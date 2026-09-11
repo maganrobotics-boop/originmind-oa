@@ -335,7 +335,7 @@ function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马�
     { key: "dashboard", label: "审批工作台", icon: LayoutDashboard },
     { key: "requests", label: "全部申请", icon: FolderKanban },
     { key: "people", label: "协作成员", icon: UsersRound },
-    { key: "knowledge", label: "实验室 AI 助手", icon: Bot },
+    { key: "knowledge", label: "实验室 AI（内部）", icon: Bot },
     { key: "rules", label: "流程与规则", icon: FileCheck2 },
     ...(isAdmin ? [{ key: "members" as ViewKey, label: "成员审核", icon: UsersRound }, { key: "oem" as ViewKey, label: "官网 OEM 申请", icon: BriefcaseBusiness }, { key: "notifications" as ViewKey, label: "飞书提醒", icon: MessageCircle }] : []),
   ];
@@ -1617,7 +1617,7 @@ function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = tr
     <div className="registration-shell">
       <div className="registration-card login-entry-card">
         <div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div>
-        <div className="login-entry-heading"><h1>扫码进入 OA</h1><p>扫码确认企业身份后即可进入 OA</p></div>
+        <div className="login-entry-heading"><h1>请登录账号</h1><p>使用源灵智能飞书扫码确认企业身份后即可进入 OA；登录并完成准入与保密签署后，才会显示实验室 AI 等内部功能。</p></div>
         <div className="oa-intro"><strong>OA 是做什么的？</strong><p>记录研发贡献、提交采购和劳务申请、签署保密协议，并查看审批进度。</p><a href="/guide"><BookOpen className="size-4" />第一次使用？先看使用指南</a></div>
         {unboundFeishuLogin ? (
           <><div className="registration-notice login-notice login-confirmed">
@@ -2395,7 +2395,7 @@ export default function Home() {
   const openMyPending = () => { setActiveView("requests"); setActiveFilter("全部"); setShowMineOnly(true); setMobileNavOpen(false); };
   const navigate = (view: ViewKey) => { setActiveView(view); setShowMineOnly(false); setMobileNavOpen(false); };
   const openMetricApproval = (id: string) => { setMetricPanel(null); openApproval(id); };
-  if (!session) return <div className="registration-shell"><div className="registration-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><p className="registration-intro">正在确认登录状态…</p></div></div>;
+  if (!session) return <div className="registration-shell"><div className="registration-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><h1>请登录账号</h1><p className="registration-intro">正在确认登录状态。实验室 AI 仅在登录并完成 OA 准入与保密签署后显示。</p></div></div>;
   if (!session.registered && (session.accountBindingRequired || session.accountBindingConflict || session.platformIdentityMissing || session.externalIdentityLinkRequired || session.githubIdentityLinkRequired || session.feishuIdentityLinkRequired)) return <><Toaster position="top-right" /><IdentityAccessGate session={session} onRefresh={refreshSession} /></>;
   if (session.status === "pending") return <><Toaster position="top-right" /><PendingGate session={session} onRefresh={refreshSession} /></>;
   if (!session.registered) return <><Toaster position="top-right" /><RegistrationGate initialUser={session.user} initialStatus={session.status} chatgptLoginEnabled={session.chatgptLoginEnabled} githubLoginEnabled={session.githubLoginEnabled} feishuLoginEnabled={session.feishuLoginEnabled} onRegistered={setSession} /></>;
@@ -2414,7 +2414,7 @@ export default function Home() {
           <div className="breadcrumbs">
             <button type="button" className="breadcrumb-home" onClick={() => navigate("dashboard")} aria-label={`返回${officialName}`} title="返回首页"><span className="breadcrumb-brand">{officialBrand}</span><span className="breadcrumb-subtitle">联合研发 OA</span></button>
             <ChevronRight className="size-3.5" />
-            <strong>{activeView === "dashboard" ? "审批工作台" : activeView === "requests" ? showMineOnly ? "待我处理" : "全部申请" : activeView === "people" ? "协作成员" : activeView === "knowledge" ? "ARTS Robotics AI Assistant" : activeView === "members" ? "成员审核" : activeView === "oem" ? "官网 OEM 申请" : activeView === "notifications" ? "飞书提醒" : activeView === "profile" ? "个人设置" : "流程与规则"}</strong>
+            <strong>{activeView === "dashboard" ? "审批工作台" : activeView === "requests" ? showMineOnly ? "待我处理" : "全部申请" : activeView === "people" ? "协作成员" : activeView === "knowledge" ? "实验室 AI（内部）" : activeView === "members" ? "成员审核" : activeView === "oem" ? "官网 OEM 申请" : activeView === "notifications" ? "飞书提醒" : activeView === "profile" ? "个人设置" : "流程与规则"}</strong>
           </div>
           <div className="topbar-actions">
             <div className="topbar-date">{todayLabel}</div>
@@ -2431,14 +2431,14 @@ export default function Home() {
             <div className="heading-actions"><button className="secondary-action" onClick={() => setActiveView("rules")}><SlidersHorizontal className="size-4" />查看规则</button><Button className="primary-button new-button" onClick={openNewRequest}><Plus className="size-4" />新建审核</Button></div>
           </section>
           <div className="oa-guide-banner"><div><strong>让你的工作有记录，申请有进度，成果可查阅。</strong><p>完成阶段成果、需要采购或申请月度劳务时，从“新建审核”开始。</p></div><a href="/guide">项目章程与使用指南 <ArrowUpRight className="size-4" /></a></div>
-          <button type="button" className="dashboard-ai-entry" onClick={() => navigate("knowledge")} aria-label="进入 ARTS Robotics AI Assistant">
+          <button type="button" className="dashboard-ai-entry" onClick={() => navigate("knowledge")} aria-label="进入 OA 内部实验室 AI">
             <span className="dashboard-ai-entry-icon"><Bot className="size-5" /></span>
             <span className="dashboard-ai-entry-copy">
-              <span className="dashboard-ai-entry-kicker">实验室知识问答</span>
-              <strong>ARTS Robotics AI Assistant</strong>
-              <span>向实验室知识库提问、提交知识，并跟踪管理员审核状态。</span>
+              <span className="dashboard-ai-entry-kicker">OA 内部知识问答</span>
+              <strong>实验室 AI（内部）</strong>
+              <span>在 OA 内提问、提交知识，并由审核人选择对内或对外公开。</span>
             </span>
-            <span className="dashboard-ai-entry-action">进入实验室 AI <ArrowUpRight className="size-4" /></span>
+            <span className="dashboard-ai-entry-action">进入内部 AI <ArrowUpRight className="size-4" /></span>
           </button>
           <section className="stats-grid">
             <button type="button" className="stat-card stat-card-action stat-card-approved" onClick={() => setMetricPanel("approved")} aria-label="查看本月已通过的文档"><div className="stat-label">本月已通过</div><div className="stat-value">{monthlyApproved.length}<span>条</span></div><div className="stat-foot positive"><span className="stat-icon"><Check className="size-4" /></span><span>点击查看已完成审批文档</span><ArrowUpRight className="stat-action-arrow size-4" /></div></button>
