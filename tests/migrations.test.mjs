@@ -52,7 +52,7 @@ test("migration journal keeps one continuous snapshot chain", () => {
 });
 
 test("production-shaped v32 data safely migrates through the GitHub identity migration", () => {
-  assert.equal(migrationFiles.at(-1), "0027_careless_winter_soldier.sql");
+  assert.equal(migrationFiles.at(-1), "0028_needy_microchip.sql");
   const db = new DatabaseSync(":memory:");
   applyMigrationRange(db, 0, 7);
 
@@ -151,6 +151,79 @@ test("production-shaped v32 data safely migrates through the GitHub identity mig
   assert.equal(db.prepare("SELECT count(*) AS count FROM auth_identities").get().count, 0);
   const transactionColumns = db.prepare("PRAGMA table_info(oauth_transactions)").all();
   assert.ok(transactionColumns.some((column) => column.name === "provider" && column.notnull === 1 && column.dflt_value === "'github'"));
+  db.close();
+});
+
+test("knowledge visibility migration defaults legacy approvals to internal without dropping security triggers", () => {
+  const visibilityMigrationIndex = migrationFiles.indexOf("0028_needy_microchip.sql");
+  assert.equal(visibilityMigrationIndex, migrationFiles.length - 1);
+  const db = new DatabaseSync(":memory:");
+  applyMigrationRange(db, 0, visibilityMigrationIndex);
+
+  const createdAt = "2026-09-10T00:00:00.000Z";
+  db.prepare(`
+    INSERT INTO knowledge_items (
+      id, project, title, category, submitter_member_id, submitter_name, submitter_email,
+      status, current_revision_no, current_revision_id, active_revision_id, mutation_revision, created_at, updated_at
+    ) VALUES ('legacy-item', 'OriginMind × ARTS Robotics 联合研发项目', '历史安全规范', '安全规范',
+      'legacy-member', '历史投稿人', 'legacy@example.com', 'active', 1, 'legacy-revision', 'legacy-revision',
+      'legacy-mutation', ?, ?)
+  `).run(createdAt, createdAt);
+  db.prepare(`
+    INSERT INTO knowledge_revisions (
+      id, item_id, revision_no, title, category, content, content_hash, status,
+      created_by_member_id, created_by_name, created_by_email, reviewed_by_member_id,
+      reviewed_by_name, reviewed_by_email, reviewed_at, activated_at, created_at
+    ) VALUES ('legacy-revision', 'legacy-item', 1, '历史安全规范', '安全规范', '历史审批内容不可被公开。', ?,
+      'active', 'legacy-member', '历史投稿人', 'legacy@example.com', 'legacy-reviewer',
+      '历史审核人', 'reviewer@example.com', ?, ?, ?)
+  `).run("a".repeat(64), createdAt, createdAt, createdAt);
+  db.prepare(`
+    INSERT INTO knowledge_chunks (id, item_id, revision_id, chunk_no, content, search_text, is_active, created_at)
+    VALUES ('legacy-chunk', 'legacy-item', 'legacy-revision', 1, '历史审批内容不可被公开。', '历史 审批 内容', 1, ?)
+  `).run(createdAt);
+  db.prepare(`
+    INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note, created_at)
+    VALUES ('legacy-approved', 'legacy-item', 'legacy-revision', 'legacy-reviewer', '历史审核人',
+      'reviewer@example.com', 'approved', '', ?)
+  `).run(createdAt);
+
+  applyMigrationRange(db, visibilityMigrationIndex, visibilityMigrationIndex + 1);
+
+  const migratedItem = db.prepare("SELECT status, visibility FROM knowledge_items WHERE id = 'legacy-item'").get();
+  assert.equal(migratedItem.status, "active");
+  assert.equal(migratedItem.visibility, "internal");
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'index' AND name = 'knowledge_items_visibility_status_updated_idx'").get().count, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND tbl_name = 'knowledge_items' AND name LIKE 'knowledge_items_migration_freeze_%'").get().count, 3);
+  for (const trigger of [
+    "knowledge_items_identity_immutable",
+    "knowledge_items_status_transition_guard",
+    "knowledge_items_no_delete",
+    "knowledge_items_visibility_transition_guard",
+  ]) {
+    assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(trigger).count, 1, trigger);
+  }
+  assert.throws(() => db.prepare("UPDATE knowledge_items SET submitter_name = '篡改' WHERE id = 'legacy-item'").run(), /identity is immutable/u);
+  assert.throws(() => db.prepare("UPDATE knowledge_items SET status = 'pending' WHERE id = 'legacy-item'").run(), /invalid knowledge item status transition/u);
+  assert.throws(() => db.prepare("UPDATE knowledge_items SET visibility = 'public' WHERE id = 'legacy-item'").run(), /invalid knowledge visibility transition/u);
+  assert.throws(() => db.prepare(`
+    INSERT INTO knowledge_items (
+      id, project, title, category, submitter_member_id, submitter_name, submitter_email,
+      status, visibility, current_revision_no, mutation_revision
+    ) VALUES ('bad-visibility', 'project', 'title', 'category', 'member', 'name', 'member@example.com',
+      'pending', 'external', 0, 'mutation')
+  `).run(), /CHECK constraint failed/u);
+  assert.throws(() => db.prepare(`
+    INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note)
+    VALUES ('bad-event', 'legacy-item', 'legacy-revision', 'legacy-reviewer', '历史审核人',
+      'reviewer@example.com', 'published', '')
+  `).run(), /invalid knowledge event action/u);
+  assert.equal(db.prepare(`
+    INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note)
+    VALUES ('legacy-approved-2', 'legacy-item', 'legacy-revision', 'legacy-reviewer', '历史审核人',
+      'reviewer@example.com', 'approved', '')
+  `).run().changes, 1);
+  assert.throws(() => db.prepare("DELETE FROM knowledge_items WHERE id = 'legacy-item'").run(), /cannot be deleted/u);
   db.close();
 });
 

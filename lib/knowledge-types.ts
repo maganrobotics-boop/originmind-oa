@@ -1,4 +1,5 @@
 export type KnowledgeStatus = "pending" | "returned" | "rejected" | "active" | "revoked";
+export type KnowledgeVisibility = "internal" | "public";
 export type KnowledgeRevisionStatus = KnowledgeStatus | "superseded";
 
 export type KnowledgeItem = {
@@ -14,6 +15,7 @@ export type KnowledgeItem = {
   submitterName?: string;
   submitterEmail?: string;
   status: KnowledgeStatus;
+  visibility: KnowledgeVisibility;
   currentRevisionNo?: number;
   currentRevisionId?: string;
   activeRevisionId?: string;

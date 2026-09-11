@@ -270,6 +270,7 @@ export const knowledgeItems = sqliteTable(
     submitterName: text("submitter_name").notNull(),
     submitterEmail: text("submitter_email").notNull(),
     status: text("status").notNull().default("pending"),
+    visibility: text("visibility").notNull().default("internal"),
     currentRevisionNo: integer("current_revision_no").notNull().default(0),
     currentRevisionId: text("current_revision_id"),
     activeRevisionId: text("active_revision_id"),
@@ -280,10 +281,12 @@ export const knowledgeItems = sqliteTable(
   },
   (table) => [
     check("knowledge_items_status_check", sql`${table.status} IN ('pending', 'returned', 'rejected', 'active', 'revoked')`),
+    check("knowledge_items_visibility_check", sql`${table.visibility} IN ('internal', 'public')`),
     check("knowledge_items_mutation_revision_check", sql`length(${table.mutationRevision}) > 0`),
     check("knowledge_items_revision_pointer_check", sql`(${table.currentRevisionNo} = 0 AND ${table.currentRevisionId} IS NULL) OR (${table.currentRevisionNo} > 0 AND ${table.currentRevisionId} IS NOT NULL)`),
     check("knowledge_items_active_pointer_check", sql`(${table.status} = 'active' AND ${table.activeRevisionId} IS NOT NULL) OR (${table.status} <> 'active' AND ${table.activeRevisionId} IS NULL)`),
     index("knowledge_items_status_updated_idx").on(table.status, table.updatedAt),
+    index("knowledge_items_visibility_status_updated_idx").on(table.visibility, table.status, table.updatedAt),
     index("knowledge_items_submitter_created_idx").on(table.submitterMemberId, table.createdAt),
     uniqueIndex("knowledge_items_current_revision_unique")
       .on(table.currentRevisionId)

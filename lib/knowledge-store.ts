@@ -3,9 +3,11 @@ import {
   KNOWLEDGE_PROJECT,
   MAX_KNOWLEDGE_CHUNKS,
   chunkKnowledgeSubmission,
+  isPublicKnowledgeConfirmation,
   type KnowledgeReviewAction,
   type KnowledgeStatus,
   type KnowledgeSubmission,
+  type KnowledgeVisibility,
   type SearchableKnowledgeChunk,
 } from "./knowledge-policy";
 
@@ -31,6 +33,7 @@ export type KnowledgeItemRow = {
   submitter_name: string;
   submitter_email: string;
   status: KnowledgeStatus;
+  visibility: KnowledgeVisibility;
   current_revision_no: number;
   current_revision_id: string | null;
   active_revision_id: string | null;
@@ -143,6 +146,7 @@ function serializeItem(row: KnowledgeItemWithRevisionRow | KnowledgeItemListRow 
     submitterName: row.submitter_name,
     submitterEmail: row.submitter_email,
     status: row.status,
+    visibility: row.visibility,
     currentRevisionNo: Number(row.current_revision_no),
     currentRevisionId: row.current_revision_id || undefined,
     activeRevisionId: row.active_revision_id || undefined,
@@ -202,6 +206,7 @@ function serializePublicItem(row: KnowledgeItemWithRevisionRow | KnowledgeItemLi
     title: row.title,
     category: row.category,
     status: row.status,
+    visibility: row.visibility,
     currentRevisionNo: Number(row.current_revision_no),
     createdAt: row.created_at,
     updatedAt: row.updated_at,
@@ -378,10 +383,10 @@ export async function createKnowledgeItem(actor: KnowledgeActor, submission: Kno
     database.prepare(`
       INSERT INTO knowledge_items (
         id, project, title, category, submitter_member_id, submitter_name, submitter_email,
-        status, current_revision_no, current_revision_id, active_revision_id, mutation_revision,
+        status, visibility, current_revision_no, current_revision_id, active_revision_id, mutation_revision,
         created_at, updated_at, revoked_at
       )
-      SELECT ?, ?, ?, ?, ?, ?, ?, 'pending', 1, ?, NULL, ?, ?, ?, NULL
+      SELECT ?, ?, ?, ?, ?, ?, ?, 'pending', 'internal', 1, ?, NULL, ?, ?, ?, NULL
       WHERE ${guard.sql}
       RETURNING *
     `).bind(itemId, KNOWLEDGE_PROJECT, submission.title, submission.category, actor.memberId, actor.name,
@@ -490,7 +495,16 @@ export async function reviewKnowledgeItem(
   actor: KnowledgeActor,
   action: KnowledgeReviewAction,
   note: string,
+  visibility?: KnowledgeVisibility,
+  publicConfirmation?: unknown,
 ) {
+  if (action === "approve") {
+    if (visibility !== "internal" && visibility !== "public") return null;
+    if (visibility === "public" && !isPublicKnowledgeConfirmation(publicConfirmation)) return null;
+    if (visibility === "internal" && publicConfirmation !== undefined) return null;
+  } else if (visibility !== undefined || publicConfirmation !== undefined) {
+    return null;
+  }
   const database = await getD1Database();
   const now = new Date().toISOString();
   const mutationRevision = crypto.randomUUID();
@@ -510,11 +524,12 @@ export async function reviewKnowledgeItem(
   const statements: D1PreparedStatement[] = [
     database.prepare(`
       UPDATE knowledge_items SET
-        status = ?, active_revision_id = ?, mutation_revision = ?, updated_at = ?, revoked_at = ?
+        status = ?, visibility = ?, active_revision_id = ?, mutation_revision = ?, updated_at = ?, revoked_at = ?
       WHERE id = ? AND status = ? AND current_revision_id = ? AND mutation_revision = ?
         AND submitter_member_id <> ? AND lower(submitter_email) <> ? AND ${guard.sql}
       RETURNING *
-    `).bind(nextStatus, action === "approve" ? existing.current_revision_id : null, mutationRevision, now,
+    `).bind(nextStatus, action === "approve" ? visibility : existing.visibility,
+      action === "approve" ? existing.current_revision_id : null, mutationRevision, now,
       action === "revoke" ? now : null, existing.id, expectedStatus, existing.current_revision_id,
       existing.mutation_revision, actor.memberId, normalizeEmail(actor.email), ...guard.values),
   ];
@@ -559,7 +574,8 @@ export async function reviewKnowledgeItem(
     SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
     WHERE EXISTS (SELECT 1 FROM knowledge_items WHERE id = ? AND current_revision_id = ? AND mutation_revision = ? AND status = ?)
   `).bind(eventId, existing.id, existing.current_revision_id, actor.memberId, actor.name, normalizeEmail(actor.email),
-    action === "approve" ? "approved" : action === "return" ? "returned" : action === "reject" ? "rejected" : "revoked",
+    action === "approve" ? visibility === "public" ? "approved_public" : "approved_internal"
+      : action === "return" ? "returned" : action === "reject" ? "rejected" : "revoked",
     note, now, existing.id, existing.current_revision_id, mutationRevision, nextStatus));
 
   const [itemResult] = await database.batch(statements);
@@ -595,6 +611,7 @@ export async function getActiveKnowledgeChunks(actor: KnowledgeActor): Promise<S
     INNER JOIN knowledge_revisions AS r ON r.id = c.revision_id AND r.item_id = i.id
     WHERE c.is_active = 1
       AND i.status = 'active'
+      AND i.visibility IN ('internal', 'public')
       AND r.status = 'active'
       AND i.active_revision_id = c.revision_id
       AND ${guard.sql}
@@ -622,6 +639,52 @@ export async function getActiveKnowledgeChunks(actor: KnowledgeActor): Promise<S
     category: row.category,
     sourceLabel: row.source_label,
     sourceUrl: row.source_url,
+    sectionTitle: row.section_title,
+    paragraphRef: row.paragraph_ref,
+    content: row.content,
+    searchText: row.search_text,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function getPublicActiveKnowledgeChunks(): Promise<SearchableKnowledgeChunk[]> {
+  const database = await getD1Database();
+  const result = await database.prepare(`
+    SELECT
+      ROW_NUMBER() OVER (ORDER BY i.updated_at DESC, i.id ASC, c.chunk_no ASC) AS public_chunk_no,
+      DENSE_RANK() OVER (ORDER BY i.id ASC) AS public_item_no,
+      r.title, r.category, r.source_label, c.section_title, c.paragraph_ref,
+      c.content, c.search_text, i.updated_at
+    FROM knowledge_chunks AS c
+    INNER JOIN knowledge_items AS i ON i.id = c.item_id
+    INNER JOIN knowledge_revisions AS r ON r.id = c.revision_id AND r.item_id = i.id
+    WHERE c.is_active = 1
+      AND i.status = 'active'
+      AND i.visibility = 'public'
+      AND r.status = 'active'
+      AND i.active_revision_id = c.revision_id
+    ORDER BY i.updated_at DESC, c.item_id ASC, c.chunk_no ASC
+    LIMIT ?
+  `).bind(KNOWLEDGE_SEARCH_CANDIDATE_LIMIT).all<{
+    public_chunk_no: number;
+    public_item_no: number;
+    title: string;
+    category: string;
+    source_label: string;
+    section_title: string;
+    paragraph_ref: string;
+    content: string;
+    search_text: string;
+    updated_at: string;
+  }>();
+  return result.results.map((row) => ({
+    id: `public-chunk-${row.public_chunk_no}`,
+    itemId: `public-item-${row.public_item_no}`,
+    revisionId: `public-revision-${row.public_item_no}`,
+    title: row.title,
+    category: row.category,
+    sourceLabel: row.source_label,
+    sourceUrl: "",
     sectionTitle: row.section_title,
     paragraphRef: row.paragraph_ref,
     content: row.content,

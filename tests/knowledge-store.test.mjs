@@ -85,9 +85,10 @@ const vite = await createServer({
 
 const policy = await vite.ssrLoadModule("/lib/knowledge-policy.ts");
 const store = await vite.ssrLoadModule("/lib/knowledge-store.ts");
-const [migration, hardeningMigration] = await Promise.all([
+const [migration, hardeningMigration, visibilityMigration] = await Promise.all([
   readFile(new URL("../drizzle/0026_rich_jocasta.sql", import.meta.url), "utf8"),
   readFile(new URL("../drizzle/0027_careless_winter_soldier.sql", import.meta.url), "utf8"),
+  readFile(new URL("../drizzle/0028_needy_microchip.sql", import.meta.url), "utf8"),
 ]);
 
 function createDatabase() {
@@ -107,6 +108,7 @@ function createDatabase() {
   `);
   database.exec(migration);
   database.exec(hardeningMigration);
+  database.exec(visibilityMigration);
   for (const member of [
     ["member-submit", "account-submit", "member-revision-submit", "member"],
     ["member-review", "account-review", "member-revision-review", "project_owner"],
@@ -165,6 +167,7 @@ test("投稿、审核、检索和下架形成完整且有审计的知识生命�
   const contentHash = await policy.hashKnowledgeSubmission(draft);
   const created = await store.createKnowledgeItem(actor("submitter"), draft, contentHash);
   assert.equal(created.status, "pending");
+  assert.equal(created.visibility, "internal");
   assert.equal(created.currentRevisionNo, 1);
   assert.equal(created.activeRevisionId, undefined);
 
@@ -184,10 +187,11 @@ test("投稿、审核、检索和下架形成完整且有审计的知识生命�
   globalThis[stateKey].sqlite.prepare("UPDATE members SET role = 'member' WHERE id = 'member-submit'").run();
 
   const existing = await store.findKnowledgeItem(created.id, actor("submitter"));
-  assert.equal(await store.reviewKnowledgeItem(existing, actor("submitter"), "approve", ""), null, "投稿人不能自审");
+  assert.equal(await store.reviewKnowledgeItem(existing, actor("submitter"), "approve", "", "internal"), null, "投稿人不能自审");
 
-  const approved = await store.reviewKnowledgeItem(existing, actor("reviewer"), "approve", "符合实验室规范");
+  const approved = await store.reviewKnowledgeItem(existing, actor("reviewer"), "approve", "符合实验室规范", "internal");
   assert.equal(approved.status, "active");
+  assert.equal(approved.visibility, "internal");
   assert.equal(approved.activeRevisionId, approved.currentRevisionId);
   assert.equal(approved.reviewedByMemberId, "member-review");
   const managed = await store.listKnowledgeItems("all", actor("reviewer"), true);
@@ -197,6 +201,7 @@ test("投稿、审核、检索和下架形成完整且有审计的知识生命�
   assert.ok(chunks.length >= 1);
   assert.ok(chunks.every((chunk) => chunk.itemId === created.id));
   assert.equal(chunks[0].sourceLabel, "安全手册");
+  assert.deepEqual(await store.getPublicActiveKnowledgeChunks(), []);
 
   const reader = {
     memberId: "member-reader",
@@ -223,7 +228,7 @@ test("投稿、审核、检索和下架形成完整且有审计的知识生命�
   assert.equal(await store.getKnowledgeItemDetail(created.id, reader, false), null);
   assert.deepEqual(await store.getActiveKnowledgeChunks(reader), []);
 
-  assert.equal(await store.reviewKnowledgeItem(existing, actor("reviewer"), "approve", "重复审核"), null, "旧 mutation revision 不能重复审核");
+  assert.equal(await store.reviewKnowledgeItem(existing, actor("reviewer"), "approve", "重复审核", "internal"), null, "旧 mutation revision 不能重复审核");
   const active = await store.findKnowledgeItem(created.id, actor("submitter"));
   const revoked = await store.reviewKnowledgeItem(active, actor("reviewer"), "revoke", "规范已废止");
   assert.equal(revoked.status, "revoked");
@@ -231,7 +236,48 @@ test("投稿、审核、检索和下架形成完整且有审计的知识生命�
   assert.deepEqual(await store.getActiveKnowledgeChunks(actor("submitter")), []);
 
   const events = globalThis[stateKey].sqlite.prepare("SELECT action FROM knowledge_events ORDER BY created_at, rowid").all().map((row) => row.action);
-  assert.deepEqual(events, ["submitted", "approved", "revoked"]);
+  assert.deepEqual(events, ["submitted", "approved_internal", "revoked"]);
+});
+
+test("审核必须明确选择内部或公开，公开知识才进入对外检索", async () => {
+  const internalDraft = submission({ title: "仅 OA 可见的急停规范" });
+  const internalCreated = await store.createKnowledgeItem(actor("submitter"), internalDraft, await policy.hashKnowledgeSubmission(internalDraft));
+  const internalPending = await store.findKnowledgeItem(internalCreated.id, actor("submitter"));
+  assert.equal(await store.reviewKnowledgeItem(internalPending, actor("reviewer"), "approve", "内部审核", "internal", policy.PUBLIC_KNOWLEDGE_CONFIRMATION), null);
+  const internalApproved = await store.reviewKnowledgeItem(internalPending, actor("reviewer"), "approve", "内部审核", "internal");
+  assert.equal(internalApproved.visibility, "internal");
+
+  const publicDraft = submission({ title: "可公开的急停复位规范" });
+  const publicCreated = await store.createKnowledgeItem(actor("submitter"), publicDraft, await policy.hashKnowledgeSubmission(publicDraft));
+  const publicPending = await store.findKnowledgeItem(publicCreated.id, actor("submitter"));
+  assert.equal(await store.reviewKnowledgeItem(publicPending, actor("reviewer"), "approve", "公开审核"), null);
+  assert.equal(await store.reviewKnowledgeItem(publicPending, actor("reviewer"), "approve", "公开审核", "public"), null);
+  assert.equal(await store.reviewKnowledgeItem(publicPending, actor("reviewer"), "approve", "公开审核", "public", "publish"), null);
+  assert.equal(globalThis[stateKey].sqlite.prepare("SELECT status, visibility FROM knowledge_items WHERE id = ?").get(publicCreated.id).status, "pending");
+  const publicApproved = await store.reviewKnowledgeItem(
+    publicPending,
+    actor("reviewer"),
+    "approve",
+    "公开审核",
+    "public",
+    policy.PUBLIC_KNOWLEDGE_CONFIRMATION,
+  );
+  assert.equal(publicApproved.status, "active");
+  assert.equal(publicApproved.visibility, "public");
+
+  const internalChunks = await store.getActiveKnowledgeChunks(actor("submitter"));
+  assert.deepEqual(new Set(internalChunks.map((chunk) => chunk.itemId)), new Set([internalCreated.id, publicCreated.id]));
+  const publicChunks = await store.getPublicActiveKnowledgeChunks();
+  assert.ok(publicChunks.length >= 1);
+  assert.equal(new Set(publicChunks.map((chunk) => chunk.itemId)).size, 1);
+  assert.ok(publicChunks.every((chunk) => chunk.id.startsWith("public-chunk-")));
+  assert.ok(publicChunks.every((chunk) => chunk.itemId.startsWith("public-item-")));
+  assert.ok(publicChunks.every((chunk) => chunk.revisionId.startsWith("public-revision-")));
+  assert.ok(publicChunks.every((chunk) => ![internalCreated.id, publicCreated.id].includes(chunk.itemId)));
+  assert.ok(publicChunks.every((chunk) => chunk.sourceUrl === ""));
+
+  const approvalEvents = globalThis[stateKey].sqlite.prepare("SELECT action FROM knowledge_events WHERE action LIKE 'approved_%' ORDER BY rowid").all().map((row) => row.action);
+  assert.deepEqual(approvalEvents, ["approved_internal", "approved_public"]);
 });
 
 test("退回后只能由投稿人创建不可变的新版本并再次进入待审核", async () => {
@@ -269,9 +315,9 @@ test("审核写入在 SQL 时间复核项目负责人角色，配置型负责人
   const pending = await store.findKnowledgeItem(created.id, actor("submitter"));
   globalThis[stateKey].sqlite.prepare("UPDATE members SET role = 'member' WHERE id = 'member-review'").run();
 
-  assert.equal(await store.reviewKnowledgeItem(pending, actor("reviewer"), "approve", "审核通过"), null);
+  assert.equal(await store.reviewKnowledgeItem(pending, actor("reviewer"), "approve", "审核通过", "internal"), null);
   const configuredOwner = { ...actor("reviewer"), configuredReviewer: true };
-  const approved = await store.reviewKnowledgeItem(pending, configuredOwner, "approve", "审核通过");
+  const approved = await store.reviewKnowledgeItem(pending, configuredOwner, "approve", "审核通过", "internal");
   assert.equal(approved.status, "active");
 
   const adminDraft = submission({ title: "OA 管理员审核样例" });
@@ -280,6 +326,6 @@ test("审核写入在 SQL 时间复核项目负责人角色，配置型负责人
   assert.equal((await store.listKnowledgeItems("review", adminReviewer, true)).length, 1);
   assert.equal(await store.countPendingKnowledgeItems(adminReviewer), 1);
   const adminPending = await store.findKnowledgeItem(adminItem.id, actor("submitter"));
-  const adminApproved = await store.reviewKnowledgeItem(adminPending, adminReviewer, "approve", "管理员审核通过");
+  const adminApproved = await store.reviewKnowledgeItem(adminPending, adminReviewer, "approve", "管理员审核通过", "internal");
   assert.equal(adminApproved.status, "active");
 });
