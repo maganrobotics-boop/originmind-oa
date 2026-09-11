@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
@@ -41,55 +42,65 @@ const validProductionEnvironment = Object.freeze({
 });
 const target = productionTarget(validProductionEnvironment);
 const expectedKnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName);
-const previousKnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName, ["0026_rich_jocasta.sql"]);
+const migration26KnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName, ["0026_rich_jocasta.sql"]);
+const migration27KnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName, [
+  "0026_rich_jocasta.sql",
+  "0027_careless_winter_soldier.sql",
+]);
 const notificationObjects = [
   "index:notification_outbox_due",
   "table:notification_control",
   "table:notification_outbox",
 ];
 const expectedSchemaObjects = [...notificationObjects, ...Object.keys(expectedKnowledgeDefinitions)].sort();
-const previousSchemaObjects = [...notificationObjects, ...Object.keys(previousKnowledgeDefinitions)].sort();
+const migration26SchemaObjects = [...notificationObjects, ...Object.keys(migration26KnowledgeDefinitions)].sort();
+const migration27SchemaObjects = [...notificationObjects, ...Object.keys(migration27KnowledgeDefinitions)].sort();
 
 function queryResult(rows) {
   return [{ success: true, results: rows, meta: { served_by: "test" } }];
 }
 
-function schemaPayload(names) {
+function schemaPayload(names, definitions = expectedKnowledgeDefinitions) {
   return queryResult(names.map((entry) => {
     const separator = entry.indexOf(":");
     return {
       type: entry.slice(0, separator),
       name: entry.slice(separator + 1),
-      sql: expectedKnowledgeDefinitions[entry] || `CREATE ${entry.startsWith("index:") ? "INDEX" : "TABLE"} ${entry.slice(separator + 1)}`,
+      sql: definitions[entry] || `CREATE ${entry.startsWith("index:") ? "INDEX" : "TABLE"} ${entry.slice(separator + 1)}`,
     };
   }));
 }
 
-function migrationSnapshot(appliedNames, schemaNames, activeFreezes = 0) {
+function migrationSnapshot(appliedNames, schemaNames, activeFreezes = 0, definitions = expectedKnowledgeDefinitions) {
   return {
     ledgerPayload: queryResult(appliedNames.map((name, index) => ({ id: index + 1, name }))),
     freezePayload: queryResult([{ active_freezes: activeFreezes }]),
-    schemaPayload: schemaPayload(schemaNames),
+    schemaPayload: schemaPayload(schemaNames, definitions),
     expectedMigrationNames: migrationNames,
     expectedSchemaObjects,
     expectedKnowledgeDefinitions,
-    previousKnowledgeDefinitions,
+    migration26KnowledgeDefinitions,
+    migration27KnowledgeDefinitions,
   };
 }
 
-test("production migration gate supports exact 0025, 0026, and 0027 states", () => {
-  assert.equal(migrationNames.length, 28);
+test("production migration gate supports exact 0025, 0026, 0027, and 0028 states", () => {
+  assert.equal(migrationNames.length, 29);
   assert.equal(migrationNames.at(-1), PRODUCTION_MIGRATION_NAME);
-  assert.equal(PRODUCTION_MIGRATION_SHA256, "a5648c380df4bafff324bdd088861e561baf6ed61cfc4c5f5ff0706951f5beaa");
+  assert.equal(PRODUCTION_MIGRATION_SHA256, "df58f8759e7ab33b5b5ab648e46ad411e27623cb7bd00664acf12c3cfc88a3a7");
   assert.deepEqual(validateProductionMigrationManifest({ migrationNames, migrationSqlByName }), migrationNames);
   assert.equal(validateProductionMigrationState({
     phase: "before",
-    ...migrationSnapshot(migrationNames.slice(0, -2), notificationObjects),
-  }), "pending-0026-0027");
+    ...migrationSnapshot(migrationNames.slice(0, -3), notificationObjects),
+  }), "pending-0026-0027-0028");
   assert.equal(validateProductionMigrationState({
     phase: "before",
-    ...migrationSnapshot(migrationNames.slice(0, -1), previousSchemaObjects),
-  }), "pending-0027");
+    ...migrationSnapshot(migrationNames.slice(0, -2), migration26SchemaObjects, 0, migration26KnowledgeDefinitions),
+  }), "pending-0027-0028");
+  assert.equal(validateProductionMigrationState({
+    phase: "before",
+    ...migrationSnapshot(migrationNames.slice(0, -1), migration27SchemaObjects, 0, migration27KnowledgeDefinitions),
+  }), "pending-0028");
   assert.equal(validateProductionMigrationState({
     phase: "before",
     ...migrationSnapshot(migrationNames, expectedSchemaObjects),
@@ -100,8 +111,42 @@ test("production migration gate supports exact 0025, 0026, and 0027 states", () 
   }), "applied");
 });
 
+test("reviewed 0028 definitions match SQLite's forward ALTER result", async () => {
+  const database = new DatabaseSync(":memory:");
+  try {
+    for (const name of Object.keys(REVIEWED_KNOWLEDGE_MIGRATIONS)) {
+      for (const statement of migrationSqlByName[name].split(/--> statement-breakpoint\s*/u).map((value) => value.trim()).filter(Boolean)) {
+        database.exec(statement);
+      }
+    }
+    const actualKnowledgeRows = database.prepare(
+      "SELECT type, name, sql FROM sqlite_master WHERE name GLOB 'knowledge_*' ORDER BY type, name",
+    ).all().map((row) => ({ ...row }));
+    const notificationRows = notificationObjects.map((entry) => {
+      const separator = entry.indexOf(":");
+      return {
+        type: entry.slice(0, separator),
+        name: entry.slice(separator + 1),
+        sql: `CREATE ${entry.startsWith("index:") ? "INDEX" : "TABLE"} ${entry.slice(separator + 1)}`,
+      };
+    });
+    assert.equal(validateProductionMigrationState({
+      phase: "after",
+      ...migrationSnapshot(migrationNames, expectedSchemaObjects),
+      schemaPayload: queryResult([...actualKnowledgeRows, ...notificationRows]),
+    }), "applied");
+  } finally {
+    database.close();
+  }
+});
+
 test("production migration gate rejects drift, partial ledgers, and freezes", () => {
-  const pending = migrationSnapshot(migrationNames.slice(0, -1), previousSchemaObjects);
+  const pending = migrationSnapshot(
+    migrationNames.slice(0, -1),
+    migration27SchemaObjects,
+    0,
+    migration27KnowledgeDefinitions,
+  );
   assert.throws(() => validateProductionMigrationState({
     phase: "before",
     ...pending,
@@ -110,11 +155,11 @@ test("production migration gate rejects drift, partial ledgers, and freezes", ()
   assert.throws(() => validateProductionMigrationState({ phase: "after", ...pending }), /must end exactly/u);
   assert.throws(() => validateProductionMigrationState({
     phase: "before",
-    ...migrationSnapshot(migrationNames.slice(0, -1), previousSchemaObjects.slice(1)),
+    ...migrationSnapshot(migrationNames.slice(0, -1), migration27SchemaObjects.slice(1), 0, migration27KnowledgeDefinitions),
   }), /does not match|missing/u);
   assert.throws(() => validateProductionMigrationState({
     phase: "before",
-    ...migrationSnapshot(migrationNames.slice(0, -2), [...notificationObjects, "table:knowledge_items"]),
+    ...migrationSnapshot(migrationNames.slice(0, -3), [...notificationObjects, "table:knowledge_items"]),
   }), /unexpected or missing/u);
   assert.throws(() => validateProductionMigrationManifest({
     migrationNames,
@@ -122,12 +167,17 @@ test("production migration gate rejects drift, partial ledgers, and freezes", ()
   }), /reviewed SHA-256/u);
 });
 
-test("migration CLI validates the immutable 0026 and 0027 files", async () => {
+test("migration CLI validates the immutable 0026, 0027, and 0028 files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "originmind-oa-production-migrations-"));
   try {
     const migrationsDirectory = join(directory, "drizzle");
     await cp(join(projectRoot, "drizzle"), migrationsDirectory, { recursive: true });
-    const pending = migrationSnapshot(migrationNames.slice(0, -1), previousSchemaObjects);
+    const pending = migrationSnapshot(
+      migrationNames.slice(0, -1),
+      migration27SchemaObjects,
+      0,
+      migration27KnowledgeDefinitions,
+    );
     const paths = {
       ledger: join(directory, "ledger.json"),
       freeze: join(directory, "freeze.json"),
@@ -148,7 +198,7 @@ test("migration CLI validates the immutable 0026 and 0027 files", async () => {
     ], { encoding: "utf8" });
     const good = run();
     assert.equal(good.status, 0, good.stderr);
-    assert.equal(good.stdout.trim(), "pending-0027");
+    assert.equal(good.stdout.trim(), "pending-0028");
     await writeFile(join(migrationsDirectory, PRODUCTION_MIGRATION_NAME), `${migrationSqlByName[PRODUCTION_MIGRATION_NAME]}\n-- drift\n`);
     const changed = run();
     assert.notEqual(changed.status, 0);
@@ -174,6 +224,7 @@ function cloudflareSnapshot() {
     secrets: [
       { name: "FEISHU_LOGIN_APP_SECRET", type: "secret_text" },
       { name: "GITHUB_OAUTH_CLIENT_SECRET", type: "secret_text" },
+      { name: "PUBLIC_LAB_AI_SERVICE_TOKEN", type: "secret_text" },
       { name: "OA_LAB_AI_API_KEY", type: "secret_text" },
       { name: "FUTURE_PROVIDER_SECRET", type: "secret_text" },
     ],
@@ -204,6 +255,21 @@ test("production target gate is variable-backed and preserves additional secrets
     ...cloudflareSnapshot(),
     secrets: cloudflareSnapshot().secrets.filter((entry) => entry.name !== "FEISHU_LOGIN_APP_SECRET"),
   }), /missing required secret/u);
+  assert.throws(() => validateProductionCloudflareSnapshot({
+    ...cloudflareSnapshot(),
+    secrets: cloudflareSnapshot().secrets.filter((entry) => entry.name !== "PUBLIC_LAB_AI_SERVICE_TOKEN"),
+  }), /missing required secret PUBLIC_LAB_AI_SERVICE_TOKEN/u);
+  const tokenNotYetConfigured = validateProductionCloudflareSnapshot({
+    ...cloudflareSnapshot(),
+    secrets: cloudflareSnapshot().secrets.filter((entry) => entry.name !== "PUBLIC_LAB_AI_SERVICE_TOKEN"),
+    allowMissingPublicLabAiServiceToken: true,
+  });
+  assert.ok(!tokenNotYetConfigured.secretNames.includes("PUBLIC_LAB_AI_SERVICE_TOKEN"));
+  assert.throws(() => validateProductionCloudflareSnapshot({
+    ...cloudflareSnapshot(),
+    secrets: cloudflareSnapshot().secrets.filter((entry) => entry.name !== "GITHUB_OAUTH_CLIENT_SECRET"),
+    allowMissingPublicLabAiServiceToken: true,
+  }), /missing required secret GITHUB_OAUTH_CLIENT_SECRET/u);
 });
 
 test("compiled production config preserves provider-managed state", async () => {
@@ -260,6 +326,7 @@ test("workflow and shell expose the token only to a confirmed manual main releas
   assert.match(deployJob, /vars\.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID/u);
   assert.match(deployJob, /vars\.OA_PRODUCTION_PUBLIC_ORIGIN/u);
   assert.equal([...workflow.matchAll(/^\s+CLOUDFLARE_API_TOKEN:/gmu)].length, 1);
+  assert.equal([...workflow.matchAll(/^\s+PUBLIC_LAB_AI_SERVICE_TOKEN:/gmu)].length, 1);
   assert.doesNotMatch(`${workflow}\n${releaseScript}`, /oa\.omindos\.ai|41e8b3404be24e1dd288556d77ffc951|34af7e92-7da5-47cd-b7c0-1270e157c0e6/u);
 
   const invalid = spawnSync("/bin/bash", [join(projectRoot, "scripts", "release-production.sh"), "production"], {
@@ -269,6 +336,7 @@ test("workflow and shell expose the token only to a confirmed manual main releas
       ...validProductionEnvironment,
       CLOUDFLARE_ACCOUNT_ID: validProductionEnvironment.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID,
       CLOUDFLARE_API_TOKEN: "test-token",
+      PUBLIC_LAB_AI_SERVICE_TOKEN: "A".repeat(43),
       OA_PRODUCTION_RELEASE_CONFIRM: "wrong",
       GITHUB_ACTIONS: "true",
       GITHUB_EVENT_NAME: "workflow_dispatch",
@@ -280,17 +348,57 @@ test("workflow and shell expose the token only to a confirmed manual main releas
   });
   assert.equal(invalid.status, 64);
   assert.doesNotMatch(invalid.stderr, /command not found/u);
+
+  const invalidServiceToken = "A".repeat(42) + "=";
+  const invalidTokenRun = spawnSync("/bin/bash", [join(projectRoot, "scripts", "release-production.sh"), "production"], {
+    encoding: "utf8",
+    env: {
+      PATH: "/nonexistent",
+      ...validProductionEnvironment,
+      CLOUDFLARE_ACCOUNT_ID: validProductionEnvironment.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID,
+      CLOUDFLARE_API_TOKEN: "test-token",
+      PUBLIC_LAB_AI_SERVICE_TOKEN: invalidServiceToken,
+      OA_PRODUCTION_RELEASE_CONFIRM: `${validProductionEnvironment.OA_PRODUCTION_WORKER_NAME}:${validProductionEnvironment.OA_PRODUCTION_D1_DATABASE_ID}:${new URL(validProductionEnvironment.OA_PRODUCTION_PUBLIC_ORIGIN).hostname}`,
+      GITHUB_ACTIONS: "true",
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_REF: "refs/heads/main",
+      GITHUB_SHA: "a".repeat(40),
+      GITHUB_RUN_ID: "12345",
+      GITHUB_RUN_ATTEMPT: "1",
+    },
+  });
+  assert.equal(invalidTokenRun.status, 64);
+  assert.match(invalidTokenRun.stderr, /exactly 43 unpadded base64url/u);
+  assert.ok(!`${invalidTokenRun.stdout}${invalidTokenRun.stderr}`.includes(invalidServiceToken));
+  assert.doesNotMatch(invalidTokenRun.stderr, /command not found/u);
+
   assert.match(releaseScript, /run_wrangler deploy --dry-run --strict --keep-vars --config/u);
   assert.match(releaseScript, /run_wrangler deploy --strict --keep-vars --config/u);
+  assert.match(releaseScript, /\^\[A-Za-z0-9_-\]\{43\}\$/u);
+  assert.match(releaseScript, /printf '%s' "\$\{public_lab_ai_service_token\}"[\s\\]*\| run_wrangler secret put PUBLIC_LAB_AI_SERVICE_TOKEN/u);
+  assert.equal([...releaseScript.matchAll(/secret put PUBLIC_LAB_AI_SERVICE_TOKEN/gu)].length, 1);
+  assert.equal([...releaseScript.matchAll(/--allow-missing-public-lab-ai-service-token true/gu)].length, 1);
+  assert.ok(releaseScript.indexOf("target-before.json") < releaseScript.indexOf("secret put PUBLIC_LAB_AI_SERVICE_TOKEN"));
+  assert.ok(releaseScript.indexOf("check-production-migration-state.mjs\" before") < releaseScript.indexOf("secret put PUBLIC_LAB_AI_SERVICE_TOKEN"));
+  assert.ok(releaseScript.indexOf("target-secret-configured.json") < releaseScript.indexOf("deploy --dry-run --strict"));
   assert.match(releaseScript, /d1 time-travel info DB/u);
   assert.equal([...releaseScript.matchAll(/d1 migrations apply DB/g)].length, 1);
   assert.doesNotMatch(releaseScript, /run_wrangler\s+(?:rollback|d1 time-travel restore)\b/u);
 });
 
-test("production smoke uses the injected origin and remains read-only", () => {
+test("production smoke uses the injected origin and keeps its POST probe unauthenticated and non-mutating", () => {
   assert.match(smokeScript, /productionTarget\(process\.env\)\.publicOrigin/u);
   assert.match(smokeScript, /request\("\/api\/session"/u);
-  assert.match(smokeScript, /ARTS Robotics AI Assistant/u);
+  assert.match(smokeScript, /实验室 AI（内部）/u);
+  assert.match(smokeScript, /chat\.omindos\.ai/u);
   assert.match(smokeScript, /\/api\/lab-ai\/ask/u);
-  assert.doesNotMatch(smokeScript, /method:\s*["'](?:POST|PUT|PATCH|DELETE)["']/u);
+  assert.doesNotMatch(smokeScript, /ARTS Robotics AI Assistant/u);
+  assert.match(smokeScript, /request\("\/api\/public\/lab-ai\/retrieve"/u);
+  assert.equal([...smokeScript.matchAll(/method:\s*"POST"/gu)].length, 1);
+  assert.match(smokeScript, /publicRetrieveAnonymousResponse\.status !== 401/u);
+  assert.match(smokeScript, /publicRetrieveAnonymousStatus:\s*401/u);
+  assert.match(smokeScript, /access-control-allow-origin/u);
+  assert.match(smokeScript, /access-control-allow-credentials/u);
+  assert.doesNotMatch(smokeScript, /x-originmind-public-lab-ai-service-token|PUBLIC_LAB_AI_SERVICE_TOKEN/u);
+  assert.doesNotMatch(smokeScript, /method:\s*["'](?:PUT|PATCH|DELETE)["']/u);
 });

@@ -86,8 +86,8 @@ const vite = await createServer({
           globalThis.${stateKey}.findCalls += 1;
           return globalThis.${stateKey}.existing;
         }
-        export async function reviewKnowledgeItem(existing, actor, action, note) {
-          globalThis.${stateKey}.reviewCalls.push({ existing, actor, action, note });
+        export async function reviewKnowledgeItem(existing, actor, action, note, visibility, publicConfirmation) {
+          globalThis.${stateKey}.reviewCalls.push({ existing, actor, action, note, visibility, publicConfirmation });
           return { id: existing.id, status: action === "approve" ? "active" : action };
         }
         export async function knowledgeRevisionHashExists() { return false; }
@@ -135,14 +135,87 @@ test("所有知识 PATCH 动作强制要求精确 mutationRevision", async () =>
   assert.equal(missing.status, 409);
   assert.equal(globalThis[stateKey].findCalls, 0, "缺少版本标识时不应读取或修改知识条目");
 
-  const stale = await detailRoute.PATCH(patch({ action: "approve", mutationRevision: "stale" }), params);
+  const stale = await detailRoute.PATCH(patch({ action: "approve", mutationRevision: "stale", visibility: "internal" }), params);
   assert.equal(stale.status, 409);
   assert.equal(globalThis[stateKey].reviewCalls.length, 0);
 
-  const current = await detailRoute.PATCH(patch({ action: "approve", mutationRevision: "item-mutation-1" }), params);
+  const current = await detailRoute.PATCH(patch({ action: "approve", mutationRevision: "item-mutation-1", visibility: "internal" }), params);
   assert.equal(current.status, 200);
   assert.equal(globalThis[stateKey].reviewCalls.length, 1);
   assert.equal(globalThis[stateKey].reviewCalls[0].action, "approve");
+  assert.equal(globalThis[stateKey].reviewCalls[0].visibility, "internal");
+  assert.equal(globalThis[stateKey].reviewCalls[0].publicConfirmation, undefined);
+});
+
+test("批准知识必须显式选择合法可见范围且在读取数据库前拒绝错误输入", async () => {
+  for (const body of [
+    { action: "approve", mutationRevision: "item-mutation-1" },
+    { action: "approve", mutationRevision: "item-mutation-1", visibility: "" },
+    { action: "approve", mutationRevision: "item-mutation-1", visibility: "private" },
+    { action: "approve", mutationRevision: "item-mutation-1", visibility: null },
+  ]) {
+    const response = await detailRoute.PATCH(patch(body), params);
+    assert.equal(response.status, 400);
+  }
+  assert.equal(globalThis[stateKey].findCalls, 0);
+  assert.equal(globalThis[stateKey].reviewCalls.length, 0);
+});
+
+test("公开批准要求逐字一致的二次确认并将范围传给 store", async () => {
+  for (const publicConfirmation of [undefined, "", "publish_to_chat.omindos.ai ", "PUBLISH_TO_CHAT.OMINDOS.AI"]) {
+    const body = { action: "approve", mutationRevision: "item-mutation-1", visibility: "public" };
+    if (publicConfirmation !== undefined) body.publicConfirmation = publicConfirmation;
+    const response = await detailRoute.PATCH(patch(body), params);
+    assert.equal(response.status, 400);
+  }
+  assert.equal(globalThis[stateKey].findCalls, 0);
+  assert.equal(globalThis[stateKey].reviewCalls.length, 0);
+
+  const response = await detailRoute.PATCH(patch({
+    action: "approve",
+    mutationRevision: "item-mutation-1",
+    visibility: "public",
+    publicConfirmation: "publish_to_chat.omindos.ai",
+  }), params);
+  assert.equal(response.status, 200);
+  assert.equal(globalThis[stateKey].reviewCalls.length, 1);
+  assert.equal(globalThis[stateKey].reviewCalls[0].visibility, "public");
+  assert.equal(globalThis[stateKey].reviewCalls[0].publicConfirmation, "publish_to_chat.omindos.ai");
+});
+
+test("对内批准和非批准动作拒绝不适用的公开范围字段", async () => {
+  const internalWithConfirmation = await detailRoute.PATCH(patch({
+    action: "approve",
+    mutationRevision: "item-mutation-1",
+    visibility: "internal",
+    publicConfirmation: "publish_to_chat.omindos.ai",
+  }), params);
+  assert.equal(internalWithConfirmation.status, 400);
+
+  for (const body of [
+    { action: "return", mutationRevision: "item-mutation-1", note: "请补充", visibility: "internal" },
+    { action: "reject", mutationRevision: "item-mutation-1", note: "不适用", publicConfirmation: "publish_to_chat.omindos.ai" },
+    { action: "revoke", mutationRevision: "item-mutation-1", note: "已过期", visibility: "public" },
+    { action: "resubmit", mutationRevision: "item-mutation-1", title: "标题", category: "分类", content: "这是足够长的知识正文。", visibility: "internal" },
+  ]) {
+    const response = await detailRoute.PATCH(patch(body), params);
+    assert.equal(response.status, 400);
+  }
+  assert.equal(globalThis[stateKey].findCalls, 0);
+  assert.equal(globalThis[stateKey].reviewCalls.length, 0);
+});
+
+test("退回等非批准动作不向 store 传入可见范围", async () => {
+  const response = await detailRoute.PATCH(patch({
+    action: "return",
+    mutationRevision: "item-mutation-1",
+    note: "请补充边界条件",
+  }), params);
+  assert.equal(response.status, 200);
+  assert.equal(globalThis[stateKey].reviewCalls.length, 1);
+  assert.equal(globalThis[stateKey].reviewCalls[0].action, "return");
+  assert.equal(globalThis[stateKey].reviewCalls[0].visibility, undefined);
+  assert.equal(globalThis[stateKey].reviewCalls[0].publicConfirmation, undefined);
 });
 
 test("普通成员不能审核，项目管理员也不能审核自己的投稿", async () => {
@@ -153,13 +226,13 @@ test("普通成员不能审核，项目管理员也不能审核自己的投稿",
     accountUserId: "account-normal",
     canReviewKnowledge: false,
   });
-  const memberResponse = await detailRoute.PATCH(patch({ action: "approve", mutationRevision: "item-mutation-1" }), params);
+  const memberResponse = await detailRoute.PATCH(patch({ action: "approve", mutationRevision: "item-mutation-1", visibility: "internal" }), params);
   assert.equal(memberResponse.status, 403);
   assert.equal(globalThis[stateKey].reviewCalls.length, 0);
 
   globalThis[stateKey].authorized = authorizedActor();
   globalThis[stateKey].existing = existingItem({ submitter_member_id: "member-review", submitter_email: "review@example.com" });
-  const selfResponse = await detailRoute.PATCH(patch({ action: "approve", mutationRevision: "item-mutation-1" }), params);
+  const selfResponse = await detailRoute.PATCH(patch({ action: "approve", mutationRevision: "item-mutation-1", visibility: "internal" }), params);
   assert.equal(selfResponse.status, 403);
   assert.match((await selfResponse.json()).error, /不能审核自己/u);
   assert.equal(globalThis[stateKey].reviewCalls.length, 0);

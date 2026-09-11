@@ -21,6 +21,7 @@ function defaultCell(table, column) {
   if (column === "revision_no" || column === "chunk_no" || column === "is_active") return 1;
   if (["current_revision_hash", "previous_revision_hash", "source_revision_hash", "nda_accepted_at", "nda_approval_id", "nda_agreement_version", "unlinked_at", "current_revision_id", "active_revision_id", "previous_revision_id", "reviewed_by_member_id", "reviewed_by_name", "reviewed_by_email", "reviewed_at", "activated_at", "retired_at", "revoked_at", "revision_id"].includes(column)) return null;
   if (column === "status" && table === "members") return "active";
+  if (column === "visibility" && table === "knowledge_items") return "internal";
   if (column === "account_user_id" && table === "members") return "email:member@example.com";
   if (column === "chatgpt_account" && table === "members") return "member@example.com";
   if (column === "payload_json") return "{}";
@@ -366,6 +367,59 @@ test("knowledge migration validates immutable revisions, historical superseded v
     knowledge_events: [submittedEvent, event],
   });
   assert.equal(await migration.assertMigrationPayloadRelationships(validPayload), true);
+
+  const internalApprovalEvent = row("knowledge_events", {
+    ...record("knowledge_events", event),
+    action: "approved_internal",
+  });
+  assert.equal(await migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [item],
+    knowledge_revisions: [revision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, internalApprovalEvent],
+  })), true);
+
+  const publicItem = row("knowledge_items", {
+    ...record("knowledge_items", item),
+    visibility: "public",
+  });
+  const publicApprovalEvent = row("knowledge_events", {
+    ...record("knowledge_events", event),
+    action: "approved_public",
+  });
+  assert.equal(await migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [publicItem],
+    knowledge_revisions: [revision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, publicApprovalEvent],
+  })), true);
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [publicItem],
+    knowledge_revisions: [revision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, event],
+  })), /approval visibility/u);
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [item],
+    knowledge_revisions: [revision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, publicApprovalEvent],
+  })), /approval visibility/u);
+  const invalidVisibilityItem = row("knowledge_items", {
+    ...record("knowledge_items", item),
+    visibility: "external",
+  });
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [invalidVisibilityItem],
+    knowledge_revisions: [revision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, event],
+  })), /invalid visibility/u);
 
   const supersededAt = "2026-09-10T02:00:00.000Z";
   const currentReviewedAt = "2026-09-10T03:00:00.000Z";

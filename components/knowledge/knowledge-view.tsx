@@ -8,6 +8,7 @@ import {
   Check,
   FileCheck2,
   FileText,
+  Globe2,
   Info,
   LibraryBig,
   LoaderCircle,
@@ -35,6 +36,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { PUBLIC_KNOWLEDGE_CONFIRMATION } from "@/lib/knowledge-policy";
 import type {
   KnowledgeAction,
   KnowledgeAskResponse,
@@ -45,6 +47,7 @@ import type {
   KnowledgeListResponse,
   KnowledgeRevision,
   KnowledgeStatus,
+  KnowledgeVisibility,
 } from "@/lib/knowledge-types";
 
 type KnowledgeTab = "ask" | "submit" | "mine" | "review" | "manage";
@@ -59,9 +62,16 @@ const statusMeta: Record<KnowledgeStatus, { label: string; detail: string }> = {
   pending: { label: "待审核", detail: "等待项目负责人或 OA 管理员审核" },
   returned: { label: "已退回", detail: "请按审核意见修改后重提" },
   rejected: { label: "已拒绝", detail: "本版本不会进入知识库" },
-  active: { label: "已入库", detail: "问答时可以检索引用" },
-  revoked: { label: "已撤销", detail: "已停止用于知识问答" },
+  active: { label: "已入库", detail: "已按审核时选择的可见范围提供检索" },
+  revoked: { label: "已撤销", detail: "已停止用于对应范围的知识问答" },
 };
+
+function knowledgeVisibility(item: KnowledgeItem): KnowledgeVisibility | undefined {
+  if (item.status !== "active" && item.status !== "revoked") return undefined;
+  const value = (item as KnowledgeItem & { visibility?: unknown }).visibility;
+  if (value === "internal" || value === "public") return value;
+  return "internal";
+}
 
 async function responseJson<T extends { error?: string }>(response: Response, fallback: string): Promise<T> {
   const data = await response.json().catch(() => ({})) as T;
@@ -108,6 +118,12 @@ function askModeLabel(mode?: string) {
 function KnowledgeStatusBadge({ status }: { status: KnowledgeStatus }) {
   const meta = statusMeta[status] || statusMeta.pending;
   return <Badge variant="outline" className={`knowledge-status knowledge-status-${status}`}><span />{meta.label}</Badge>;
+}
+
+function KnowledgeVisibilityBadge({ item }: { item: KnowledgeItem }) {
+  const visibility = knowledgeVisibility(item);
+  if (!visibility) return null;
+  return <Badge variant="outline" className={`knowledge-visibility knowledge-visibility-${visibility}`}>{visibility === "public" ? <Globe2 className="size-3" /> : <ShieldCheck className="size-3" />}{visibility === "public" ? "对外公开" : "仅 OA 内部"}</Badge>;
 }
 
 function EmptyPanel({ icon: Icon, title, description, action }: { icon: typeof BookOpen; title: string; description: string; action?: React.ReactNode }) {
@@ -177,7 +193,7 @@ function KnowledgeAskPanel() {
 
   return <div className="knowledge-ask-layout">
     <section className="knowledge-chat-card">
-      <div className="knowledge-card-heading"><div className="knowledge-card-icon"><Bot className="size-[18px]" /></div><div><h2>向实验室知识助手提问</h2><p>助手只会检索已审核、仍有效的实验室知识，并在回答下方列出依据。</p></div></div>
+      <div className="knowledge-card-heading"><div className="knowledge-card-icon"><Bot className="size-[18px]" /></div><div><h2>在 OA 内向实验室 AI 提问</h2><p>仅已登录并完成准入与保密签署的成员可使用；助手检索已审核、仍有效的内部及公开知识，并列出依据。</p></div></div>
       <div className="knowledge-conversation" aria-live="polite">
         {turns.length === 0 ? <div className="knowledge-welcome"><div className="knowledge-welcome-mark"><Sparkles className="size-5" /></div><strong>从团队已经确认的知识开始</strong><p>可以询问实验步骤、设备操作、技术结论或项目规范。没有足够依据时，助手会明确说明。</p><div className="knowledge-example-list">{examples.map((example) => <button type="button" key={example} onClick={() => setQuestion(example)}>{example}</button>)}</div></div> : turns.map((turn) => <article className="knowledge-turn" key={turn.id}>
           <div className="knowledge-question"><span>你</span><p>{turn.question}</p></div>
@@ -192,7 +208,7 @@ function KnowledgeAskPanel() {
       </form>
     </section>
     <aside className="knowledge-principles">
-      <div><ShieldCheck className="size-5" /><strong>先审核，再入库</strong><p>成员提交的内容不会立即参与问答，须由项目负责人或 OA 管理员确认。</p></div>
+      <div><ShieldCheck className="size-5" /><strong>先审核，再选择范围</strong><p>成员投稿不会立即参与问答；项目负责人或 OA 管理员批准时必须选择“对内”或“对外公开”。</p></div>
       <div><FileCheck2 className="size-5" /><strong>回答附带依据</strong><p>每次命中知识库时展示条目、章节和原文片段，方便回看。</p></div>
       <div><LibraryBig className="size-5" /><strong>仅使用有效版本</strong><p>被退回、拒绝或撤销的内容不会被知识问答调用。</p></div>
     </aside>
@@ -215,7 +231,7 @@ function KnowledgeSubmitPanel({
   onCancelEdit: () => void;
 }) {
   return <section className="knowledge-form-card">
-    <div className="knowledge-card-heading"><div className="knowledge-card-icon"><FileText className="size-[18px]" /></div><div><h2>{editingItem ? "修改并重新提交" : "提交一条实验室知识"}</h2><p>{editingItem ? "请按审核意见完善内容；重提后将重新进入审核队列。" : "所有已完成 OA 准入的成员都可以投稿，审核通过后会自动进入知识库。"}</p></div></div>
+    <div className="knowledge-card-heading"><div className="knowledge-card-icon"><FileText className="size-[18px]" /></div><div><h2>{editingItem ? "修改并重新提交" : "提交一条实验室知识"}</h2><p>{editingItem ? "请按审核意见完善内容；重提后将重新进入审核队列。" : "所有已完成 OA 准入的成员都可以投稿；审核人批准时再选择对内或对外公开。"}</p></div></div>
     {editingItem && <div className="knowledge-editing-banner"><Pencil className="size-4" /><div><strong>正在修改：{editingItem.title}</strong><p>{editingItem.reviewNote || "请完善内容后重新提交。"}</p></div><button type="button" onClick={onCancelEdit} aria-label="取消修改"><X className="size-4" /></button></div>}
     <form className="knowledge-submit-form" onSubmit={onSubmit}>
       <div className="knowledge-form-grid">
@@ -228,7 +244,7 @@ function KnowledgeSubmitPanel({
         <label className="form-field"><span className="field-label">来源名称 <small>可选</small></span><Input value={draft.sourceLabel} onChange={(event) => setDraft((current) => ({ ...current, sourceLabel: event.target.value }))} placeholder="例如：底盘联调记录 2026-09" maxLength={160} disabled={submitting} /></label>
         <label className="form-field"><span className="field-label">来源链接 <small>可选，仅 http/https</small></span><Input type="url" inputMode="url" value={draft.sourceUrl} onChange={(event) => setDraft((current) => ({ ...current, sourceUrl: event.target.value }))} placeholder="https://…" maxLength={2048} disabled={submitting} /></label>
       </div>
-      <div className="knowledge-submit-note"><Info className="size-4" /><p><strong>提交前请确认</strong>内容不含不应在项目内部共享的个人隐私、账号密码或密钥；事实、参数和操作步骤可以由审核人核对。</p></div>
+      <div className="knowledge-submit-note"><Info className="size-4" /><p><strong>提交前请确认</strong>内容不含个人隐私、账号密码或密钥；审核人批准时会选择仅供 OA 内部使用，或经二次确认后对外公开。</p></div>
       <div className="knowledge-form-actions">{editingItem && <Button type="button" variant="outline" onClick={onCancelEdit} disabled={submitting}>取消修改</Button>}<Button type="submit" className="primary-button" disabled={submitting}>{submitting ? <LoaderCircle className="size-4" /> : <Send className="size-4" />}{submitting ? "提交中" : editingItem ? "重新提交审核" : "提交审核"}</Button></div>
     </form>
   </section>;
@@ -237,7 +253,7 @@ function KnowledgeSubmitPanel({
 function KnowledgeItemCard({ item, onEdit }: { item: KnowledgeItem; onEdit?: (item: KnowledgeItem) => void }) {
   const meta = statusMeta[item.status] || statusMeta.pending;
   return <article className="knowledge-item-card">
-    <div className="knowledge-item-topline"><span className="knowledge-category">{item.category}</span><KnowledgeStatusBadge status={item.status} /></div>
+    <div className="knowledge-item-topline"><span className="knowledge-category">{item.category}</span><div className="knowledge-item-badges"><KnowledgeVisibilityBadge item={item} /><KnowledgeStatusBadge status={item.status} /></div></div>
     <h3>{item.title}</h3>
     {item.summary && <p className="knowledge-item-summary">{item.summary}</p>}
     <div className="knowledge-item-state"><span>{meta.detail}</span>{item.currentRevisionNo && <small>第 {item.currentRevisionNo} 版</small>}</div>
@@ -256,8 +272,8 @@ function KnowledgeMinePanel({ items, loading, error, onRetry, onEdit, editingId 
 function KnowledgeReviewPanel({ items, pendingCount, loading, error, onRetry, onOpen }: { items: KnowledgeItem[]; pendingCount: number; loading: boolean; error: string; onRetry: () => void; onOpen: (item: KnowledgeItem) => void }) {
   if (loading) return <LoadingPanel label="正在加载待审核知识…" />;
   if (error) return <ErrorPanel message={error} onRetry={onRetry} />;
-  if (!items.length) return <EmptyPanel icon={Check} title="当前没有待审核知识" description="新的成员投稿会出现在这里；只有审核通过的版本才会进入知识问答。" />;
-  return <div className="knowledge-list"><div className="knowledge-list-summary"><span>待审核 {pendingCount || items.length} 条{pendingCount > items.length ? `，当前显示前 ${items.length} 条` : ""}</span><small>请核对准确性、适用范围和是否包含敏感信息</small></div><div className="knowledge-review-list">{items.map((item) => <article className="knowledge-review-row" key={item.id}><div className="knowledge-review-row-main"><div><span className="knowledge-category">{item.category}</span><time>{formatDate(item.createdAt)}</time></div><h3>{item.title}</h3>{item.summary && <p>{item.summary}</p>}<small>提交人：{item.submitterName || item.submitterEmail || "项目成员"}</small></div><Button type="button" variant="outline" onClick={() => onOpen(item)}>查看并审核</Button></article>)}</div></div>;
+  if (!items.length) return <EmptyPanel icon={Check} title="当前没有待审核知识" description="新的成员投稿会出现在这里；批准时必须选择仅在 OA 内部使用，或二次确认后对外公开。" />;
+  return <div className="knowledge-list"><div className="knowledge-list-summary"><span>待审核 {pendingCount || items.length} 条{pendingCount > items.length ? `，当前显示前 ${items.length} 条` : ""}</span><small>请核对准确性、敏感信息，并为每条知识选择“对内”或“对外公开”</small></div><div className="knowledge-review-list">{items.map((item) => <article className="knowledge-review-row" key={item.id}><div className="knowledge-review-row-main"><div><span className="knowledge-category">{item.category}</span><time>{formatDate(item.createdAt)}</time></div><h3>{item.title}</h3>{item.summary && <p>{item.summary}</p>}<small>提交人：{item.submitterName || item.submitterEmail || "项目成员"}</small></div><Button type="button" variant="outline" onClick={() => onOpen(item)}>查看并选择范围</Button></article>)}</div></div>;
 }
 
 function KnowledgeManagePanel({ items, loading, error, onRetry, onOpen, onRevoke }: { items: KnowledgeItem[]; loading: boolean; error: string; onRetry: () => void; onOpen: (item: KnowledgeItem) => void; onRevoke: (item: KnowledgeItem) => void }) {
@@ -265,7 +281,7 @@ function KnowledgeManagePanel({ items, loading, error, onRetry, onOpen, onRevoke
   if (error) return <ErrorPanel message={error} onRetry={onRetry} />;
   if (!items.length) return <EmptyPanel icon={LibraryBig} title="知识库还是空的" description="审核通过的投稿会成为有效知识；其他状态的历史记录也会保留在这里。" />;
   return <div className="knowledge-list"><div className="knowledge-list-summary"><span>当前显示 {items.length} 条知识记录</span><small>最多显示最近 100 条；撤销不会删除原文和审核轨迹</small></div><div className="knowledge-manage-list">{items.map((item) => <article className="knowledge-manage-row" key={item.id}>
-    <div className="knowledge-manage-main"><div><span className="knowledge-category">{item.category}</span><KnowledgeStatusBadge status={item.status} /></div><h3>{item.title}</h3>{item.summary && <p>{item.summary}</p>}<small>{item.submitterName || item.submitterEmail || "项目成员"} · 更新于 {formatDate(item.updatedAt)}</small></div>
+    <div className="knowledge-manage-main"><div><span className="knowledge-category">{item.category}</span><KnowledgeVisibilityBadge item={item} /><KnowledgeStatusBadge status={item.status} /></div><h3>{item.title}</h3>{item.summary && <p>{item.summary}</p>}<small>{item.submitterName || item.submitterEmail || "项目成员"} · 更新于 {formatDate(item.updatedAt)}</small></div>
     <div className="knowledge-manage-actions"><Button type="button" variant="outline" onClick={() => onOpen(item)}>查看详情</Button>{item.status === "active" && item.canRevoke ? <Button type="button" variant="outline" className="knowledge-revoke-button" onClick={() => onRevoke(item)}>停止用于问答</Button> : <span className="knowledge-manage-state">{item.status === "active" ? "本人投稿需由其他负责人处理" : statusMeta[item.status]?.detail || "状态已记录"}</span>}</div>
   </article>)}</div></div>;
 }
@@ -273,7 +289,9 @@ function KnowledgeManagePanel({ items, loading, error, onRetry, onOpen, onRevoke
 const eventLabels: Record<string, string> = {
   submitted: "提交审核",
   resubmitted: "重新提交",
-  approved: "审核入库",
+  approved: "审核入库（仅 OA 内部）",
+  approved_internal: "批准为仅 OA 内部",
+  approved_public: "批准为对外公开",
   returned: "退回修改",
   rejected: "拒绝入库",
   revoked: "停止问答",
@@ -306,22 +324,29 @@ function KnowledgeHistory({ detail }: { detail: ReviewDetail }) {
   </details>;
 }
 
-function KnowledgeReviewDialog({ detail, open, loading, error, note, setNote, actioning, onOpenChange, onRetry, onAction }: { detail: ReviewDetail | null; open: boolean; loading: boolean; error: string; note: string; setNote: (value: string) => void; actioning: KnowledgeAction | null; onOpenChange: (open: boolean) => void; onRetry: () => void; onAction: (action: Extract<KnowledgeAction, "approve" | "return" | "reject">) => void }) {
+function KnowledgeReviewDialog({ detail, open, loading, error, note, setNote, visibility, setVisibility, publicConfirmation, setPublicConfirmation, actioning, onOpenChange, onRetry, onAction }: { detail: ReviewDetail | null; open: boolean; loading: boolean; error: string; note: string; setNote: (value: string) => void; visibility: KnowledgeVisibility | ""; setVisibility: (value: KnowledgeVisibility) => void; publicConfirmation: string; setPublicConfirmation: (value: string) => void; actioning: KnowledgeAction | null; onOpenChange: (open: boolean) => void; onRetry: () => void; onAction: (action: Extract<KnowledgeAction, "approve" | "return" | "reject">, visibility?: KnowledgeVisibility, publicConfirmation?: string) => void }) {
   const revision = detail ? currentRevision(detail) : undefined;
   const reviewContent = revision?.content || detail?.item.content || "";
   const sourceUrl = safeHttpUrl(revision?.sourceUrl || detail?.item.sourceUrl);
   const actionable = Boolean(detail && detail.item.status === "pending" && detail.item.canReview !== false && reviewContent.trim() && !loading && !error);
   const canAct = actionable && !actioning;
+  const canApprove = canAct && Boolean(visibility) && (visibility !== "public" || publicConfirmation === PUBLIC_KNOWLEDGE_CONFIRMATION);
+  const savedVisibility = detail ? knowledgeVisibility(detail.item) : undefined;
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="knowledge-review-dialog">
-    <DialogHeader><div className="knowledge-dialog-icon"><ShieldCheck className="size-5" /></div><DialogTitle>{detail?.item.title || "知识投稿审核"}</DialogTitle><DialogDescription>{detail ? `${detail.item.submitterName || detail.item.submitterEmail || "项目成员"} · ${detail.item.category} · 第 ${detail.item.currentRevisionNo || revision?.revisionNo || 1} 版` : "核对投稿内容后决定是否进入知识库。"}</DialogDescription></DialogHeader>
+    <DialogHeader><div className="knowledge-dialog-icon"><ShieldCheck className="size-5" /></div><DialogTitle>{detail?.item.title || "知识投稿审核"}</DialogTitle><DialogDescription>{detail ? `${detail.item.submitterName || detail.item.submitterEmail || "项目成员"} · ${detail.item.category} · 第 ${detail.item.currentRevisionNo || revision?.revisionNo || 1} 版` : "核对投稿内容，并在批准时选择仅对内或对外公开。"}</DialogDescription></DialogHeader>
     {loading ? <LoadingPanel label="正在加载投稿正文…" /> : error ? <ErrorPanel message={error} onRetry={onRetry} /> : detail ? <div className="knowledge-review-detail">
       {(revision?.summary || detail.item.summary) && <section><h3>摘要</h3><p>{revision?.summary || detail.item.summary}</p></section>}
       <section><h3>知识正文</h3><div className="knowledge-review-content">{reviewContent || "当前版本没有可显示的正文。"}</div>{!reviewContent && <p className="knowledge-review-blocked"><AlertTriangle className="size-4" />正文未完整加载，不能执行审核。请重新加载。</p>}</section>
       {(revision?.sourceLabel || detail.item.sourceLabel || sourceUrl) && <section><h3>来源</h3><p>{revision?.sourceLabel || detail.item.sourceLabel || "投稿人提供的参考链接"}</p>{sourceUrl && <a className="knowledge-source-link" href={sourceUrl} target="_blank" rel="noreferrer">打开来源链接</a>}</section>}
+      {!actionable && savedVisibility && <section><h3>当前可见范围</h3><p><KnowledgeVisibilityBadge item={detail.item} />{savedVisibility === "public" ? " 已供 chat.omindos.ai 的“马教授 AI 助手”升级版检索使用。" : " 仅已登录并完成准入与保密签署的成员可在 OA 内检索。"}</p></section>}
       <KnowledgeHistory detail={detail} />
       {actionable && <label className="form-field"><span className="field-label">审核意见 <small>退回或拒绝时至少填写 2 个字符</small></span><Textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="说明核对结论，或写清需要修改的具体内容" rows={4} minLength={2} maxLength={1000} disabled={Boolean(actioning)} /></label>}
+      {actionable && <fieldset className="knowledge-visibility-choice" disabled={Boolean(actioning)}><legend>批准后的可见范围 <b className="required-mark">*</b></legend><p>批准前必须选择一个范围；投稿人提交时不会自动决定公开范围。</p><div className="knowledge-visibility-options">
+        <label className={visibility === "internal" ? "selected" : ""}><input type="radio" name="knowledge-visibility" value="internal" checked={visibility === "internal"} onChange={() => { setVisibility("internal"); setPublicConfirmation(""); }} /><ShieldCheck className="size-4" /><span><strong>对内</strong><small>仅登录 OA 且完成准入与保密签署的成员可见；在 OA 里提问。</small></span></label>
+        <label className={visibility === "public" ? "selected public" : ""}><input type="radio" name="knowledge-visibility" value="public" checked={visibility === "public"} onChange={() => setVisibility("public")} /><Globe2 className="size-4" /><span><strong>对外公开</strong><small>供 chat.omindos.ai 的“马教授 AI 助手”升级版检索；访客无需登录 OA。</small></span></label>
+      </div>{visibility === "public" && <label className="knowledge-public-confirmation"><span>二次确认：输入 <code>{PUBLIC_KNOWLEDGE_CONFIRMATION}</code></span><Input value={publicConfirmation} onChange={(event) => setPublicConfirmation(event.target.value)} placeholder={PUBLIC_KNOWLEDGE_CONFIRMATION} autoComplete="off" spellCheck={false} disabled={Boolean(actioning)} /><small>必须逐字一致。公开批准后，该知识仍可在 OA 内检索，并将同时供 chat.omindos.ai 对外检索。</small></label>}</fieldset>}
     </div> : null}
-    {actionable && <DialogFooter className="knowledge-review-actions"><Button type="button" variant="outline" className="knowledge-reject-button" disabled={!canAct || note.trim().length < 2} onClick={() => onAction("reject")}>{actioning === "reject" ? <LoaderCircle className="size-4" /> : <X className="size-4" />}拒绝</Button><Button type="button" variant="outline" className="knowledge-return-button" disabled={!canAct || note.trim().length < 2} onClick={() => onAction("return")}>{actioning === "return" ? <LoaderCircle className="size-4" /> : <RotateCcw className="size-4" />}退回修改</Button><Button type="button" className="primary-button" disabled={!canAct} onClick={() => onAction("approve")}>{actioning === "approve" ? <LoaderCircle className="size-4" /> : <Check className="size-4" />}通过并入库</Button></DialogFooter>}
+    {actionable && <DialogFooter className="knowledge-review-actions"><Button type="button" variant="outline" className="knowledge-reject-button" disabled={!canAct || note.trim().length < 2} onClick={() => onAction("reject")}>{actioning === "reject" ? <LoaderCircle className="size-4" /> : <X className="size-4" />}拒绝</Button><Button type="button" variant="outline" className="knowledge-return-button" disabled={!canAct || note.trim().length < 2} onClick={() => onAction("return")}>{actioning === "return" ? <LoaderCircle className="size-4" /> : <RotateCcw className="size-4" />}退回修改</Button><Button type="button" className="primary-button" disabled={!canApprove} onClick={() => onAction("approve", visibility || undefined, visibility === "public" ? publicConfirmation : undefined)}>{actioning === "approve" ? <LoaderCircle className="size-4" /> : visibility === "public" ? <Globe2 className="size-4" /> : <Check className="size-4" />}{visibility === "public" ? "确认公开并入库" : visibility === "internal" ? "通过并仅在 OA 内入库" : "先选择可见范围"}</Button></DialogFooter>}
   </DialogContent></Dialog>;
 }
 
@@ -351,6 +376,8 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
   const [reviewDetailError, setReviewDetailError] = useState("");
   const reviewDetailRequest = useRef<AbortController | null>(null);
   const [reviewNote, setReviewNote] = useState("");
+  const [reviewVisibility, setReviewVisibility] = useState<KnowledgeVisibility | "">("");
+  const [publicConfirmation, setPublicConfirmation] = useState("");
   const [reviewAction, setReviewAction] = useState<KnowledgeAction | null>(null);
   const [revokeTarget, setRevokeTarget] = useState<KnowledgeItem | null>(null);
   const [revokeNote, setRevokeNote] = useState("");
@@ -456,7 +483,7 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
         body: JSON.stringify(editingItem ? { action: "resubmit", mutationRevision: editingItem.mutationRevision, ...payload } : payload),
       });
       await responseJson<{ item?: KnowledgeItem; error?: string }>(response, editingItem ? "知识未重新提交" : "知识未提交");
-      toast.success(editingItem ? "知识已重新提交" : "知识已提交审核", { description: "管理员审核通过后会自动进入知识库。" });
+      toast.success(editingItem ? "知识已重新提交" : "知识已提交审核", { description: "审核人将核对内容，并在批准时选择对内或对外公开。" });
       setDraft(emptyDraft());
       setEditingItem(null);
       await loadMine();
@@ -526,6 +553,8 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
     setReviewTarget(item);
     setReviewDetail({ item, revisions: [], events: [] });
     setReviewNote("");
+    setReviewVisibility("");
+    setPublicConfirmation("");
     void loadReviewDetail(item);
   };
 
@@ -538,9 +567,11 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
     setReviewDetailLoading(false);
     setReviewDetailError("");
     setReviewNote("");
+    setReviewVisibility("");
+    setPublicConfirmation("");
   };
 
-  const performReview = async (action: Extract<KnowledgeAction, "approve" | "return" | "reject">) => {
+  const performReview = async (action: Extract<KnowledgeAction, "approve" | "return" | "reject">, visibility?: KnowledgeVisibility, confirmation?: string) => {
     if (!reviewTarget) return;
     if (!reviewDetail || reviewDetail.item.id !== reviewTarget.id) {
       toast.info("请等待当前投稿正文加载完成");
@@ -551,21 +582,34 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
       toast.info("审核意见至少需要 2 个字符", { description: action === "return" ? "请明确说明需要修改的内容。" : "请说明拒绝入库的原因。" });
       return;
     }
+    if (action === "approve" && !visibility) {
+      toast.info("请先选择可见范围", { description: "选择“对内”或“对外公开”后才能批准。" });
+      return;
+    }
+    if (action === "approve" && visibility === "public" && confirmation !== PUBLIC_KNOWLEDGE_CONFIRMATION) {
+      toast.info("公开确认文字不一致", { description: `请逐字输入 ${PUBLIC_KNOWLEDGE_CONFIRMATION}` });
+      return;
+    }
     setReviewAction(action);
     try {
+      const approvalScope = action === "approve" && visibility
+        ? { visibility, ...(visibility === "public" ? { publicConfirmation: confirmation } : {}) }
+        : {};
       const response = await fetch(`/api/knowledge/${encodeURIComponent(reviewTarget.id)}`, {
         method: "PATCH",
         headers: { "content-type": "application/json", accept: "application/json" },
         credentials: "same-origin",
-        body: JSON.stringify({ action, mutationRevision: reviewDetail.item.mutationRevision, note: note || undefined }),
+        body: JSON.stringify({ action, mutationRevision: reviewDetail.item.mutationRevision, note: note || undefined, ...approvalScope }),
       });
       await responseJson<{ item?: KnowledgeItem; error?: string }>(response, "审核动作未保存");
-      toast.success(action === "approve" ? "知识已审核入库" : action === "return" ? "知识已退回修改" : "知识已拒绝", { description: action === "approve" ? "该版本现在可以被知识问答检索。" : "投稿人可以在“我的提交”中查看审核意见。" });
+      toast.success(action === "approve" ? visibility === "public" ? "知识已对外公开" : "知识已在 OA 内部入库" : action === "return" ? "知识已退回修改" : "知识已拒绝", { description: action === "approve" ? visibility === "public" ? "该版本可供 chat.omindos.ai 的“马教授 AI 助手”升级版检索。" : "该版本仅供已完成准入的 OA 成员检索。" : "投稿人可以在“我的提交”中查看审核意见。" });
       reviewDetailRequest.current?.abort();
       reviewDetailRequest.current = null;
       setReviewTarget(null);
       setReviewDetail(null);
       setReviewNote("");
+      setReviewVisibility("");
+      setPublicConfirmation("");
       await Promise.all([loadReview(), loadManage(), loadMine()]);
     } catch (error) {
       toast.error("审核动作未保存", { description: error instanceof Error ? error.message : "请稍后重试" });
@@ -600,7 +644,8 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
   const visibleTab = !canReviewKnowledge && (activeTab === "review" || activeTab === "manage") ? "ask" : activeTab;
 
   return <div className="knowledge-view">
-    <section className="page-heading knowledge-heading"><div><div className="eyebrow"><span className="eyebrow-line" />实验室知识与问答</div><h1>ARTS Robotics AI Assistant</h1><p>成员共同沉淀实验室知识，由项目负责人或 OA 管理员审核后自动进入知识库，并用于可追溯的知识问答。</p></div><div className="knowledge-live-note"><span /><div><strong>审核后可用</strong><small>仅检索当前有效版本</small></div></div></section>
+    <section className="page-heading knowledge-heading"><div><div className="eyebrow"><span className="eyebrow-line" />OA 内部知识与问答</div><h1>实验室 AI（内部）</h1><p>登录并完成 OA 准入与保密签署后，可在这里提问、投稿和查看审核状态。项目负责人或 OA 管理员批准时必须选择“对内”或“对外公开”。</p></div><div className="knowledge-live-note"><span /><div><strong>仅限 OA 成员</strong><small>登录并完成准入后使用</small></div></div></section>
+    <section className="knowledge-scope-summary" aria-label="实验室知识可见范围说明"><div><ShieldCheck className="size-5" /><p><strong>对内：在 OA 里面问</strong><span>仅已登录并完成准入与保密签署的成员可检索。</span></p></div><div><Globe2 className="size-5" /><p><strong>对外：供马教授 AI 助手升级版使用</strong><span>公开批准须二次确认，随后供 <a href="https://chat.omindos.ai" target="_blank" rel="noreferrer">chat.omindos.ai</a> 检索。</span></p></div></section>
     <Tabs className="knowledge-tabs" value={visibleTab} onValueChange={(value) => setActiveTab(value as KnowledgeTab)}>
       <TabsList aria-label="实验室 AI 功能"><TabsTrigger value="ask"><Bot className="size-4" />知识问答</TabsTrigger><TabsTrigger value="submit"><Send className="size-4" />提交知识</TabsTrigger><TabsTrigger value="mine"><FileText className="size-4" />我的提交</TabsTrigger>{canReviewKnowledge && <TabsTrigger value="review"><ShieldCheck className="size-4" />待审核{reviewPendingCount > 0 && <span className="knowledge-tab-count">{tabCount}</span>}</TabsTrigger>}{canReviewKnowledge && <TabsTrigger value="manage"><LibraryBig className="size-4" />知识库管理</TabsTrigger>}</TabsList>
       <TabsContent value="ask"><KnowledgeAskPanel /></TabsContent>
@@ -609,7 +654,7 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
       {canReviewKnowledge && <TabsContent value="review"><KnowledgeReviewPanel items={reviewItems} pendingCount={reviewPendingCount} loading={reviewLoading} error={reviewError} onRetry={() => void loadReview()} onOpen={openReview} /></TabsContent>}
       {canReviewKnowledge && <TabsContent value="manage"><KnowledgeManagePanel items={manageItems} loading={manageLoading} error={manageError} onRetry={() => void loadManage()} onOpen={openReview} onRevoke={(item) => { setRevokeTarget(item); setRevokeNote(""); }} /></TabsContent>}
     </Tabs>
-    <KnowledgeReviewDialog detail={reviewDetail} open={Boolean(reviewTarget)} loading={reviewDetailLoading} error={reviewDetailError} note={reviewNote} setNote={setReviewNote} actioning={reviewAction} onOpenChange={(open) => { if (!open) closeReview(); }} onRetry={() => { if (reviewTarget) void loadReviewDetail(reviewTarget); }} onAction={(action) => void performReview(action)} />
+    <KnowledgeReviewDialog detail={reviewDetail} open={Boolean(reviewTarget)} loading={reviewDetailLoading} error={reviewDetailError} note={reviewNote} setNote={setReviewNote} visibility={reviewVisibility} setVisibility={setReviewVisibility} publicConfirmation={publicConfirmation} setPublicConfirmation={setPublicConfirmation} actioning={reviewAction} onOpenChange={(open) => { if (!open) closeReview(); }} onRetry={() => { if (reviewTarget) void loadReviewDetail(reviewTarget); }} onAction={(action, visibility, confirmation) => void performReview(action, visibility, confirmation)} />
     <KnowledgeRevokeDialog item={revokeTarget} note={revokeNote} setNote={setRevokeNote} submitting={revoking} onOpenChange={(open) => { if (!open && !revoking) { setRevokeTarget(null); setRevokeNote(""); } }} onConfirm={() => void performRevoke()} />
   </div>;
 }

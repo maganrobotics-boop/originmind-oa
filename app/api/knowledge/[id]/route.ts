@@ -2,9 +2,11 @@ import { getDb } from "../../../../db";
 import { readBoundedJsonObject } from "../../../../lib/bounded-json-request";
 import {
   hashKnowledgeSubmission,
+  isPublicKnowledgeConfirmation,
   knowledgeActionAllowed,
   parseKnowledgeReviewAction,
   parseKnowledgeSubmission,
+  parseKnowledgeVisibility,
   parseReviewNote,
 } from "../../../../lib/knowledge-policy";
 import {
@@ -91,9 +93,25 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const action = typeof body.action === "string" ? body.action : "";
   const allowedKeys = action === "resubmit"
     ? new Set(["action", "mutationRevision", "title", "category", "summary", "sourceLabel", "sourceUrl", "content"])
-    : new Set(["action", "mutationRevision", "note"]);
+    : action === "approve"
+      ? new Set(["action", "mutationRevision", "note", "visibility", "publicConfirmation"])
+      : new Set(["action", "mutationRevision", "note"]);
   if (Object.keys(body).some((key) => !allowedKeys.has(key))) return privateJson({ error: "知识流转包含不支持的字段。" }, { status: 400 });
   if (typeof body.mutationRevision !== "string" || !body.mutationRevision.trim()) return privateJson({ error: "请刷新知识条目后再操作。" }, { status: 409 });
+  const reviewAction = action === "resubmit" ? null : parseKnowledgeReviewAction(action);
+  if (action !== "resubmit" && !reviewAction) return privateJson({ error: "不支持的知识流转动作。" }, { status: 400 });
+  const parsedApprovalVisibility = reviewAction === "approve" ? parseKnowledgeVisibility(body.visibility) : null;
+  if (reviewAction === "approve" && !parsedApprovalVisibility) {
+    return privateJson({ error: "批准知识时必须选择对内或对外公开。" }, { status: 400 });
+  }
+  const approvalVisibility = parsedApprovalVisibility ?? undefined;
+  if (approvalVisibility === "public" && !isPublicKnowledgeConfirmation(body.publicConfirmation)) {
+    return privateJson({ error: "对外公开需要完成精确的二次确认。" }, { status: 400 });
+  }
+  if (approvalVisibility === "internal" && Object.hasOwn(body, "publicConfirmation")) {
+    return privateJson({ error: "对内知识不接受对外公开确认字段。" }, { status: 400 });
+  }
+  const publicConfirmation = approvalVisibility === "public" ? body.publicConfirmation : undefined;
 
   try {
     const reviewIntent = action !== "resubmit";
@@ -127,7 +145,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return item ? privateJson({ item }) : privateJson({ error: "知识条目已更新，请刷新后重试。" }, { status: 409 });
     }
 
-    const reviewAction = parseKnowledgeReviewAction(action);
     if (!reviewAction) return privateJson({ error: "不支持的知识流转动作。" }, { status: 400 });
     if (!canReviewKnowledge(access.authorized)) return privateJson({ error: "只有项目负责人或 OA 管理员可以审核知识。" }, { status: 403 });
     if (isSubmitter) return privateJson({ error: "投稿人不能审核自己的知识。" }, { status: 403 });
@@ -141,7 +158,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     if (!(await consumeWriteRateLimit(db, { actorSubject: access.actor.accountUserId, scope: "knowledge_review", limit: MAX_KNOWLEDGE_WRITES_PER_MINUTE }))) {
       return privateJson({ error: "知识审核操作过于频繁，请稍后再试。" }, { status: 429, headers: { "retry-after": "60" } });
     }
-    const item = await reviewKnowledgeItem(existing, access.actor, reviewAction, parsedNote.value);
+    const item = await reviewKnowledgeItem(existing, access.actor, reviewAction, parsedNote.value, approvalVisibility, publicConfirmation);
     return item ? privateJson({ item }) : privateJson({ error: "知识条目已更新，请刷新后重试。" }, { status: 409 });
   } catch {
     return privateJson({ error: "知识流转暂时无法保存，请稍后重试。" }, { status: 500 });

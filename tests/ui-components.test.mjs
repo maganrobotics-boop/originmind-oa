@@ -44,13 +44,16 @@ test("keeps registration and sidebar branding text-only", async () => {
   );
 });
 
-test("keeps the laboratory AI assistant directly discoverable from the dashboard", async () => {
+test("keeps the internal laboratory AI discoverable only inside the admitted OA dashboard", async () => {
   const pageSource = await readFile(path.join(root, "app/page.tsx"), "utf8");
 
   assert.match(pageSource, /className="dashboard-ai-entry"/u);
   assert.match(pageSource, /onClick=\{\(\) => navigate\("knowledge"\)\}/u);
-  assert.match(pageSource, /ARTS Robotics AI Assistant/u);
-  assert.match(pageSource, /进入实验室 AI/u);
+  assert.match(pageSource, /实验室 AI（内部）/u);
+  assert.match(pageSource, /进入内部 AI/u);
+  assert.match(pageSource, /if \(!session\) return[\s\S]*?<h1>请登录账号<\/h1>/u);
+  assert.match(pageSource, /if \(needsNda\) return[\s\S]*?<NdaAdmissionGate/u);
+  assert.ok(pageSource.indexOf("if (needsNda) return") < pageSource.indexOf('<div className="oa-app">'));
 });
 
 test("makes the official Feishu QR the primary login and keeps ChatGPT and GitHub under smaller alternatives", async () => {
@@ -78,7 +81,7 @@ test("makes the official Feishu QR the primary login and keeps ChatGPT and GitHu
     choiceSource,
     /\{githubLoginEnabled\s*&&\s*<a[^>]*href="\/api\/auth\/github\/start"/,
   );
-  assert.match(pageSource, /扫码进入 OA/u);
+  assert.match(pageSource, /请登录账号/u);
   assert.match(pageSource, /fetch\("\/api\/auth\/feishu\/name-binding"/u);
   assert.match(pageSource, /fetch\("\/api\/auth\/feishu\/provision"/u);
   assert.match(pageSource, /provision-feishu-member/u);

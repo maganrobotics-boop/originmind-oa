@@ -19,6 +19,7 @@ async function request(path, init = {}) {
     return await fetch(new URL(path, PRODUCTION_ORIGIN), {
       redirect: "manual",
       cache: "no-store",
+      credentials: "omit",
       ...init,
       headers: {
         accept: init.headers?.accept || "*/*",
@@ -51,12 +52,24 @@ function scriptUrls(html) {
 }
 
 async function checkOnce() {
-  const [{ text: rootHtml }, { text: guideHtml }, sessionResponse, approvalsResponse, knowledgeResponse] = await Promise.all([
+  const [
+    { text: rootHtml },
+    { text: guideHtml },
+    sessionResponse,
+    approvalsResponse,
+    knowledgeResponse,
+    publicRetrieveAnonymousResponse,
+  ] = await Promise.all([
     successfulText("/"),
     successfulText("/guide"),
     request("/api/session", { headers: { accept: "application/json" } }),
     request("/api/approvals", { headers: { accept: "application/json" } }),
     request("/api/knowledge", { headers: { accept: "application/json" } }),
+    request("/api/public/lab-ai/retrieve", {
+      method: "POST",
+      headers: { accept: "application/json", "content-type": "application/json" },
+      body: JSON.stringify({ question: "发布验证" }),
+    }),
   ]);
   if (sessionResponse.status !== 200) throw new Error(`/api/session returned HTTP ${sessionResponse.status}`);
   const session = await sessionResponse.json();
@@ -66,6 +79,19 @@ async function checkOnce() {
   if (approvalsResponse.status !== 401 || knowledgeResponse.status !== 401) {
     throw new Error("Protected OA APIs did not fail closed for an anonymous request");
   }
+  if (publicRetrieveAnonymousResponse.status !== 401) {
+    throw new Error(`/api/public/lab-ai/retrieve returned HTTP ${publicRetrieveAnonymousResponse.status} without its service credential`);
+  }
+  if (!publicRetrieveAnonymousResponse.headers.get("cache-control")?.includes("no-store")) {
+    throw new Error("/api/public/lab-ai/retrieve anonymous rejection is cacheable");
+  }
+  if (
+    publicRetrieveAnonymousResponse.headers.has("access-control-allow-origin")
+    || publicRetrieveAnonymousResponse.headers.has("access-control-allow-credentials")
+  ) {
+    throw new Error("/api/public/lab-ai/retrieve unexpectedly enables browser CORS");
+  }
+  await publicRetrieveAnonymousResponse.arrayBuffer();
 
   let searchable = `${rootHtml}\n${guideHtml}`;
   const assets = scriptUrls(searchable);
@@ -77,11 +103,11 @@ async function checkOnce() {
   }));
   searchable += `\n${assetResponses.join("\n")}`;
   if (
-    !searchable.includes("ARTS Robotics AI Assistant")
-    || !searchable.includes("实验室 AI")
+    !searchable.includes("实验室 AI（内部）")
+    || !searchable.includes("chat.omindos.ai")
     || !searchable.includes("/api/lab-ai/ask")
   ) {
-    throw new Error("The deployed client does not expose the reviewed laboratory AI entry");
+    throw new Error("The deployed client does not expose the reviewed internal/public laboratory AI split");
   }
   return {
     origin: PRODUCTION_ORIGIN,
@@ -90,8 +116,10 @@ async function checkOnce() {
     sessionStatus: 200,
     approvalsAnonymousStatus: 401,
     knowledgeAnonymousStatus: 401,
+    publicRetrieveAnonymousStatus: 401,
     checkedAssets: assets.length,
     laboratoryAiEntryFound: true,
+    publicAssistantReferenceFound: true,
   };
 }
 
@@ -113,4 +141,4 @@ await writeFile(receiptPath, `${JSON.stringify({
   checkedAt: new Date().toISOString(),
   ...result,
 }, null, 2)}\n`, { encoding: "utf8", mode: 0o600, flag: "wx" });
-process.stdout.write("Verified public OA routes, fail-closed APIs, security headers, and laboratory AI entry.\n");
+process.stdout.write("Verified public OA routes, fail-closed APIs, public retrieval authentication, security headers, and laboratory AI entry.\n");

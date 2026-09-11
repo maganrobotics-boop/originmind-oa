@@ -3,6 +3,10 @@ export const KNOWLEDGE_PROJECT = "OriginMind × ARTS Robotics 联合研发项目
 export const KNOWLEDGE_STATUSES = ["pending", "returned", "rejected", "active", "revoked"] as const;
 export type KnowledgeStatus = typeof KNOWLEDGE_STATUSES[number];
 
+export const KNOWLEDGE_VISIBILITIES = ["internal", "public"] as const;
+export type KnowledgeVisibility = typeof KNOWLEDGE_VISIBILITIES[number];
+export const PUBLIC_KNOWLEDGE_CONFIRMATION = "publish_to_chat.omindos.ai";
+
 export const KNOWLEDGE_REVIEW_ACTIONS = ["approve", "return", "reject", "revoke"] as const;
 export type KnowledgeReviewAction = typeof KNOWLEDGE_REVIEW_ACTIONS[number];
 
@@ -136,6 +140,16 @@ export function parseKnowledgeReviewAction(value: unknown): KnowledgeReviewActio
   return typeof value === "string" && (KNOWLEDGE_REVIEW_ACTIONS as readonly string[]).includes(value)
     ? value as KnowledgeReviewAction
     : null;
+}
+
+export function parseKnowledgeVisibility(value: unknown): KnowledgeVisibility | null {
+  return typeof value === "string" && (KNOWLEDGE_VISIBILITIES as readonly string[]).includes(value)
+    ? value as KnowledgeVisibility
+    : null;
+}
+
+export function isPublicKnowledgeConfirmation(value: unknown): boolean {
+  return value === PUBLIC_KNOWLEDGE_CONFIRMATION;
 }
 
 export function parseReviewNote(value: unknown): { ok: true; value: string } | { ok: false; error: string } {

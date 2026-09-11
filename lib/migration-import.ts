@@ -268,6 +268,7 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
 
   const knowledgeItemStatuses = new Set(["pending", "returned", "rejected", "active", "revoked"]);
   const knowledgeRevisionStatuses = new Set(["pending", "returned", "rejected", "active", "superseded", "revoked"]);
+  const knowledgeApprovalActions = new Set(["approved", "approved_internal", "approved_public"]);
   const knowledgeItemById = new Map<string, Record<string, string | number | null>>();
   for (const item of knowledgeItems) {
     const id = requiredText(item, "id");
@@ -281,6 +282,11 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
     requiredText(item, "updated_at");
     const status = requiredText(item, "status");
     if (!knowledgeItemStatuses.has(status)) throw new Error(`Migration knowledge item ${id} has an invalid status`);
+    const visibility = requiredText(item, "visibility");
+    if (visibility !== "internal" && visibility !== "public") throw new Error(`Migration knowledge item ${id} has an invalid visibility`);
+    if (visibility === "public" && status !== "active" && status !== "revoked") {
+      throw new Error(`Migration knowledge item ${id} exposes unapproved knowledge`);
+    }
     const revokedAt = optionalText(item, "revoked_at");
     if ((status === "revoked") !== (revokedAt !== null)) throw new Error(`Migration knowledge item ${id} has inconsistent revocation evidence`);
     knowledgeItemById.set(id, item);
@@ -346,7 +352,7 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
         ? new Set(["returned"])
         : status === "rejected"
           ? new Set(["rejected"])
-          : new Set(["approved"]);
+          : knowledgeApprovalActions;
       const matchingEvents = knowledgeEvents.filter((event) => event.revision_id === id
         && reviewActions.has(event.action as string)
         && event.actor_member_id === reviewerMemberId
@@ -432,6 +438,16 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
         throw new Error(`Migration knowledge item ${itemId} has no unique matching revoke event`);
       }
     }
+    if (itemStatus === "active" || itemStatus === "revoked") {
+      const approvalEvents = knowledgeEvents.filter((event) => event.item_id === itemId
+        && event.revision_id === current.id
+        && knowledgeApprovalActions.has(event.action as string));
+      if (approvalEvents.length !== 1) throw new Error(`Migration knowledge item ${itemId} has no unique visibility approval event`);
+      const approvedVisibility = approvalEvents[0].action === "approved_public" ? "public" : "internal";
+      if (requiredText(item, "visibility") !== approvedVisibility) {
+        throw new Error(`Migration knowledge item ${itemId} has inconsistent approval visibility`);
+      }
+    }
   }
 
   const chunkNumbersByRevision = new Map<string, Set<number>>();
@@ -504,7 +520,7 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
     requiredText(event, "actor_name");
     requiredText(event, "actor_email");
     const action = requiredText(event, "action");
-    if (!["submitted", "resubmitted", "approved", "returned", "rejected", "revoked"].includes(action)) {
+    if (!["submitted", "resubmitted", "approved", "approved_internal", "approved_public", "returned", "rejected", "revoked"].includes(action)) {
       throw new Error(`Migration knowledge event ${id} has an unsupported action`);
     }
     if (typeof event.note !== "string") throw new Error(`Migration knowledge event ${id} has a malformed note`);
@@ -525,7 +541,7 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
       else if (status === "revoked") expectedActions.push("approved", "revoked");
       const actualActions = knowledgeEvents
         .filter((event) => event.revision_id === revisionId)
-        .map((event) => requiredText(event, "action"))
+        .map((event) => knowledgeApprovalActions.has(requiredText(event, "action")) ? "approved" : requiredText(event, "action"))
         .sort();
       expectedActions.sort();
       if (actualActions.length !== expectedActions.length || actualActions.some((action, actionIndex) => action !== expectedActions[actionIndex])) {

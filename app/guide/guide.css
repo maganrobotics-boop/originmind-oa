@@ -39,6 +39,7 @@
 .guide-task ol { list-style: decimal; padding-left: 1.5em; margin-top: 12px; }
 .guide-task li + li { margin-top: 10px; }
 .guide-task > p + p { margin-top: 12px; }
+.guide-task a { color: #256e5c; font-weight: 700; text-decoration: underline; text-underline-offset: 4px; }
 .guide-example { padding: 16px 20px; margin-top: 20px; background: #eef6f2; border-radius: 8px; color: #34564a; }
 .guide-example strong { display: block; margin-bottom: 6px; }
 .guide-charter-intro { padding: 20px 22px; background: #eaf0f4; border-radius: 10px; }

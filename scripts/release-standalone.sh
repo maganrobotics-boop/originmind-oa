@@ -56,7 +56,7 @@ config_path="${release_root}/dist/server/wrangler.json"
 node "${script_dir}/check-standalone-output.mjs" staging "${config_path}"
 "${wrangler}" d1 info "${staging_database_name}" --json --config "${config_path}" >/dev/null
 
-# A locked bootstrap Worker may receive its OAuth secret through the Cloudflare
+# A locked bootstrap Worker may receive its required secrets through the Cloudflare
 # dashboard. Verify the exact name before any D1 mutation; the value remains
 # unreadable to this release process. A first deploy may instead provide the
 # same value through the validated private secrets file.

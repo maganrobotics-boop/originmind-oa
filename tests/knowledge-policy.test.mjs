@@ -145,6 +145,18 @@ test("知识状态机只开放审核矩阵中的流转", () => {
   assert.equal(policy.knowledgeActionAllowed("revoked", "revoke"), false);
 });
 
+test("知识公开范围与公开确认必须精确匹配", () => {
+  assert.equal(policy.parseKnowledgeVisibility("internal"), "internal");
+  assert.equal(policy.parseKnowledgeVisibility("public"), "public");
+  for (const value of [undefined, null, "", " internal", "Public", "external"]) {
+    assert.equal(policy.parseKnowledgeVisibility(value), null);
+  }
+  assert.equal(policy.isPublicKnowledgeConfirmation(policy.PUBLIC_KNOWLEDGE_CONFIRMATION), true);
+  for (const value of [undefined, null, "", "publish_to_chat.omindos.ai ", "PUBLISH_TO_CHAT.OMINDOS.AI"]) {
+    assert.equal(policy.isPublicKnowledgeConfirmation(value), false);
+  }
+});
+
 test("投稿内容哈希覆盖来源和正文且稳定", async () => {
   const first = await policy.hashKnowledgeSubmission(submission());
   const repeated = await policy.hashKnowledgeSubmission(submission());
