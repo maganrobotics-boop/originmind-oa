@@ -1,0 +1,1 @@
+ALTER TABLE `approvals` ADD `period_key` text;

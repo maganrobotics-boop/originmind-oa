@@ -1,0 +1,1 @@
+ALTER TABLE `oauth_transactions` ADD `provider` text DEFAULT 'github' NOT NULL;

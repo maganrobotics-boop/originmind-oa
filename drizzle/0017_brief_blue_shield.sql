@@ -1,0 +1,1 @@
+CREATE INDEX `direct_messages_sender_created_idx` ON `direct_messages` (`sender_email`,`created_at`);

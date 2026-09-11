@@ -1,0 +1,2 @@
+DROP INDEX `members_identity_number_unique`;--> statement-breakpoint
+CREATE UNIQUE INDEX `members_identity_number_active_unique` ON `members` (`identity_number`) WHERE "members"."status" = 'active' AND "members"."identity_number" IS NOT NULL;

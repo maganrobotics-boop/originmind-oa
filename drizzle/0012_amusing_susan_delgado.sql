@@ -1,0 +1,2 @@
+ALTER TABLE `approvals` ADD `client_creation_key` text;--> statement-breakpoint
+CREATE UNIQUE INDEX `approvals_requester_creation_unique` ON `approvals` (`requester_email`,`client_creation_key`) WHERE "approvals"."client_creation_key" IS NOT NULL;

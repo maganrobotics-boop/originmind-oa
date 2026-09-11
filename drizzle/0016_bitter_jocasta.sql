@@ -1,0 +1,1 @@
+CREATE INDEX `approval_events_actor_created_idx` ON `approval_events` (`actor_email`,`created_at`);
