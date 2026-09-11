@@ -33,12 +33,17 @@ if (sqlEntries.some((entry) => !entry.isFile())) throw new Error("Every producti
 const migrationSqlByName = Object.fromEntries(await Promise.all([
   "0026_rich_jocasta.sql",
   "0027_careless_winter_soldier.sql",
+  "0028_needy_microchip.sql",
 ].map(async (name) => [name, await readFile(resolve(drizzleRoot, name), "utf8")])));
 const expectedMigrationNames = validateProductionMigrationManifest({
   migrationNames: sqlEntries.map((entry) => entry.name).sort(),
   migrationSqlByName,
 });
-const previousKnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName, ["0026_rich_jocasta.sql"]);
+const migration26KnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName, ["0026_rich_jocasta.sql"]);
+const migration27KnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName, [
+  "0026_rich_jocasta.sql",
+  "0027_careless_winter_soldier.sql",
+]);
 const expectedKnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName);
 const [ledgerPayload, freezePayload, schemaPayload] = await Promise.all([
   readFile(resolve(options.ledger), "utf8").then(JSON.parse),
@@ -59,6 +64,7 @@ const state = validateProductionMigrationState({
     "table:notification_outbox",
   ].sort(),
   expectedKnowledgeDefinitions,
-  previousKnowledgeDefinitions,
+  migration26KnowledgeDefinitions,
+  migration27KnowledgeDefinitions,
 });
 process.stdout.write(`${state}\n`);

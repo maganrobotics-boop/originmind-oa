@@ -13,9 +13,12 @@ function parseArguments(values) {
     options[key.slice(2)] = value;
   }
   const required = ["identity", "database", "website-database", "secrets", "deployments", "versions", "receipt"];
-  const allowed = [...required, "expected-version-message"];
+  const allowed = [...required, "expected-version-message", "allow-missing-public-lab-ai-service-token"];
   if (required.some((key) => !options[key]) || Object.keys(options).some((key) => !allowed.includes(key))) {
-    throw new Error("Usage: check-production-cloudflare-target.mjs --identity <json> --database <json> --website-database <json> --secrets <json> --deployments <json> --versions <json> --receipt <json> [--expected-version-message <message>]");
+    throw new Error("Usage: check-production-cloudflare-target.mjs --identity <json> --database <json> --website-database <json> --secrets <json> --deployments <json> --versions <json> --receipt <json> [--expected-version-message <message>] [--allow-missing-public-lab-ai-service-token true]");
+  }
+  if (options["allow-missing-public-lab-ai-service-token"] && options["allow-missing-public-lab-ai-service-token"] !== "true") {
+    throw new Error("allow-missing-public-lab-ai-service-token must be exactly true when supplied");
   }
   return options;
 }
@@ -34,6 +37,7 @@ const snapshot = validateProductionCloudflareSnapshot({
   deployments: await jsonFile(options.deployments),
   versions: await jsonFile(options.versions),
   expectedVersionMessage: options["expected-version-message"],
+  allowMissingPublicLabAiServiceToken: options["allow-missing-public-lab-ai-service-token"] === "true",
 });
 const receiptPath = resolve(options.receipt);
 await writeFile(receiptPath, `${JSON.stringify({

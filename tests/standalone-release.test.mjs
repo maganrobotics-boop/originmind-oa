@@ -40,6 +40,5 @@ test("staging release uses one guarded immutable standalone artifact", () => {
   assert.ok(dryRun < migrations && migrations < finalDeploy);
   assert.doesNotMatch(releaseScript, /\bwrangler deploy(?![^\n]*--config)/u);
   assert.doesNotMatch(releaseScript, /[0-9a-f]{32}/iu);
-  assert.match(secretListValidator, /GITHUB_OAUTH_CLIENT_SECRET/u);
-  assert.match(secretListValidator, /FEISHU_LOGIN_APP_SECRET/u);
+  assert.match(secretListValidator, /requiredStandaloneSecrets/u);
 });

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+set +x
 set -euo pipefail
 
 target="${1:-}"
@@ -59,8 +60,14 @@ if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN is required from GitHub Actions Secrets." >&2
   exit 64
 fi
+if [[ ! "${PUBLIC_LAB_AI_SERVICE_TOKEN:-}" =~ ^[A-Za-z0-9_-]{43}$ ]]; then
+  echo "PUBLIC_LAB_AI_SERVICE_TOKEN must be exactly 43 unpadded base64url characters." >&2
+  exit 64
+fi
 cloudflare_api_token="${CLOUDFLARE_API_TOKEN}"
+public_lab_ai_service_token="${PUBLIC_LAB_AI_SERVICE_TOKEN}"
 unset CLOUDFLARE_API_TOKEN
+unset PUBLIC_LAB_AI_SERVICE_TOKEN
 
 script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 project_root="$(cd "${script_dir}/.." && pwd)"
@@ -110,15 +117,16 @@ deployments_path="${private_root}/deployments.json"
 versions_path="${private_root}/versions.json"
 bookmark_path="${private_root}/d1-bookmark.json"
 cleanup_private_files() {
-  unset CLOUDFLARE_API_TOKEN
+  unset CLOUDFLARE_API_TOKEN PUBLIC_LAB_AI_SERVICE_TOKEN
   cloudflare_api_token=""
+  public_lab_ai_service_token=""
   rm -f "${identity_path}" "${database_path}" "${website_database_path}" "${secrets_path}" "${deployments_path}" "${versions_path}" "${bookmark_path}"
   rmdir "${private_root}" 2>/dev/null || true
 }
 trap cleanup_private_files EXIT
 
-# Read-only provider checks. Their values are redirected so no identity or
-# account details are expanded into shell arguments or release logs.
+# Read-only provider checks. The secret-list API returns names and types only;
+# every response is redirected so provider details stay out of release logs.
 run_wrangler whoami --json > "${identity_path}"
 run_wrangler d1 info "${expected_database_name}" --json --config "${config_path}" > "${database_path}"
 run_wrangler d1 info "${expected_website_database_name}" --json --config "${config_path}" > "${website_database_path}"
@@ -132,7 +140,8 @@ node "${script_dir}/check-production-cloudflare-target.mjs" \
   --secrets "${secrets_path}" \
   --deployments "${deployments_path}" \
   --versions "${versions_path}" \
-  --receipt "${release_root}/target-before.json"
+  --receipt "${release_root}/target-before.json" \
+  --allow-missing-public-lab-ai-service-token true
 
 ledger_query="SELECT id, name FROM d1_migrations ORDER BY id"
 freeze_query="SELECT COUNT(*) AS active_freezes FROM migration_control WHERE deactivated_at IS NULL"
@@ -146,6 +155,27 @@ migration_state="$(node "${script_dir}/check-production-migration-state.mjs" bef
   --freeze "${release_root}/migration-freeze-before.json" \
   --schema "${release_root}/schema-before.json" \
   --migrations-dir "${release_root}/drizzle")"
+
+# stdin keeps the protected value out of argv and logs. The first target check
+# captures the rollback point, and the migration check verifies the database
+# ledger, freeze and schema state before this provider mutation.
+printf '%s' "${public_lab_ai_service_token}" \
+  | run_wrangler secret put PUBLIC_LAB_AI_SERVICE_TOKEN --config "${config_path}"
+public_lab_ai_service_token=""
+
+# Cloudflare never returns the secret value. Verify only that the required name
+# is now bound before any production D1 mutation can run.
+run_wrangler secret list --format json --config "${config_path}" > "${secrets_path}"
+run_wrangler deployments list --json --config "${config_path}" > "${deployments_path}"
+run_wrangler versions list --json --config "${config_path}" > "${versions_path}"
+node "${script_dir}/check-production-cloudflare-target.mjs" \
+  --identity "${identity_path}" \
+  --database "${database_path}" \
+  --website-database "${website_database_path}" \
+  --secrets "${secrets_path}" \
+  --deployments "${deployments_path}" \
+  --versions "${versions_path}" \
+  --receipt "${release_root}/target-secret-configured.json"
 
 # Validate this exact immutable artifact before changing production schema.
 run_wrangler deploy --dry-run --strict --keep-vars --config "${config_path}"

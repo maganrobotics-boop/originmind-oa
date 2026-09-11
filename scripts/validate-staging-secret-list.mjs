@@ -1,4 +1,6 @@
-const requiredNames = ["FEISHU_LOGIN_APP_SECRET", "GITHUB_OAUTH_CLIENT_SECRET"];
+import { requiredStandaloneSecrets } from "../lib/standalone-config.mjs";
+
+const requiredNames = [...requiredStandaloneSecrets].sort();
 let input = "";
 for await (const chunk of process.stdin) input += chunk;
 const parsed = JSON.parse(input);

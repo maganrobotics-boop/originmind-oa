@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildStandaloneConfig, deploymentTarget, productionTarget } from "../lib/standalone-config.mjs";
+import {
+  buildStandaloneConfig,
+  deploymentTarget,
+  productionTarget,
+  validatePublicLabAiServiceToken,
+} from "../lib/standalone-config.mjs";
 
 const validEnvironment = {
   OA_STAGING_CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
@@ -52,8 +57,27 @@ test("standalone staging config is isolated and contains every runtime binding",
   assert.equal(config.vars.FEISHU_LOGIN_TENANT_KEY, validEnvironment.FEISHU_LOGIN_TENANT_KEY);
   assert.equal(config.vars.FEISHU_PDF_ARCHIVE_ENABLED, "true");
   assert.equal(config.preview_urls, false);
-  assert.deepEqual(config.secrets.required, ["GITHUB_OAUTH_CLIENT_SECRET", "FEISHU_LOGIN_APP_SECRET"]);
+  assert.deepEqual(config.secrets.required, [
+    "GITHUB_OAUTH_CLIENT_SECRET",
+    "FEISHU_LOGIN_APP_SECRET",
+    "PUBLIC_LAB_AI_SERVICE_TOKEN",
+  ]);
   assert.doesNotMatch(JSON.stringify(config.vars), /secret|token/iu);
+});
+
+test("public lab AI service token accepts only exactly 43 unpadded base64url characters", () => {
+  const token = "A".repeat(42) + "_";
+  assert.equal(validatePublicLabAiServiceToken(token), token);
+  for (const invalid of [
+    "A".repeat(42),
+    "A".repeat(44),
+    `${"A".repeat(42)}=`,
+    `${"A".repeat(42)}+`,
+    `${"A".repeat(42)}/`,
+    `${"A".repeat(42)} `,
+  ]) {
+    assert.throws(() => validatePublicLabAiServiceToken(invalid), /exactly 43 unpadded base64url/u);
+  }
 });
 
 test("standalone staging config rejects placeholders and non-isolated targets", () => {
@@ -106,6 +130,7 @@ test("standalone production config comes only from injected identifiers and pres
   assert.equal(config.route, undefined);
   assert.equal(config.routes, undefined);
   assert.deepEqual(config.triggers.crons, [expected.cron]);
+  assert.ok(config.secrets.required.includes("PUBLIC_LAB_AI_SERVICE_TOKEN"));
   assert.doesNotMatch(JSON.stringify(config.vars), /secret|token/iu);
 
   assert.throws(() => buildStandaloneConfig("production", {

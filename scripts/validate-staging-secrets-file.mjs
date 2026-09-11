@@ -2,8 +2,10 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { requiredStandaloneSecrets, validatePublicLabAiServiceToken } from "../lib/standalone-config.mjs";
+
 const projectRoot = await realpath(resolve(fileURLToPath(new URL("..", import.meta.url))));
-const requiredNames = ["FEISHU_LOGIN_APP_SECRET", "GITHUB_OAUTH_CLIENT_SECRET"];
+const requiredNames = [...requiredStandaloneSecrets].sort();
 const inputPath = process.argv[2];
 if (!inputPath) throw new Error("OA_STAGING_SECRETS_FILE must name a private JSON file outside the Git worktree");
 
@@ -23,9 +25,13 @@ if (!parsed || typeof parsed !== "object" || Array.isArray(parsed) || Object.get
   throw new Error("Staging secrets input must be a JSON object");
 }
 const names = Object.keys(parsed).sort();
-if (JSON.stringify(names) !== JSON.stringify(requiredNames)) throw new Error("Staging secrets input must contain exactly the required OAuth secret names");
+if (JSON.stringify(names) !== JSON.stringify(requiredNames)) throw new Error("Staging secrets input must contain exactly the required Worker secret names");
 for (const name of requiredNames) {
   const value = parsed[name];
+  if (name === "PUBLIC_LAB_AI_SERVICE_TOKEN") {
+    validatePublicLabAiServiceToken(value);
+    continue;
+  }
   if (typeof value !== "string" || value.trim().length < 16 || value.length > 4_096 || /[\u0000-\u001f\u007f]/u.test(value)) {
     throw new Error(`Staging secret ${name} has an invalid value`);
   }

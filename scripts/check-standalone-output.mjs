@@ -89,6 +89,7 @@ await access(resolve(dirname(outputPath), config.assets.directory));
 if (target === "production") {
   await access(resolve(dirname(outputPath), database.migrations_dir, "0026_rich_jocasta.sql"));
   await access(resolve(dirname(outputPath), database.migrations_dir, "0027_careless_winter_soldier.sql"));
+  await access(resolve(dirname(outputPath), database.migrations_dir, "0028_needy_microchip.sql"));
 }
 
 process.stdout.write(`Verified ${target} standalone Worker output.\n`);
