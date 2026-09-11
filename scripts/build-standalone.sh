@@ -2,8 +2,8 @@
 set -euo pipefail
 
 target="${1:-}"
-if [[ "${target}" != "staging" ]]; then
-  echo "Only the isolated staging target may be built." >&2
+if [[ "${target}" != "staging" && "${target}" != "production" ]]; then
+  echo "Only the staging or production standalone target may be built." >&2
   exit 64
 fi
 

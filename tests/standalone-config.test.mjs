@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildStandaloneConfig, deploymentTarget } from "../lib/standalone-config.mjs";
+import { buildStandaloneConfig, deploymentTarget, productionTarget } from "../lib/standalone-config.mjs";
 
 const validEnvironment = {
   OA_STAGING_CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
@@ -14,6 +14,17 @@ const validEnvironment = {
   FEISHU_LOGIN_TENANT_KEY: "tenant_example_key",
   OA_ADMIN_EMAILS: "admin@example.com",
   OA_ADMIN_NAMES: "OA Admin",
+};
+
+const validProductionEnvironment = {
+  OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID: "fedcba9876543210fedcba9876543210",
+  OA_PRODUCTION_WORKER_NAME: "legacy-worker-name",
+  OA_PRODUCTION_D1_DATABASE_NAME: "originmind-oa-production",
+  OA_PRODUCTION_D1_DATABASE_ID: "7d9e6679-7425-40de-944b-e07fc1f90ae7",
+  OA_PRODUCTION_WEBSITE_D1_DATABASE_NAME: "website-visits",
+  OA_PRODUCTION_WEBSITE_D1_DATABASE_ID: "1b4e28ba-2fa1-41d2-883f-41d12ac61b91",
+  OA_PRODUCTION_PUBLIC_ORIGIN: "https://oa.example.com",
+  OA_PRODUCTION_CRON: "* * * * *",
 };
 
 test("standalone staging config is isolated and contains every runtime binding", () => {
@@ -45,7 +56,7 @@ test("standalone staging config is isolated and contains every runtime binding",
   assert.doesNotMatch(JSON.stringify(config.vars), /secret|token/iu);
 });
 
-test("standalone staging config rejects placeholders, missing admin tuples, and production targets", () => {
+test("standalone staging config rejects placeholders and non-isolated targets", () => {
   assert.throws(() => buildStandaloneConfig("staging", {
     ...validEnvironment,
     OA_STAGING_D1_DATABASE_ID: "00000000-0000-4000-8000-000000000000",
@@ -54,7 +65,6 @@ test("standalone staging config rejects placeholders, missing admin tuples, and 
     ...validEnvironment,
     OA_ADMIN_NAMES: "",
   }), /configured together/u);
-  assert.throws(() => buildStandaloneConfig("production", validEnvironment), /Only the isolated staging/u);
   assert.throws(() => buildStandaloneConfig("staging", {
     ...validEnvironment,
     OA_STAGING_WORKER_NAME: "originmind-oa-production",
@@ -65,12 +75,8 @@ test("standalone staging config rejects placeholders, missing admin tuples, and 
   }), /ending in -staging/u);
   assert.throws(() => buildStandaloneConfig("staging", {
     ...validEnvironment,
-    OA_STAGING_PUBLIC_ORIGIN: "https://oa.omindos.ai",
-  }), /isolated HTTPS/u);
-  assert.throws(() => buildStandaloneConfig("staging", {
-    ...validEnvironment,
-    OA_STAGING_PUBLIC_ORIGIN: "https://oa.originmindos.com",
-  }), /isolated HTTPS/u);
+    OA_STAGING_PUBLIC_ORIGIN: "https://oa.example.com",
+  }), /workers\.dev/u);
   assert.throws(() => buildStandaloneConfig("staging", {
     ...validEnvironment,
     OA_STAGING_PUBLIC_ORIGIN: "https://oa-staging.originmindos.com",
@@ -78,9 +84,40 @@ test("standalone staging config rejects placeholders, missing admin tuples, and 
   assert.throws(() => buildStandaloneConfig("staging", {
     ...validEnvironment,
     OA_STAGING_PUBLIC_ORIGIN: "https://another-worker.example.workers.dev",
-  }), /workers\.dev origin/u);
+  }), /must belong/u);
   assert.throws(() => buildStandaloneConfig("staging", {
     ...validEnvironment,
     OA_STAGING_PUBLIC_ORIGIN: "https://originmind-oa-staging.example.workers.dev:8443",
   }), /workers\.dev origin/u);
+});
+
+test("standalone production config comes only from injected identifiers and preserves provider state", () => {
+  const expected = productionTarget(validProductionEnvironment);
+  const config = buildStandaloneConfig("production", validProductionEnvironment);
+  assert.equal(config.account_id, expected.accountId);
+  assert.equal(config.name, expected.workerName);
+  assert.equal(config.d1_databases[0].database_name, expected.databaseName);
+  assert.equal(config.d1_databases[0].database_id, expected.databaseId);
+  assert.equal(config.d1_databases[1].database_name, expected.websiteDatabaseName);
+  assert.equal(config.d1_databases[1].database_id, expected.websiteDatabaseId);
+  assert.equal(config.vars.OA_PUBLIC_ORIGIN, expected.publicOrigin);
+  assert.equal(config.keep_vars, true);
+  assert.equal(config.workers_dev, false);
+  assert.equal(config.route, undefined);
+  assert.equal(config.routes, undefined);
+  assert.deepEqual(config.triggers.crons, [expected.cron]);
+  assert.doesNotMatch(JSON.stringify(config.vars), /secret|token/iu);
+
+  assert.throws(() => buildStandaloneConfig("production", {
+    ...validProductionEnvironment,
+    OA_PRODUCTION_D1_DATABASE_ID: validProductionEnvironment.OA_PRODUCTION_WEBSITE_D1_DATABASE_ID,
+  }), /must be distinct/u);
+  assert.throws(() => buildStandaloneConfig("production", {
+    ...validProductionEnvironment,
+    OA_PRODUCTION_PUBLIC_ORIGIN: "https://worker.example.workers.dev",
+  }), /custom-domain/u);
+  assert.throws(() => buildStandaloneConfig("production", {
+    ...validProductionEnvironment,
+    OA_PRODUCTION_CRON: "not a cron",
+  }), /five-field/u);
 });
