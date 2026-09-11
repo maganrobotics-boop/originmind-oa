@@ -25,6 +25,7 @@ interface Env {
   FEISHU_LOGIN_TENANT_KEY?: string;
   FEISHU_NOTIFICATIONS_ENABLED?: string;
   OA_ADMIN_EMAILS?: string;
+  PUBLIC_LAB_AI_SERVICE_TOKEN: string;
 }
 
 interface ExecutionContext {
@@ -86,8 +87,9 @@ const worker = {
     const legacyRedirect = legacyOaRedirect(request, env.OA_LEGACY_REDIRECT_ENABLED);
     if (legacyRedirect) return legacyRedirect;
     const url = new URL(request.url);
+    const isPublicLabAiRetrieve = request.method === "POST" && url.pathname === "/api/public/lab-ai/retrieve";
 
-    if (isMigrationWriteFrozen(env as unknown as Record<string, unknown>)) {
+    if (!isPublicLabAiRetrieve && isMigrationWriteFrozen(env as unknown as Record<string, unknown>)) {
       try {
         await ensureMigrationWriteFreezeMarker(env.DB, env as unknown as Record<string, unknown>);
       } catch {
@@ -97,7 +99,7 @@ const worker = {
       }
     }
 
-    if (shouldBlockForMigrationFreeze(request, env as unknown as Record<string, unknown>)) {
+    if (!isPublicLabAiRetrieve && shouldBlockForMigrationFreeze(request, env as unknown as Record<string, unknown>)) {
       return withSecurityHeaders(request, Response.json(
         { error: "OA 正在生成迁移快照，暂时停止写入；请勿重复提交，稍后刷新。" },
         { status: 503, headers: { "retry-after": "300" } },
