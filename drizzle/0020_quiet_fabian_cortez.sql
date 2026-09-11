@@ -1,0 +1,1 @@
+ALTER TABLE `members` ADD `department_code` text DEFAULT '' NOT NULL;
