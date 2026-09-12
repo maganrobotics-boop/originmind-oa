@@ -241,6 +241,45 @@ test("client-supplied assistant turns never enter the model prompt", async () =>
   assert.equal(calls[0].input.messages.some((turn) => turn.role === "assistant"), false);
 });
 
+test("OA Service Binding failure fails closed without retrying the public network", async () => {
+  let serviceCalls = 0;
+  let globalFetchCalls = 0;
+  let aiCalls = 0;
+  const env = environment({
+    OA_SERVICE: {
+      async fetch() {
+        serviceCalls += 1;
+        throw new Error("bound OA unavailable");
+      },
+    },
+    AI: {
+      async run() {
+        aiCalls += 1;
+        return { response: "不应调用" };
+      },
+    },
+  });
+  const response = await handleRequest(
+    request("/api/chat", { method: "POST", body: chatBody("机器人研究方向") }),
+    env,
+    {},
+    {
+      async fetch() {
+        globalFetchCalls += 1;
+        return Response.json({ chunks: OA_CHUNKS });
+      },
+    },
+  );
+  const result = await body(response);
+  assert.equal(response.status, 200);
+  assert.equal(result.mode, "retrieval");
+  assert.equal(result.oaPublicStatus, "unavailable");
+  assert.deepEqual(result.sources, []);
+  assert.equal(serviceCalls, 1);
+  assert.equal(globalFetchCalls, 0);
+  assert.equal(aiCalls, 0);
+});
+
 test("OA outage fails closed without local knowledge or model invocation", async () => {
   const aiCalls = [];
   const fetchCalls = [];
