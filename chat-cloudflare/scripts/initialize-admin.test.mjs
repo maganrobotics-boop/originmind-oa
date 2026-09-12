@@ -83,9 +83,18 @@ function repairEnvironment(overrides = {}) {
   });
 }
 
+function prepareEnvironment(overrides = {}) {
+  return repairEnvironment({
+    CHAT_ADMIN_OPERATION: "prepare-cloudflare-pbkdf2",
+    CHAT_ADMIN_PASSWORD: undefined,
+    ...overrides,
+  });
+}
+
 test("environment validation requires the exact repository, main ref, confirmation, and independent secrets", () => {
   assert.equal(validateAdminInitializationEnvironment(validEnvironment()).accountId, accountId);
   assert.equal(validateAdminInitializationEnvironment(repairEnvironment()).operation, "repair-cloudflare-pbkdf2");
+  assert.equal(validateAdminInitializationEnvironment(prepareEnvironment()).adminPassword, null);
   assert.throws(
     () => validateAdminInitializationEnvironment(validEnvironment({ CHAT_ADMIN_PASSWORD: "too-short" })),
     (error) => error instanceof AdminInitializationError && error.code === "invalid-chat-admin-password",
@@ -198,6 +207,40 @@ test("an existing administrator is preserved without deriving or applying the su
   assert.equal(result.secretApplied, false);
   assert.equal(randomCalled, false);
   assert.equal(hashCalled, false);
+});
+
+test("repair preparation records a bookmark without requiring a password or mutating D1", async () => {
+  const calls = [];
+  let checkpoint;
+  let derived = false;
+  const replies = [
+    jsonResponse(listPayload()),
+    jsonResponse(queryPayload([legacyAccountRow()])),
+    jsonResponse(bookmarkPayload()),
+  ];
+  const result = await initializeChatAdmin({
+    environment: prepareEnvironment(),
+    fetchImpl: async (url, options) => {
+      calls.push({ url, options });
+      return replies.shift();
+    },
+    pbkdf2Impl: () => {
+      derived = true;
+      return Buffer.alloc(32);
+    },
+    onRepairCheckpoint: async (value) => {
+      checkpoint = value;
+    },
+  });
+  assert.equal(result.outcome, "repair-prepared-no-change");
+  assert.equal(result.secretApplied, false);
+  assert.equal(result.bookmarkBefore, bookmark);
+  assert.equal(checkpoint.operation, "prepare-cloudflare-pbkdf2");
+  assert.equal(calls.length, 3);
+  assert.equal(derived, false);
+  assert.equal(calls.some((call) => call.options.method === "POST"), true);
+  assert.equal(calls.filter((call) => call.options.method === "POST").length, 1);
+  assert.match(JSON.parse(calls[1].options.body).sql, /^SELECT /u);
 });
 
 test("the explicit repair operation replaces only the known incompatible 210k record and clears sessions", async () => {
@@ -363,6 +406,10 @@ test("the repair-generated record is accepted by the Worker password verifier", 
   };
   assert.equal(await verifyPassword(adminPassword, record), true);
   assert.equal(await verifyPassword("different-password-value", record), false);
+  await assert.rejects(
+    verifyPassword(adminPassword, { ...record, iterations: PASSWORD_ITERATIONS + 1 }),
+    /PASSWORD_RECORD_UNSUPPORTED/u,
+  );
 });
 
 test("repair CAS conflicts do not clear sessions", async () => {
@@ -441,6 +488,10 @@ test("the initialization entrypoint and workflow have no deployment, migration, 
   assert.match(workflow, /permissions:\s*\n\s+contents: read/u);
   assert.match(repairWorkflow, /repair-cloudflare-pbkdf2/u);
   assert.match(repairWorkflow, /permissions:\s*\n\s+contents: read/u);
-  assert.match(repairWorkflow, /smoke-cloudflare\.mjs https:\/\/chat\.omindos\.ai --admin-auth-only/u);
+  assert.match(repairWorkflow, /smoke-cloudflare\.mjs https:\/\/chat\.omindos\.ai --admin-saved-secret/u);
   assert.match(repairWorkflow, /admin-initialization\/\*\.json/u);
+  assert.ok(
+    repairWorkflow.indexOf("Externalize the D1 recovery bookmark before mutation") <
+      repairWorkflow.indexOf("Repair only the incompatible production administrator password record"),
+  );
 });
