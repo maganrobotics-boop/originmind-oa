@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   frontendAssetPaths,
   isTransientSmokeStatus,
+  smokeAdminAuthentication,
+  smokeCloudflare,
   validateReleaseEvidence,
 } from "./smoke-cloudflare.mjs";
 
@@ -19,6 +21,7 @@ const evidence = {
     releaseId,
     sources: [{ id: "oa:1", origin: "oa_public" }],
   },
+  adminAuth: { status: 401, error: "密码不正确" },
 };
 
 test("release evidence accepts only the exact OA-backed Chat release", () => {
@@ -30,6 +33,7 @@ test("release evidence accepts only the exact OA-backed Chat release", () => {
     provider: "workers-ai",
     model: "test-model",
     sources: 1,
+    adminLoginReady: true,
   });
 });
 
@@ -59,12 +63,68 @@ test("release evidence rejects unavailable OA and retrieval-only fallback", () =
   );
 });
 
+test("release evidence requires a completed administrator password check", () => {
+  for (const adminAuth of [undefined, { status: 503, error: "服务暂时不可用，请稍后重试。" }]) {
+    assert.throws(
+      () => validateReleaseEvidence({ ...evidence, adminAuth }, releaseId),
+      /compatible administrator password check/u,
+    );
+  }
+});
+
 
 test("edge propagation responses are retried without retrying authorization failures", () => {
   for (const status of [undefined, 404, 408, 421, 425, 429, 500, 502, 503, 504]) {
     assert.equal(isTransientSmokeStatus(status), true);
   }
   for (const status of [400, 401, 403, 405]) assert.equal(isTransientSmokeStatus(status), false);
+});
+
+test("administrator authentication runs once after retryable release checks settle", async () => {
+  let smokeCalls = 0;
+  let authCalls = 0;
+  const sleeps = [];
+  const serviceEvidence = {
+    app: "arts-robotics-ai-assistant",
+    ready: true,
+    releaseId,
+    oaPublicStatus: "connected",
+    provider: "workers-ai",
+    model: "test-model",
+    sources: 1,
+  };
+  const result = await smokeCloudflare("https://chat.example.com", {
+    attempts: 3,
+    releaseId,
+    smokeAttempt: async () => {
+      smokeCalls += 1;
+      if (smokeCalls < 3) throw Object.assign(new Error("edge pending"), { status: 503 });
+      return serviceEvidence;
+    },
+    verifyAdmin: async () => {
+      authCalls += 1;
+    },
+    sleepImpl: async (milliseconds) => {
+      sleeps.push(milliseconds);
+    },
+  });
+  assert.equal(smokeCalls, 3);
+  assert.equal(authCalls, 1);
+  assert.deepEqual(sleeps, [1_500, 3_000]);
+  assert.deepEqual(result, { ...serviceEvidence, adminLoginReady: true });
+});
+
+test("the administrator-only production smoke validates the exact origin once", async () => {
+  const origins = [];
+  const result = await smokeAdminAuthentication("https://chat.omindos.ai", {
+    verifyAdmin: async (origin) => origins.push(origin),
+  });
+  assert.deepEqual(origins, ["https://chat.omindos.ai"]);
+  assert.deepEqual(result, { adminLoginReady: true });
+  await assert.rejects(
+    smokeAdminAuthentication("http://chat.omindos.ai", { verifyAdmin: async () => {} }),
+    /exact HTTPS origin/u,
+  );
 });
 
 test("frontend smoke accepts one deterministic content-hashed script and stylesheet", () => {
