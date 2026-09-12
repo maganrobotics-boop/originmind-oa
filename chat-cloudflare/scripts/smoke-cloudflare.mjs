@@ -282,47 +282,68 @@ async function runAdminProbe(origin, verifyAdmin, { attempts = 2, sleepImpl = sl
   throw lastError || new Error("Administrator smoke check failed");
 }
 
-async function verifySavedAdminPasswordRuntime(origin, password) {
+async function revokeSmokeSession(origin, token, { attempts = 3, sleepImpl = sleep } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await request(origin, "/api/auth/logout", {
+        method: "POST",
+        headers: { Origin: origin, Cookie: `__Host-ma-session=${token}` },
+      });
+      if (response.status !== 200 && isTransientSmokeStatus(response.status)) {
+        throw Object.assign(new Error("Administrator logout returned a transient response"), {
+          status: response.status,
+          retryable: true,
+        });
+      }
+      apiHeaders(response, "/api/auth/logout");
+      const payload = await json(response, "/api/auth/logout");
+      if (response.status !== 200 || payload?.saved !== true) {
+        throw Object.assign(new Error("Administrator smoke session was not revoked"), {
+          status: response.status,
+          retryable: false,
+        });
+      }
+      return;
+    } catch (error) {
+      lastError = error;
+      const transient = error?.retryable === true || isTransientSmokeStatus(error?.status);
+      if (!transient || attempt === attempts) break;
+      await sleepImpl(attempt * 1_500);
+    }
+  }
+  throw lastError || new Error("Administrator smoke session was not revoked");
+}
+
+async function verifySavedAdminPasswordRuntime(origin, password, { logoutAttempts = 3, sleepImpl = sleep } = {}) {
   const loginResponse = await request(origin, "/api/auth/login", {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: origin },
     body: JSON.stringify({ password }),
   });
-  if (loginResponse.status !== 200 && isTransientSmokeStatus(loginResponse.status)) {
-    throw Object.assign(new Error("Administrator login returned a transient response"), {
-      status: loginResponse.status,
-      retryable: true,
-    });
-  }
-  apiHeaders(loginResponse, "/api/auth/login");
-  const login = await json(loginResponse, "/api/auth/login");
-  if (loginResponse.status !== 200 || login?.signedIn !== true) {
-    throw Object.assign(new Error("The saved administrator password was not accepted"), {
-      status: loginResponse.status,
-      retryable: false,
-    });
-  }
   const cookie = loginResponse.headers.get("set-cookie") || "";
-  const match = /^__Host-ma-session=([a-f0-9]{64}); Path=\/; Secure; HttpOnly; SameSite=Strict; Max-Age=[1-9][0-9]*$/u.exec(cookie);
-  if (!match) throw new Error("Administrator login did not return the expected session cookie");
-
-  const logoutResponse = await request(origin, "/api/auth/logout", {
-    method: "POST",
-    headers: { Origin: origin, Cookie: `__Host-ma-session=${match[1]}` },
-  });
-  if (logoutResponse.status !== 200 && isTransientSmokeStatus(logoutResponse.status)) {
-    throw Object.assign(new Error("Administrator logout returned a transient response"), {
-      status: logoutResponse.status,
-      retryable: true,
-    });
-  }
-  apiHeaders(logoutResponse, "/api/auth/logout");
-  const logout = await json(logoutResponse, "/api/auth/logout");
-  if (logoutResponse.status !== 200 || logout?.saved !== true) {
-    throw Object.assign(new Error("Administrator smoke session was not revoked"), {
-      status: logoutResponse.status,
-      retryable: false,
-    });
+  const tokenMatch = /^__Host-ma-session=([a-f0-9]{64})(?:;|$)/u.exec(cookie);
+  const validCookie = /^__Host-ma-session=[a-f0-9]{64}; Path=\/; Secure; HttpOnly; SameSite=Strict; Max-Age=[1-9][0-9]*$/u.test(cookie);
+  try {
+    if (loginResponse.status !== 200 && isTransientSmokeStatus(loginResponse.status)) {
+      throw Object.assign(new Error("Administrator login returned a transient response"), {
+        status: loginResponse.status,
+        retryable: false,
+      });
+    }
+    apiHeaders(loginResponse, "/api/auth/login");
+    const login = await json(loginResponse, "/api/auth/login");
+    if (loginResponse.status !== 200 || login?.signedIn !== true) {
+      throw Object.assign(new Error("The saved administrator password was not accepted"), {
+        status: loginResponse.status,
+        retryable: false,
+      });
+    }
+    if (!validCookie) throw new Error("Administrator login did not return the expected session cookie");
+  } finally {
+    if (tokenMatch) {
+      await revokeSmokeSession(origin, tokenMatch[1], { attempts: logoutAttempts, sleepImpl });
+    }
   }
 }
 
@@ -339,7 +360,7 @@ export async function smokeAdminAuthentication(originValue, {
 export async function smokeSavedAdminAuthentication(originValue, {
   environment = process.env,
   verifyAdmin = verifySavedAdminPasswordRuntime,
-  attempts = 2,
+  logoutAttempts = 3,
   sleepImpl = sleep,
 } = {}) {
   const origin = exactOrigin(originValue);
@@ -348,7 +369,7 @@ export async function smokeSavedAdminAuthentication(originValue, {
   if (typeof password !== "string" || password.length < 12 || password.length > 256) {
     throw new Error("A valid saved administrator password is required");
   }
-  await runAdminProbe(origin, (value) => verifyAdmin(value, password), { attempts, sleepImpl });
+  await verifyAdmin(origin, password, { logoutAttempts, sleepImpl });
   return { adminPasswordVerified: true, smokeSessionRevoked: true };
 }
 
