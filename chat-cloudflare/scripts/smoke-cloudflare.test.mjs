@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { validateReleaseEvidence } from "./smoke-cloudflare.mjs";
+import { isTransientSmokeStatus, validateReleaseEvidence } from "./smoke-cloudflare.mjs";
 
 const releaseId = `${"a".repeat(40)}-1`;
 const evidence = {
@@ -53,4 +53,12 @@ test("release evidence rejects unavailable OA and retrieval-only fallback", () =
     }, releaseId),
     /OA-backed AI answer/u,
   );
+});
+
+
+test("edge propagation responses are retried without retrying authorization failures", () => {
+  for (const status of [undefined, 404, 408, 421, 425, 429, 500, 502, 503, 504]) {
+    assert.equal(isTransientSmokeStatus(status), true);
+  }
+  for (const status of [400, 401, 403, 405]) assert.equal(isTransientSmokeStatus(status), false);
 });
