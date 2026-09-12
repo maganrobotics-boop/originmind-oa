@@ -44,6 +44,24 @@ test("keeps registration and sidebar branding text-only", async () => {
   );
 });
 
+test("shows the system administrator role consistently across account and collaboration views", async () => {
+  const [pageSource, peopleRouteSource, directMessagesSource] = await Promise.all([
+    readFile(path.join(root, "app/page.tsx"), "utf8"),
+    readFile(path.join(root, "app/api/people/route.ts"), "utf8"),
+    readFile(path.join(root, "app/api/direct-messages/route.ts"), "utf8"),
+  ]);
+
+  assert.match(pageSource, /if \(isAdmin\) return "系统管理员"/u);
+  assert.match(pageSource, /className="sidebar-user-role">\{sessionRoleLabel\(currentRole, isAdmin\)\}/u);
+  assert.match(pageSource, /<span>系统角色<\/span><strong>\{sessionRoleLabel\(currentRole, isAdmin\)\}<\/strong>/u);
+  assert.match(pageSource, /if \(person\.isAdmin\) return "系统管理员"/u);
+  assert.match(pageSource, /isAdmin: summary\.peer\.isAdmin === true/u);
+  assert.match(peopleRouteSource, /isAdmin: owners\.get\(email\)\?\.isAdmin === true/u);
+  assert.match(peopleRouteSource, /isAdmin: owner\.isAdmin/u);
+  assert.match(directMessagesSource, /isAdmin: eligibleReviewers\.get\(peerEmail\)\?\.isAdmin === true/u);
+  assert.match(directMessagesSource, /isAdmin: owner\.isAdmin/u);
+});
+
 test("keeps the internal laboratory AI discoverable only inside the admitted OA dashboard", async () => {
   const pageSource = await readFile(path.join(root, "app/page.tsx"), "utf8");
 
