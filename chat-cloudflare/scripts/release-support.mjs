@@ -48,7 +48,7 @@ export function validateReleaseEnvironment(environment = process.env) {
   const adminEmail = requiredText(environment, "CHAT_ADMIN_EMAIL", 3, 254).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(adminEmail)) throw new Error("CHAT_ADMIN_EMAIL is invalid");
   const apiToken = requiredText(environment, "CLOUDFLARE_API_TOKEN", 20, 2_048);
-  const publicToken = requiredText(environment, "PUBLIC_LAB_AI_SERVICE_TOKEN", 43, 43);
+  const publicToken = requiredText(environment, "PUBLIC_LAB_AI_SERVICE_TOKEN").trim();
   if (!/^[A-Za-z0-9_-]{43}$/u.test(publicToken)) throw new Error("PUBLIC_LAB_AI_SERVICE_TOKEN is invalid");
   const encryptionKey = (environment.CHAT_APP_ENCRYPTION_KEY || "").trim();
   const rateLimitKey = (environment.CHAT_RATE_LIMIT_HMAC_KEY || "").trim();

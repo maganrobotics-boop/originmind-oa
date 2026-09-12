@@ -372,6 +372,50 @@ test("workflow and shell expose the token only to a confirmed manual main releas
   assert.ok(!`${invalidTokenRun.stdout}${invalidTokenRun.stderr}`.includes(invalidServiceToken));
   assert.doesNotMatch(invalidTokenRun.stderr, /command not found/u);
 
+  const clipboardToken = ` \n${"A".repeat(43)}\r\n`;
+  const clipboardTokenRun = spawnSync("/bin/bash", [join(projectRoot, "scripts", "release-production.sh"), "production"], {
+    encoding: "utf8",
+    env: {
+      PATH: "/nonexistent",
+      ...validProductionEnvironment,
+      CLOUDFLARE_ACCOUNT_ID: validProductionEnvironment.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID,
+      CLOUDFLARE_API_TOKEN: "test-token",
+      PUBLIC_LAB_AI_SERVICE_TOKEN: clipboardToken,
+      OA_PRODUCTION_RELEASE_CONFIRM: `${validProductionEnvironment.OA_PRODUCTION_WORKER_NAME}:${validProductionEnvironment.OA_PRODUCTION_D1_DATABASE_ID}:${new URL(validProductionEnvironment.OA_PRODUCTION_PUBLIC_ORIGIN).hostname}`,
+      GITHUB_ACTIONS: "true",
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_REF: "refs/heads/main",
+      GITHUB_SHA: "a".repeat(40),
+      GITHUB_RUN_ID: "12345",
+      GITHUB_RUN_ATTEMPT: "1",
+    },
+  });
+  assert.notEqual(clipboardTokenRun.status, 64);
+  assert.doesNotMatch(clipboardTokenRun.stderr, /PUBLIC_LAB_AI_SERVICE_TOKEN must/u);
+  assert.ok(!`${clipboardTokenRun.stdout}${clipboardTokenRun.stderr}`.includes("A".repeat(43)));
+
+  const internalWhitespaceToken = `${"A".repeat(21)}\n${"A".repeat(22)}`;
+  const internalWhitespaceRun = spawnSync("/bin/bash", [join(projectRoot, "scripts", "release-production.sh"), "production"], {
+    encoding: "utf8",
+    env: {
+      PATH: "/nonexistent",
+      ...validProductionEnvironment,
+      CLOUDFLARE_ACCOUNT_ID: validProductionEnvironment.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID,
+      CLOUDFLARE_API_TOKEN: "test-token",
+      PUBLIC_LAB_AI_SERVICE_TOKEN: internalWhitespaceToken,
+      OA_PRODUCTION_RELEASE_CONFIRM: `${validProductionEnvironment.OA_PRODUCTION_WORKER_NAME}:${validProductionEnvironment.OA_PRODUCTION_D1_DATABASE_ID}:${new URL(validProductionEnvironment.OA_PRODUCTION_PUBLIC_ORIGIN).hostname}`,
+      GITHUB_ACTIONS: "true",
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_REF: "refs/heads/main",
+      GITHUB_SHA: "a".repeat(40),
+      GITHUB_RUN_ID: "12345",
+      GITHUB_RUN_ATTEMPT: "1",
+    },
+  });
+  assert.equal(internalWhitespaceRun.status, 64);
+  assert.match(internalWhitespaceRun.stderr, /exactly 43 unpadded base64url/u);
+  assert.ok(!`${internalWhitespaceRun.stdout}${internalWhitespaceRun.stderr}`.includes(internalWhitespaceToken));
+
   assert.match(releaseScript, /run_wrangler deploy --dry-run --strict --keep-vars --config/u);
   assert.match(releaseScript, /run_wrangler deploy --strict --keep-vars --config/u);
   assert.match(releaseScript, /\^\[A-Za-z0-9_-\]\{43\}\$/u);

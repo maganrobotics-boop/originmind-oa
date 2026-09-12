@@ -60,12 +60,16 @@ if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN is required from GitHub Actions Secrets." >&2
   exit 64
 fi
-if [[ ! "${PUBLIC_LAB_AI_SERVICE_TOKEN:-}" =~ ^[A-Za-z0-9_-]{43}$ ]]; then
+public_lab_ai_service_token="${PUBLIC_LAB_AI_SERVICE_TOKEN:-}"
+# Secret managers and mobile clipboards can append surrounding whitespace.
+# Normalize only the edges; whitespace inside the token still fails closed.
+public_lab_ai_service_token="${public_lab_ai_service_token#"${public_lab_ai_service_token%%[![:space:]]*}"}"
+public_lab_ai_service_token="${public_lab_ai_service_token%"${public_lab_ai_service_token##*[![:space:]]}"}"
+if [[ ! "${public_lab_ai_service_token}" =~ ^[A-Za-z0-9_-]{43}$ ]]; then
   echo "PUBLIC_LAB_AI_SERVICE_TOKEN must be exactly 43 unpadded base64url characters." >&2
   exit 64
 fi
 cloudflare_api_token="${CLOUDFLARE_API_TOKEN}"
-public_lab_ai_service_token="${PUBLIC_LAB_AI_SERVICE_TOKEN}"
 unset CLOUDFLARE_API_TOKEN
 unset PUBLIC_LAB_AI_SERVICE_TOKEN
 
