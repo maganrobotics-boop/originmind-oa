@@ -56,6 +56,8 @@ test("shows the system administrator role consistently across account and collab
   assert.match(pageSource, /<span>系统角色<\/span><strong>\{sessionRoleLabel\(currentRole, isAdmin\)\}<\/strong>/u);
   assert.match(pageSource, /if \(person\.isAdmin\) return "系统管理员"/u);
   assert.match(pageSource, /isAdmin: summary\.peer\.isAdmin === true/u);
+  assert.match(pageSource, /currentRoleLabel=\{sessionRoleLabel\(currentRole, isAdmin\)\}/u);
+  assert.match(pageSource, /<ChatHub currentUser=\{session\.user\} currentRole=\{session\.role\} isAdmin=\{session\.isAdmin\}/u);
   assert.match(peopleRouteSource, /isAdmin: owners\.get\(email\)\?\.isAdmin === true/u);
   assert.match(peopleRouteSource, /isAdmin: owner\.isAdmin/u);
   assert.match(directMessagesSource, /isAdmin: eligibleReviewers\.get\(peerEmail\)\?\.isAdmin === true/u);
