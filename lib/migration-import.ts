@@ -176,7 +176,8 @@ export async function assertMigrationPayloadRelationships(
     const member = memberById.get(memberId);
     return administratorEmails.has(normalizedEmail)
       && typeof member?.chatgpt_account === "string"
-      && member.chatgpt_account.trim().toLowerCase() === normalizedEmail;
+      && member.chatgpt_account.trim().toLowerCase() === normalizedEmail
+      && member.account_user_id === `email:${normalizedEmail}`;
   };
   uniqueIds(approvalEvents, "id", "approval_events");
   uniqueIds(approvalRevisions, "revision_hash", "approval_revisions");
