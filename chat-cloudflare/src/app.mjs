@@ -254,7 +254,7 @@ async function modelCall(context, config, messages, maxTokens = 1_400) {
       enable_thinking: false,
       stream: false,
     }),
-    redirect: "error",
+    redirect: "manual",
     cache: "no-store",
     credentials: "omit",
     signal: AbortSignal.timeout(40_000),
