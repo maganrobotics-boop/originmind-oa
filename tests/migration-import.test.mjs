@@ -491,6 +491,18 @@ test("knowledge migration validates immutable revisions, historical superseded v
     knowledge_events: [submittedEvent, internalApprovalEvent, selfManagedPublic],
   })), /self-managed visibility/u);
 
+  const adminSelfManagedPublic = row("knowledge_events", {
+    ...record("knowledge_events", selfManagedPublic),
+    note: knowledgePolicy.knowledgeAdminSelfAuditNote(""),
+  });
+  assert.equal(await migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [reclassifiedPublicItem],
+    knowledge_revisions: [revision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, internalApprovalEvent, adminSelfManagedPublic],
+  })), true);
+
   await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
     members: [member, reviewer],
     knowledge_items: [reclassifiedInternalItem],
@@ -626,6 +638,31 @@ test("knowledge migration validates immutable revisions, historical superseded v
   });
   await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
     members: [member, reviewer], knowledge_items: [item], knowledge_revisions: [selfReviewedRevision], knowledge_chunks: [chunk], knowledge_events: [submittedEvent, selfReviewEvent],
+  })), /self-reviewed/u);
+
+  const adminSelfReviewNote = knowledgePolicy.knowledgeAdminSelfAuditNote("通过");
+  const adminSelfReviewedRevision = row("knowledge_revisions", {
+    ...record("knowledge_revisions", selfReviewedRevision),
+    review_note: adminSelfReviewNote,
+  });
+  const adminSelfReviewEvent = row("knowledge_events", {
+    ...record("knowledge_events", selfReviewEvent),
+    note: adminSelfReviewNote,
+  });
+  assert.equal(await migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer], knowledge_items: [item], knowledge_revisions: [adminSelfReviewedRevision], knowledge_chunks: [chunk], knowledge_events: [submittedEvent, adminSelfReviewEvent],
+  })), true);
+
+  const partialSelfReviewedRevision = row("knowledge_revisions", {
+    ...record("knowledge_revisions", adminSelfReviewedRevision),
+    reviewed_by_email: "admin@example.com",
+  });
+  const partialSelfReviewEvent = row("knowledge_events", {
+    ...record("knowledge_events", adminSelfReviewEvent),
+    actor_email: "admin@example.com",
+  });
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer], knowledge_items: [item], knowledge_revisions: [partialSelfReviewedRevision], knowledge_chunks: [chunk], knowledge_events: [submittedEvent, partialSelfReviewEvent],
   })), /self-reviewed/u);
 
   const mismatchedEvent = row("knowledge_events", { ...record("knowledge_events", event), actor_name: "另一位管理员" });
