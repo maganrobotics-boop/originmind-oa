@@ -208,13 +208,13 @@ try {
       format: "originmind-chat-admin-initialization-v1",
       algorithm: "PBKDF2-SHA-256",
       mode: "insert-if-absent",
-      adminLoginReady: true,
+      adminSeedAttempted: true,
     });
   } else {
     await writeJson(join(evidenceRoot, "admin-initialization.json"), {
       format: "originmind-chat-admin-initialization-v1",
       mode: "skipped-no-secret",
-      adminLoginReady: false,
+      adminSeedAttempted: false,
     });
   }
 
