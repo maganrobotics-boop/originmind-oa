@@ -4,6 +4,8 @@ const APP_NAME = "ARTS Robotics AI assistant";
 const HEADER_NAME = "ARTS Robotics AI Assistant";
 const OFFICIAL_SITE = "https://omindos.ai";
 const BAILIAN_CONSOLE = "https://bailian.console.aliyun.com/";
+const OA_KNOWLEDGE_URL = "https://oa.omindos.ai/";
+const OA_CHAT_IMPORT_URL = "https://oa.omindos.ai/api/knowledge/import-chat";
 
 const TOPICS = [
   {
@@ -232,6 +234,7 @@ function createPublicApp() {
     sessions: Object.fromEntries(TOPICS.map((topic) => [topic.id, {
       requestTopic: topic.requestTopic,
       messages: [],
+      conversationToken: "",
       draft: "",
       scrollTop: 0,
       stickToEnd: true,
@@ -360,6 +363,7 @@ function createPublicApp() {
     const session = sessionFor();
     if (session.sending || !hasResettableState(session)) return;
     session.messages = [];
+    session.conversationToken = "";
     session.draft = "";
     session.scrollTop = 0;
     session.stickToEnd = true;
@@ -561,6 +565,8 @@ function createPublicApp() {
     label.append(document.createTextNode(message.role === "user" ? "你" : APP_NAME));
     if (message.mode === "retrieval") {
       label.append(element("span", { text: "资料摘录" }));
+    } else if (message.role === "assistant" && message.provider) {
+      label.append(element("span", { text: message.provider === "bailian" ? "千问 · AI 回答" : "备用模型 · AI 回答" }));
     }
     article.append(label, element("div", { className: "message-body", text: String(message.content || "") }));
 
@@ -705,15 +711,18 @@ function createPublicApp() {
 
     try {
       const payload = await requestJson("/api/chat", jsonOptions({
-        messages: session.messages.slice(-9).map(({ role, content }) => ({ role, content })),
+        messages: (session.conversationToken ? session.messages.slice(-1) : session.messages.slice(-9)).map(({ role, content }) => ({ role, content })),
         topic: topic.requestTopic,
+        ...(session.conversationToken ? { conversationToken: session.conversationToken } : {}),
       }));
       const assistant = {
         role: "assistant",
         content: typeof payload.answer === "string" ? payload.answer : "暂时没有可显示的回答。",
         sources: Array.isArray(payload.sources) ? payload.sources : [],
         mode: payload.mode,
+        provider: payload.provider,
       };
+      session.conversationToken = typeof payload.conversationToken === "string" ? payload.conversationToken : "";
       session.messages.push(assistant);
       completed = true;
       return {
@@ -1028,6 +1037,7 @@ function createAdminApp() {
       workersAiReady: false,
     },
     documents: [],
+    importReceipts: {},
     inquiries: [],
     draft: emptyDraft(),
   };
@@ -1046,6 +1056,31 @@ function createAdminApp() {
 
   function adminRequest(endpoint, options) {
     return requestJson(`/api/admin/${endpoint}`, options);
+  }
+
+  async function submitDocumentToOa(draft) {
+    let response;
+    try {
+      response = await fetch(OA_CHAT_IMPORT_URL, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ document: {
+          id: draft.id, title: draft.title, body: draft.body, url: draft.url || "",
+          category: draft.category, updatedAt: draft.updatedAt,
+        } }),
+        signal: AbortSignal.timeout(30_000),
+      });
+    } catch {
+      throw new Error("Chat 草稿已保留，暂未确认进入 OA。请确认已登录 OA 后点击“提交 OA 待审”重试；重复提交不会重复建单。");
+    }
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "Chat 草稿已保留，OA 暂未接收，请稍后重试。");
+    if (!Array.isArray(result.items) || !result.items.length) throw new Error("OA 未返回接收记录，草稿仍保留，请重试。");
+    state.importReceipts[draft.id] = result.items;
+    state.notice = result.items.every((item) => item.status === "pending")
+      ? `已提交 OA 待审（${result.items.length} 条）。在 OA“实验室 AI”的待审核列表中处理，对内或公开由审核时选择。`
+      : "OA 已接收过该版本资料，重复提交不会新增条目。请打开 OA 查看当前审核状态。";
   }
 
   async function fetchAdminData(initial = false) {
@@ -1239,6 +1274,10 @@ function createAdminApp() {
     panel.append(
       element("p", { className: "eyebrow", text: "MODEL CONNECTION" }),
       element("h2", { text: "阿里云百炼 · 通义千问" }),
+      element("p", { className: "admin-notice", text: state.config.activeProvider === "bailian"
+        ? `当前使用阿里云千问 · ${state.config.model} · 已保存并验证`
+        : state.config.workersAiReady ? "当前使用 Cloudflare 备用模型；阿里云配置验证通过后自动切换。"
+        : "当前为资料检索模式；保存并连接千问后启用 AI 回答。" }),
       element("p", {
         className: "admin-notice",
         text: "选择华北 2（北京）地域。密钥仅在此管理页填写，保存后不会再显示完整值。模型调用按阿里云账户实际用量计费。",
@@ -1282,7 +1321,7 @@ function createAdminApp() {
     apiKey.input.addEventListener("input", (event) => { state.config.apiKey = event.currentTarget.value; });
 
     const actions = element("div", { className: "admin-buttons" });
-    const save = textButton(state.busy === "config" ? "正在保存…" : "保存配置", "primary-button");
+    const save = textButton(state.busy === "config" ? "正在验证并保存…" : "保存并连接", "primary-button");
     save.type = "submit";
     save.disabled = Boolean(state.busy) || !state.config.encryptionReady;
     const test = textButton(state.busy === "model-test" ? "正在检测…" : "检测连接", "secondary-button");
@@ -1290,6 +1329,7 @@ function createAdminApp() {
     test.addEventListener("click", () => {
       void runAdminAction("model-test", async () => {
         await adminRequest("test", jsonOptions({}));
+        state.config = { ...state.config, ...await adminRequest("config"), apiKey: "" };
         state.notice = "连接成功，真实 AI 对话已可使用。";
       });
     });
@@ -1303,10 +1343,11 @@ function createAdminApp() {
           model: state.config.model,
         };
         if (state.config.apiKey) body.apiKey = state.config.apiKey;
-        await adminRequest("config", jsonOptions(body));
+        const result = await adminRequest("config", jsonOptions(body));
+        state.config = { ...state.config, ...result };
         state.config.apiKey = "";
         state.config.keyConfigured = true;
-        state.notice = "配置已保存。请点击“检测连接”确认模型可用。";
+        state.notice = "千问连接已验证，配置已保存并启用。之后的提问会继续使用该配置。";
       });
     });
     panel.append(form);
@@ -1372,7 +1413,7 @@ function createAdminApp() {
       element("h2", { text: state.draft.id ? "编辑资料" : "添加待审核草稿" }),
       element("p", {
         className: "small-note",
-        text: "此处只能暂存待审核草稿；对外知识必须在 OA 审核为“公开”后由系统接入。",
+        text: "保存后提交至 OA 待审。请在同一浏览器登录 OA；审核时选择对内或公开，未经审核的资料不会用于回答。",
       }),
     );
     const form = element("form", { className: "stack-form document-form" });
@@ -1461,7 +1502,7 @@ function createAdminApp() {
     );
 
     const actions = element("div", { className: "admin-buttons" });
-    const save = textButton(state.busy === "document" ? "正在保存…" : "保存资料", "primary-button");
+    const save = textButton(state.busy === "document" ? "正在保存并提交…" : "保存并提交 OA 待审", "primary-button");
     save.type = "submit";
     save.disabled = Boolean(state.busy);
     actions.append(save);
@@ -1482,14 +1523,15 @@ function createAdminApp() {
       fileLabel,
       element("p", {
         className: "small-note",
-        text: "此处仅保存待审核草稿；对外知识必须在 OA 审核为“公开”后由系统接入。",
+        text: "提交失败时保留 Chat 草稿，可从下方列表重试；重复提交同一版本不会重复建单。",
       }),
       actions,
     );
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       void runAdminAction("document", async () => {
-        await adminRequest("documents", jsonOptions({
+        const draft = { ...state.draft };
+        const saved = await adminRequest("documents", jsonOptions({
           ...(state.draft.id ? { id: state.draft.id } : {}),
           title: state.draft.title,
           body: state.draft.body,
@@ -1498,10 +1540,11 @@ function createAdminApp() {
           updatedAt: state.draft.updatedAt,
           published: 0,
         }));
+        delete state.importReceipts[saved.id];
         const payload = await adminRequest("documents");
         state.documents = Array.isArray(payload.documents) ? payload.documents : [];
         state.draft = emptyDraft();
-        state.notice = "资料已保存为草稿，不会用于公开回答；请在 OA 中提交审核。";
+        await submitDocumentToOa({ ...draft, id: saved.id });
       });
     });
     editor.append(form);
@@ -1510,6 +1553,7 @@ function createAdminApp() {
     list.append(
       element("p", { className: "eyebrow", text: "LOCAL DRAFTS" }),
       element("h2", { text: `资料列表 · ${state.documents.length}` }),
+      externalLink("打开 OA 登录／查看待审核", OA_KNOWLEDGE_URL, "primary-link"),
     );
     if (!state.documents.length) {
       list.append(element("div", { className: "admin-empty", text: "暂时没有待审核草稿。" }));
@@ -1521,7 +1565,7 @@ function createAdminApp() {
           element("div", {}, [
             element("h3", { text: String(document.title || "未命名资料") }),
             element("p", {
-              text: `${TOPIC_LABELS[document.category] || "未分类"} · ${String(document.updatedAt || "未标注")} · 待 OA 审核 · ${adminSourceOriginLabel(document.origin)}`,
+              text: `${TOPIC_LABELS[document.category] || "未分类"} · ${String(document.updatedAt || "未标注")} · ${state.importReceipts[document.id] ? "OA 已接收" : "Chat 草稿，可提交 OA"}`,
             }),
           ]),
         );
@@ -1541,6 +1585,10 @@ function createAdminApp() {
           window.scrollTo({ top: 0, behavior: "smooth" });
         });
         head.append(edit);
+        const submit = textButton(state.busy === `submit-${document.id}` ? "正在提交…" : "提交 OA 待审", "primary-button small-button");
+        submit.disabled = Boolean(state.busy);
+        submit.addEventListener("click", () => { void runAdminAction(`submit-${document.id}`, () => submitDocumentToOa(document)); });
+        head.append(submit);
         const documentBody = String(document.body || "");
         article.append(
           head,

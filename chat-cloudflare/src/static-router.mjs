@@ -3,7 +3,7 @@ export const CANONICAL_ORIGIN = "https://chat.omindos.ai";
 export const SECURITY_HEADERS = Object.freeze({
   "Content-Security-Policy":
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
-    "img-src 'self' data:; connect-src 'self'; font-src 'self'; " +
+    "img-src 'self' data:; connect-src 'self' https://oa.omindos.ai; font-src 'self'; " +
     "object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   "Referrer-Policy": "strict-origin-when-cross-origin",
   "Permissions-Policy": "camera=(), microphone=(), geolocation=(), payment=(), usb=()",

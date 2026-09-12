@@ -402,10 +402,9 @@ export async function getKnowledgeItemDetail(id: string, actor: KnowledgeActor, 
   };
 }
 
-export async function createKnowledgeItem(actor: KnowledgeActor, submission: KnowledgeSubmission, contentHash: string) {
+export async function createKnowledgeItem(actor: KnowledgeActor, submission: KnowledgeSubmission, contentHash: string, itemId = crypto.randomUUID()) {
   const database = await getD1Database();
   const now = new Date().toISOString();
-  const itemId = crypto.randomUUID();
   const revisionId = crypto.randomUUID();
   const mutationRevision = crypto.randomUUID();
   const eventId = crypto.randomUUID();
@@ -419,6 +418,7 @@ export async function createKnowledgeItem(actor: KnowledgeActor, submission: Kno
       )
       SELECT ?, ?, ?, ?, ?, ?, ?, 'pending', 'internal', 1, ?, NULL, ?, ?, ?, NULL
       WHERE ${guard.sql}
+      ON CONFLICT(id) DO NOTHING
       RETURNING *
     `).bind(itemId, KNOWLEDGE_PROJECT, submission.title, submission.category, actor.memberId, actor.name,
       normalizeEmail(actor.email), revisionId, mutationRevision, now, now, ...guard.values),
@@ -458,6 +458,18 @@ export async function createKnowledgeItem(actor: KnowledgeActor, submission: Kno
     activated_at: null,
     retired_at: null,
   }) : null;
+}
+
+export async function createChatImportedKnowledgeItem(actor: KnowledgeActor, submission: KnowledgeSubmission, contentHash: string, itemId: string) {
+  const created = await createKnowledgeItem(actor, submission, contentHash, itemId);
+  if (created) return created;
+  // The deterministic ID makes retries and concurrent submissions idempotent.
+  // Re-reading uses the live member/NDA guard and exact submitter identity.
+  const existing = await findKnowledgeItem(itemId, actor);
+  if (!existing || existing.submitter_member_id !== actor.memberId
+    || normalizeEmail(existing.submitter_email) !== normalizeEmail(actor.email)
+    || existing.content_hash !== contentHash) return null;
+  return serializeItem(existing);
 }
 
 export async function resubmitKnowledgeItem(

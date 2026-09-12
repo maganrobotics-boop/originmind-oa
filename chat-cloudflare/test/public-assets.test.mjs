@@ -144,9 +144,10 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.match(script, /id:\s*["']company["'][\s\S]*?requestTopic:\s*["']business["']/u);
   assert.match(script, /id:\s*["']association["'][\s\S]*?requestTopic:\s*["']student["']/u);
   assert.match(script, /\bpublished\s*:\s*0\b/u);
-  assert.ok(script.includes("资料已保存为草稿，不会用于公开回答；请在 OA 中提交审核。"));
-  assert.ok(script.includes("对外知识必须在 OA 审核为“公开”后由系统接入。"));
-  assert.doesNotMatch(script, /https?:\/\/[^\s"'`]+\/api\//iu);
+  assert.ok(script.includes("保存并提交 OA 待审"));
+  assert.ok(script.includes("未经审核的资料不会用于回答。"));
+  const externalApis = [...script.matchAll(/https?:\/\/[^\s"'`]+\/api\/[^\s"'`]+/giu)].map((match) => match[0]);
+  assert.deepEqual(externalApis, ["https://oa.omindos.ai/api/knowledge/import-chat"]);
 
   for (const forbidden of [
     "马教授 AI 助手",

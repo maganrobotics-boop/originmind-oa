@@ -56,10 +56,11 @@ function turns(value, { min = 0, max }) {
 
 export function parseChatPayload(value) {
   const input = object(value);
-  exactKeys(input, ["messages", "topic"]);
+  exactKeys(input, ["messages", "topic"], ["conversationToken"]);
   return {
     messages: turns(input.messages, { min: 1, max: 9 }),
     topic: oneOf(input.topic, TOPICS),
+    conversationToken: input.conversationToken === undefined ? undefined : text(input.conversationToken, { max: 40_000 }),
   };
 }
 
