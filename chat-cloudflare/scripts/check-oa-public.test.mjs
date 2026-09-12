@@ -43,7 +43,7 @@ test("OA preflight sends the normalized token and records only safe success evid
   assert.equal(request.options.cache, "no-store");
   assert.equal(request.options.credentials, "omit");
   assert.equal(request.options.headers["x-originmind-public-lab-ai-service-token"], token);
-  assert.deepEqual(JSON.parse(request.options.body), { question: "公开知识连接检测" });
+  assert.deepEqual(JSON.parse(request.options.body), { question: "请根据公开资料简要说明 ARTS Robotics 的机器人研究方向。" });
   assert.deepEqual(result, {
     format: "originmind-chat-oa-public-preflight-v1",
     checkedAt: new Date(1_025).toISOString(),
