@@ -85,6 +85,7 @@ const vite = await createServer({
 
 const policy = await vite.ssrLoadModule("/lib/knowledge-policy.ts");
 const store = await vite.ssrLoadModule("/lib/knowledge-store.ts");
+const chatImport = await vite.ssrLoadModule("/lib/chat-knowledge-import.ts");
 const [migration, hardeningMigration, visibilityMigration, reclassificationMigration] = await Promise.all([
   readFile(new URL("../drizzle/0026_rich_jocasta.sql", import.meta.url), "utf8"),
   readFile(new URL("../drizzle/0027_careless_winter_soldier.sql", import.meta.url), "utf8"),
@@ -156,6 +157,49 @@ beforeEach(() => {
   const sqlite = createDatabase();
   globalThis[stateKey].sqlite = sqlite;
   globalThis[stateKey].database = new D1DatabaseAdapter(sqlite);
+});
+
+test("Chat imports enter review exactly once and cannot enter either retrieval index before approval", async () => {
+  const draft = submission();
+  const submitter = actor("submitter");
+  const identity = await chatImport.chatImportIdentity(submitter.accountUserId, "11111111-2222-4333-8444-555555555555", draft, 0);
+  const imported = await Promise.all([1, 2].map(() => store.createChatImportedKnowledgeItem(submitter, draft, identity.contentHash, identity.itemId)));
+  assert.equal(imported[0].id, imported[1].id);
+  assert.equal(imported[0].status, "pending");
+  assert.equal(imported[0].visibility, "internal");
+  const db = globalThis[stateKey].sqlite;
+  for (const table of ["knowledge_items", "knowledge_revisions", "knowledge_events"]) assert.equal(db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n, 1);
+  assert.equal((await store.listKnowledgeItems("review", actor("reviewer"), true)).length, 1);
+  assert.deepEqual(await store.getActiveKnowledgeChunks(submitter), []);
+  assert.deepEqual(await store.getPublicActiveKnowledgeChunks(), []);
+  const existing = await store.findKnowledgeItem(identity.itemId, actor("reviewer"));
+  await store.reviewKnowledgeItem(existing, actor("reviewer"), "approve", "审核测试", "internal");
+  assert.ok((await store.getActiveKnowledgeChunks(submitter)).length);
+  assert.deepEqual(await store.getPublicActiveKnowledgeChunks(), []);
+  const retry = await store.createChatImportedKnowledgeItem(submitter, draft, identity.contentHash, identity.itemId);
+  assert.equal(retry.status, "active");
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM knowledge_events").get().n, 2);
+  db.prepare("UPDATE members SET status='departed' WHERE id=?").run(submitter.memberId);
+  assert.equal(await store.createChatImportedKnowledgeItem(submitter, draft, identity.contentHash, identity.itemId), null);
+});
+
+test("Chat import splits long drafts without losing Unicode and rejects injected approval or identity fields", async () => {
+  const document = { id: "11111111-2222-4333-8444-555555555555", title: "导入资料", body: "机器人技术。".repeat(4_000), url: "", category: "research", updatedAt: "2026-09-12" };
+  const parsed = chatImport.parseChatKnowledgeImport({ document });
+  assert.equal(parsed.submissions.length, 2);
+  assert.equal(parsed.submissions.map((part) => part.content).join(""), document.body);
+  for (const length of [18001, 20000, 20001, 29999]) {
+    const content = "a".repeat(length - 2) + "😀";
+    const result = chatImport.parseChatKnowledgeImport({ document: { ...document, body: content } });
+    assert.equal(result.submissions.map((part) => part.content).join(""), content);
+    assert.ok(result.submissions.every((part) => part.content.length >= 10 && part.content.length <= 20_000));
+  }
+  assert.throws(() => chatImport.parseChatKnowledgeImport({ document: { ...document, visibility: "public" } }));
+  assert.throws(() => chatImport.parseChatKnowledgeImport({ document, submitterEmail: "other@example.com" }));
+  assert.throws(() => chatImport.parseChatKnowledgeImport({ document: { ...document, updatedAt: "2026-02-30" } }));
+  const otherIdentity = await chatImport.chatImportIdentity("other-account", document.id, parsed.submissions[0], 0);
+  const identity = await chatImport.chatImportIdentity("one-account", document.id, parsed.submissions[0], 0);
+  assert.notEqual(identity.itemId, otherIdentity.itemId);
 });
 
 after(async () => {

@@ -108,6 +108,7 @@ export class MockD1 {
 
     if (query.startsWith("update settings set value")) {
       if (!this.settings.has(args[1])) return { rows: [], changes: 0 };
+      if (args.length > 2 && this.settings.get(args[1]) !== args[2]) return { rows: [], changes: 0 };
       this.settings.set(args[1], args[0]);
       return { rows: [], changes: 1 };
     }

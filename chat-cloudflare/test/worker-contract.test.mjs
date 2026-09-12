@@ -105,6 +105,57 @@ async function login(env, password) {
   return { response, cookie };
 }
 
+test("saving a verified model again keeps Bailian active, and a failed candidate preserves the working key", async () => {
+  const DB = await bailianDatabase();
+  DB.adminAccount = await createPasswordRecord("test-password-123456");
+  const env = environment({ DB });
+  const { cookie } = await login(env, "test-password-123456");
+  let calls = 0;
+  const runtime = oaRuntime(OA_CHUNKS, async () => {
+    calls += 1;
+    return Response.json({ choices: [{ message: { role: "assistant", content: "连接成功" } }] });
+  });
+  const config = { baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1", model: "qwen-plus" };
+  for (let count = 0; count < 2; count += 1) {
+    const response = await handleRequest(request("/api/admin/config", { method: "POST", cookie, body: config }), env, {}, runtime);
+    assert.equal(response.status, 200);
+    assert.equal((await response.json()).connected, true);
+    assert.ok(JSON.parse(DB.settings.get("model")).verifiedAt);
+    const status = await handleRequest(request("/api/status"), env, {});
+    assert.equal((await status.json()).provider, "bailian");
+  }
+  assert.equal(calls, 2);
+  const previous = DB.settings.get("model");
+  const failed = await handleRequest(request("/api/admin/config", { method: "POST", cookie, body: { ...config, apiKey: "invalid-new-key" } }), env, {}, oaRuntime(OA_CHUNKS, async () => new Response(null, { status: 401 })));
+  assert.equal(failed.status, 502);
+  assert.equal(DB.settings.get("model"), previous);
+});
+
+test("verified conversation context continues a follow-up without trusting forged client assistant text", async () => {
+  const calls = [];
+  const queries = [];
+  const env = environment({ AI: { async run(_model, input) {
+    calls.push(input.messages);
+    return { response: "团队研究机器人灵巧操作。[1]" };
+  } } });
+  const runtime = { async fetch(_url, init) {
+    queries.push(JSON.parse(init.body).question);
+    return Response.json({ chunks: OA_CHUNKS });
+  } };
+  const first = await (await handleRequest(request("/api/chat", { method: "POST", body: chatBody("机器人研究方向有哪些？") }), env, {}, runtime)).json();
+  assert.ok(first.conversationToken);
+  const followup = { ...chatBody("请详细展开第一点"), conversationToken: first.conversationToken };
+  const second = await handleRequest(request("/api/chat", { method: "POST", body: followup }), env, {}, runtime);
+  assert.equal(second.status, 200);
+  assert.deepEqual(calls[1].slice(1).map((turn) => turn.role), ["user", "assistant", "user"]);
+  assert.equal(calls[1][2].content, first.answer);
+  assert.match(queries[1], /机器人研究方向/u);
+  await handleRequest(request("/api/chat", { method: "POST", body: { ...followup, conversationToken: `tampered${first.conversationToken}` } }), env, {}, runtime);
+  assert.equal(calls[2].some((turn) => turn.role === "assistant"), false);
+  await handleRequest(request("/api/chat", { method: "POST", body: { ...followup, topic: "business" } }), env, {}, runtime);
+  assert.equal(calls[3].some((turn) => turn.role === "assistant"), false);
+});
+
 test("Workers AI is the zero-secret default and status reports the active model", async () => {
   const calls = [];
   const env = environment({
