@@ -517,8 +517,7 @@ textarea {
   gap: 11px;
 }
 
-.assistant-avatar,
-.welcome-mark {
+.assistant-avatar {
   position: relative;
   display: grid;
   flex: 0 0 auto;
@@ -627,13 +626,6 @@ textarea {
   margin: auto;
   padding: 46px 36px 38px;
   animation: enter-soft 420ms ease both;
-}
-
-.welcome-mark {
-  width: 52px;
-  height: 52px;
-  margin-bottom: 19px;
-  border-radius: 16px;
 }
 
 .welcome .eyebrow {
@@ -1873,12 +1865,6 @@ textarea {
 
   .welcome {
     padding: 28px 19px 24px;
-  }
-
-  .welcome-mark {
-    width: 46px;
-    height: 46px;
-    margin-bottom: 15px;
   }
 
   .welcome h2 {

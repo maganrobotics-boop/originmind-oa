@@ -226,13 +226,19 @@ function serviceLabel(service) {
 
 function createPublicApp() {
   const state = {
-    messages: [],
     section: "technology",
-    topic: "research",
     service: null,
-    sending: false,
-    error: "",
-    notice: "",
+    serviceError: "",
+    sessions: Object.fromEntries(TOPICS.map((topic) => [topic.id, {
+      requestTopic: topic.requestTopic,
+      messages: [],
+      draft: "",
+      scrollTop: 0,
+      stickToEnd: true,
+      sending: false,
+      error: "",
+      notice: "",
+    }])),
     inquiry: {
       name: "",
       organisation: "",
@@ -244,8 +250,21 @@ function createPublicApp() {
       requestId: "",
       reference: "",
       error: "",
+      section: "",
     },
   };
+
+  function topicFor(section = state.section) {
+    return TOPICS.find((topic) => topic.id === section) || TOPICS[0];
+  }
+
+  function sessionFor(section = state.section) {
+    return state.sessions[section] || state.sessions[TOPICS[0].id];
+  }
+
+  function hasResettableState(session) {
+    return Boolean(session.messages.length || session.draft || session.error || session.notice);
+  }
 
   const app = element("div", { className: "chat-app" });
   const header = element("header", { className: "topbar site-header" });
@@ -286,17 +305,23 @@ function createPublicApp() {
       icon("→", "topic-arrow"),
     );
     button.addEventListener("click", () => {
-      if (state.sending || state.section === topic.id) return;
+      saveCurrentView();
       state.section = topic.id;
-      state.topic = topic.requestTopic;
       for (const [id, candidate] of topicButtons) {
         const selected = id === state.section;
         candidate.classList.toggle("selected", selected);
         candidate.setAttribute("aria-pressed", selected ? "true" : "false");
       }
       topicStatus.textContent = `已切换到${topic.title}`;
-      if (state.messages.length === 0) renderMessages();
-      else questionInput.focus();
+      questionInput.value = sessionFor().draft;
+      syncFeedback();
+      updateComposer();
+      const session = sessionFor();
+      renderMessages({
+        scrollMode: session.messages.length === 0
+          ? "start"
+          : session.stickToEnd ? "end" : "restore",
+      });
     });
     topicButtons.set(topic.id, button);
     topicList.append(button);
@@ -332,13 +357,23 @@ function createPublicApp() {
   newConversation.append(icon("＋"), element("span", { className: "new-text", text: "新对话" }));
   newConversation.disabled = true;
   newConversation.addEventListener("click", () => {
-    if (state.sending || state.messages.length === 0) return;
-    state.messages = [];
-    state.error = "";
-    state.notice = "";
+    const session = sessionFor();
+    if (session.sending || !hasResettableState(session)) return;
+    session.messages = [];
+    session.draft = "";
+    session.scrollTop = 0;
+    session.stickToEnd = true;
+    session.error = "";
+    session.notice = "";
+    if (state.inquiry.section === state.section) {
+      state.inquiry.summary = "";
+      state.inquiry.includeConversation = false;
+    }
     questionInput.value = "";
+    syncFeedback();
     updateComposer();
-    renderMessages();
+    renderMessages({ scrollMode: "start" });
+    topicStatus.textContent = `已清空${topicFor().title}对话并返回精选问题`;
     questionInput.focus();
   });
   toolbar.append(assistantIdentity, newConversation);
@@ -428,6 +463,7 @@ function createPublicApp() {
   });
   let sourceDialogOpener = null;
   let inquiryDialogOpener = null;
+  let renderEpoch = 0;
   sourceDialog.addEventListener("close", () => {
     const opener = sourceDialogOpener;
     sourceDialogOpener = null;
@@ -444,14 +480,33 @@ function createPublicApp() {
   app.append(header, layout, siteFooter, sourceDialog, inquiryDialog);
   root.replaceChildren(app);
 
+  function saveCurrentView() {
+    const session = sessionFor();
+    session.draft = questionInput.value;
+    session.scrollTop = messageScroll.scrollTop;
+    session.stickToEnd = session.messages.length === 0 ||
+      messageScroll.scrollHeight - messageScroll.clientHeight - messageScroll.scrollTop <= 24;
+  }
+
+  function syncFeedback() {
+    const session = sessionFor();
+    setRegion(errorRegion, session.error || state.serviceError);
+    setRegion(noticeRegion, session.notice);
+  }
+
   function updateComposer() {
+    const session = sessionFor();
     const length = questionInput.value.length;
     characterCount.textContent = length ? `${length}/2000` : "Shift + Enter 换行";
-    sendButton.disabled = state.sending || !questionInput.value.trim();
-    questionInput.disabled = state.sending;
-    for (const button of topicButtons.values()) button.disabled = state.sending;
-    newConversation.disabled = state.sending || state.messages.length === 0;
-    messageScroll.setAttribute("aria-busy", state.sending ? "true" : "false");
+    sendButton.disabled = session.sending || !questionInput.value.trim();
+    questionInput.disabled = session.sending;
+    newConversation.disabled = session.sending || !hasResettableState(session);
+    messageScroll.setAttribute("aria-busy", session.sending ? "true" : "false");
+    for (const [section, button] of topicButtons) {
+      const candidate = sessionFor(section);
+      button.classList.toggle("busy", candidate.sending);
+      button.setAttribute("aria-busy", candidate.sending ? "true" : "false");
+    }
   }
 
   function openSource(source, opener) {
@@ -488,18 +543,19 @@ function createPublicApp() {
     if (!sourceDialog.open) sourceDialog.showModal();
   }
 
-  async function copyAnswer(content) {
+  async function copyAnswer(content, section) {
+    const session = sessionFor(section);
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
       await navigator.clipboard.writeText(content);
-      state.notice = "已复制回答";
+      session.notice = "已复制回答";
     } catch {
-      state.notice = "无法自动复制，请长按选择文字。";
+      session.notice = "无法自动复制，请长按选择文字。";
     }
-    setRegion(noticeRegion, state.notice);
+    if (state.section === section) syncFeedback();
   }
 
-  function assistantMessageNode(message) {
+  function assistantMessageNode(message, section) {
     const article = element("article", { className: `message ${message.role}` });
     const label = element("div", { className: "message-label" });
     label.append(document.createTextNode(message.role === "user" ? "你" : APP_NAME));
@@ -525,7 +581,7 @@ function createPublicApp() {
       const copy = textButton("", "copy-answer");
       copy.setAttribute("aria-label", "复制回答");
       copy.append(icon("□"));
-      copy.addEventListener("click", () => void copyAnswer(String(message.content || "")));
+      copy.addEventListener("click", () => void copyAnswer(String(message.content || ""), section));
       const further = textButton("需要进一步交流", "further-inquiry");
       further.addEventListener("click", (event) => openInquiry(event.currentTarget));
       actions.append(copy, further);
@@ -534,11 +590,19 @@ function createPublicApp() {
     return article;
   }
 
+  function dispatchQuestion(rawQuestion, section) {
+    const question = String(rawQuestion || "").trim();
+    if (!question || sessionFor(section).sending) return;
+    const request = sendQuestion(question, section);
+    if (state.section === section) messageScroll.focus({ preventScroll: true });
+    void request.catch(() => {});
+  }
+
   function welcomeNode() {
-    const topic = TOPICS.find((candidate) => candidate.id === state.section) || TOPICS[0];
+    const topic = topicFor();
+    const section = state.section;
     const welcome = element("div", { className: "welcome" });
     welcome.append(
-      element("div", { className: "welcome-mark", text: "AI", attributes: { "aria-hidden": "true" } }),
       element("p", { className: "eyebrow", text: topic.eyebrow }),
       element("h2", { text: topic.heading }),
       element("p", { text: topic.intro }),
@@ -550,11 +614,7 @@ function createPublicApp() {
     for (const suggestion of topic.suggestions) {
       const button = textButton("", "suggestion-button");
       button.append(element("span", { text: suggestion }), icon("→", "suggestion-arrow"));
-      button.addEventListener("click", () => {
-        void sendQuestion(suggestion)
-          .catch(() => {})
-          .finally(() => questionInput.focus());
-      });
+      button.addEventListener("click", () => dispatchQuestion(suggestion, section));
       suggestions.append(button);
     }
     welcome.append(
@@ -567,11 +627,16 @@ function createPublicApp() {
     return welcome;
   }
 
-  function renderMessages() {
-    const content = element("div", { className: state.messages.length ? "message-list" : "welcome-shell" });
-    if (state.messages.length) {
-      for (const message of state.messages) content.append(assistantMessageNode(message));
-      if (state.sending) {
+  function renderMessages({ scrollMode = "restore" } = {}) {
+    const section = state.section;
+    const session = sessionFor(section);
+    const topic = topicFor(section);
+    const restoreTop = session.scrollTop;
+    const epoch = ++renderEpoch;
+    const content = element("div", { className: session.messages.length ? "message-list" : "welcome-shell" });
+    if (session.messages.length) {
+      for (const message of session.messages) content.append(assistantMessageNode(message, section));
+      if (session.sending) {
         content.append(
           element("div", {
             className: "thinking",
@@ -585,42 +650,63 @@ function createPublicApp() {
     } else {
       content.append(welcomeNode());
     }
+    messageScroll.setAttribute("aria-live", "off");
     messageScroll.replaceChildren(content);
-    messageScroll.setAttribute("role", state.messages.length ? "log" : "region");
-    messageScroll.setAttribute("aria-live", state.messages.length ? "polite" : "off");
-    newConversation.disabled = state.sending || state.messages.length === 0;
+    messageScroll.setAttribute("role", session.messages.length ? "log" : "region");
+    messageScroll.setAttribute("aria-label", `${topic.title}对话内容`);
+    messageScroll.setAttribute("aria-live", session.messages.length ? "polite" : "off");
+    newConversation.disabled = session.sending || !hasResettableState(session);
     window.requestAnimationFrame(() => {
-      messageScroll.scrollTop = state.messages.length ? messageScroll.scrollHeight : 0;
+      if (state.section !== section || renderEpoch !== epoch) return;
+      if (session.messages.length === 0 || scrollMode === "start") {
+        messageScroll.scrollTop = 0;
+      } else if (scrollMode === "end") {
+        messageScroll.scrollTop = messageScroll.scrollHeight;
+      } else {
+        const maximum = Math.max(0, messageScroll.scrollHeight - messageScroll.clientHeight);
+        messageScroll.scrollTop = Math.min(restoreTop, maximum);
+      }
+      session.scrollTop = messageScroll.scrollTop;
+      session.stickToEnd = session.messages.length === 0 ||
+        messageScroll.scrollHeight - messageScroll.clientHeight - messageScroll.scrollTop <= 24;
     });
   }
 
-  async function sendQuestion(rawQuestion) {
+  async function sendQuestion(rawQuestion, section = state.section) {
+    const session = sessionFor(section);
+    const topic = topicFor(section);
     const question = String(rawQuestion || "").trim();
-    if (!question || state.sending) {
-      if (state.sending) throw new Error("请等待当前回答完成");
+    if (!question || session.sending) {
+      if (session.sending) throw new Error("请等待当前回答完成");
       return null;
     }
     if (question.length > 2000) {
-      state.error = "每次问题请控制在 2000 字以内。";
-      setRegion(errorRegion, state.error);
-      throw new Error(state.error);
+      session.error = "每次问题请控制在 2000 字以内。";
+      if (state.section === section) syncFeedback();
+      throw new Error(session.error);
     }
 
-    const previousMessages = state.messages.slice();
-    state.sending = true;
-    state.error = "";
-    state.notice = "";
-    state.messages.push({ role: "user", content: question });
-    questionInput.value = "";
-    setRegion(errorRegion, "");
-    setRegion(noticeRegion, "");
-    updateComposer();
-    renderMessages();
+    const previousMessages = session.messages.slice();
+    const previousScrollTop = session.scrollTop;
+    const previousStickToEnd = session.stickToEnd;
+    let completed = false;
+    session.sending = true;
+    session.error = "";
+    session.notice = "";
+    session.messages.push({ role: "user", content: question });
+    session.draft = "";
+    session.stickToEnd = true;
+    if (state.section === section) {
+      questionInput.value = "";
+      syncFeedback();
+      updateComposer();
+      renderMessages({ scrollMode: "end" });
+    }
 
     try {
       const payload = await requestJson("/api/chat", jsonOptions({
-        messages: state.messages.slice(-9).map(({ role, content }) => ({ role, content })),
-        topic: state.topic,
+        messages: session.messages.slice(-9).map(({ role, content }) => ({ role, content })),
+        topic: topic.requestTopic,
       }));
       const assistant = {
         role: "assistant",
@@ -628,27 +714,47 @@ function createPublicApp() {
         sources: Array.isArray(payload.sources) ? payload.sources : [],
         mode: payload.mode,
       };
-      state.messages.push(assistant);
+      session.messages.push(assistant);
+      completed = true;
       return {
         answer: assistant.content,
         sourceTitles: assistant.sources.map((source) => String(source?.title || "参考资料")),
       };
     } catch (error) {
-      state.messages = previousMessages;
-      questionInput.value = question;
-      state.error = error instanceof Error ? error.message : "服务暂时不可用";
-      setRegion(errorRegion, state.error);
+      session.messages = previousMessages;
+      session.draft = question;
+      session.scrollTop = previousScrollTop;
+      session.stickToEnd = previousStickToEnd;
+      session.error = error instanceof Error ? error.message : "服务暂时不可用";
+      if (state.section === section) {
+        questionInput.value = session.draft;
+        syncFeedback();
+      }
       throw error;
     } finally {
-      state.sending = false;
+      session.sending = false;
       updateComposer();
-      renderMessages();
+      if (state.section === section) {
+        questionInput.value = session.draft;
+        syncFeedback();
+        renderMessages({
+          scrollMode: completed
+            ? session.stickToEnd ? "end" : "restore"
+            : session.messages.length === 0 ? "start" : session.stickToEnd ? "end" : "restore",
+        });
+      }
     }
   }
 
   function prefillInquirySummary() {
-    if (state.inquiry.summary) return;
-    state.inquiry.summary = state.messages
+    const inquiry = state.inquiry;
+    if (inquiry.section !== state.section) {
+      inquiry.section = state.section;
+      inquiry.summary = "";
+      inquiry.includeConversation = false;
+    }
+    if (inquiry.summary) return;
+    inquiry.summary = sessionFor(inquiry.section).messages
       .filter((message) => message.role === "user")
       .map((message) => message.content)
       .join("\n")
@@ -767,6 +873,9 @@ function createPublicApp() {
   async function submitInquiry(event) {
     event.preventDefault();
     const inquiry = state.inquiry;
+    const section = state.sessions[inquiry.section] ? inquiry.section : state.section;
+    const session = sessionFor(section);
+    const topic = topicFor(section);
     if (inquiry.submitting || !inquiry.consent) return;
     inquiry.submitting = true;
     inquiry.error = "";
@@ -777,12 +886,12 @@ function createPublicApp() {
         name: inquiry.name,
         organisation: inquiry.organisation,
         contact: inquiry.contact,
-        topic: state.topic,
+        topic: topic.requestTopic,
         summary: inquiry.summary,
         consent: inquiry.consent,
         includeConversation: inquiry.includeConversation,
         transcript: inquiry.includeConversation
-          ? state.messages.slice(-12).map(({ role, content }) => ({ role, content }))
+          ? session.messages.slice(-12).map(({ role, content }) => ({ role, content }))
           : [],
       }));
       inquiry.reference = String(payload.reference || "");
@@ -792,6 +901,7 @@ function createPublicApp() {
       inquiry.summary = "";
       inquiry.consent = false;
       inquiry.includeConversation = false;
+      inquiry.section = "";
     } catch (error) {
       inquiry.error = error instanceof Error ? error.message : "提交失败";
     } finally {
@@ -820,31 +930,42 @@ function createPublicApp() {
     return { wrapper, input };
   }
 
-  questionInput.addEventListener("input", updateComposer);
+  messageScroll.addEventListener("scroll", () => {
+    const session = sessionFor();
+    session.scrollTop = messageScroll.scrollTop;
+    session.stickToEnd = session.messages.length === 0 ||
+      messageScroll.scrollHeight - messageScroll.clientHeight - messageScroll.scrollTop <= 24;
+  }, { passive: true });
+  questionInput.addEventListener("input", () => {
+    sessionFor().draft = questionInput.value;
+    updateComposer();
+  });
   questionInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
-      void sendQuestion(questionInput.value).catch(() => {});
+      dispatchQuestion(questionInput.value, state.section);
     }
   });
   composer.addEventListener("submit", (event) => {
     event.preventDefault();
-    void sendQuestion(questionInput.value).catch(() => {});
+    dispatchQuestion(questionInput.value, state.section);
   });
   submitInquiryButton.addEventListener("click", (event) => openInquiry(event.currentTarget));
 
-  renderMessages();
+  renderMessages({ scrollMode: "start" });
   updateComposer();
   void requestJson("/api/status")
     .then((payload) => {
       state.service = payload;
+      state.serviceError = "";
       statusText.textContent = serviceLabel(payload);
+      syncFeedback();
     })
     .catch((error) => {
       state.service = { storageReady: false, modelReady: false };
       statusText.textContent = serviceLabel(state.service);
-      state.error = error instanceof Error ? error.message : "暂时无法连接服务，请稍后重试。";
-      setRegion(errorRegion, state.error);
+      state.serviceError = error instanceof Error ? error.message : "暂时无法连接服务，请稍后重试。";
+      syncFeedback();
     });
 
   const modelContext = document.modelContext;
@@ -870,8 +991,9 @@ function createPublicApp() {
         if (!input || typeof input.question !== "string" || !input.question.trim() || input.question.length > 2000) {
           throw new Error("请输入 1–2000 字的问题");
         }
-        if (state.sending) throw new Error("请等待当前回答完成");
-        return sendQuestion(input.question);
+        const section = state.section;
+        if (sessionFor(section).sending) throw new Error("请等待当前回答完成");
+        return sendQuestion(input.question, section);
       },
     };
     try {
