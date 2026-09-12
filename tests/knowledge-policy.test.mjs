@@ -157,10 +157,11 @@ test("知识公开范围与公开确认必须精确匹配", () => {
   }
 });
 
-test("系统管理员自操作审计标记保留且不会突破审核意见上限", () => {
+test("系统管理员自操作审计标记不会截断原始审核意见", () => {
   const note = "审".repeat(policy.MAX_KNOWLEDGE_REVIEW_NOTE_LENGTH);
   const audited = policy.knowledgeAdminSelfAuditNote(note);
-  assert.equal(audited.length, policy.MAX_KNOWLEDGE_REVIEW_NOTE_LENGTH);
+  assert.equal(audited.endsWith(note), true);
+  assert.equal(audited.length, policy.KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER.length + 1 + note.length);
   assert.equal(policy.isKnowledgeAdminSelfAuditNote(audited), true);
   assert.equal(policy.knowledgeAdminSelfAuditNote(""), policy.KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER);
 });
