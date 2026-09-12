@@ -15,7 +15,7 @@ export const HOSTNAME = "chat.omindos.ai";
 export const PRODUCTION_ORIGIN = `https://${HOSTNAME}`;
 export const EXPECTED_CONFIRMATION = `${WORKER_NAME}:${DATABASE_NAME}:${HOSTNAME}`;
 export const PASSWORD_ALGORITHM = "PBKDF2-SHA-256";
-export const PASSWORD_ITERATIONS = 210_000;
+export const PASSWORD_ITERATIONS = 100_000;
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 export const CHAT_ROOT = resolve(SCRIPT_DIRECTORY, "..");

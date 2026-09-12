@@ -1,7 +1,10 @@
 import { PublicError } from "./errors.mjs";
 
 export const PASSWORD_ALGORITHM = "PBKDF2-SHA-256";
-export const PASSWORD_ITERATIONS = 210_000;
+// Cloudflare's production workerd runtime rejects PBKDF2 iteration counts
+// above 100,000 before deriving any bits. Keep the stored record within that
+// platform ceiling; online login attempts are separately rate-limited.
+export const PASSWORD_ITERATIONS = 100_000;
 
 function webCrypto() {
   if (!globalThis.crypto?.subtle || !globalThis.crypto?.getRandomValues) {
@@ -112,8 +115,7 @@ export async function verifyPassword(password, record) {
   if (
     record?.algorithm !== PASSWORD_ALGORITHM ||
     !Number.isInteger(record?.iterations) ||
-    record.iterations < 100_000 ||
-    record.iterations > 1_000_000
+    record.iterations !== PASSWORD_ITERATIONS
   ) {
     throw new Error("PASSWORD_RECORD_UNSUPPORTED");
   }

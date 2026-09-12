@@ -1,11 +1,11 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 // A newly published Worker or route can briefly return 404/421 while edge state converges.
-const TRANSIENT_STATUSES = new Set([404, 408, 421, 425, 429, 500, 502, 503, 504]);
+const TRANSIENT_STATUSES = new Set([404, 408, 421, 425, 500, 502, 503, 504]);
 
 export function isTransientSmokeStatus(status) {
-  return status === undefined || TRANSIENT_STATUSES.has(status);
+  return TRANSIENT_STATUSES.has(status);
 }
 
 function sleep(milliseconds) {
@@ -21,17 +21,21 @@ function exactOrigin(value) {
 }
 
 async function request(origin, pathname, init = {}) {
-  return fetch(`${origin}${pathname}`, {
-    ...init,
-    headers: {
-      Accept: "application/json, text/html;q=0.9",
-      "Cache-Control": "no-cache",
-      "User-Agent": "OriginMind-Chat-Release-Smoke/1.0",
-      ...(init.headers || {}),
-    },
-    redirect: "error",
-    signal: AbortSignal.timeout(45_000),
-  });
+  try {
+    return await fetch(`${origin}${pathname}`, {
+      ...init,
+      headers: {
+        Accept: "application/json, text/html;q=0.9",
+        "Cache-Control": "no-cache",
+        "User-Agent": "OriginMind-Chat-Release-Smoke/1.0",
+        ...(init.headers || {}),
+      },
+      redirect: "error",
+      signal: AbortSignal.timeout(45_000),
+    });
+  } catch {
+    throw Object.assign(new Error("Smoke request failed"), { retryable: true });
+  }
 }
 
 async function json(response, label) {
@@ -111,7 +115,7 @@ function expectedRelease(value) {
   return value;
 }
 
-export function validateReleaseEvidence({ health, status, chat }, releaseIdValue) {
+export function validateServiceEvidence({ health, status, chat }, releaseIdValue) {
   const releaseId = expectedRelease(releaseIdValue);
   if (
     health?.app !== "arts-robotics-ai-assistant" ||
@@ -152,6 +156,18 @@ export function validateReleaseEvidence({ health, status, chat }, releaseIdValue
     model: status.model,
     sources: chat.sources.length,
   };
+}
+
+function validateAdminAuth(adminAuth) {
+  if (adminAuth?.status !== 401 || adminAuth?.error !== "密码不正确") {
+    throw new Error("/api/auth/login did not execute a compatible administrator password check");
+  }
+}
+
+export function validateReleaseEvidence({ health, status, chat, adminAuth }, releaseIdValue) {
+  const evidence = validateServiceEvidence({ health, status, chat }, releaseIdValue);
+  validateAdminAuth(adminAuth);
+  return { ...evidence, adminKdfCompatible: true };
 }
 
 async function smokeOnce(origin, releaseId) {
@@ -195,10 +211,14 @@ async function smokeOnce(origin, releaseId) {
     headers: { "Content-Type": "application/json", Origin: "https://invalid.example" },
     body: JSON.stringify({ messages: [{ role: "user", content: "研究方向是什么？" }], topic: "research" }),
   });
-  if (hostileResponse.status !== 403) throw new Error("/api/chat accepted a hostile Origin");
+  if (hostileResponse.status !== 403) {
+    throw Object.assign(new Error("/api/chat accepted a hostile Origin"), { status: hostileResponse.status });
+  }
 
   const missingResponse = await request(origin, "/api/release-smoke-missing");
-  if (missingResponse.status !== 404) throw new Error("Unknown API route did not return 404");
+  if (missingResponse.status !== 404) {
+    throw Object.assign(new Error("Unknown API route did not return 404"), { status: missingResponse.status });
+  }
 
   const chatResponse = await request(origin, "/api/chat", {
     method: "POST",
@@ -213,29 +233,181 @@ async function smokeOnce(origin, releaseId) {
   }
   apiHeaders(chatResponse, "/api/chat");
   const chat = await json(chatResponse, "/api/chat");
-  return validateReleaseEvidence({ health, status, chat }, releaseId);
+
+  return validateServiceEvidence({ health, status, chat }, releaseId);
 }
 
-export async function smokeCloudflare(originValue, { attempts = 12, releaseId } = {}) {
-  const origin = exactOrigin(originValue);
-  const expectedReleaseId = expectedRelease(releaseId);
+async function verifyAdminPasswordRuntime(origin) {
+  // Run this once, outside the release retry loop. A high-entropy wrong
+  // password forces the production runtime to execute the stored KDF without
+  // creating a session or exposing a secret. This catches platform-
+  // incompatible records without exhausting the login rate limit.
+  const diagnosticPassword = `release-smoke-${randomBytes(24).toString("base64url")}`;
+  const authResponse = await request(origin, "/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ password: diagnosticPassword }),
+  });
+  if (authResponse.status !== 401 && isTransientSmokeStatus(authResponse.status)) {
+    throw Object.assign(new Error("Administrator KDF check returned a transient response"), {
+      status: authResponse.status,
+      retryable: true,
+    });
+  }
+  apiHeaders(authResponse, "/api/auth/login");
+  const authPayload = await json(authResponse, "/api/auth/login");
+  const adminAuth = { status: authResponse.status, error: authPayload?.error };
+  if (adminAuth.status !== 401 || adminAuth.error !== "密码不正确") {
+    throw Object.assign(
+      new Error("/api/auth/login did not complete the administrator password check"),
+      { status: authResponse.status, retryable: isTransientSmokeStatus(authResponse.status) },
+    );
+  }
+  validateAdminAuth(adminAuth);
+}
+
+async function runAdminProbe(origin, verifyAdmin, { attempts = 2, sleepImpl = sleep } = {}) {
   let lastError;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      return await smokeOnce(origin, expectedReleaseId);
+      await verifyAdmin(origin);
+      return;
     } catch (error) {
       lastError = error;
-      const transient = isTransientSmokeStatus(error?.status);
+      const transient = error?.retryable === true || isTransientSmokeStatus(error?.status);
       if (!transient || attempt === attempts) break;
-      await sleep(Math.min(10_000, attempt * 1_500));
+      await sleepImpl(attempt * 1_500);
     }
   }
-  throw lastError || new Error("Cloudflare smoke check failed");
+  throw lastError || new Error("Administrator smoke check failed");
+}
+
+async function revokeSmokeSession(origin, token, { attempts = 3, sleepImpl = sleep } = {}) {
+  let lastError;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      const response = await request(origin, "/api/auth/logout", {
+        method: "POST",
+        headers: { Origin: origin, Cookie: `__Host-ma-session=${token}` },
+      });
+      if (response.status !== 200 && isTransientSmokeStatus(response.status)) {
+        throw Object.assign(new Error("Administrator logout returned a transient response"), {
+          status: response.status,
+          retryable: true,
+        });
+      }
+      apiHeaders(response, "/api/auth/logout");
+      const payload = await json(response, "/api/auth/logout");
+      if (response.status !== 200 || payload?.saved !== true) {
+        throw Object.assign(new Error("Administrator smoke session was not revoked"), {
+          status: response.status,
+          retryable: false,
+        });
+      }
+      return;
+    } catch (error) {
+      lastError = error;
+      const transient = error?.retryable === true || isTransientSmokeStatus(error?.status);
+      if (!transient || attempt === attempts) break;
+      await sleepImpl(attempt * 1_500);
+    }
+  }
+  throw lastError || new Error("Administrator smoke session was not revoked");
+}
+
+async function verifySavedAdminPasswordRuntime(origin, password, { logoutAttempts = 3, sleepImpl = sleep } = {}) {
+  const loginResponse = await request(origin, "/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ password }),
+  });
+  const cookie = loginResponse.headers.get("set-cookie") || "";
+  const tokenMatch = /^__Host-ma-session=([a-f0-9]{64})(?:;|$)/u.exec(cookie);
+  const validCookie = /^__Host-ma-session=[a-f0-9]{64}; Path=\/; Secure; HttpOnly; SameSite=Strict; Max-Age=[1-9][0-9]*$/u.test(cookie);
+  try {
+    if (loginResponse.status !== 200 && isTransientSmokeStatus(loginResponse.status)) {
+      throw Object.assign(new Error("Administrator login returned a transient response"), {
+        status: loginResponse.status,
+        retryable: false,
+      });
+    }
+    apiHeaders(loginResponse, "/api/auth/login");
+    const login = await json(loginResponse, "/api/auth/login");
+    if (loginResponse.status !== 200 || login?.signedIn !== true) {
+      throw Object.assign(new Error("The saved administrator password was not accepted"), {
+        status: loginResponse.status,
+        retryable: false,
+      });
+    }
+    if (!validCookie) throw new Error("Administrator login did not return the expected session cookie");
+  } finally {
+    if (tokenMatch) {
+      await revokeSmokeSession(origin, tokenMatch[1], { attempts: logoutAttempts, sleepImpl });
+    }
+  }
+}
+
+export async function smokeAdminAuthentication(originValue, {
+  verifyAdmin = verifyAdminPasswordRuntime,
+  attempts = 2,
+  sleepImpl = sleep,
+} = {}) {
+  const origin = exactOrigin(originValue);
+  await runAdminProbe(origin, verifyAdmin, { attempts, sleepImpl });
+  return { adminKdfCompatible: true };
+}
+
+export async function smokeSavedAdminAuthentication(originValue, {
+  environment = process.env,
+  verifyAdmin = verifySavedAdminPasswordRuntime,
+  logoutAttempts = 3,
+  sleepImpl = sleep,
+} = {}) {
+  const origin = exactOrigin(originValue);
+  const password = environment.CHAT_ADMIN_PASSWORD;
+  delete environment.CHAT_ADMIN_PASSWORD;
+  if (typeof password !== "string" || password.length < 12 || password.length > 256) {
+    throw new Error("A valid saved administrator password is required");
+  }
+  await verifyAdmin(origin, password, { logoutAttempts, sleepImpl });
+  return { adminPasswordVerified: true, smokeSessionRevoked: true };
+}
+
+export async function smokeCloudflare(originValue, {
+  attempts = 12,
+  releaseId,
+  smokeAttempt = smokeOnce,
+  verifyAdmin = verifyAdminPasswordRuntime,
+  sleepImpl = sleep,
+} = {}) {
+  const origin = exactOrigin(originValue);
+  const expectedReleaseId = expectedRelease(releaseId);
+  let lastError;
+  let evidence;
+  for (let attempt = 1; attempt <= attempts; attempt += 1) {
+    try {
+      evidence = await smokeAttempt(origin, expectedReleaseId);
+      break;
+    } catch (error) {
+      lastError = error;
+      const transient = error?.retryable === true || isTransientSmokeStatus(error?.status);
+      if (!transient || attempt === attempts) break;
+      await sleepImpl(Math.min(10_000, attempt * 1_500));
+    }
+  }
+  if (!evidence) throw lastError || new Error("Cloudflare smoke check failed");
+  await runAdminProbe(origin, verifyAdmin, { sleepImpl });
+  return { ...evidence, adminKdfCompatible: true };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const origin = process.argv[2];
-  smokeCloudflare(origin, { releaseId: process.env.CHAT_RELEASE_ID })
+  const operation = process.argv[3] === "--admin-auth-only"
+    ? smokeAdminAuthentication(origin)
+    : process.argv[3] === "--admin-saved-secret"
+      ? smokeSavedAdminAuthentication(origin)
+      : smokeCloudflare(origin, { releaseId: process.env.CHAT_RELEASE_ID });
+  operation
     .then((result) => process.stdout.write(`${JSON.stringify(result)}\n`))
     .catch((error) => {
       process.stderr.write(`${error instanceof Error ? error.message : "Cloudflare smoke check failed"}\n`);
