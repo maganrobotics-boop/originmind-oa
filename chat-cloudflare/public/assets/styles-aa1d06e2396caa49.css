@@ -959,8 +959,8 @@ textarea {
 
 .site-footer {
   display: flex;
-  flex: 0 0 48px;
-  min-height: 48px;
+  flex: 0 0 calc(48px + env(safe-area-inset-bottom));
+  min-height: calc(48px + env(safe-area-inset-bottom));
   align-items: center;
   justify-content: center;
   gap: 24px;
@@ -1769,6 +1769,14 @@ textarea {
     box-shadow: none;
   }
 
+  .welcome-shell {
+    place-items: start center;
+  }
+
+  .welcome {
+    margin: 0 auto;
+  }
+
   .admin-shell {
     padding-top: 24px;
   }
@@ -1857,12 +1865,7 @@ textarea {
     display: none;
   }
 
-  .welcome-shell {
-    place-items: start center;
-  }
-
   .welcome {
-    margin: 0 auto;
     padding: 28px 19px 24px;
   }
 
@@ -1943,9 +1946,9 @@ textarea {
   }
 
   .site-footer {
-    flex-basis: 48px;
+    flex-basis: calc(48px + env(safe-area-inset-bottom));
     gap: 18px;
-    min-height: 48px;
+    min-height: calc(48px + env(safe-area-inset-bottom));
     padding-right: max(12px, env(safe-area-inset-right));
     padding-left: max(12px, env(safe-area-inset-left));
     font-size: 12px;
