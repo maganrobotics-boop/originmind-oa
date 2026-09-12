@@ -6,6 +6,7 @@ import {
   isTransientSmokeStatus,
   smokeAdminAuthentication,
   smokeCloudflare,
+  smokeSavedAdminAuthentication,
   validateReleaseEvidence,
 } from "./smoke-cloudflare.mjs";
 
@@ -33,7 +34,7 @@ test("release evidence accepts only the exact OA-backed Chat release", () => {
     provider: "workers-ai",
     model: "test-model",
     sources: 1,
-    adminLoginReady: true,
+    adminKdfCompatible: true,
   });
 });
 
@@ -74,10 +75,12 @@ test("release evidence requires a completed administrator password check", () =>
 
 
 test("edge propagation responses are retried without retrying authorization failures", () => {
-  for (const status of [undefined, 404, 408, 421, 425, 429, 500, 502, 503, 504]) {
+  for (const status of [404, 408, 421, 425, 500, 502, 503, 504]) {
     assert.equal(isTransientSmokeStatus(status), true);
   }
-  for (const status of [400, 401, 403, 405]) assert.equal(isTransientSmokeStatus(status), false);
+  for (const status of [undefined, 400, 401, 403, 405, 429]) {
+    assert.equal(isTransientSmokeStatus(status), false);
+  }
 });
 
 test("administrator authentication runs once after retryable release checks settle", async () => {
@@ -111,7 +114,7 @@ test("administrator authentication runs once after retryable release checks sett
   assert.equal(smokeCalls, 3);
   assert.equal(authCalls, 1);
   assert.deepEqual(sleeps, [1_500, 3_000]);
-  assert.deepEqual(result, { ...serviceEvidence, adminLoginReady: true });
+  assert.deepEqual(result, { ...serviceEvidence, adminKdfCompatible: true });
 });
 
 test("the administrator-only production smoke validates the exact origin once", async () => {
@@ -120,11 +123,53 @@ test("the administrator-only production smoke validates the exact origin once", 
     verifyAdmin: async (origin) => origins.push(origin),
   });
   assert.deepEqual(origins, ["https://chat.omindos.ai"]);
-  assert.deepEqual(result, { adminLoginReady: true });
+  assert.deepEqual(result, { adminKdfCompatible: true });
   await assert.rejects(
     smokeAdminAuthentication("http://chat.omindos.ai", { verifyAdmin: async () => {} }),
     /exact HTTPS origin/u,
   );
+});
+
+test("administrator probes retry only transient failures and never retry a 429", async () => {
+  let calls = 0;
+  const sleeps = [];
+  await smokeAdminAuthentication("https://chat.omindos.ai", {
+    verifyAdmin: async () => {
+      calls += 1;
+      if (calls === 1) throw Object.assign(new Error("edge pending"), { status: 503 });
+    },
+    sleepImpl: async (milliseconds) => sleeps.push(milliseconds),
+  });
+  assert.equal(calls, 2);
+  assert.deepEqual(sleeps, [1_500]);
+
+  let rateLimitedCalls = 0;
+  await assert.rejects(
+    smokeAdminAuthentication("https://chat.omindos.ai", {
+      verifyAdmin: async () => {
+        rateLimitedCalls += 1;
+        throw Object.assign(new Error("rate limited"), { status: 429 });
+      },
+      sleepImpl: async () => assert.fail("429 must not sleep or retry"),
+    }),
+    /rate limited/u,
+  );
+  assert.equal(rateLimitedCalls, 1);
+});
+
+test("the saved administrator password is consumed, verified, and not returned", async () => {
+  const password = "saved-administrator-password";
+  const environment = { CHAT_ADMIN_PASSWORD: password };
+  const calls = [];
+  const result = await smokeSavedAdminAuthentication("https://chat.omindos.ai", {
+    environment,
+    attempts: 1,
+    verifyAdmin: async (origin, suppliedPassword) => calls.push({ origin, suppliedPassword }),
+  });
+  assert.deepEqual(calls, [{ origin: "https://chat.omindos.ai", suppliedPassword: password }]);
+  assert.equal("CHAT_ADMIN_PASSWORD" in environment, false);
+  assert.deepEqual(result, { adminPasswordVerified: true, smokeSessionRevoked: true });
+  assert.equal(JSON.stringify(result).includes(password), false);
 });
 
 test("frontend smoke accepts one deterministic content-hashed script and stylesheet", () => {
