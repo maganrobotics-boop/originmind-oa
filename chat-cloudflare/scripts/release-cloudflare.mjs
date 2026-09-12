@@ -108,6 +108,7 @@ try {
     accountId: environment.accountId,
     adminEmail: environment.adminEmail,
     databaseId: database.id,
+    oaWorkerName: environment.oaWorkerName,
     configPath: stagingConfigPath,
     origin: stagingOrigin,
     production: false,
@@ -117,6 +118,7 @@ try {
     accountId: environment.accountId,
     adminEmail: environment.adminEmail,
     databaseId: database.id,
+    oaWorkerName: environment.oaWorkerName,
     configPath: productionConfigPath,
     origin: PRODUCTION_ORIGIN,
     production: true,
@@ -133,6 +135,8 @@ try {
     stagingOrigin,
     productionOrigin: PRODUCTION_ORIGIN,
     hostname: HOSTNAME,
+    oaServiceBinding: "OA_SERVICE",
+    oaWorker: environment.oaWorkerName,
     releaseId: environment.releaseId,
   });
 
