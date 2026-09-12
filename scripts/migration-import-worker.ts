@@ -26,6 +26,7 @@ interface Env {
   DB: D1Database;
   MIGRATION_IMPORT_TOKEN: string;
   MIGRATION_IMPORT_AUTH_KEY: string;
+  MIGRATION_IMPORT_ADMIN_EMAILS: string;
   MIGRATION_IMPORT_EXPECTED_ORIGIN: string;
   MIGRATION_IMPORT_EXPECTED_SCHEMA_SHA256: string;
   MIGRATION_IMPORT_EXPECTED_FREEZE_ID: string;
@@ -113,6 +114,10 @@ function buildInsertStatements(db: D1Database, payload: MigrationPayload, guardK
 function safeConfiguration(env: Env) {
   return typeof env.MIGRATION_IMPORT_TOKEN === "string" && /^[A-Za-z0-9_-]{43}$/u.test(env.MIGRATION_IMPORT_TOKEN)
     && typeof env.MIGRATION_IMPORT_AUTH_KEY === "string" && /^[A-Za-z0-9_-]{43}$/u.test(env.MIGRATION_IMPORT_AUTH_KEY)
+    && typeof env.MIGRATION_IMPORT_ADMIN_EMAILS === "string"
+    && env.MIGRATION_IMPORT_ADMIN_EMAILS.length > 0
+    && env.MIGRATION_IMPORT_ADMIN_EMAILS.length <= 4_096
+    && !/[\s|]/u.test(env.MIGRATION_IMPORT_ADMIN_EMAILS)
     && typeof env.MIGRATION_IMPORT_EXPECTED_SCHEMA_SHA256 === "string" && /^[a-f0-9]{64}$/u.test(env.MIGRATION_IMPORT_EXPECTED_SCHEMA_SHA256)
     && typeof env.MIGRATION_IMPORT_EXPECTED_FREEZE_ID === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(env.MIGRATION_IMPORT_EXPECTED_FREEZE_ID)
     && typeof env.MIGRATION_IMPORT_READY_PROOF === "string" && /^[A-Za-z0-9_-]{43}$/u.test(env.MIGRATION_IMPORT_READY_PROOF)
@@ -170,7 +175,9 @@ async function importPayload(request: Request, env: Env) {
     expectedSourceOrigin: env.MIGRATION_IMPORT_EXPECTED_ORIGIN,
   });
   if (payload.freezeId !== env.MIGRATION_IMPORT_EXPECTED_FREEZE_ID.toLowerCase()) throw new Error("Migration freeze generation does not match the selected attempt");
-  await assertMigrationPayloadRelationships(payload);
+  await assertMigrationPayloadRelationships(payload, {
+    administratorEmails: env.MIGRATION_IMPORT_ADMIN_EMAILS.split(","),
+  });
 
   const preflight = await env.DB.batch([
     env.DB.prepare(migrationLedgerSelectSql()),
