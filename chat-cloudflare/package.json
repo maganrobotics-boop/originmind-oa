@@ -1,0 +1,17 @@
+{
+  "name": "arts-robotics-chat-cloudflare",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test",
+    "check": "node --check src/index.mjs && node --test",
+    "check:wrangler": "wrangler deploy --dry-run --strict --config wrangler.example.jsonc --outdir .wrangler-build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "wrangler": "4.131.0"
+  }
+}
