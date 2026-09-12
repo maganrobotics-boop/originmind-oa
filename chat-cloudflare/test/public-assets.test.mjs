@@ -119,6 +119,30 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.match(script, /\bconst\s+HEADER_NAME\s*=\s*["']ARTS Robotics AI Assistant["']\s*;/u);
   assert.ok(script.includes("机器人自主自动与操作实验室"));
   assert.ok(script.includes("OriginMind x ARTS Robotics"));
+  for (const section of [
+    "技术成果与产业化",
+    "科研合作与学术交流",
+    "源灵智能科技有限公司",
+    "智能无人系统创新协会",
+  ]) {
+    assert.ok(script.includes(section), section);
+  }
+  for (const question of [
+    "从双臂灵巧操作到 3C 精密装配，团队有哪些可落地技术成果？",
+    "试管抓取如何实现随机姿态 96.6% 成功率与 38.4% 效率提升？",
+    "ARTS Robotics 与哪些国内外高校和科研机构开展合作？",
+    "马淦团队有哪些代表性的国际科研经历与合作成果？",
+    "源灵智能如何用 OmindOS 让机器人理解任务、自主行动？",
+    "源灵智能能为机器人厂商和场景集成商提供哪些合作方案？",
+    "智能无人系统创新协会由谁指导，可以连接哪些机器人研究方向？",
+    "协会指导教师所在实验室有哪些公开的竞赛与创新成果？",
+  ]) {
+    assert.ok(script.includes(question), question);
+  }
+  assert.match(script, /id:\s*["']technology["'][\s\S]*?requestTopic:\s*["']research["']/u);
+  assert.match(script, /id:\s*["']academic["'][\s\S]*?requestTopic:\s*["']research["']/u);
+  assert.match(script, /id:\s*["']company["'][\s\S]*?requestTopic:\s*["']business["']/u);
+  assert.match(script, /id:\s*["']association["'][\s\S]*?requestTopic:\s*["']student["']/u);
   assert.match(script, /\bpublished\s*:\s*0\b/u);
   assert.ok(script.includes("资料已保存为草稿，不会用于公开回答；请在 OA 中提交审核。"));
   assert.ok(script.includes("对外知识必须在 OA 审核为“公开”后由系统接入。"));
