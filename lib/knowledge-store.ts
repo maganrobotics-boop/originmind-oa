@@ -372,7 +372,7 @@ export async function getKnowledgeItemDetail(id: string, actor: KnowledgeActor, 
   const item = await database.prepare(`${ITEM_WITH_REVISION_SELECT} WHERE i.id = ? AND ${guard.sql} LIMIT 1`)
     .bind(id, ...guard.values).first<KnowledgeItemWithRevisionRow>();
   if (!item) return null;
-  const isOwner = item.submitter_member_id === actor.memberId || normalizeEmail(item.submitter_email) === normalizeEmail(actor.email);
+  const isOwner = submitterIdentity(item, actor).exact;
   if (item.status !== "active" && !isOwner && !canReview) return null;
 
   if (!isOwner && !canReview) {
