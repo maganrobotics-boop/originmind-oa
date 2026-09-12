@@ -42,7 +42,10 @@ test("OA preflight sends the normalized token and records only safe success evid
   assert.equal(request.options.redirect, "manual");
   assert.equal(request.options.cache, "no-store");
   assert.equal(request.options.credentials, "omit");
+  assert.equal(request.options.headers.Accept, "application/json");
+  assert.equal(request.options.headers["Content-Type"], "application/json");
   assert.equal(request.options.headers["x-originmind-public-lab-ai-service-token"], token);
+  assert.ok(request.options.signal instanceof AbortSignal);
   assert.deepEqual(JSON.parse(request.options.body), { question: "请根据公开资料简要说明 ARTS Robotics 的机器人研究方向。" });
   assert.deepEqual(result, {
     format: "originmind-chat-oa-public-preflight-v1",
@@ -96,6 +99,18 @@ test("OA preflight distinguishes empty knowledge, invalid contracts, and network
   assert.equal(invalid.classification, "invalid_contract");
   assert.equal(invalid.httpStatus, 200);
 
+  const strictInvalid = await checkOaPublicRetrieve(token, {
+    clock: () => 3_000,
+    fetchImpl: async () => response(JSON.stringify({ chunks: [], extra: true })),
+  });
+  assert.equal(strictInvalid.classification, "invalid_contract");
+
+  const wrongMediaType = await checkOaPublicRetrieve(token, {
+    clock: () => 3_000,
+    fetchImpl: async () => response(JSON.stringify(validPayload), 200, "text/plain"),
+  });
+  assert.equal(wrongMediaType.classification, "invalid_contract");
+
   const oversized = await checkOaPublicRetrieve(token, {
     clock: () => 3_000,
     fetchImpl: async () => new Response("{}", {
@@ -107,6 +122,30 @@ test("OA preflight distinguishes empty knowledge, invalid contracts, and network
     }),
   });
   assert.equal(oversized.classification, "invalid_contract");
+
+  const streamedOversized = await checkOaPublicRetrieve(token, {
+    clock: () => 3_000,
+    fetchImpl: async () => new Response(new ReadableStream({
+      start(controller) {
+        controller.enqueue(new Uint8Array(16 * 1024));
+        controller.enqueue(new Uint8Array([1]));
+        controller.close();
+      },
+    }), {
+      status: 200,
+      headers: { "Content-Type": "application/json" },
+    }),
+  });
+  assert.equal(streamedOversized.classification, "invalid_contract");
+
+  const timeout = await checkOaPublicRetrieve(token, {
+    clock: () => 3_000,
+    fetchImpl: async () => {
+      throw Object.assign(new Error(`hostile-${token}`), { name: "TimeoutError" });
+    },
+  });
+  assert.equal(timeout.classification, "timeout");
+  assert.equal(JSON.stringify(timeout).includes(token), false);
 
   const network = await checkOaPublicRetrieve(token, {
     clock: () => 3_000,
