@@ -36,6 +36,26 @@ test("optional generated and administrator credentials may be absent", () => {
   assert.equal(environment.adminPassword, "");
 });
 
+test("service token trims only surrounding clipboard whitespace", () => {
+  const token = "A".repeat(43);
+  const environment = validateReleaseEnvironment(validEnvironment({
+    PUBLIC_LAB_AI_SERVICE_TOKEN: ` \n${token}\r\n`,
+  }));
+  assert.equal(environment.publicToken, token);
+  assert.throws(
+    () => validateReleaseEnvironment(validEnvironment({
+      PUBLIC_LAB_AI_SERVICE_TOKEN: `${"A".repeat(21)} ${"A".repeat(22)}`,
+    })),
+    /PUBLIC_LAB_AI_SERVICE_TOKEN is invalid/u,
+  );
+  assert.throws(
+    () => validateReleaseEnvironment(validEnvironment({
+      PUBLIC_LAB_AI_SERVICE_TOKEN: `${"A".repeat(42)}=`,
+    })),
+    /PUBLIC_LAB_AI_SERVICE_TOKEN is invalid/u,
+  );
+});
+
 test("generated Wrangler targets use explicit Worker-first static routing", () => {
   const staging = buildWranglerConfig({
     accountId,
