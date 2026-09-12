@@ -1,18 +1,43 @@
-# Frontend release provenance
+# Frontend source and release assets
 
-The original React/Vite source project was not present in the recovered Tencent
-release. The checked-in JavaScript and CSS are therefore reviewed production
-artifacts, protected by exact SHA-256 assertions in
-`test/public-assets.test.mjs`.
+The maintainable browser source is deliberately dependency-free and lives in:
 
-For this release, the reviewed JavaScript artifact was changed only to:
+- `frontend/index.html`
+- `frontend/app.js`
+- `frontend/styles.css`
 
-- use the `ARTS Robotics AI assistant` name and model-context tool name;
-- make Chat-local document submissions draft-only (`published: 0`);
-- remove the direct-publication checkbox and all wording that claims Chat can
-  publish outside OA review; and
-- direct users to OA for public-knowledge approval.
+`frontend/index.html` contains the placeholders `__APP_ASSET__` and
+`__STYLE_ASSET__` exactly once. `npm run build:frontend` copies the JavaScript
+and CSS bytes to `public/assets/`, names each file with the first 16 hexadecimal
+characters of its SHA-256 digest, replaces the placeholders in
+`public/index.html`, and removes stale generated `.js` and `.css` files. Other
+public assets are not removed.
 
-The backend independently enforces these controls. A future UI redesign should
-replace the artifact with a reconstructed source project and a reproducible
-frontend build.
+The generated files under `public/` are committed release inputs. Before a
+release, run:
+
+```sh
+npm run build:frontend
+npm run check
+```
+
+`npm run check:frontend` and the Cloudflare release preflight use
+`build-frontend.mjs --check`. Check mode performs no writes and fails if the
+shell, either hashed asset, or the generated JS/CSS allowlist differs from the
+current source.
+
+## Security and application contract
+
+- Browser API requests remain root-relative and same-origin.
+- `/` is the public assistant and exact `/manage` is the administrator view.
+- The public name is exactly `ARTS Robotics AI assistant`.
+- Chat-local document writes are always drafts with `published: 0`. Only the OA
+  approved-public endpoint can provide public model knowledge.
+- Untrusted answers, source metadata, inquiries, and transcripts are rendered
+  as text. The frontend does not use `innerHTML`, dynamic code execution,
+  remote scripts, or remote stylesheets.
+- JavaScript and CSS filenames are content-addressed, so `/assets/*` retains
+  the one-year immutable cache policy. The HTML shell remains non-cacheable.
+
+The backend independently enforces authentication, request validation, draft
+visibility, OA-only public retrieval, rate limits, and model-output safety.

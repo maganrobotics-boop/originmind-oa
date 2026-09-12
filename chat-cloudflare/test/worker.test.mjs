@@ -66,11 +66,11 @@ async function responseJson(response) {
   return { status: response.status, body: await response.json() };
 }
 
-async function storeVerifiedBailianConfig(env, apiKey = "test-key-not-a-real-secret") {
+async function storeVerifiedBailianConfig(env, credential = "test-key-not-a-real-secret") {
   const value = {
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
     model: "qwen-plus",
-    encryptedKey: await encryptSecret(apiKey, env.APP_ENCRYPTION_KEY),
+    encryptedKey: await encryptSecret(credential, env.APP_ENCRYPTION_KEY),
     verifiedAt: "2026-09-11T00:00:00.000Z",
   };
   await env.DB.prepare("INSERT INTO settings(id,value) VALUES (?,?)").bind("model", JSON.stringify(value)).run();

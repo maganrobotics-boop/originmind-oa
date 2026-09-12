@@ -5,6 +5,8 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 
+import { buildFrontend } from "./build-frontend.mjs";
+
 export const WORKER_NAME = "originmind-public-chat-production";
 export const DATABASE_NAME = "originmind-public-chat-production";
 export const OA_WORKER_NAME = "originmind-internal-oa-staging";
@@ -136,12 +138,17 @@ export async function verifySourceTree() {
     "package.json",
     "src/index.mjs",
     "migrations/0001_initial.sql",
+    "frontend/index.html",
+    "frontend/app.js",
+    "frontend/styles.css",
+    "public/_headers",
     "public/index.html",
   ];
   for (const item of required) {
     const path = resolve(CHAT_ROOT, item);
     if (!(await pathIsRegularFile(path))) throw new Error(`Required Chat release file is missing: ${item}`);
   }
+  await buildFrontend({ check: true });
   if (!(await pathIsRegularFile(WRANGLER))) throw new Error("Locked Wrangler executable is missing");
 }
 
