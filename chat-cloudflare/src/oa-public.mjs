@@ -128,7 +128,7 @@ export async function retrieveOa(question, context) {
   }
   if (normalized.length < 2) return { status: "unavailable", documents: [] };
   try {
-    const response = await context.runtime.fetch(OA_PUBLIC_RETRIEVE_URL, {
+    const init = {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -139,7 +139,11 @@ export async function retrieveOa(question, context) {
       cache: "no-store",
       credentials: "omit",
       signal: AbortSignal.timeout(TIMEOUT_MS),
-    });
+    };
+    const service = context.env.OA_SERVICE;
+    const response = typeof service?.fetch === "function"
+      ? await service.fetch(new Request(OA_PUBLIC_RETRIEVE_URL, init))
+      : await context.runtime.fetch(OA_PUBLIC_RETRIEVE_URL, init);
     const mediaType = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
     if (!response.ok || mediaType !== "application/json") return { status: "unavailable", documents: [] };
     const chunks = parseOaResult(await boundedJson(response));
