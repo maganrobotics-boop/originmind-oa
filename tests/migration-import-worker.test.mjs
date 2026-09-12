@@ -199,6 +199,7 @@ function environment(d1, payload) {
     DB: d1,
     MIGRATION_IMPORT_TOKEN: Buffer.alloc(32, 0x33).toString("base64url"),
     MIGRATION_IMPORT_AUTH_KEY: authKey,
+    MIGRATION_IMPORT_ADMIN_EMAILS: "admin@example.com",
     MIGRATION_IMPORT_EXPECTED_ORIGIN: "https://oa.example.test",
     MIGRATION_IMPORT_EXPECTED_SCHEMA_SHA256: payload.schemaSha256,
     MIGRATION_IMPORT_EXPECTED_FREEZE_ID: freezeId,
@@ -227,6 +228,24 @@ function targetCounts(database) {
     guards: database.prepare("SELECT COUNT(*) AS count FROM write_rate_buckets").get().count,
   };
 }
+
+test("importer readiness rejects missing, invalid, or duplicate administrator lists without database access", async () => {
+  const payload = await makePayload();
+  const target = createApplicationDatabase();
+  try {
+    const d1 = new TransactionalD1(target);
+    for (const administratorEmails of [undefined, "", "not-an-email", "admin@example.com,ADMIN@example.com"]) {
+      const env = environment(d1, payload);
+      if (administratorEmails === undefined) delete env.MIGRATION_IMPORT_ADMIN_EMAILS;
+      else env.MIGRATION_IMPORT_ADMIN_EMAILS = administratorEmails;
+      const response = await migrationWorker.fetch(new Request("http://127.0.0.1/ready"), env);
+      assert.equal(response.status, 503);
+      assert.equal(d1.queryCount, 0);
+    }
+  } finally {
+    target.close();
+  }
+});
 
 test("local importer commits, verifies, cleans its guard, and makes same-package replay read-only", async () => {
   const payload = await makePayload();
