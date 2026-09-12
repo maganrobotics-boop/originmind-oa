@@ -1,7 +1,7 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { accountProfiles, members } from "../../../db/schema";
-import { getAuthorizedUser, getReviewerDirectory, isNdaAdmittedMember, parseAccountProfile, parseMemberPermissions } from "../_lib/auth";
+import { getAuthorizedUser, getReviewerDirectory, isAdministrator, isNdaAdmittedMember, parseAccountProfile, parseMemberPermissions } from "../_lib/auth";
 import { memberDepartmentLabel } from "../../../lib/member-attributes";
 
 const ONLINE_WINDOW_MS = 5 * 60 * 1000;
@@ -44,17 +44,18 @@ export async function GET(request: Request) {
     ]);
     const profiles = new Map(profileRows.map((row) => [row.chatgptAccount, row]));
     const reviewerDirectory = await getReviewerDirectory({ ...authorized.user, accountUserId: authorized.accountUserId });
-    const owners = new Map<string, { email: string; displayName: string }>(reviewerDirectory
+    const owners = new Map<string, { email: string; displayName: string; isAdmin: boolean }>(reviewerDirectory
       .filter((reviewer) => reviewer.ndaCompleted && reviewer.permissions.includes("project_owner"))
-      .map((owner): [string, { email: string; displayName: string }] => [owner.email, { email: owner.email, displayName: owner.displayName }]));
+      .map((owner): [string, { email: string; displayName: string; isAdmin: boolean }] => [owner.email, { email: owner.email, displayName: owner.displayName, isAdmin: owner.isAdmin }]));
     const currentEmail = authorized.user.email.trim().toLowerCase();
-    if (!owners.has(currentEmail) && authorized.role === "project_owner") owners.set(currentEmail, { email: currentEmail, displayName: authorized.user.displayName });
+    if (!owners.has(currentEmail) && authorized.role === "project_owner") owners.set(currentEmail, { email: currentEmail, displayName: authorized.user.displayName, isAdmin: authorized.isAdmin });
     const people = new Map<string, {
       id: string;
       fullName: string;
       email: string;
       role: string;
       permissions: string[];
+      isAdmin: boolean;
       avatarDataUrl: string;
       profile: ReturnType<typeof parseAccountProfile>;
       lastSeenAt: string;
@@ -69,14 +70,14 @@ export async function GET(request: Request) {
       const profile = parseAccountProfile(profileRow?.profileJson);
       const permissions = parseMemberPermissions(row.role, row.permissionsJson);
       const lastSeenAt = profileRow?.lastSeenAt || row.lastSeenAt;
-      people.set(email, { id: row.id, fullName: owners.get(email)?.displayName || row.fullName, email, role: permissions.includes("project_owner") ? "project_owner" : permissions.includes("technical_advisor") ? "technical_advisor" : "member", permissions, avatarDataUrl: profileRow?.avatarDataUrl || "", profile: profileForViewer(profile, email === currentEmail, row.departmentCode), lastSeenAt, online: confidentialityCompleted && isOnline(lastSeenAt), ndaCompleted: confidentialityCompleted });
+      people.set(email, { id: row.id, fullName: owners.get(email)?.displayName || row.fullName, email, role: permissions.includes("project_owner") ? "project_owner" : permissions.includes("technical_advisor") ? "technical_advisor" : "member", permissions, isAdmin: isAdministrator(row.chatgptAccount, row.accountUserId ?? undefined), avatarDataUrl: profileRow?.avatarDataUrl || "", profile: profileForViewer(profile, email === currentEmail, row.departmentCode), lastSeenAt, online: confidentialityCompleted && isOnline(lastSeenAt), ndaCompleted: confidentialityCompleted });
     }
     for (const owner of owners.values()) {
       if (people.has(owner.email)) continue;
       const profileRow = profiles.get(owner.email);
       const profile = parseAccountProfile(profileRow?.profileJson);
       const lastSeenAt = profileRow?.lastSeenAt || "";
-      people.set(owner.email, { id: `account:${owner.email}`, fullName: owner.displayName, email: owner.email, role: "project_owner", permissions: ["technical_advisor", "project_owner"], avatarDataUrl: profileRow?.avatarDataUrl || "", profile: profileForViewer(profile, owner.email === currentEmail), lastSeenAt, online: isOnline(lastSeenAt), ndaCompleted: true });
+      people.set(owner.email, { id: `account:${owner.email}`, fullName: owner.displayName, email: owner.email, role: "project_owner", permissions: ["technical_advisor", "project_owner"], isAdmin: owner.isAdmin, avatarDataUrl: profileRow?.avatarDataUrl || "", profile: profileForViewer(profile, owner.email === currentEmail), lastSeenAt, online: isOnline(lastSeenAt), ndaCompleted: true });
     }
     return Response.json({ people: Array.from(people.values()).sort((left, right) => Number(right.online) - Number(left.online) || left.fullName.localeCompare(right.fullName, "zh-CN")), currentUserEmail: authorized.user.email });
   } catch {

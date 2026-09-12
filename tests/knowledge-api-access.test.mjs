@@ -224,7 +224,7 @@ test("退回等非批准动作不向 store 传入可见范围", async () => {
   assert.equal(globalThis[stateKey].reviewCalls[0].publicConfirmation, undefined);
 });
 
-test("普通成员不能审核，项目管理员也不能审核自己的投稿", async () => {
+test("普通成员和项目负责人不能自审，系统管理员可以批准自己的投稿", async () => {
   globalThis[stateKey].authorized = authorizedActor({
     user: { email: "member@example.com", displayName: "普通成员", authProvider: "chatgpt" },
     role: "member",
@@ -241,6 +241,42 @@ test("普通成员不能审核，项目管理员也不能审核自己的投稿",
   const selfResponse = await detailRoute.PATCH(patch({ action: "approve", mutationRevision: "item-mutation-1", visibility: "internal" }), params);
   assert.equal(selfResponse.status, 403);
   assert.match((await selfResponse.json()).error, /不能审核自己/u);
+  assert.equal(globalThis[stateKey].reviewCalls.length, 0);
+
+  globalThis[stateKey].authorized = authorizedActor({ isAdmin: true });
+  const adminSelfResponse = await detailRoute.PATCH(patch({ action: "approve", mutationRevision: "item-mutation-1", visibility: "internal" }), params);
+  assert.equal(adminSelfResponse.status, 200);
+  assert.equal(globalThis[stateKey].reviewCalls.length, 1);
+  assert.equal(globalThis[stateKey].reviewCalls[0].actor.isAdmin, true);
+
+  const adminSelfReturn = await detailRoute.PATCH(patch({ action: "return", mutationRevision: "item-mutation-1", note: "自行退回" }), params);
+  assert.equal(adminSelfReturn.status, 403);
+  assert.match((await adminSelfReturn.json()).error, /只能批准自己的知识或调整可见范围/u);
+  assert.equal(globalThis[stateKey].reviewCalls.length, 1);
+});
+
+test("重新提交要求成员 ID 与邮箱同时匹配投稿人", async () => {
+  const body = {
+    action: "resubmit",
+    mutationRevision: "item-mutation-1",
+    title: "补充后的知识标题",
+    category: "安全规范",
+    content: "这是补充后且长度足够的知识正文内容。",
+  };
+
+  globalThis[stateKey].existing = existingItem({
+    status: "returned",
+    submitter_member_id: "member-review",
+    submitter_email: "other@example.com",
+  });
+  assert.equal((await detailRoute.PATCH(patch(body), params)).status, 404);
+
+  globalThis[stateKey].existing = existingItem({
+    status: "returned",
+    submitter_member_id: "member-other",
+    submitter_email: "review@example.com",
+  });
+  assert.equal((await detailRoute.PATCH(patch(body), params)).status, 404);
   assert.equal(globalThis[stateKey].reviewCalls.length, 0);
 });
 
@@ -343,4 +379,13 @@ test("范围调整保留并发、审核权限和禁止自我管理保护", async
     visibility: "internal",
   }), params)).status, 403);
   assert.equal(globalThis[stateKey].visibilityCalls.length, 0);
+
+  globalThis[stateKey].authorized = authorizedActor({ isAdmin: true });
+  assert.equal((await detailRoute.PATCH(patch({
+    action: "set_visibility",
+    mutationRevision: "item-mutation-1",
+    visibility: "internal",
+  }), params)).status, 200);
+  assert.equal(globalThis[stateKey].visibilityCalls.length, 1);
+  assert.equal(globalThis[stateKey].visibilityCalls[0].actor.isAdmin, true);
 });

@@ -157,6 +157,15 @@ test("知识公开范围与公开确认必须精确匹配", () => {
   }
 });
 
+test("系统管理员事件审计标记不会突破审核意见存储上限", () => {
+  const note = "审".repeat(policy.MAX_KNOWLEDGE_REVIEW_NOTE_LENGTH);
+  const audited = policy.knowledgeAdminSelfAuditNote(note);
+  assert.equal(audited.length, policy.MAX_KNOWLEDGE_REVIEW_NOTE_LENGTH);
+  assert.equal(audited.startsWith(`${policy.KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER} `), true);
+  assert.equal(policy.isKnowledgeAdminSelfAuditNote(audited), true);
+  assert.equal(policy.knowledgeAdminSelfAuditNote(""), policy.KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER);
+});
+
 test("投稿内容哈希覆盖来源和正文且稳定", async () => {
   const first = await policy.hashKnowledgeSubmission(submission());
   const repeated = await policy.hashKnowledgeSubmission(submission());

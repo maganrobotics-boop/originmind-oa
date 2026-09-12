@@ -225,6 +225,15 @@ test("投稿、审核、检索和下架形成完整且有审计的知识生命�
   assert.equal("contentHash" in publicDetail.revisions[0], false);
   assert.equal("submitterMemberId" in publicDetail.item, false);
 
+  for (const partialIdentity of [
+    { ...actor("submitter"), email: "other@example.com" },
+    { ...reader, email: "submit@example.com" },
+  ]) {
+    const partialDetail = await store.getKnowledgeItemDetail(created.id, partialIdentity, false);
+    assert.equal("submitterMemberId" in partialDetail.item, false);
+    assert.deepEqual(partialDetail.events, []);
+  }
+
   globalThis[stateKey].sqlite.prepare("UPDATE members SET status = 'departed' WHERE id = 'member-reader'").run();
   assert.deepEqual(await store.listKnowledgeItems("all", reader, false), []);
   assert.equal(await store.getKnowledgeItemDetail(created.id, reader, false), null);
@@ -239,6 +248,51 @@ test("投稿、审核、检索和下架形成完整且有审计的知识生命�
 
   const events = globalThis[stateKey].sqlite.prepare("SELECT action FROM knowledge_events ORDER BY created_at, rowid").all().map((row) => row.action);
   assert.deepEqual(events, ["submitted", "approved_internal", "revoked"]);
+});
+
+test("系统管理员可以批准并调整自己的知识，但不能自行退回、拒绝或撤销", async () => {
+  const draft = submission({ title: "系统管理员本人投稿样例" });
+  const created = await store.createKnowledgeItem(actor("submitter"), draft, await policy.hashKnowledgeSubmission(draft));
+  const pending = await store.findKnowledgeItem(created.id, actor("submitter"));
+  const projectOwnerSelf = { ...actor("submitter"), configuredReviewer: true };
+
+  assert.deepEqual(await store.listKnowledgeItems("review", projectOwnerSelf, true), []);
+  assert.equal(await store.countPendingKnowledgeItems(projectOwnerSelf), 0);
+  assert.equal(await store.reviewKnowledgeItem(pending, projectOwnerSelf, "approve", "", "internal"), null);
+
+  const adminSelf = { ...actor("submitter"), isAdmin: true };
+  const reviewQueue = await store.listKnowledgeItems("review", adminSelf, true);
+  assert.equal(reviewQueue.length, 1);
+  assert.equal(reviewQueue[0].canReview, true);
+  assert.equal(reviewQueue[0].canReturn, false);
+  assert.equal(reviewQueue[0].canReject, false);
+  assert.equal(await store.countPendingKnowledgeItems(adminSelf), 1);
+
+  assert.equal(await store.reviewKnowledgeItem(pending, adminSelf, "return", "自行退回"), null);
+  assert.equal(await store.reviewKnowledgeItem(pending, adminSelf, "reject", "自行拒绝"), null);
+  const approved = await store.reviewKnowledgeItem(pending, adminSelf, "approve", "确认内容准确", "internal");
+  assert.equal(approved.status, "active");
+  assert.equal(approved.reviewNote, "确认内容准确");
+
+  const managed = await store.listKnowledgeItems("all", adminSelf, true);
+  assert.equal(managed[0].canSetVisibility, true);
+  assert.equal(managed[0].canRevoke, false);
+  const active = await store.findKnowledgeItem(created.id, adminSelf, true);
+  const published = await store.setKnowledgeItemVisibility(active, adminSelf, "public", policy.PUBLIC_KNOWLEDGE_CONFIRMATION);
+  assert.equal(published.visibility, "public");
+
+  const publishedCurrent = await store.findKnowledgeItem(created.id, adminSelf, true);
+  assert.equal(await store.reviewKnowledgeItem(publishedCurrent, adminSelf, "revoke", "本人不能自行撤销"), null);
+
+  const events = globalThis[stateKey].sqlite
+    .prepare("SELECT action, note FROM knowledge_events ORDER BY created_at, rowid")
+    .all()
+    .map((row) => ({ action: row.action, note: row.note }));
+  assert.deepEqual(events, [
+    { action: "submitted", note: "" },
+    { action: "approved_internal", note: policy.knowledgeAdminSelfAuditNote("确认内容准确") },
+    { action: "visibility_changed_public", note: policy.knowledgeAdminSelfAuditNote("") },
+  ]);
 });
 
 test("审核必须明确选择内部或公开，公开知识才进入对外检索", async () => {

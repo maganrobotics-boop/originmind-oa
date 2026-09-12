@@ -44,6 +44,30 @@ test("keeps registration and sidebar branding text-only", async () => {
   );
 });
 
+test("shows the system administrator role consistently across account and collaboration views", async () => {
+  const [pageSource, peopleRouteSource, directMessagesSource] = await Promise.all([
+    readFile(path.join(root, "app/page.tsx"), "utf8"),
+    readFile(path.join(root, "app/api/people/route.ts"), "utf8"),
+    readFile(path.join(root, "app/api/direct-messages/route.ts"), "utf8"),
+  ]);
+
+  assert.match(pageSource, /if \(isAdmin\) return "系统管理员"/u);
+  assert.match(pageSource, /session\.isAdmin \? "系统管理员待办"/u);
+  assert.match(pageSource, /session\.isAdmin \? "你已具备系统管理员角色，必须先完成负责人专用承诺书。"/u);
+  assert.match(pageSource, /session\.isAdmin \? "原成员保密协议仍保留；由于你已成为系统管理员，需另行签署《项目负责人保密承诺书》。"/u);
+  assert.match(pageSource, /className="sidebar-user-role">\{sessionRoleLabel\(currentRole, isAdmin\)\}/u);
+  assert.match(pageSource, /<span>系统角色<\/span><strong>\{sessionRoleLabel\(currentRole, isAdmin\)\}<\/strong>/u);
+  assert.match(pageSource, /if \(person\.isAdmin\) return "系统管理员"/u);
+  assert.match(pageSource, /person\.isAdmin \|\| person\.permissions\.includes\("project_owner"\)/u);
+  assert.match(pageSource, /isAdmin: summary\.peer\.isAdmin === true/u);
+  assert.match(pageSource, /currentRoleLabel=\{sessionRoleLabel\(currentRole, isAdmin\)\}/u);
+  assert.match(pageSource, /<ChatHub currentUser=\{session\.user\} currentRole=\{session\.role\} isAdmin=\{session\.isAdmin\}/u);
+  assert.match(peopleRouteSource, /isAdmin: isAdministrator\(row\.chatgptAccount, row\.accountUserId \?\? undefined\)/u);
+  assert.match(peopleRouteSource, /isAdmin: owner\.isAdmin/u);
+  assert.match(directMessagesSource, /isAdmin: eligibleReviewers\.get\(peerEmail\)\?\.isAdmin === true/u);
+  assert.match(directMessagesSource, /isAdmin: owner\.isAdmin/u);
+});
+
 test("keeps the internal laboratory AI discoverable only inside the admitted OA dashboard", async () => {
   const pageSource = await readFile(path.join(root, "app/page.tsx"), "utf8");
 

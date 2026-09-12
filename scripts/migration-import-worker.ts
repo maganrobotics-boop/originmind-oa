@@ -15,6 +15,7 @@ import {
   type MigrationPayload,
 } from "../lib/migration-import";
 import {
+  migrationAdministratorEmails,
   migrationImportD1QueryCount,
   migrationImportRowBatches,
   MIGRATION_IMPORT_FIXED_D1_QUERIES,
@@ -26,6 +27,7 @@ interface Env {
   DB: D1Database;
   MIGRATION_IMPORT_TOKEN: string;
   MIGRATION_IMPORT_AUTH_KEY: string;
+  MIGRATION_IMPORT_ADMIN_EMAILS: string;
   MIGRATION_IMPORT_EXPECTED_ORIGIN: string;
   MIGRATION_IMPORT_EXPECTED_SCHEMA_SHA256: string;
   MIGRATION_IMPORT_EXPECTED_FREEZE_ID: string;
@@ -110,8 +112,17 @@ function buildInsertStatements(db: D1Database, payload: MigrationPayload, guardK
   return { statements, expectedChanges };
 }
 
+function configuredAdministratorEmails(env: Env) {
+  try {
+    return migrationAdministratorEmails(env.MIGRATION_IMPORT_ADMIN_EMAILS);
+  } catch {
+    return null;
+  }
+}
+
 function safeConfiguration(env: Env) {
-  return typeof env.MIGRATION_IMPORT_TOKEN === "string" && /^[A-Za-z0-9_-]{43}$/u.test(env.MIGRATION_IMPORT_TOKEN)
+  return configuredAdministratorEmails(env) !== null
+    && typeof env.MIGRATION_IMPORT_TOKEN === "string" && /^[A-Za-z0-9_-]{43}$/u.test(env.MIGRATION_IMPORT_TOKEN)
     && typeof env.MIGRATION_IMPORT_AUTH_KEY === "string" && /^[A-Za-z0-9_-]{43}$/u.test(env.MIGRATION_IMPORT_AUTH_KEY)
     && typeof env.MIGRATION_IMPORT_EXPECTED_SCHEMA_SHA256 === "string" && /^[a-f0-9]{64}$/u.test(env.MIGRATION_IMPORT_EXPECTED_SCHEMA_SHA256)
     && typeof env.MIGRATION_IMPORT_EXPECTED_FREEZE_ID === "string" && /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu.test(env.MIGRATION_IMPORT_EXPECTED_FREEZE_ID)
@@ -170,7 +181,9 @@ async function importPayload(request: Request, env: Env) {
     expectedSourceOrigin: env.MIGRATION_IMPORT_EXPECTED_ORIGIN,
   });
   if (payload.freezeId !== env.MIGRATION_IMPORT_EXPECTED_FREEZE_ID.toLowerCase()) throw new Error("Migration freeze generation does not match the selected attempt");
-  await assertMigrationPayloadRelationships(payload);
+  await assertMigrationPayloadRelationships(payload, {
+    administratorEmails: migrationAdministratorEmails(env.MIGRATION_IMPORT_ADMIN_EMAILS),
+  });
 
   const preflight = await env.DB.batch([
     env.DB.prepare(migrationLedgerSelectSql()),

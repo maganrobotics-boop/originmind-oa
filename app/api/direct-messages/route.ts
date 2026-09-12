@@ -12,7 +12,7 @@ const MAX_REQUEST_LENGTH = 8_192;
 const MAX_MESSAGES_PER_MINUTE = 30;
 
 type ConversationSummary = {
-  peer: { email: string; name: string; role: string; permissions: MemberPermission[] };
+  peer: { email: string; name: string; role: string; permissions: MemberPermission[]; isAdmin: boolean };
   latestMessageId: string | null;
   latestCreatedAt: string | null;
   latestIncomingId: string | null;
@@ -102,7 +102,7 @@ async function getConversationSummaries(email: string): Promise<ConversationSumm
   ]);
 
   const eligibleReviewers = new Map(reviewerRows.filter((reviewer) => reviewer.ndaCompleted).map((reviewer) => [reviewer.email, reviewer]));
-  const configuredOwners = new Map(reviewerRows.filter((reviewer) => reviewer.ndaCompleted && reviewer.permissions.includes("project_owner")).map((owner) => [owner.email, { email: owner.email, displayName: owner.displayName }]));
+  const configuredOwners = new Map(reviewerRows.filter((reviewer) => reviewer.ndaCompleted && reviewer.permissions.includes("project_owner")).map((owner) => [owner.email, { email: owner.email, displayName: owner.displayName, isAdmin: owner.isAdmin }]));
   const knownMembers = new Map(memberRows.map((member) => [member.chatgptAccount.trim().toLowerCase(), member]));
   const summaries = new Map<string, ConversationSummary>();
   for (const member of memberRows) {
@@ -118,6 +118,7 @@ async function getConversationSummaries(email: string): Promise<ConversationSumm
         name: member.fullName,
         role: normalizedPermissions.includes("project_owner") ? "project_owner" : normalizedPermissions.includes("technical_advisor") ? "technical_advisor" : "member",
         permissions: normalizedPermissions,
+        isAdmin: eligibleReviewers.get(peerEmail)?.isAdmin === true,
       },
       latestMessageId: null,
       latestCreatedAt: null,
@@ -129,7 +130,7 @@ async function getConversationSummaries(email: string): Promise<ConversationSumm
     if (knownMember && knownMember.status !== "active") continue;
     if (owner.email === email || summaries.has(owner.email)) continue;
     summaries.set(owner.email, {
-      peer: { email: owner.email, name: owner.displayName, role: "project_owner", permissions: ["technical_advisor", "project_owner"] },
+      peer: { email: owner.email, name: owner.displayName, role: "project_owner", permissions: ["technical_advisor", "project_owner"], isAdmin: owner.isAdmin },
       latestMessageId: null,
       latestCreatedAt: null,
       latestIncomingId: null,

@@ -6,6 +6,7 @@ export type KnowledgeStatus = typeof KNOWLEDGE_STATUSES[number];
 export const KNOWLEDGE_VISIBILITIES = ["internal", "public"] as const;
 export type KnowledgeVisibility = typeof KNOWLEDGE_VISIBILITIES[number];
 export const PUBLIC_KNOWLEDGE_CONFIRMATION = "publish_to_chat.omindos.ai";
+export const KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER = "[系统管理员本人操作]";
 
 export const KNOWLEDGE_REVIEW_ACTIONS = ["approve", "return", "reject", "revoke"] as const;
 export type KnowledgeReviewAction = typeof KNOWLEDGE_REVIEW_ACTIONS[number];
@@ -17,6 +18,17 @@ export const MAX_KNOWLEDGE_SOURCE_LABEL_LENGTH = 160;
 export const MAX_KNOWLEDGE_SOURCE_URL_LENGTH = 2_048;
 export const MAX_KNOWLEDGE_CONTENT_LENGTH = 20_000;
 export const MAX_KNOWLEDGE_REVIEW_NOTE_LENGTH = 1_000;
+
+export function knowledgeAdminSelfAuditNote(note: string): string {
+  if (!note) return KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER;
+  const prefix = `${KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER} `;
+  return `${prefix}${safePrefix(note, MAX_KNOWLEDGE_REVIEW_NOTE_LENGTH - prefix.length)}`;
+}
+
+export function isKnowledgeAdminSelfAuditNote(value: unknown): value is string {
+  return typeof value === "string"
+    && (value === KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER || value.startsWith(`${KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER} `));
+}
 export const MAX_KNOWLEDGE_QUESTION_LENGTH = 500;
 export const MAX_KNOWLEDGE_CHUNKS = 32;
 const MAX_KNOWLEDGE_SEARCH_TERMS = 64;

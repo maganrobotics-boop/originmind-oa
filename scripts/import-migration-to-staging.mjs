@@ -12,7 +12,12 @@ import {
   MIGRATION_EXPORT_MAX_PLAINTEXT_BYTES,
   verifyFreshMigrationPayload,
 } from "../lib/migration-export.mjs";
-import { assertTargetAdministratorReentry, migrationImportD1QueryCount, MIGRATION_IMPORT_MAX_D1_QUERIES } from "../lib/migration-import-plan.mjs";
+import {
+  assertTargetAdministratorReentry,
+  migrationImportD1QueryCount,
+  MIGRATION_IMPORT_MAX_D1_QUERIES,
+  targetAdministratorEmails,
+} from "../lib/migration-import-plan.mjs";
 import { waitForMigrationImporter } from "../lib/migration-import-readiness.mjs";
 import { deploymentTarget } from "../lib/standalone-config.mjs";
 
@@ -163,7 +168,9 @@ if (options) {
 
     const config = JSON.parse(serializedConfig);
     const binding = stagingBinding(config);
-    assertTargetAdministratorReentry(payload, config.vars);
+    const runtimeVariables = { ...process.env, ...(config.vars || {}) };
+    const administratorEmails = targetAdministratorEmails(runtimeVariables);
+    assertTargetAdministratorReentry(payload, runtimeVariables);
     const authorizedAccountId = process.env.OA_STAGING_CLOUDFLARE_ACCOUNT_ID?.trim().toLowerCase() || "";
     const authorizedDatabaseId = process.env.OA_STAGING_D1_DATABASE_ID?.trim().toLowerCase() || "";
     if (!ACCOUNT_ID_PATTERN.test(authorizedAccountId) || !UUID_PATTERN.test(authorizedDatabaseId)
@@ -208,6 +215,7 @@ if (options) {
           database_id: binding.database_id,
           remote: true,
         }],
+        vars: { MIGRATION_IMPORT_ADMIN_EMAILS: administratorEmails.join(",") },
       };
       await Promise.all([
         writeFile(temporaryConfigPath, `${JSON.stringify(temporaryConfig)}\n`, { mode: 0o600, flag: "wx" }),

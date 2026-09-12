@@ -1,6 +1,10 @@
 import { inspectRevisionChain, type ApprovalRevision } from "./approval-revisions";
 import { canonicalJson } from "./canonical-json";
-import { chunkKnowledgeSubmission } from "./knowledge-policy";
+import {
+  KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER,
+  chunkKnowledgeSubmission,
+  knowledgeAdminSelfAuditNote,
+} from "./knowledge-policy";
 
 type MigrationTable = {
   name: string;
@@ -126,7 +130,29 @@ function approvalProjection(row: Record<string, string | number | null>) {
   return Object.fromEntries(APPROVAL_PROJECTION_COLUMNS.map(([column, property]) => [property, row[column]]));
 }
 
-export async function assertMigrationPayloadRelationships(payload: MigrationPayload) {
+export type MigrationRelationshipOptions = {
+  administratorEmails?: readonly string[];
+};
+
+function configuredAdministratorEmails(values: readonly string[] | undefined) {
+  const result = new Set<string>();
+  for (const value of values ?? []) {
+    const email = typeof value === "string" ? value.trim().toLowerCase() : "";
+    const at = email.indexOf("@");
+    if (!email || email.length > 254 || at <= 0 || at !== email.lastIndexOf("@") || at === email.length - 1 || /[\s|]/u.test(email)) {
+      throw new Error("Migration administrator email is invalid");
+    }
+    if (result.has(email)) throw new Error("Migration administrator email is duplicated");
+    result.add(email);
+  }
+  return result;
+}
+
+export async function assertMigrationPayloadRelationships(
+  payload: MigrationPayload,
+  options: MigrationRelationshipOptions = {},
+) {
+  const administratorEmails = configuredAdministratorEmails(options.administratorEmails);
   const approvals = tableRecord(payload, "approvals").rows;
   const approvalEvents = tableRecord(payload, "approval_events").rows;
   const approvalRevisions = tableRecord(payload, "approval_revisions").rows;
@@ -143,6 +169,16 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
 
   const approvalIds = uniqueIds(approvals, "id", "approvals");
   const memberIds = uniqueIds(members, "id", "members");
+  const memberById = new Map(members.map((member) => [requiredText(member, "id"), member]));
+  const isConfiguredAdministrator = (memberId: string | null, email: string | null) => {
+    if (!memberId || !email) return false;
+    const normalizedEmail = email.trim().toLowerCase();
+    const member = memberById.get(memberId);
+    return administratorEmails.has(normalizedEmail)
+      && typeof member?.chatgpt_account === "string"
+      && member.chatgpt_account.trim().toLowerCase() === normalizedEmail
+      && member.account_user_id === `email:${normalizedEmail}`;
+  };
   uniqueIds(approvalEvents, "id", "approval_events");
   uniqueIds(approvalRevisions, "revision_hash", "approval_revisions");
   uniqueIds(laborClaims, "id", "labor_source_claims");
@@ -269,6 +305,7 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
   const knowledgeItemStatuses = new Set(["pending", "returned", "rejected", "active", "revoked"]);
   const knowledgeRevisionStatuses = new Set(["pending", "returned", "rejected", "active", "superseded", "revoked"]);
   const knowledgeApprovalActions = new Set(["approved", "approved_internal", "approved_public"]);
+  const knowledgeAdminSelfApprovalActions = new Set(["approved_internal", "approved_public"]);
   const knowledgeVisibilityActions = new Set(["visibility_changed_internal", "visibility_changed_public"]);
   const knowledgeItemById = new Map<string, Record<string, string | number | null>>();
   for (const item of knowledgeItems) {
@@ -323,8 +360,25 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
     const hasReview = reviewValues.every((value) => value !== null && value !== "");
     if (reviewValues.some((value) => value !== null) && !hasReview) throw new Error(`Migration knowledge revision ${id} has incomplete review evidence`);
     const item = knowledgeItemById.get(itemId);
-    if (hasReview && (reviewerMemberId === item?.submitter_member_id
-      || reviewerEmail?.toLowerCase() === String(item?.submitter_email || "").toLowerCase())) throw new Error(`Migration knowledge revision ${id} was self-reviewed`);
+    const reviewerMemberMatchesSubmitter = reviewerMemberId === item?.submitter_member_id;
+    const reviewerEmailMatchesSubmitter = reviewerEmail?.toLowerCase() === String(item?.submitter_email || "").toLowerCase();
+    const reviewIdentityOverlapsSubmitter = reviewerMemberMatchesSubmitter || reviewerEmailMatchesSubmitter;
+    const reviewIsApproval = status === "active" || status === "superseded" || status === "revoked";
+    const adminSelfReviewAuditNote = knowledgeAdminSelfAuditNote(String(revision.review_note));
+    const adminSelfReview = reviewIsApproval
+      && reviewerMemberMatchesSubmitter
+      && reviewerEmailMatchesSubmitter
+      && isConfiguredAdministrator(reviewerMemberId, reviewerEmail)
+      && knowledgeEvents.some((event) => event.revision_id === id
+        && knowledgeAdminSelfApprovalActions.has(event.action as string)
+        && event.actor_member_id === reviewerMemberId
+        && event.actor_name === reviewerName
+        && event.actor_email === reviewerEmail
+        && event.note === adminSelfReviewAuditNote
+        && event.created_at === reviewedAt);
+    if (hasReview && reviewIdentityOverlapsSubmitter && !adminSelfReview) {
+      throw new Error(`Migration knowledge revision ${id} was self-reviewed`);
+    }
     const activatedAt = optionalText(revision, "activated_at");
     const retiredAt = optionalText(revision, "retired_at");
     if (status === "pending") {
@@ -359,7 +413,7 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
         && event.actor_member_id === reviewerMemberId
         && event.actor_name === reviewerName
         && event.actor_email === reviewerEmail
-        && event.note === revision.review_note
+        && event.note === (adminSelfReview ? adminSelfReviewAuditNote : revision.review_note)
         && event.created_at === reviewedAt);
       if (matchingEvents.length !== 1) throw new Error(`Migration knowledge revision ${id} has no unique matching review event`);
     }
@@ -407,11 +461,20 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
       if (!Number.isFinite(eventTimestamp) || eventTimestamp <= previousTimestamp) {
         throw new Error(`Migration knowledge revision ${revisionId} has an invalid visibility timeline`);
       }
-      if (event.actor_member_id === item?.submitter_member_id
-        || String(event.actor_email || "").toLowerCase() === String(item?.submitter_email || "").toLowerCase()) {
+      const actorMemberMatchesSubmitter = event.actor_member_id === item?.submitter_member_id;
+      const actorEmailMatchesSubmitter = String(event.actor_email || "").toLowerCase() === String(item?.submitter_email || "").toLowerCase();
+      const visibilityIdentityOverlapsSubmitter = actorMemberMatchesSubmitter || actorEmailMatchesSubmitter;
+      const adminSelfManagement = actorMemberMatchesSubmitter
+        && actorEmailMatchesSubmitter
+        && event.note === KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER
+        && isConfiguredAdministrator(
+          typeof event.actor_member_id === "string" ? event.actor_member_id : null,
+          typeof event.actor_email === "string" ? event.actor_email : null,
+        );
+      if (visibilityIdentityOverlapsSubmitter && !adminSelfManagement) {
         throw new Error(`Migration knowledge revision ${revisionId} has a self-managed visibility event`);
       }
-      if (event.note !== "") throw new Error(`Migration knowledge revision ${revisionId} has a malformed visibility event`);
+      if (!adminSelfManagement && event.note !== "") throw new Error(`Migration knowledge revision ${revisionId} has a malformed visibility event`);
       const nextVisibility: "internal" | "public" = event.action === "visibility_changed_public" ? "public" : "internal";
       if (nextVisibility === visibility) throw new Error(`Migration knowledge revision ${revisionId} has a redundant visibility event`);
       visibility = nextVisibility;
