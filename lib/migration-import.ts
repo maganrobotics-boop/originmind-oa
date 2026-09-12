@@ -3,7 +3,7 @@ import { canonicalJson } from "./canonical-json";
 import {
   KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER,
   chunkKnowledgeSubmission,
-  isKnowledgeAdminSelfAuditNote,
+  knowledgeAdminSelfAuditNote,
 } from "./knowledge-policy";
 
 type MigrationTable = {
@@ -363,11 +363,18 @@ export async function assertMigrationPayloadRelationships(
     const reviewerEmailMatchesSubmitter = reviewerEmail?.toLowerCase() === String(item?.submitter_email || "").toLowerCase();
     const reviewIdentityOverlapsSubmitter = reviewerMemberMatchesSubmitter || reviewerEmailMatchesSubmitter;
     const reviewIsApproval = status === "active" || status === "superseded" || status === "revoked";
+    const adminSelfReviewAuditNote = knowledgeAdminSelfAuditNote(String(revision.review_note));
     const adminSelfReview = reviewIsApproval
       && reviewerMemberMatchesSubmitter
       && reviewerEmailMatchesSubmitter
-      && isKnowledgeAdminSelfAuditNote(revision.review_note)
-      && isConfiguredAdministrator(reviewerMemberId, reviewerEmail);
+      && isConfiguredAdministrator(reviewerMemberId, reviewerEmail)
+      && knowledgeEvents.some((event) => event.revision_id === id
+        && knowledgeApprovalActions.has(event.action as string)
+        && event.actor_member_id === reviewerMemberId
+        && event.actor_name === reviewerName
+        && event.actor_email === reviewerEmail
+        && event.note === adminSelfReviewAuditNote
+        && event.created_at === reviewedAt);
     if (hasReview && reviewIdentityOverlapsSubmitter && !adminSelfReview) {
       throw new Error(`Migration knowledge revision ${id} was self-reviewed`);
     }
@@ -405,7 +412,7 @@ export async function assertMigrationPayloadRelationships(
         && event.actor_member_id === reviewerMemberId
         && event.actor_name === reviewerName
         && event.actor_email === reviewerEmail
-        && event.note === revision.review_note
+        && event.note === (adminSelfReview ? adminSelfReviewAuditNote : revision.review_note)
         && event.created_at === reviewedAt);
       if (matchingEvents.length !== 1) throw new Error(`Migration knowledge revision ${id} has no unique matching review event`);
     }
