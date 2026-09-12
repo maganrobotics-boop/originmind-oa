@@ -23,6 +23,7 @@ import {
   workersDevSubdomain,
   writeJson,
 } from "./release-support.mjs";
+import { checkOaPublicRetrieve } from "./check-oa-public.mjs";
 import { smokeCloudflare } from "./smoke-cloudflare.mjs";
 
 const rawPublicToken = process.env.PUBLIC_LAB_AI_SERVICE_TOKEN || "";
@@ -79,6 +80,14 @@ try {
   await verifySourceTree();
   await mkdir(evidenceRoot, { recursive: true, mode: 0o700 });
   await writeJson(join(evidenceRoot, "source-manifest.json"), await sourceManifest());
+
+  progress("Verifying the OA public retrieval credential and live response contract.");
+  const oaPreflight = await checkOaPublicRetrieve(environment.publicToken);
+  await writeJson(join(evidenceRoot, "oa-public-preflight.json"), oaPreflight);
+  if (oaPreflight.classification !== "connected_with_public_knowledge") {
+    const status = oaPreflight.httpStatus === null ? "" : ` (HTTP ${oaPreflight.httpStatus})`;
+    throw new Error(`OA public live preflight failed: ${oaPreflight.classification}${status}`);
+  }
 
   await writeJson(bootstrapConfigPath, {
     account_id: environment.accountId,
