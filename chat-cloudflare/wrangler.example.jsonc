@@ -26,6 +26,12 @@
   "ai": {
     "binding": "AI"
   },
+  "services": [
+    {
+      "binding": "OA_SERVICE",
+      "service": "originmind-internal-oa-staging"
+    }
+  ],
   "d1_databases": [
     {
       "binding": "DB",

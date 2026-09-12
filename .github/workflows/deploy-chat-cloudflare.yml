@@ -32,6 +32,7 @@ jobs:
       cancel-in-progress: false
     env:
       CLOUDFLARE_ACCOUNT_ID: ${{ vars.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}
+      OA_PRODUCTION_WORKER_NAME: ${{ vars.OA_PRODUCTION_WORKER_NAME }}
       CHAT_ADMIN_EMAIL: ${{ vars.CHAT_ADMIN_EMAIL || 'maganrobotics@gmail.com' }}
       CHAT_EXPECTED_ORIGIN_IPV4: ${{ vars.CHAT_EXPECTED_ORIGIN_IPV4 }}
       CHAT_WORKERS_DEV_SUBDOMAIN: ${{ vars.CHAT_WORKERS_DEV_SUBDOMAIN }}

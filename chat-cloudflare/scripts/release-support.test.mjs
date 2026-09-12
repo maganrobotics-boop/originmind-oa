@@ -6,6 +6,7 @@ import {
   DATABASE_NAME,
   EXPECTED_CONFIRMATION,
   HOSTNAME,
+  OA_WORKER_NAME,
   buildWranglerConfig,
   exactDnsRecord,
   normalizePublicServiceToken,
@@ -17,6 +18,7 @@ import {
 const accountId = "1234567890abcdef1234567890abcdef";
 const databaseId = "12345678-1234-4234-9234-1234567890ab";
 const releaseId = `${"a".repeat(40)}-1`;
+const oaWorkerName = OA_WORKER_NAME;
 const releaseEntry = await readFile(new URL("./release-cloudflare.mjs", import.meta.url), "utf8");
 
 function validEnvironment(overrides = {}) {
@@ -27,6 +29,7 @@ function validEnvironment(overrides = {}) {
     CHAT_RELEASE_ID: releaseId,
     CHAT_ADMIN_EMAIL: "maganrobotics@gmail.com",
     CLOUDFLARE_API_TOKEN: "cloudflare-api-token-long-enough",
+    OA_PRODUCTION_WORKER_NAME: oaWorkerName,
     PUBLIC_LAB_AI_SERVICE_TOKEN: "A".repeat(43),
     ...overrides,
   };
@@ -34,9 +37,18 @@ function validEnvironment(overrides = {}) {
 
 test("optional generated and administrator credentials may be absent", () => {
   const environment = validateReleaseEnvironment(validEnvironment());
+  assert.equal(environment.oaWorkerName, oaWorkerName);
   assert.equal(environment.encryptionKey, "");
   assert.equal(environment.rateLimitKey, "");
   assert.equal(environment.adminPassword, "");
+  assert.throws(
+    () => validateReleaseEnvironment(validEnvironment({ OA_PRODUCTION_WORKER_NAME: "" })),
+    /OA_PRODUCTION_WORKER_NAME is missing or invalid/u,
+  );
+  assert.throws(
+    () => validateReleaseEnvironment(validEnvironment({ OA_PRODUCTION_WORKER_NAME: "wrong/worker" })),
+    /OA_PRODUCTION_WORKER_NAME must equal/u,
+  );
 });
 
 test("service token accepts exact values and normalizes copied values deterministically", () => {
@@ -86,6 +98,7 @@ test("generated Wrangler targets use explicit Worker-first static routing", () =
     accountId,
     adminEmail: "maganrobotics@gmail.com",
     databaseId,
+    oaWorkerName,
     configPath: "/tmp/chat-release/wrangler.staging.json",
     origin: "https://originmind-public-chat-production.example.workers.dev",
     production: false,
@@ -93,6 +106,7 @@ test("generated Wrangler targets use explicit Worker-first static routing", () =
   });
   assert.equal(staging.workers_dev, true);
   assert.deepEqual(staging.compatibility_flags, ["global_fetch_strictly_public"]);
+  assert.deepEqual(staging.services, [{ binding: "OA_SERVICE", service: oaWorkerName }]);
   assert.equal(staging.routes, undefined);
   assert.match(staging.assets.directory, /(?:^|\/)public$/u);
   assert.deepEqual({ ...staging.assets, directory: "<chat-public>" }, {
@@ -107,6 +121,7 @@ test("generated Wrangler targets use explicit Worker-first static routing", () =
     accountId,
     adminEmail: "maganrobotics@gmail.com",
     databaseId,
+    oaWorkerName,
     configPath: "/tmp/chat-release/wrangler.production.json",
     origin: `https://${HOSTNAME}`,
     production: true,
@@ -114,8 +129,25 @@ test("generated Wrangler targets use explicit Worker-first static routing", () =
   });
   assert.equal(production.workers_dev, false);
   assert.deepEqual(production.compatibility_flags, ["global_fetch_strictly_public"]);
+  assert.deepEqual(production.services, [{ binding: "OA_SERVICE", service: oaWorkerName }]);
   assert.deepEqual(production.routes, [{ pattern: `${HOSTNAME}/*`, zone_name: "omindos.ai" }]);
   assert.equal(production.d1_databases[0].database_name, DATABASE_NAME);
+
+  for (const invalidWorker of [undefined, "originmind-public-chat-production"]) {
+    assert.throws(
+      () => buildWranglerConfig({
+        accountId,
+        adminEmail: "maganrobotics@gmail.com",
+        databaseId,
+        oaWorkerName: invalidWorker,
+        configPath: "/tmp/chat-release/wrangler.invalid.json",
+        origin: `https://${HOSTNAME}`,
+        production: true,
+        releaseId,
+      }),
+      /Invalid Wrangler target/u,
+    );
+  }
 });
 
 test("D1 selection requires one exact, valid database", () => {

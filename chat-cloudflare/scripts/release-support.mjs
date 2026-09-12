@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 
 export const WORKER_NAME = "originmind-public-chat-production";
 export const DATABASE_NAME = "originmind-public-chat-production";
+export const OA_WORKER_NAME = "originmind-internal-oa-staging";
 export const ZONE_NAME = "omindos.ai";
 export const HOSTNAME = "chat.omindos.ai";
 export const PRODUCTION_ORIGIN = `https://${HOSTNAME}`;
@@ -67,6 +68,10 @@ export function validateReleaseEnvironment(environment = process.env) {
   const adminEmail = requiredText(environment, "CHAT_ADMIN_EMAIL", 3, 254).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(adminEmail)) throw new Error("CHAT_ADMIN_EMAIL is invalid");
   const apiToken = requiredText(environment, "CLOUDFLARE_API_TOKEN", 20, 2_048);
+  const oaWorkerName = requiredText(environment, "OA_PRODUCTION_WORKER_NAME", 1, 63).trim().toLowerCase();
+  if (oaWorkerName !== OA_WORKER_NAME) {
+    throw new Error(`OA_PRODUCTION_WORKER_NAME must equal ${OA_WORKER_NAME}`);
+  }
   const publicToken = normalizePublicServiceToken(environment.PUBLIC_LAB_AI_SERVICE_TOKEN, apiToken);
   const encryptionKey = (environment.CHAT_APP_ENCRYPTION_KEY || "").trim();
   const rateLimitKey = (environment.CHAT_RATE_LIMIT_HMAC_KEY || "").trim();
@@ -94,6 +99,7 @@ export function validateReleaseEnvironment(environment = process.env) {
     accountId,
     adminEmail,
     apiToken,
+    oaWorkerName,
     publicToken,
     encryptionKey,
     rateLimitKey,
@@ -265,8 +271,16 @@ function relativeFromConfig(configPath, targetPath) {
   return value.startsWith(".") ? value : `./${value}`;
 }
 
-export function buildWranglerConfig({ accountId, adminEmail, databaseId, configPath, origin, production, releaseId }) {
-  if (!ACCOUNT_ID_PATTERN.test(accountId) || !UUID_PATTERN.test(databaseId)) throw new Error("Invalid Wrangler target");
+export function buildWranglerConfig({ accountId, adminEmail, databaseId, configPath, oaWorkerName, origin, production, releaseId }) {
+  if (
+    !ACCOUNT_ID_PATTERN.test(accountId) ||
+    !UUID_PATTERN.test(databaseId) ||
+    typeof oaWorkerName !== "string" ||
+    oaWorkerName !== OA_WORKER_NAME ||
+    oaWorkerName === WORKER_NAME
+  ) {
+    throw new Error("Invalid Wrangler target");
+  }
   const url = new URL(origin);
   if (url.protocol !== "https:" || url.origin !== origin) throw new Error("Invalid Wrangler origin");
   const config = {
@@ -275,8 +289,8 @@ export function buildWranglerConfig({ accountId, adminEmail, databaseId, configP
     name: WORKER_NAME,
     main: relativeFromConfig(configPath, resolve(CHAT_ROOT, "src", "index.mjs")),
     compatibility_date: "2026-09-11",
-    // OA is another Worker in the same Cloudflare zone. Route global fetch
-    // through Cloudflare's public front door so oa.omindos.ai reaches it.
+    // The Service Binding is the primary Worker-to-Worker path. Keep the
+    // public URL fallback strict so it cannot silently resolve to a zone origin.
     compatibility_flags: ["global_fetch_strictly_public"],
     workers_dev: !production,
     preview_urls: false,
@@ -288,6 +302,7 @@ export function buildWranglerConfig({ accountId, adminEmail, databaseId, configP
       run_worker_first: ["/*", "!/assets/*", "!/favicon.svg", "!/LICENSES.md"],
     },
     ai: { binding: "AI" },
+    services: [{ binding: "OA_SERVICE", service: oaWorkerName }],
     d1_databases: [{
       binding: "DB",
       database_name: DATABASE_NAME,
