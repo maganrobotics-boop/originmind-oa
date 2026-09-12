@@ -10,6 +10,8 @@ import {
   routeStaticRequest,
 } from "../src/static-router.mjs";
 
+const TOPIC_PATHS = ["/technology", "/research", "/originmind", "/ius"];
+
 function mockEnvironment() {
   const calls = [];
   return {
@@ -59,6 +61,10 @@ function assertHardened(response, cacheControl = "no-store") {
 test("path classifier is exact and does not turn unknown paths into the SPA", () => {
   assert.equal(classifyPath("/"), RouteKind.SHELL);
   assert.equal(classifyPath("/manage"), RouteKind.SHELL);
+  for (const pathname of TOPIC_PATHS) {
+    assert.equal(classifyPath(pathname), RouteKind.SHELL, pathname);
+    assert.equal(classifyPath(`${pathname}/`), RouteKind.REDIRECT_TOPIC, `${pathname}/`);
+  }
   assert.equal(classifyPath("/manage/"), RouteKind.REDIRECT_MANAGE);
   assert.equal(classifyPath("/manage/extra"), RouteKind.NOT_FOUND);
   assert.equal(classifyPath("/%6Danage"), RouteKind.NOT_FOUND);
@@ -72,9 +78,10 @@ test("path classifier is exact and does not turn unknown paths into the SPA", ()
   assert.equal(classifyPath("/unknown"), RouteKind.NOT_FOUND);
 });
 
-test("root and exact /manage serve the same non-cacheable shell", async () => {
+test("public topic links and exact /manage serve the same non-cacheable shell", async () => {
   const { env, calls } = mockEnvironment();
-  for (const path of ["/", "/manage", "/manage?tab=model"]) {
+  const shellPaths = ["/", ...TOPIC_PATHS, "/research?from=mobile", "/manage", "/manage?tab=model"];
+  for (const path of shellPaths) {
     const response = await routeStaticRequest(
       new Request(`https://chat.omindos.ai${path}`),
       env,
@@ -85,7 +92,7 @@ test("root and exact /manage serve the same non-cacheable shell", async () => {
   }
   assert.deepEqual(
     calls.map((call) => call.pathname),
-    ["/index.html", "/index.html", "/index.html"],
+    shellPaths.map(() => "/index.html"),
   );
   assert.ok(calls.every((call) => call.origin === CANONICAL_ORIGIN));
 });
@@ -93,7 +100,7 @@ test("root and exact /manage serve the same non-cacheable shell", async () => {
 test("HEAD is preserved when retrieving the shell", async () => {
   const { env, calls } = mockEnvironment();
   const response = await routeStaticRequest(
-    new Request("https://chat.omindos.ai/manage", { method: "HEAD" }),
+    new Request("https://chat.omindos.ai/originmind", { method: "HEAD" }),
     env,
   );
   assert.equal(response.status, 200);
@@ -119,6 +126,16 @@ test("canonical redirects preserve the request hostname for safe previews", asyn
   assert.equal(index.status, 308);
   assert.equal(index.headers.get("location"), "https://preview.example/");
   assertHardened(index);
+
+  for (const pathname of TOPIC_PATHS) {
+    const response = await routeStaticRequest(
+      new Request(`https://preview.example${pathname}/?source=shared`),
+      env,
+    );
+    assert.equal(response.status, 308, pathname);
+    assert.equal(response.headers.get("location"), `https://preview.example${pathname}`);
+    assertHardened(response);
+  }
 });
 
 test("dynamic endpoints are delegated and never receive the HTML shell", async () => {
@@ -140,7 +157,15 @@ test("dynamic endpoints are delegated and never receive the HTML shell", async (
 
 test("unknown paths return hardened 404 responses", async () => {
   const { env, calls } = mockEnvironment();
-  for (const path of ["/unknown", "/manage/extra", "/api", "/%6Danage"]) {
+  for (const path of [
+    "/unknown",
+    "/manage/extra",
+    "/technology/extra",
+    "/Technology",
+    "/%74echnology",
+    "/api",
+    "/%6Danage",
+  ]) {
     const response = await routeStaticRequest(
       new Request(`https://chat.omindos.ai${path}`),
       env,
@@ -154,7 +179,7 @@ test("unknown paths return hardened 404 responses", async () => {
 
 test("unsafe methods cannot retrieve the shell or static assets", async () => {
   const { env, calls } = mockEnvironment();
-  for (const path of ["/", "/manage", "/manage/", "/favicon.svg"]) {
+  for (const path of ["/", ...TOPIC_PATHS, "/technology/", "/manage", "/manage/", "/favicon.svg"]) {
     const response = await routeStaticRequest(
       new Request(`https://chat.omindos.ai${path}`, { method: "POST" }),
       env,

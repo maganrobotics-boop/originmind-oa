@@ -649,14 +649,31 @@ test("public health stays ready before an admin account is initialized", async (
   });
 });
 
-test("static root, manager route and generated hashed assets are served by the ASSETS binding", async () => {
+test("static topic links, root, manager and generated hashed assets are served by the ASSETS binding", async () => {
   const assets = mockAssets();
   const env = environment({ ASSETS: assets });
-  for (const path of ["/", "/manage", "/assets/app-0123456789abcdef.js"]) {
+  const paths = [
+    "/",
+    "/technology",
+    "/research",
+    "/originmind",
+    "/ius",
+    "/manage",
+    "/assets/app-0123456789abcdef.js",
+  ];
+  for (const path of paths) {
     const response = await worker.fetch(request(path, { origin: null }), env, {});
     assert.equal(response.status, 200, path);
   }
-  assert.deepEqual(assets.calls, ["/index.html", "/index.html", "/assets/app-0123456789abcdef.js"]);
+  assert.deepEqual(assets.calls, [
+    "/index.html",
+    "/index.html",
+    "/index.html",
+    "/index.html",
+    "/index.html",
+    "/index.html",
+    "/assets/app-0123456789abcdef.js",
+  ]);
 });
 
 test("wrong canonical host is rejected before API or static handling", async () => {

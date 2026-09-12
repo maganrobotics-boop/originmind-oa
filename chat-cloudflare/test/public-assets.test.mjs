@@ -170,11 +170,41 @@ test("public topics keep independent view state without a duplicate welcome avat
   assert.match(script, /sessions:\s*Object\.fromEntries\(TOPICS\.map/u);
   assert.match(script, /function\s+sessionFor\s*\(/u);
   assert.match(script, /function\s+saveCurrentView\s*\(/u);
-  for (const field of ["messages", "draft", "scrollTop", "stickToEnd", "sending", "error", "notice"]) {
+  for (const field of ["messages", "conversationToken", "draft", "scrollTop", "stickToEnd", "sending", "error", "notice"]) {
     assert.match(script, new RegExp(`\\b${field}:`, "u"), field);
   }
   assert.doesNotMatch(script, /className:\s*["']welcome-mark["']/u);
   assert.doesNotMatch(style, /\.welcome-mark\b/u);
+});
+
+test("public modules expose direct links with history navigation and a mobile selector", async () => {
+  const [script, style] = await Promise.all([
+    readFile(path.join(frontendDir, "app.js"), "utf8"),
+    readFile(path.join(frontendDir, "styles.css"), "utf8"),
+  ]);
+  const mappings = [
+    ["technology", "/technology", "research"],
+    ["academic", "/research", "research"],
+    ["company", "/originmind", "business"],
+    ["association", "/ius", "student"],
+  ];
+  for (const [id, directPath, requestTopic] of mappings) {
+    assert.match(
+      script,
+      new RegExp(`id:\\s*["']${id}["'][\\s\\S]*?path:\\s*["']${directPath}["'][\\s\\S]*?requestTopic:\\s*["']${requestTopic}["']`, "u"),
+      directPath,
+    );
+  }
+  assert.match(script, /section:\s*topicIdForPath\(window\.location\.pathname\)/u);
+  assert.match(script, /window\.history\.pushState\(/u);
+  assert.match(script, /window\.addEventListener\(["']popstate["']/u);
+  assert.match(script, /className:\s*["']topic-select["']/u);
+  assert.match(script, /className:\s*["']topic-card["'][\s\S]*?href:\s*topic\.path/u);
+  assert.match(style, /\.topic-select\s*\{[\s\S]*?min-height:\s*48px/u);
+  assert.match(
+    style,
+    /@media\s*\(max-width:\s*960px\)[\s\S]*?\.topic-list\s*\{[\s\S]*?display:\s*none[\s\S]*?\.topic-select-wrap\s*\{[\s\S]*?display:\s*grid/u,
+  );
 });
 
 test("frontend source avoids executable HTML and dynamic-code sinks", async () => {

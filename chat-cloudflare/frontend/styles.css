@@ -362,6 +362,53 @@ textarea {
   margin-top: 34px;
 }
 
+.topic-select-wrap {
+  display: none;
+}
+
+.topic-select-label {
+  color: #93a7c4;
+  font-size: 12px;
+  font-weight: 590;
+  letter-spacing: 0.04em;
+}
+
+.topic-select-control {
+  position: relative;
+  display: block;
+  min-width: 0;
+}
+
+.topic-select {
+  width: 100%;
+  min-width: 0;
+  min-height: 48px;
+  padding: 0 42px 0 14px;
+  appearance: none;
+  border: 1px solid rgba(133, 162, 227, 0.42);
+  border-radius: var(--radius-control);
+  background: rgba(48, 75, 137, 0.22);
+  color: #f4f7fc;
+  font-size: 16px;
+  font-weight: 580;
+  line-height: 1.35;
+}
+
+.topic-select option {
+  background: #101c2e;
+  color: #f4f7fc;
+}
+
+.topic-select-arrow {
+  position: absolute;
+  top: 50%;
+  right: 15px;
+  color: #91a8d7;
+  font-size: 18px;
+  pointer-events: none;
+  transform: translateY(-55%);
+}
+
 .topic-card {
   position: relative;
   display: grid;
@@ -376,6 +423,7 @@ textarea {
   border-radius: var(--radius-control);
   background: rgba(255, 255, 255, 0.025);
   color: #d1dceb;
+  cursor: pointer;
   text-align: left;
   transition:
     border-color 170ms ease,
@@ -406,7 +454,7 @@ textarea {
 }
 
 .topic-card.selected,
-.topic-card[aria-pressed="true"] {
+.topic-card[aria-current="page"] {
   border-color: rgba(103, 139, 236, 0.42);
   background:
     linear-gradient(90deg, rgba(65, 104, 218, 0.18), rgba(255, 255, 255, 0.045));
@@ -414,7 +462,7 @@ textarea {
 }
 
 .topic-card.selected::before,
-.topic-card[aria-pressed="true"]::before {
+.topic-card[aria-current="page"]::before {
   opacity: 1;
   transform: scaleY(1);
 }
@@ -1721,43 +1769,14 @@ textarea {
   }
 
   .topic-list {
-    display: flex;
-    gap: 8px;
+    display: none;
     margin: 0;
-    overflow-x: auto;
-    overscroll-behavior-inline: contain;
-    scroll-snap-type: inline proximity;
-    scrollbar-width: none;
   }
 
-  .topic-list::-webkit-scrollbar {
-    display: none;
-  }
-
-  .topic-card {
-    flex: 0 0 auto;
-    grid-template-columns: 22px auto;
-    width: auto;
-    min-width: 224px;
-    min-height: 48px;
-    padding: 7px 12px;
-    scroll-snap-align: start;
-  }
-
-  .topic-copy strong {
-    white-space: nowrap;
-  }
-
-  .topic-card::before,
-  .topic-arrow,
-  .topic-copy small {
-    display: none;
-  }
-
-  .topic-card.selected,
-  .topic-card[aria-pressed="true"] {
-    border-color: rgba(111, 140, 255, 0.5);
-    background: rgba(81, 119, 226, 0.17);
+  .topic-select-wrap {
+    display: grid;
+    gap: 6px;
+    margin: 0;
   }
 
   .conversation {
@@ -1838,10 +1857,6 @@ textarea {
   .context-heading h1 {
     margin-bottom: 8px;
     font-size: 14px;
-  }
-
-  .topic-card {
-    min-width: 210px;
   }
 
   .conversation-toolbar {

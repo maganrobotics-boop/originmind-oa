@@ -19,12 +19,17 @@ export const RouteKind = Object.freeze({
   SHELL: "shell",
   REDIRECT_HOME: "redirect-home",
   REDIRECT_MANAGE: "redirect-manage",
+  REDIRECT_TOPIC: "redirect-topic",
   DYNAMIC: "dynamic",
   ASSET: "asset",
   NOT_FOUND: "not-found",
 });
 
-const SHELL_PATHS = new Set(["/", "/manage"]);
+const TOPIC_PATHS = ["/technology", "/research", "/originmind", "/ius"];
+const SHELL_PATHS = new Set(["/", "/manage", ...TOPIC_PATHS]);
+const TOPIC_TRAILING_REDIRECTS = new Map(
+  TOPIC_PATHS.map((pathname) => [`${pathname}/`, pathname]),
+);
 const DIRECT_ASSET_PATHS = new Set(["/favicon.svg", "/LICENSES.md"]);
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
@@ -32,6 +37,7 @@ export function classifyPath(pathname) {
   if (SHELL_PATHS.has(pathname)) return RouteKind.SHELL;
   if (pathname === "/index.html") return RouteKind.REDIRECT_HOME;
   if (pathname === "/manage/") return RouteKind.REDIRECT_MANAGE;
+  if (TOPIC_TRAILING_REDIRECTS.has(pathname)) return RouteKind.REDIRECT_TOPIC;
   if (pathname === "/_health" || pathname.startsWith("/api/")) {
     return RouteKind.DYNAMIC;
   }
@@ -111,6 +117,9 @@ export async function routeStaticRequest(request, env) {
 
   if (kind === RouteKind.REDIRECT_HOME) return redirect(request, "/");
   if (kind === RouteKind.REDIRECT_MANAGE) return redirect(request, "/manage");
+  if (kind === RouteKind.REDIRECT_TOPIC) {
+    return redirect(request, TOPIC_TRAILING_REDIRECTS.get(url.pathname));
+  }
 
   if (kind === RouteKind.SHELL) {
     if (!SAFE_METHODS.has(request.method)) return methodNotAllowed();
