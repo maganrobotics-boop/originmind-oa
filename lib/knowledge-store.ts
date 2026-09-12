@@ -542,7 +542,7 @@ export async function reviewKnowledgeItem(
   const eventId = crypto.randomUUID();
   const identity = submitterIdentity(existing, actor);
   const adminSelfApproval = action === "approve" && actor.isAdmin && identity.exact;
-  const storedNote = adminSelfApproval ? knowledgeAdminSelfAuditNote(note) : note;
+  const eventNote = adminSelfApproval ? knowledgeAdminSelfAuditNote(note) : note;
   const nextStatus: KnowledgeStatus = action === "approve" ? "active" : action === "return" ? "returned" : action === "reject" ? "rejected" : "revoked";
   const expectedStatus: KnowledgeStatus = action === "revoke" ? "active" : "pending";
   const guard = actorGuard(actor, true);
@@ -581,7 +581,7 @@ export async function reviewKnowledgeItem(
         review_note = ?, reviewed_at = ?, activated_at = ?, retired_at = NULL
       WHERE id = ? AND item_id = ? AND status = 'pending'
         AND EXISTS (SELECT 1 FROM knowledge_items WHERE id = ? AND mutation_revision = ? AND status = ?)
-    `).bind(nextStatus, actor.memberId, actor.name, normalizeEmail(actor.email), storedNote, now,
+    `).bind(nextStatus, actor.memberId, actor.name, normalizeEmail(actor.email), note, now,
       action === "approve" ? now : null, existing.current_revision_id, existing.id, existing.id, mutationRevision, nextStatus));
   }
   statements.push(database.prepare(`
@@ -611,7 +611,7 @@ export async function reviewKnowledgeItem(
   `).bind(eventId, existing.id, existing.current_revision_id, actor.memberId, actor.name, normalizeEmail(actor.email),
     action === "approve" ? visibility === "public" ? "approved_public" : "approved_internal"
       : action === "return" ? "returned" : action === "reject" ? "rejected" : "revoked",
-    storedNote, now, existing.id, existing.current_revision_id, mutationRevision, nextStatus));
+    eventNote, now, existing.id, existing.current_revision_id, mutationRevision, nextStatus));
 
   const [itemResult] = await database.batch(statements);
   const updated = resultRows(itemResult as D1Result<KnowledgeItemRow>)[0];
@@ -627,7 +627,7 @@ export async function reviewKnowledgeItem(
     reviewed_by_member_id: action === "revoke" ? existing.reviewed_by_member_id : actor.memberId,
     reviewed_by_name: action === "revoke" ? existing.reviewed_by_name : actor.name,
     reviewed_by_email: action === "revoke" ? existing.reviewed_by_email : normalizeEmail(actor.email),
-    review_note: action === "revoke" ? existing.review_note : storedNote,
+    review_note: action === "revoke" ? existing.review_note : note,
     reviewed_at: action === "revoke" ? existing.reviewed_at : now,
     activated_at: action === "approve" ? now : existing.activated_at,
     retired_at: action === "revoke" ? now : null,
