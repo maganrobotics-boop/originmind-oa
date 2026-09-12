@@ -6,6 +6,7 @@ on:
       - 'chat-cloudflare/**'
       - '.github/workflows/check-chat-cloudflare.yml'
       - '.github/workflows/deploy-chat-cloudflare.yml'
+      - '.github/workflows/initialize-chat-admin.yml'
   push:
     branches:
       - main
@@ -13,6 +14,7 @@ on:
       - 'chat-cloudflare/**'
       - '.github/workflows/check-chat-cloudflare.yml'
       - '.github/workflows/deploy-chat-cloudflare.yml'
+      - '.github/workflows/initialize-chat-admin.yml'
 
 permissions:
   contents: read
