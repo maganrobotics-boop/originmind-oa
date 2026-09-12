@@ -93,6 +93,17 @@ test("release entry redacts and removes the raw copied token before child proces
   assert.match(releaseEntry, /rawPublicToken\.trim\(\)/u);
 });
 
+test("production release waits past Cloudflare Auto TTL before live smoke", () => {
+  const proxyEnabled = releaseEntry.indexOf('await writeJson(join(evidenceRoot, "dns-enabled.json"), enabledState)');
+  const dnsSettled = releaseEntry.indexOf('await writeJson(join(evidenceRoot, "dns-settle.json"), await settleProductionDns())');
+  const liveSmoke = releaseEntry.indexOf("smokeCloudflare(PRODUCTION_ORIGIN");
+  assert.ok(proxyEnabled >= 0);
+  assert.ok(dnsSettled > proxyEnabled);
+  assert.ok(liveSmoke > dnsSettled);
+  assert.match(releaseEntry, /DNS_AUTO_TTL_MILLISECONDS = 300_000/u);
+  assert.match(releaseEntry, /DNS_PROPAGATION_BUFFER_MILLISECONDS = 30_000/u);
+});
+
 test("generated Wrangler targets use explicit Worker-first static routing", () => {
   const staging = buildWranglerConfig({
     accountId,
