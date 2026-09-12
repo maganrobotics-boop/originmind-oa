@@ -160,6 +160,22 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.doesNotMatch(script, /\bpublished\s*:\s*(?:1|true)\b/u);
 });
 
+test("public topics keep independent view state without a duplicate welcome avatar", async () => {
+  const [script, style] = await Promise.all([
+    readFile(path.join(frontendDir, "app.js"), "utf8"),
+    readFile(path.join(frontendDir, "styles.css"), "utf8"),
+  ]);
+
+  assert.match(script, /sessions:\s*Object\.fromEntries\(TOPICS\.map/u);
+  assert.match(script, /function\s+sessionFor\s*\(/u);
+  assert.match(script, /function\s+saveCurrentView\s*\(/u);
+  for (const field of ["messages", "draft", "scrollTop", "stickToEnd", "sending", "error", "notice"]) {
+    assert.match(script, new RegExp(`\\b${field}:`, "u"), field);
+  }
+  assert.doesNotMatch(script, /className:\s*["']welcome-mark["']/u);
+  assert.doesNotMatch(style, /\.welcome-mark\b/u);
+});
+
 test("frontend source avoids executable HTML and dynamic-code sinks", async () => {
   const [script, style] = await Promise.all([
     readFile(path.join(frontendDir, "app.js"), "utf8"),
