@@ -3,7 +3,7 @@ import { parseOaResult } from "../src/oa-public.mjs";
 
 const MAX_RESPONSE_BYTES = 16 * 1024;
 const PREFLIGHT_TIMEOUT_MS = 15_000;
-const PREFLIGHT_QUESTION = "公开知识连接检测";
+const PREFLIGHT_QUESTION = "请根据公开资料简要说明 ARTS Robotics 的机器人研究方向。";
 const OA_PUBLIC_ORIGIN = new URL(OA_PUBLIC_RETRIEVE_URL).origin;
 
 async function boundedJson(response) {
@@ -20,7 +20,7 @@ async function boundedJson(response) {
     if (done) break;
     total += value.length;
     if (total > MAX_RESPONSE_BYTES) {
-      await reader.cancel();
+      await reader.cancel().catch(() => {});
       throw new Error("oversized");
     }
     chunks.push(value);
