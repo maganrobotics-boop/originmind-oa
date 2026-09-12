@@ -126,14 +126,14 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
     const submitterMemberIdMatches = existing.submitter_member_id === access.actor.memberId;
     const submitterEmailMatches = existing.submitter_email.trim().toLowerCase() === access.actor.email.trim().toLowerCase();
-    const isSubmitter = submitterMemberIdMatches || submitterEmailMatches;
+    const submitterIdentityOverlaps = submitterMemberIdMatches || submitterEmailMatches;
+    const submitterIdentityIsExact = submitterMemberIdMatches && submitterEmailMatches;
     const adminSelfManagementAllowed = access.actor.isAdmin
-      && submitterMemberIdMatches
-      && submitterEmailMatches
+      && submitterIdentityIsExact
       && (changesVisibility || reviewAction === "approve");
 
     if (action === "resubmit") {
-      if (!isSubmitter) return privateJson({ error: "知识条目不存在或当前账号不可操作。" }, { status: 404 });
+      if (!submitterIdentityIsExact) return privateJson({ error: "知识条目不存在或当前账号不可操作。" }, { status: 404 });
       if (existing.status !== "returned") return privateJson({ error: "只有已退回的知识可以补充后重新提交。" }, { status: 409 });
       const submission = parseKnowledgeSubmission({
         title: body.title,
@@ -155,7 +155,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
 
     if (!canReviewKnowledge(access.authorized)) return privateJson({ error: "只有项目负责人或 OA 管理员可以审核知识。" }, { status: 403 });
-    if (isSubmitter && !adminSelfManagementAllowed) return privateJson({ error: access.actor.isAdmin ? "系统管理员本人只能批准自己的知识或调整可见范围。" : "投稿人不能审核自己的知识。" }, { status: 403 });
+    if (submitterIdentityOverlaps && !adminSelfManagementAllowed) return privateJson({ error: access.actor.isAdmin ? "系统管理员本人只能批准自己的知识或调整可见范围。" : "投稿人不能审核自己的知识。" }, { status: 403 });
     if (changesVisibility) {
       if (existing.status !== "active") return privateJson({ error: "只有已入库且仍有效的知识可以调整可见范围。" }, { status: 409 });
       if (existing.visibility === approvalVisibility) return privateJson({ error: "知识已经是所选可见范围。" }, { status: 409 });
