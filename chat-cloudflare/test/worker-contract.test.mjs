@@ -179,12 +179,52 @@ test("OA Service Binding is preferred and preserves the hardened request", async
   const boundRequest = serviceCalls[0];
   assert.equal(boundRequest.url, OA_URL);
   assert.equal(boundRequest.method, "POST");
-  assert.equal(boundRequest.redirect, "error");
+  assert.equal(boundRequest.redirect, "manual");
   assert.equal(boundRequest.cache, "no-store");
   assert.equal(boundRequest.credentials, "omit");
   assert.equal(boundRequest.headers.get("content-type"), "application/json");
   assert.equal(boundRequest.headers.get("x-originmind-public-lab-ai-service-token"), SERVICE_TOKEN);
   assert.deepEqual(await boundRequest.json(), { question: "机器人研究方向有哪些?" });
+});
+
+test("OA Service Binding rejects redirects without invoking the model", async () => {
+  let serviceCalls = 0;
+  let globalFetchCalls = 0;
+  let aiCalls = 0;
+  const env = environment({
+    OA_SERVICE: {
+      async fetch(boundRequest) {
+        serviceCalls += 1;
+        assert.equal(boundRequest.redirect, "manual");
+        return Response.redirect("https://invalid.example/redirected", 302);
+      },
+    },
+    AI: {
+      async run() {
+        aiCalls += 1;
+        return { response: "不应调用" };
+      },
+    },
+  });
+  const response = await handleRequest(
+    request("/api/chat", { method: "POST", body: chatBody("机器人研究方向") }),
+    env,
+    {},
+    {
+      async fetch() {
+        globalFetchCalls += 1;
+        throw new Error("The redirect must not be followed through global fetch");
+      },
+    },
+  );
+  const result = await body(response);
+  assert.equal(response.status, 200);
+  assert.equal(result.mode, "retrieval");
+  assert.equal(result.oaPublicStatus, "unavailable");
+  assert.deepEqual(result.sources, []);
+  assert.equal(serviceCalls, 1);
+  assert.equal(globalFetchCalls, 0);
+  assert.equal(aiCalls, 0);
 });
 
 test("no matching documents means retrieval mode and no model invocation", async () => {
@@ -343,8 +383,26 @@ test("a verified Bailian configuration overrides Workers AI and forbids redirect
   assert.equal(result.answer, "百炼回答。[1]");
   assert.equal(workersAiCalls, 0);
   assert.equal(fetchCalls.length, 1);
-  assert.equal(fetchCalls[0].init.redirect, "error");
+  assert.equal(fetchCalls[0].init.redirect, "manual");
   assert.equal(JSON.parse(fetchCalls[0].init.body).stream, false);
+});
+
+test("Bailian rejects redirect responses without following them", async () => {
+  const env = environment({ DB: await bailianDatabase() });
+  let externalCalls = 0;
+  const runtime = oaRuntime(OA_CHUNKS, async (_url, init) => {
+    externalCalls += 1;
+    assert.equal(init.redirect, "manual");
+    return Response.redirect("https://invalid.example/redirected", 302);
+  });
+  const response = await handleRequest(
+    request("/api/chat", { method: "POST", body: chatBody("机器人研究方向") }),
+    env,
+    {},
+    runtime,
+  );
+  assert.equal(response.status, 502);
+  assert.equal(externalCalls, 1);
 });
 
 test("Bailian rejects non-JSON responses", async () => {
