@@ -9,6 +9,11 @@ const OA_PUBLIC_ORIGIN = new URL(OA_PUBLIC_RETRIEVE_URL).origin;
 async function boundedJson(response) {
   const length = Number(response.headers.get("content-length") || 0);
   if (Number.isFinite(length) && length > MAX_RESPONSE_BYTES) {
+    try {
+      await response.body?.cancel();
+    } catch {
+      // The size limit remains authoritative if cancellation fails.
+    }
     throw new Error("oversized");
   }
   const reader = response.body?.getReader();
