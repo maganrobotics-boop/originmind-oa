@@ -54,6 +54,7 @@ test("shows the system administrator role consistently across account and collab
   assert.match(pageSource, /if \(isAdmin\) return "系统管理员"/u);
   assert.match(pageSource, /session\.isAdmin \? "系统管理员待办"/u);
   assert.match(pageSource, /session\.isAdmin \? "你已具备系统管理员角色，必须先完成负责人专用承诺书。"/u);
+  assert.match(pageSource, /session\.isAdmin \? "原成员保密协议仍保留；由于你已成为系统管理员，需另行签署《项目负责人保密承诺书》。"/u);
   assert.match(pageSource, /className="sidebar-user-role">\{sessionRoleLabel\(currentRole, isAdmin\)\}/u);
   assert.match(pageSource, /<span>系统角色<\/span><strong>\{sessionRoleLabel\(currentRole, isAdmin\)\}<\/strong>/u);
   assert.match(pageSource, /if \(person\.isAdmin\) return "系统管理员"/u);
