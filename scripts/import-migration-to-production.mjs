@@ -12,7 +12,12 @@ import {
   MIGRATION_EXPORT_MAX_PLAINTEXT_BYTES,
   verifyFreshMigrationPayload,
 } from "../lib/migration-export.mjs";
-import { assertTargetAdministratorReentry, migrationImportD1QueryCount, MIGRATION_IMPORT_MAX_D1_QUERIES } from "../lib/migration-import-plan.mjs";
+import {
+  assertTargetAdministratorReentry,
+  migrationImportD1QueryCount,
+  MIGRATION_IMPORT_MAX_D1_QUERIES,
+  targetAdministratorEmails,
+} from "../lib/migration-import-plan.mjs";
 import { waitForMigrationImporter } from "../lib/migration-import-readiness.mjs";
 import { deploymentTarget } from "../lib/standalone-config.mjs";
 
@@ -163,6 +168,7 @@ if (options) {
 
     const config = JSON.parse(serializedConfig);
     const binding = productionBinding(config);
+    const administratorEmails = targetAdministratorEmails(config.vars);
     assertTargetAdministratorReentry(payload, config.vars);
     const authorizedAccountId = process.env.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID?.trim().toLowerCase() || "";
     const authorizedDatabaseId = process.env.OA_PRODUCTION_D1_DATABASE_ID?.trim().toLowerCase() || "";
@@ -214,6 +220,7 @@ if (options) {
         writeFile(environmentPath, [
           `MIGRATION_IMPORT_TOKEN=${token}`,
           `MIGRATION_IMPORT_AUTH_KEY=${authKey}`,
+          `MIGRATION_IMPORT_ADMIN_EMAILS=${JSON.stringify(administratorEmails.join(","))}`,
           `MIGRATION_IMPORT_EXPECTED_ORIGIN=${expectedOrigin}`,
           `MIGRATION_IMPORT_EXPECTED_SCHEMA_SHA256=${payload.schemaSha256}`,
           `MIGRATION_IMPORT_EXPECTED_FREEZE_ID=${freezeId}`,
