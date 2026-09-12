@@ -4,6 +4,7 @@ import {
   MAX_KNOWLEDGE_CHUNKS,
   chunkKnowledgeSubmission,
   isPublicKnowledgeConfirmation,
+  knowledgeAdminSelfAuditNote,
   type KnowledgeReviewAction,
   type KnowledgeStatus,
   type KnowledgeSubmission,
@@ -105,6 +106,15 @@ export type KnowledgeListScope = "mine" | "review" | "all";
 
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
+}
+
+function submitterIdentity(row: Pick<KnowledgeItemRow, "submitter_member_id" | "submitter_email">, actor: KnowledgeActor) {
+  const memberIdMatches = row.submitter_member_id === actor.memberId;
+  const emailMatches = normalizeEmail(row.submitter_email) === normalizeEmail(actor.email);
+  return {
+    overlaps: memberIdMatches || emailMatches,
+    exact: memberIdMatches && emailMatches,
+  };
 }
 
 function timestampAfter(value: string): string {
@@ -223,11 +233,16 @@ function serializePublicItem(row: KnowledgeItemWithRevisionRow | KnowledgeItemLi
 }
 
 function itemCapabilities(row: KnowledgeItemRow, actor: KnowledgeActor, canReview: boolean) {
-  const isSubmitter = row.submitter_member_id === actor.memberId
-    || normalizeEmail(row.submitter_email) === normalizeEmail(actor.email);
+  const identity = submitterIdentity(row, actor);
+  const canAdminManageOwn = actor.isAdmin && identity.exact;
+  const canApprove = canReview && (!identity.overlaps || canAdminManageOwn);
+  const canModerate = canReview && !identity.overlaps;
   return {
-    canReview: canReview && !isSubmitter && row.status === "pending",
-    canRevoke: canReview && !isSubmitter && row.status === "active",
+    canReview: canApprove && row.status === "pending",
+    canReturn: canModerate && row.status === "pending",
+    canReject: canModerate && row.status === "pending",
+    canRevoke: canModerate && row.status === "active",
+    canSetVisibility: canApprove && row.status === "active",
   };
 }
 
@@ -296,10 +311,14 @@ export async function listKnowledgeItems(scope: KnowledgeListScope, actor: Knowl
     if (!canReview) return [];
     statement = database.prepare(`${LIST_ITEM_WITH_REVISION_SELECT}
       WHERE i.status = 'pending'
-        AND i.submitter_member_id <> ? AND lower(i.submitter_email) <> ?
+        AND (
+          (i.submitter_member_id <> ? AND lower(i.submitter_email) <> ?)
+          OR (? = 1 AND i.submitter_member_id = ? AND lower(i.submitter_email) = ?)
+        )
         AND ${guard.sql}
       ORDER BY i.created_at ASC, i.id ASC LIMIT ?
-    `).bind(actor.memberId, normalizeEmail(actor.email), ...guard.values, KNOWLEDGE_LIST_LIMIT);
+    `).bind(actor.memberId, normalizeEmail(actor.email), actor.isAdmin ? 1 : 0,
+      actor.memberId, normalizeEmail(actor.email), ...guard.values, KNOWLEDGE_LIST_LIMIT);
   } else if (canReview) {
     statement = database.prepare(`${LIST_ITEM_WITH_REVISION_SELECT}
       WHERE ${guard.sql}
@@ -324,8 +343,14 @@ export async function countPendingKnowledgeItems(actor: KnowledgeActor): Promise
   const database = await getD1Database();
   const guard = actorGuard(actor, true);
   const row = await database.prepare(`SELECT COUNT(*) AS total FROM knowledge_items
-    WHERE status = 'pending' AND submitter_member_id <> ? AND lower(submitter_email) <> ? AND ${guard.sql}`)
-    .bind(actor.memberId, normalizeEmail(actor.email), ...guard.values).first<{ total: number | string }>();
+    WHERE status = 'pending'
+      AND (
+        (submitter_member_id <> ? AND lower(submitter_email) <> ?)
+        OR (? = 1 AND submitter_member_id = ? AND lower(submitter_email) = ?)
+      )
+      AND ${guard.sql}`)
+    .bind(actor.memberId, normalizeEmail(actor.email), actor.isAdmin ? 1 : 0,
+      actor.memberId, normalizeEmail(actor.email), ...guard.values).first<{ total: number | string }>();
   return Number(row?.total ?? 0);
 }
 
@@ -515,6 +540,9 @@ export async function reviewKnowledgeItem(
   const now = timestampAfter(existing.updated_at);
   const mutationRevision = crypto.randomUUID();
   const eventId = crypto.randomUUID();
+  const identity = submitterIdentity(existing, actor);
+  const adminSelfApproval = action === "approve" && actor.isAdmin && identity.exact;
+  const storedNote = adminSelfApproval ? knowledgeAdminSelfAuditNote(note) : note;
   const nextStatus: KnowledgeStatus = action === "approve" ? "active" : action === "return" ? "returned" : action === "reject" ? "rejected" : "revoked";
   const expectedStatus: KnowledgeStatus = action === "revoke" ? "active" : "pending";
   const guard = actorGuard(actor, true);
@@ -532,12 +560,13 @@ export async function reviewKnowledgeItem(
       UPDATE knowledge_items SET
         status = ?, visibility = ?, active_revision_id = ?, mutation_revision = ?, updated_at = ?, revoked_at = ?
       WHERE id = ? AND status = ? AND current_revision_id = ? AND mutation_revision = ?
-        AND submitter_member_id <> ? AND lower(submitter_email) <> ? AND ${guard.sql}
+        AND (? = 1 OR (submitter_member_id <> ? AND lower(submitter_email) <> ?))
+        AND ${guard.sql}
       RETURNING *
     `).bind(nextStatus, action === "approve" ? visibility : existing.visibility,
       action === "approve" ? existing.current_revision_id : null, mutationRevision, now,
       action === "revoke" ? now : null, existing.id, expectedStatus, existing.current_revision_id,
-      existing.mutation_revision, actor.memberId, normalizeEmail(actor.email), ...guard.values),
+      existing.mutation_revision, adminSelfApproval ? 1 : 0, actor.memberId, normalizeEmail(actor.email), ...guard.values),
   ];
   if (action === "revoke") {
     statements.push(database.prepare(`
@@ -552,7 +581,7 @@ export async function reviewKnowledgeItem(
         review_note = ?, reviewed_at = ?, activated_at = ?, retired_at = NULL
       WHERE id = ? AND item_id = ? AND status = 'pending'
         AND EXISTS (SELECT 1 FROM knowledge_items WHERE id = ? AND mutation_revision = ? AND status = ?)
-    `).bind(nextStatus, actor.memberId, actor.name, normalizeEmail(actor.email), note, now,
+    `).bind(nextStatus, actor.memberId, actor.name, normalizeEmail(actor.email), storedNote, now,
       action === "approve" ? now : null, existing.current_revision_id, existing.id, existing.id, mutationRevision, nextStatus));
   }
   statements.push(database.prepare(`
@@ -582,7 +611,7 @@ export async function reviewKnowledgeItem(
   `).bind(eventId, existing.id, existing.current_revision_id, actor.memberId, actor.name, normalizeEmail(actor.email),
     action === "approve" ? visibility === "public" ? "approved_public" : "approved_internal"
       : action === "return" ? "returned" : action === "reject" ? "rejected" : "revoked",
-    note, now, existing.id, existing.current_revision_id, mutationRevision, nextStatus));
+    storedNote, now, existing.id, existing.current_revision_id, mutationRevision, nextStatus));
 
   const [itemResult] = await database.batch(statements);
   const updated = resultRows(itemResult as D1Result<KnowledgeItemRow>)[0];
@@ -598,7 +627,7 @@ export async function reviewKnowledgeItem(
     reviewed_by_member_id: action === "revoke" ? existing.reviewed_by_member_id : actor.memberId,
     reviewed_by_name: action === "revoke" ? existing.reviewed_by_name : actor.name,
     reviewed_by_email: action === "revoke" ? existing.reviewed_by_email : normalizeEmail(actor.email),
-    review_note: action === "revoke" ? existing.review_note : note,
+    review_note: action === "revoke" ? existing.review_note : storedNote,
     reviewed_at: action === "revoke" ? existing.reviewed_at : now,
     activated_at: action === "approve" ? now : existing.activated_at,
     retired_at: action === "revoke" ? now : null,
@@ -621,6 +650,9 @@ export async function setKnowledgeItemVisibility(
   const now = timestampAfter(existing.updated_at);
   const mutationRevision = crypto.randomUUID();
   const eventId = crypto.randomUUID();
+  const identity = submitterIdentity(existing, actor);
+  const adminSelfManagement = actor.isAdmin && identity.exact;
+  const eventNote = adminSelfManagement ? knowledgeAdminSelfAuditNote("") : "";
   const guard = actorGuard(actor, true);
   const [itemResult] = await database.batch([
     database.prepare(`
@@ -629,13 +661,15 @@ export async function setKnowledgeItemVisibility(
       WHERE id = ? AND status = 'active' AND visibility = ?
         AND current_revision_id = ? AND active_revision_id = current_revision_id
         AND mutation_revision = ?
-        AND submitter_member_id <> ? AND lower(submitter_email) <> ? AND ${guard.sql}
+        AND (? = 1 OR (submitter_member_id <> ? AND lower(submitter_email) <> ?))
+        AND ${guard.sql}
       RETURNING *
     `).bind(visibility, mutationRevision, now, existing.id, existing.visibility,
-      existing.current_revision_id, existing.mutation_revision, actor.memberId, normalizeEmail(actor.email), ...guard.values),
+      existing.current_revision_id, existing.mutation_revision, adminSelfManagement ? 1 : 0,
+      actor.memberId, normalizeEmail(actor.email), ...guard.values),
     database.prepare(`
       INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note, created_at)
-      SELECT ?, ?, ?, ?, ?, ?, ?, '', ?
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?
       WHERE EXISTS (
         SELECT 1 FROM knowledge_items
         WHERE id = ? AND status = 'active' AND visibility = ?
@@ -643,7 +677,7 @@ export async function setKnowledgeItemVisibility(
           AND mutation_revision = ? AND updated_at = ?
       )
     `).bind(eventId, existing.id, existing.current_revision_id, actor.memberId, actor.name, normalizeEmail(actor.email),
-      visibility === "public" ? "visibility_changed_public" : "visibility_changed_internal", now,
+      visibility === "public" ? "visibility_changed_public" : "visibility_changed_internal", eventNote, now,
       existing.id, visibility, existing.current_revision_id, mutationRevision, now),
   ]);
   const updated = resultRows(itemResult as D1Result<KnowledgeItemRow>)[0];
