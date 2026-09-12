@@ -7,6 +7,7 @@ import { spawn } from "node:child_process";
 
 export const WORKER_NAME = "originmind-public-chat-production";
 export const DATABASE_NAME = "originmind-public-chat-production";
+export const OA_WORKER_NAME = "originmind-internal-oa-staging";
 export const ZONE_NAME = "omindos.ai";
 export const HOSTNAME = "chat.omindos.ai";
 export const PRODUCTION_ORIGIN = `https://${HOSTNAME}`;
@@ -68,7 +69,9 @@ export function validateReleaseEnvironment(environment = process.env) {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(adminEmail)) throw new Error("CHAT_ADMIN_EMAIL is invalid");
   const apiToken = requiredText(environment, "CLOUDFLARE_API_TOKEN", 20, 2_048);
   const oaWorkerName = requiredText(environment, "OA_PRODUCTION_WORKER_NAME", 1, 63).trim().toLowerCase();
-  if (!SUBDOMAIN_PATTERN.test(oaWorkerName)) throw new Error("OA_PRODUCTION_WORKER_NAME is invalid");
+  if (oaWorkerName !== OA_WORKER_NAME) {
+    throw new Error(`OA_PRODUCTION_WORKER_NAME must equal ${OA_WORKER_NAME}`);
+  }
   const publicToken = normalizePublicServiceToken(environment.PUBLIC_LAB_AI_SERVICE_TOKEN, apiToken);
   const encryptionKey = (environment.CHAT_APP_ENCRYPTION_KEY || "").trim();
   const rateLimitKey = (environment.CHAT_RATE_LIMIT_HMAC_KEY || "").trim();
@@ -272,7 +275,9 @@ export function buildWranglerConfig({ accountId, adminEmail, databaseId, configP
   if (
     !ACCOUNT_ID_PATTERN.test(accountId) ||
     !UUID_PATTERN.test(databaseId) ||
-    !SUBDOMAIN_PATTERN.test(oaWorkerName)
+    typeof oaWorkerName !== "string" ||
+    oaWorkerName !== OA_WORKER_NAME ||
+    oaWorkerName === WORKER_NAME
   ) {
     throw new Error("Invalid Wrangler target");
   }
