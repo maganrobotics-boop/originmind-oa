@@ -62,7 +62,7 @@ const statusMeta: Record<KnowledgeStatus, { label: string; detail: string }> = {
   pending: { label: "待审核", detail: "等待项目负责人或 OA 管理员审核" },
   returned: { label: "已退回", detail: "请按审核意见修改后重提" },
   rejected: { label: "已拒绝", detail: "本版本不会进入知识库" },
-  active: { label: "已入库", detail: "已按审核时选择的可见范围提供检索" },
+  active: { label: "已入库", detail: "已按当前可见范围提供检索" },
   revoked: { label: "已撤销", detail: "已停止用于对应范围的知识问答" },
 };
 
@@ -280,9 +280,9 @@ function KnowledgeManagePanel({ items, loading, error, onRetry, onOpen, onRevoke
   if (loading) return <LoadingPanel label="正在加载知识库条目…" />;
   if (error) return <ErrorPanel message={error} onRetry={onRetry} />;
   if (!items.length) return <EmptyPanel icon={LibraryBig} title="知识库还是空的" description="审核通过的投稿会成为有效知识；其他状态的历史记录也会保留在这里。" />;
-  return <div className="knowledge-list"><div className="knowledge-list-summary"><span>当前显示 {items.length} 条知识记录</span><small>最多显示最近 100 条；撤销不会删除原文和审核轨迹</small></div><div className="knowledge-manage-list">{items.map((item) => <article className="knowledge-manage-row" key={item.id}>
+  return <div className="knowledge-list"><div className="knowledge-list-summary"><span>当前显示 {items.length} 条知识记录</span><small>已入库知识可调整对内/公开；所有调整和撤销都会保留审核轨迹</small></div><div className="knowledge-manage-list">{items.map((item) => <article className="knowledge-manage-row" key={item.id}>
     <div className="knowledge-manage-main"><div><span className="knowledge-category">{item.category}</span><KnowledgeVisibilityBadge item={item} /><KnowledgeStatusBadge status={item.status} /></div><h3>{item.title}</h3>{item.summary && <p>{item.summary}</p>}<small>{item.submitterName || item.submitterEmail || "项目成员"} · 更新于 {formatDate(item.updatedAt)}</small></div>
-    <div className="knowledge-manage-actions"><Button type="button" variant="outline" onClick={() => onOpen(item)}>查看详情</Button>{item.status === "active" && item.canRevoke ? <Button type="button" variant="outline" className="knowledge-revoke-button" onClick={() => onRevoke(item)}>停止用于问答</Button> : <span className="knowledge-manage-state">{item.status === "active" ? "本人投稿需由其他负责人处理" : statusMeta[item.status]?.detail || "状态已记录"}</span>}</div>
+    <div className="knowledge-manage-actions"><Button type="button" variant="outline" onClick={() => onOpen(item)}>{item.status === "active" && item.canRevoke ? "查看并调整范围" : "查看详情"}</Button>{item.status === "active" && item.canRevoke ? <Button type="button" variant="outline" className="knowledge-revoke-button" onClick={() => onRevoke(item)}>停止用于问答</Button> : <span className="knowledge-manage-state">{item.status === "active" ? "本人投稿需由其他负责人处理" : statusMeta[item.status]?.detail || "状态已记录"}</span>}</div>
   </article>)}</div></div>;
 }
 
@@ -292,6 +292,8 @@ const eventLabels: Record<string, string> = {
   approved: "审核入库（仅 OA 内部）",
   approved_internal: "批准为仅 OA 内部",
   approved_public: "批准为对外公开",
+  visibility_changed_internal: "调整为仅 OA 内部",
+  visibility_changed_public: "调整为对外公开",
   returned: "退回修改",
   rejected: "拒绝入库",
   revoked: "停止问答",
@@ -324,7 +326,7 @@ function KnowledgeHistory({ detail }: { detail: ReviewDetail }) {
   </details>;
 }
 
-function KnowledgeReviewDialog({ detail, open, loading, error, note, setNote, visibility, setVisibility, publicConfirmation, setPublicConfirmation, actioning, onOpenChange, onRetry, onAction }: { detail: ReviewDetail | null; open: boolean; loading: boolean; error: string; note: string; setNote: (value: string) => void; visibility: KnowledgeVisibility | ""; setVisibility: (value: KnowledgeVisibility) => void; publicConfirmation: string; setPublicConfirmation: (value: string) => void; actioning: KnowledgeAction | null; onOpenChange: (open: boolean) => void; onRetry: () => void; onAction: (action: Extract<KnowledgeAction, "approve" | "return" | "reject">, visibility?: KnowledgeVisibility, publicConfirmation?: string) => void }) {
+function KnowledgeReviewDialog({ detail, open, loading, error, note, setNote, visibility, setVisibility, publicConfirmation, setPublicConfirmation, actioning, onOpenChange, onRetry, onAction }: { detail: ReviewDetail | null; open: boolean; loading: boolean; error: string; note: string; setNote: (value: string) => void; visibility: KnowledgeVisibility | ""; setVisibility: (value: KnowledgeVisibility) => void; publicConfirmation: string; setPublicConfirmation: (value: string) => void; actioning: KnowledgeAction | null; onOpenChange: (open: boolean) => void; onRetry: () => void; onAction: (action: Extract<KnowledgeAction, "approve" | "return" | "reject" | "set_visibility">, visibility?: KnowledgeVisibility, publicConfirmation?: string) => void }) {
   const revision = detail ? currentRevision(detail) : undefined;
   const reviewContent = revision?.content || detail?.item.content || "";
   const sourceUrl = safeHttpUrl(revision?.sourceUrl || detail?.item.sourceUrl);
@@ -332,21 +334,26 @@ function KnowledgeReviewDialog({ detail, open, loading, error, note, setNote, vi
   const canAct = actionable && !actioning;
   const canApprove = canAct && Boolean(visibility) && (visibility !== "public" || publicConfirmation === PUBLIC_KNOWLEDGE_CONFIRMATION);
   const savedVisibility = detail ? knowledgeVisibility(detail.item) : undefined;
+  const visibilityEditable = Boolean(detail && detail.item.status === "active" && detail.item.canRevoke && reviewContent.trim() && !loading && !error);
+  const canEditVisibility = visibilityEditable && !actioning;
+  const publicConfirmationRequired = visibility === "public" && (actionable || savedVisibility !== "public");
+  const canSaveVisibility = canEditVisibility && Boolean(visibility) && visibility !== savedVisibility && (!publicConfirmationRequired || publicConfirmation === PUBLIC_KNOWLEDGE_CONFIRMATION);
   return <Dialog open={open} onOpenChange={onOpenChange}><DialogContent className="knowledge-review-dialog">
     <DialogHeader><div className="knowledge-dialog-icon"><ShieldCheck className="size-5" /></div><DialogTitle>{detail?.item.title || "知识投稿审核"}</DialogTitle><DialogDescription>{detail ? `${detail.item.submitterName || detail.item.submitterEmail || "项目成员"} · ${detail.item.category} · 第 ${detail.item.currentRevisionNo || revision?.revisionNo || 1} 版` : "核对投稿内容，并在批准时选择仅对内或对外公开。"}</DialogDescription></DialogHeader>
     {loading ? <LoadingPanel label="正在加载投稿正文…" /> : error ? <ErrorPanel message={error} onRetry={onRetry} /> : detail ? <div className="knowledge-review-detail">
       {(revision?.summary || detail.item.summary) && <section><h3>摘要</h3><p>{revision?.summary || detail.item.summary}</p></section>}
       <section><h3>知识正文</h3><div className="knowledge-review-content">{reviewContent || "当前版本没有可显示的正文。"}</div>{!reviewContent && <p className="knowledge-review-blocked"><AlertTriangle className="size-4" />正文未完整加载，不能执行审核。请重新加载。</p>}</section>
       {(revision?.sourceLabel || detail.item.sourceLabel || sourceUrl) && <section><h3>来源</h3><p>{revision?.sourceLabel || detail.item.sourceLabel || "投稿人提供的参考链接"}</p>{sourceUrl && <a className="knowledge-source-link" href={sourceUrl} target="_blank" rel="noreferrer">打开来源链接</a>}</section>}
-      {!actionable && savedVisibility && <section><h3>当前可见范围</h3><p><KnowledgeVisibilityBadge item={detail.item} />{savedVisibility === "public" ? " 已供 chat.omindos.ai 的“马教授 AI 助手”升级版检索使用。" : " 仅已登录并完成准入与保密签署的成员可在 OA 内检索。"}</p></section>}
+      {!actionable && savedVisibility && <section><h3>当前可见范围</h3><p><KnowledgeVisibilityBadge item={detail.item} />{savedVisibility === "public" ? " 已供 chat.omindos.ai 的 ARTS Robotics AI assistant 检索使用。" : " 仅已登录并完成准入与保密签署的成员可在 OA 内检索。"}</p></section>}
       <KnowledgeHistory detail={detail} />
       {actionable && <label className="form-field"><span className="field-label">审核意见 <small>退回或拒绝时至少填写 2 个字符</small></span><Textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="说明核对结论，或写清需要修改的具体内容" rows={4} minLength={2} maxLength={1000} disabled={Boolean(actioning)} /></label>}
-      {actionable && <fieldset className="knowledge-visibility-choice" disabled={Boolean(actioning)}><legend>批准后的可见范围 <b className="required-mark">*</b></legend><p>批准前必须选择一个范围；投稿人提交时不会自动决定公开范围。</p><div className="knowledge-visibility-options">
+      {(actionable || visibilityEditable) && <fieldset className="knowledge-visibility-choice" disabled={Boolean(actioning)}><legend>{actionable ? "批准后的可见范围" : "调整可见范围"} <b className="required-mark">*</b></legend><p>{actionable ? "批准前必须选择一个范围；投稿人提交时不会自动决定公开范围。" : "已入库知识可以在对内与公开之间调整；每次调整都会保留审计记录。"}</p><div className="knowledge-visibility-options">
         <label className={visibility === "internal" ? "selected" : ""}><input type="radio" name="knowledge-visibility" value="internal" checked={visibility === "internal"} onChange={() => { setVisibility("internal"); setPublicConfirmation(""); }} /><ShieldCheck className="size-4" /><span><strong>对内</strong><small>仅登录 OA 且完成准入与保密签署的成员可见；在 OA 里提问。</small></span></label>
-        <label className={visibility === "public" ? "selected public" : ""}><input type="radio" name="knowledge-visibility" value="public" checked={visibility === "public"} onChange={() => setVisibility("public")} /><Globe2 className="size-4" /><span><strong>对外公开</strong><small>供 chat.omindos.ai 的“马教授 AI 助手”升级版检索；访客无需登录 OA。</small></span></label>
-      </div>{visibility === "public" && <label className="knowledge-public-confirmation"><span>二次确认：输入 <code>{PUBLIC_KNOWLEDGE_CONFIRMATION}</code></span><Input value={publicConfirmation} onChange={(event) => setPublicConfirmation(event.target.value)} placeholder={PUBLIC_KNOWLEDGE_CONFIRMATION} autoComplete="off" spellCheck={false} disabled={Boolean(actioning)} /><small>必须逐字一致。公开批准后，该知识仍可在 OA 内检索，并将同时供 chat.omindos.ai 对外检索。</small></label>}</fieldset>}
+        <label className={visibility === "public" ? "selected public" : ""}><input type="radio" name="knowledge-visibility" value="public" checked={visibility === "public"} onChange={() => setVisibility("public")} /><Globe2 className="size-4" /><span><strong>对外公开</strong><small>供 chat.omindos.ai 的 ARTS Robotics AI assistant 检索；访客无需登录 OA。</small></span></label>
+      </div>{publicConfirmationRequired && <label className="knowledge-public-confirmation"><span>二次确认：输入 <code>{PUBLIC_KNOWLEDGE_CONFIRMATION}</code></span><Input value={publicConfirmation} onChange={(event) => setPublicConfirmation(event.target.value)} placeholder={PUBLIC_KNOWLEDGE_CONFIRMATION} autoComplete="off" spellCheck={false} disabled={Boolean(actioning)} /><small>必须逐字一致。设为公开后，该知识仍可在 OA 内检索，并将同时供 chat.omindos.ai 对外检索。</small></label>}</fieldset>}
     </div> : null}
     {actionable && <DialogFooter className="knowledge-review-actions"><Button type="button" variant="outline" className="knowledge-reject-button" disabled={!canAct || note.trim().length < 2} onClick={() => onAction("reject")}>{actioning === "reject" ? <LoaderCircle className="size-4" /> : <X className="size-4" />}拒绝</Button><Button type="button" variant="outline" className="knowledge-return-button" disabled={!canAct || note.trim().length < 2} onClick={() => onAction("return")}>{actioning === "return" ? <LoaderCircle className="size-4" /> : <RotateCcw className="size-4" />}退回修改</Button><Button type="button" className="primary-button" disabled={!canApprove} onClick={() => onAction("approve", visibility || undefined, visibility === "public" ? publicConfirmation : undefined)}>{actioning === "approve" ? <LoaderCircle className="size-4" /> : visibility === "public" ? <Globe2 className="size-4" /> : <Check className="size-4" />}{visibility === "public" ? "确认公开并入库" : visibility === "internal" ? "通过并仅在 OA 内入库" : "先选择可见范围"}</Button></DialogFooter>}
+    {visibilityEditable && <DialogFooter className="knowledge-review-actions"><Button type="button" variant="outline" disabled={Boolean(actioning)} onClick={() => onOpenChange(false)}>取消</Button><Button type="button" className="primary-button" disabled={!canSaveVisibility} onClick={() => onAction("set_visibility", visibility || undefined, publicConfirmationRequired ? publicConfirmation : undefined)}>{actioning === "set_visibility" ? <LoaderCircle className="size-4" /> : visibility === "public" ? <Globe2 className="size-4" /> : <ShieldCheck className="size-4" />}{!visibility || visibility === savedVisibility ? "请选择新的范围" : visibility === "public" ? "确认调整为公开" : "确认调整为仅 OA 内部"}</Button></DialogFooter>}
   </DialogContent></Dialog>;
 }
 
@@ -571,7 +578,7 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
     setPublicConfirmation("");
   };
 
-  const performReview = async (action: Extract<KnowledgeAction, "approve" | "return" | "reject">, visibility?: KnowledgeVisibility, confirmation?: string) => {
+  const performReview = async (action: Extract<KnowledgeAction, "approve" | "return" | "reject" | "set_visibility">, visibility?: KnowledgeVisibility, confirmation?: string) => {
     if (!reviewTarget) return;
     if (!reviewDetail || reviewDetail.item.id !== reviewTarget.id) {
       toast.info("请等待当前投稿正文加载完成");
@@ -582,18 +589,22 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
       toast.info("审核意见至少需要 2 个字符", { description: action === "return" ? "请明确说明需要修改的内容。" : "请说明拒绝入库的原因。" });
       return;
     }
-    if (action === "approve" && !visibility) {
+    if ((action === "approve" || action === "set_visibility") && !visibility) {
       toast.info("请先选择可见范围", { description: "选择“对内”或“对外公开”后才能批准。" });
       return;
     }
-    if (action === "approve" && visibility === "public" && confirmation !== PUBLIC_KNOWLEDGE_CONFIRMATION) {
+    if ((action === "approve" || action === "set_visibility") && visibility === "public" && knowledgeVisibility(reviewDetail.item) !== "public" && confirmation !== PUBLIC_KNOWLEDGE_CONFIRMATION) {
       toast.info("公开确认文字不一致", { description: `请逐字输入 ${PUBLIC_KNOWLEDGE_CONFIRMATION}` });
+      return;
+    }
+    if (action === "set_visibility" && (reviewDetail.item.status !== "active" || visibility === knowledgeVisibility(reviewDetail.item))) {
+      toast.info("请选择新的可见范围");
       return;
     }
     setReviewAction(action);
     try {
-      const approvalScope = action === "approve" && visibility
-        ? { visibility, ...(visibility === "public" ? { publicConfirmation: confirmation } : {}) }
+      const approvalScope = (action === "approve" || action === "set_visibility") && visibility
+        ? { visibility, ...(visibility === "public" && knowledgeVisibility(reviewDetail.item) !== "public" ? { publicConfirmation: confirmation } : {}) }
         : {};
       const response = await fetch(`/api/knowledge/${encodeURIComponent(reviewTarget.id)}`, {
         method: "PATCH",
@@ -602,7 +613,7 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
         body: JSON.stringify({ action, mutationRevision: reviewDetail.item.mutationRevision, note: note || undefined, ...approvalScope }),
       });
       await responseJson<{ item?: KnowledgeItem; error?: string }>(response, "审核动作未保存");
-      toast.success(action === "approve" ? visibility === "public" ? "知识已对外公开" : "知识已在 OA 内部入库" : action === "return" ? "知识已退回修改" : "知识已拒绝", { description: action === "approve" ? visibility === "public" ? "该版本可供 chat.omindos.ai 的“马教授 AI 助手”升级版检索。" : "该版本仅供已完成准入的 OA 成员检索。" : "投稿人可以在“我的提交”中查看审核意见。" });
+      toast.success(action === "set_visibility" ? visibility === "public" ? "知识已调整为对外公开" : "知识已调整为仅 OA 内部" : action === "approve" ? visibility === "public" ? "知识已对外公开" : "知识已在 OA 内部入库" : action === "return" ? "知识已退回修改" : "知识已拒绝", { description: action === "set_visibility" || action === "approve" ? visibility === "public" ? "该版本可供 chat.omindos.ai 的 ARTS Robotics AI assistant 检索。" : "该版本仅供已完成准入的 OA 成员检索。" : "投稿人可以在“我的提交”中查看审核意见。" });
       reviewDetailRequest.current?.abort();
       reviewDetailRequest.current = null;
       setReviewTarget(null);
@@ -645,7 +656,7 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
 
   return <div className="knowledge-view">
     <section className="page-heading knowledge-heading"><div><div className="eyebrow"><span className="eyebrow-line" />OA 内部知识与问答</div><h1>实验室 AI（内部）</h1><p>登录并完成 OA 准入与保密签署后，可在这里提问、投稿和查看审核状态。项目负责人或 OA 管理员批准时必须选择“对内”或“对外公开”。</p></div><div className="knowledge-live-note"><span /><div><strong>仅限 OA 成员</strong><small>登录并完成准入后使用</small></div></div></section>
-    <section className="knowledge-scope-summary" aria-label="实验室知识可见范围说明"><div><ShieldCheck className="size-5" /><p><strong>对内：在 OA 里面问</strong><span>仅已登录并完成准入与保密签署的成员可检索。</span></p></div><div><Globe2 className="size-5" /><p><strong>对外：供马教授 AI 助手升级版使用</strong><span>公开批准须二次确认，随后供 <a href="https://chat.omindos.ai" target="_blank" rel="noreferrer">chat.omindos.ai</a> 检索。</span></p></div></section>
+    <section className="knowledge-scope-summary" aria-label="实验室知识可见范围说明"><div><ShieldCheck className="size-5" /><p><strong>对内：在 OA 里面问</strong><span>仅已登录并完成准入与保密签署的成员可检索。</span></p></div><div><Globe2 className="size-5" /><p><strong>对外：供 ARTS Robotics AI assistant 使用</strong><span>设为公开须二次确认，随后供 <a href="https://chat.omindos.ai" target="_blank" rel="noreferrer">chat.omindos.ai</a> 检索。</span></p></div></section>
     <Tabs className="knowledge-tabs" value={visibleTab} onValueChange={(value) => setActiveTab(value as KnowledgeTab)}>
       <TabsList aria-label="实验室 AI 功能"><TabsTrigger value="ask"><Bot className="size-4" />知识问答</TabsTrigger><TabsTrigger value="submit"><Send className="size-4" />提交知识</TabsTrigger><TabsTrigger value="mine"><FileText className="size-4" />我的提交</TabsTrigger>{canReviewKnowledge && <TabsTrigger value="review"><ShieldCheck className="size-4" />待审核{reviewPendingCount > 0 && <span className="knowledge-tab-count">{tabCount}</span>}</TabsTrigger>}{canReviewKnowledge && <TabsTrigger value="manage"><LibraryBig className="size-4" />知识库管理</TabsTrigger>}</TabsList>
       <TabsContent value="ask"><KnowledgeAskPanel /></TabsContent>

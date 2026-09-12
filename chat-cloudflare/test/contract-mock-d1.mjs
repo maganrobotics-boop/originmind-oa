@@ -210,7 +210,7 @@ export function mockAssets() {
       calls.push(new URL(request.url).pathname);
       const pathname = new URL(request.url).pathname;
       const isAsset = pathname.startsWith("/assets/");
-      return new Response(isAsset ? "asset" : "<!doctype html><title>ARTS Robotics AI Assistant</title>", {
+      return new Response(isAsset ? "asset" : "<!doctype html><title>ARTS Robotics AI assistant</title>", {
         status: 200,
         headers: {
           "Content-Type": isAsset ? "application/javascript; charset=utf-8" : "text/html; charset=utf-8",

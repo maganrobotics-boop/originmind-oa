@@ -1,4 +1,4 @@
-# ARTS Robotics AI Assistant — Cloudflare release
+# ARTS Robotics AI assistant — Cloudflare release
 
 This project serves the public `chat.omindos.ai` assistant from one Cloudflare
 Worker. Static Assets serve the verified production frontend, D1 stores

@@ -269,6 +269,7 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
   const knowledgeItemStatuses = new Set(["pending", "returned", "rejected", "active", "revoked"]);
   const knowledgeRevisionStatuses = new Set(["pending", "returned", "rejected", "active", "superseded", "revoked"]);
   const knowledgeApprovalActions = new Set(["approved", "approved_internal", "approved_public"]);
+  const knowledgeVisibilityActions = new Set(["visibility_changed_internal", "visibility_changed_public"]);
   const knowledgeItemById = new Map<string, Record<string, string | number | null>>();
   for (const item of knowledgeItems) {
     const id = requiredText(item, "id");
@@ -378,6 +379,54 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
   });
   if (sortedKnowledgeRevisions.some((row, index) => row !== knowledgeRevisions[index])) throw new Error("Migration knowledge revisions are not in deterministic chain order");
 
+  const finalVisibilityByRevision = new Map<string, "internal" | "public">();
+  for (const revision of knowledgeRevisions) {
+    const revisionId = requiredText(revision, "id");
+    const itemId = requiredText(revision, "item_id");
+    const item = knowledgeItemById.get(itemId);
+    const revisionStatus = requiredText(revision, "status");
+    const reclassificationEvents = knowledgeEvents.filter((event) => event.revision_id === revisionId
+      && knowledgeVisibilityActions.has(event.action as string));
+    if (!["active", "superseded", "revoked"].includes(revisionStatus)) {
+      if (reclassificationEvents.length) throw new Error(`Migration knowledge revision ${revisionId} changes visibility before approval`);
+      continue;
+    }
+    const approvalEvents = knowledgeEvents.filter((event) => event.revision_id === revisionId
+      && knowledgeApprovalActions.has(event.action as string));
+    if (approvalEvents.length !== 1) throw new Error(`Migration knowledge revision ${revisionId} has no unique visibility approval event`);
+    const approvalEvent = approvalEvents[0];
+    let visibility: "internal" | "public" = approvalEvent.action === "approved_public" ? "public" : "internal";
+    let previousTimestamp = Date.parse(requiredText(approvalEvent, "created_at"));
+    if (!Number.isFinite(previousTimestamp)) throw new Error(`Migration knowledge revision ${revisionId} has an invalid visibility timeline`);
+    const orderedEvents = [...reclassificationEvents].sort((left, right) => {
+      const timestampOrder = requiredText(left, "created_at").localeCompare(requiredText(right, "created_at"));
+      return timestampOrder || requiredText(left, "id").localeCompare(requiredText(right, "id"));
+    });
+    for (const event of orderedEvents) {
+      const eventTimestamp = Date.parse(requiredText(event, "created_at"));
+      if (!Number.isFinite(eventTimestamp) || eventTimestamp <= previousTimestamp) {
+        throw new Error(`Migration knowledge revision ${revisionId} has an invalid visibility timeline`);
+      }
+      if (event.actor_member_id === item?.submitter_member_id
+        || String(event.actor_email || "").toLowerCase() === String(item?.submitter_email || "").toLowerCase()) {
+        throw new Error(`Migration knowledge revision ${revisionId} has a self-managed visibility event`);
+      }
+      if (event.note !== "") throw new Error(`Migration knowledge revision ${revisionId} has a malformed visibility event`);
+      const nextVisibility: "internal" | "public" = event.action === "visibility_changed_public" ? "public" : "internal";
+      if (nextVisibility === visibility) throw new Error(`Migration knowledge revision ${revisionId} has a redundant visibility event`);
+      visibility = nextVisibility;
+      previousTimestamp = eventTimestamp;
+    }
+    const retiredAt = optionalText(revision, "retired_at");
+    if (orderedEvents.length && retiredAt !== null) {
+      const retiredTimestamp = Date.parse(retiredAt);
+      if (!Number.isFinite(retiredTimestamp) || previousTimestamp >= retiredTimestamp) {
+        throw new Error(`Migration knowledge revision ${revisionId} changes visibility after retirement`);
+      }
+    }
+    finalVisibilityByRevision.set(revisionId, visibility);
+  }
+
   for (const item of knowledgeItems) {
     const itemId = requiredText(item, "id");
     const revisions = knowledgeRevisionsByItem.get(itemId) ?? [];
@@ -439,13 +488,20 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
       }
     }
     if (itemStatus === "active" || itemStatus === "revoked") {
-      const approvalEvents = knowledgeEvents.filter((event) => event.item_id === itemId
-        && event.revision_id === current.id
-        && knowledgeApprovalActions.has(event.action as string));
-      if (approvalEvents.length !== 1) throw new Error(`Migration knowledge item ${itemId} has no unique visibility approval event`);
-      const approvedVisibility = approvalEvents[0].action === "approved_public" ? "public" : "internal";
-      if (requiredText(item, "visibility") !== approvedVisibility) {
+      const finalVisibility = finalVisibilityByRevision.get(requiredText(current, "id"));
+      if (!finalVisibility || requiredText(item, "visibility") !== finalVisibility) {
         throw new Error(`Migration knowledge item ${itemId} has inconsistent approval visibility`);
+      }
+      const currentVisibilityEvents = knowledgeEvents.filter((event) => event.revision_id === current.id
+        && knowledgeVisibilityActions.has(event.action as string));
+      if (currentVisibilityEvents.length) {
+        const lastEvent = [...currentVisibilityEvents].sort((left, right) => {
+          const timestampOrder = requiredText(left, "created_at").localeCompare(requiredText(right, "created_at"));
+          return timestampOrder || requiredText(left, "id").localeCompare(requiredText(right, "id"));
+        }).at(-1) as Record<string, string | number | null>;
+        if (itemStatus === "active" && requiredText(item, "updated_at") !== requiredText(lastEvent, "created_at")) {
+          throw new Error(`Migration knowledge item ${itemId} has inconsistent visibility update evidence`);
+        }
       }
     }
   }
@@ -520,8 +576,11 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
     requiredText(event, "actor_name");
     requiredText(event, "actor_email");
     const action = requiredText(event, "action");
-    if (!["submitted", "resubmitted", "approved", "approved_internal", "approved_public", "returned", "rejected", "revoked"].includes(action)) {
+    if (!["submitted", "resubmitted", "approved", "approved_internal", "approved_public", "visibility_changed_internal", "visibility_changed_public", "returned", "rejected", "revoked"].includes(action)) {
       throw new Error(`Migration knowledge event ${id} has an unsupported action`);
+    }
+    if (knowledgeVisibilityActions.has(action) && !finalVisibilityByRevision.has(revisionId)) {
+      throw new Error(`Migration knowledge event ${id} changes visibility outside an approved revision`);
     }
     if (typeof event.note !== "string") throw new Error(`Migration knowledge event ${id} has a malformed note`);
     requiredText(event, "created_at");
@@ -541,6 +600,7 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
       else if (status === "revoked") expectedActions.push("approved", "revoked");
       const actualActions = knowledgeEvents
         .filter((event) => event.revision_id === revisionId)
+        .filter((event) => !knowledgeVisibilityActions.has(requiredText(event, "action")))
         .map((event) => knowledgeApprovalActions.has(requiredText(event, "action")) ? "approved" : requiredText(event, "action"))
         .sort();
       expectedActions.sort();

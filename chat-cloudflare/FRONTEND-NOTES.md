@@ -7,7 +7,7 @@ artifacts, protected by exact SHA-256 assertions in
 
 For this release, the reviewed JavaScript artifact was changed only to:
 
-- use the `ARTS Robotics AI Assistant` name and model-context tool name;
+- use the `ARTS Robotics AI assistant` name and model-context tool name;
 - make Chat-local document submissions draft-only (`published: 0`);
 - remove the direct-publication checkbox and all wording that claims Chat can
   publish outside OA review; and
