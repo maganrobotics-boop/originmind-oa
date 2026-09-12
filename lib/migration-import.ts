@@ -1,6 +1,10 @@
 import { inspectRevisionChain, type ApprovalRevision } from "./approval-revisions";
 import { canonicalJson } from "./canonical-json";
-import { chunkKnowledgeSubmission, isKnowledgeAdminSelfAuditNote } from "./knowledge-policy";
+import {
+  KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER,
+  chunkKnowledgeSubmission,
+  isKnowledgeAdminSelfAuditNote,
+} from "./knowledge-policy";
 
 type MigrationTable = {
   name: string;
@@ -126,7 +130,29 @@ function approvalProjection(row: Record<string, string | number | null>) {
   return Object.fromEntries(APPROVAL_PROJECTION_COLUMNS.map(([column, property]) => [property, row[column]]));
 }
 
-export async function assertMigrationPayloadRelationships(payload: MigrationPayload) {
+export type MigrationRelationshipOptions = {
+  administratorEmails?: readonly string[];
+};
+
+function configuredAdministratorEmails(values: readonly string[] | undefined) {
+  const result = new Set<string>();
+  for (const value of values ?? []) {
+    const email = typeof value === "string" ? value.trim().toLowerCase() : "";
+    const at = email.indexOf("@");
+    if (!email || email.length > 254 || at <= 0 || at !== email.lastIndexOf("@") || at === email.length - 1 || /[\s|]/u.test(email)) {
+      throw new Error("Migration administrator email is invalid");
+    }
+    if (result.has(email)) throw new Error("Migration administrator email is duplicated");
+    result.add(email);
+  }
+  return result;
+}
+
+export async function assertMigrationPayloadRelationships(
+  payload: MigrationPayload,
+  options: MigrationRelationshipOptions = {},
+) {
+  const administratorEmails = configuredAdministratorEmails(options.administratorEmails);
   const approvals = tableRecord(payload, "approvals").rows;
   const approvalEvents = tableRecord(payload, "approval_events").rows;
   const approvalRevisions = tableRecord(payload, "approval_revisions").rows;
@@ -143,6 +169,15 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
 
   const approvalIds = uniqueIds(approvals, "id", "approvals");
   const memberIds = uniqueIds(members, "id", "members");
+  const memberById = new Map(members.map((member) => [requiredText(member, "id"), member]));
+  const isConfiguredAdministrator = (memberId: string | null, email: string | null) => {
+    if (!memberId || !email) return false;
+    const normalizedEmail = email.trim().toLowerCase();
+    const member = memberById.get(memberId);
+    return administratorEmails.has(normalizedEmail)
+      && typeof member?.chatgpt_account === "string"
+      && member.chatgpt_account.trim().toLowerCase() === normalizedEmail;
+  };
   uniqueIds(approvalEvents, "id", "approval_events");
   uniqueIds(approvalRevisions, "revision_hash", "approval_revisions");
   uniqueIds(laborClaims, "id", "labor_source_claims");
@@ -326,9 +361,12 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
     const reviewerMemberMatchesSubmitter = reviewerMemberId === item?.submitter_member_id;
     const reviewerEmailMatchesSubmitter = reviewerEmail?.toLowerCase() === String(item?.submitter_email || "").toLowerCase();
     const reviewIdentityOverlapsSubmitter = reviewerMemberMatchesSubmitter || reviewerEmailMatchesSubmitter;
-    const adminSelfReview = reviewerMemberMatchesSubmitter
+    const reviewIsApproval = status === "active" || status === "superseded" || status === "revoked";
+    const adminSelfReview = reviewIsApproval
+      && reviewerMemberMatchesSubmitter
       && reviewerEmailMatchesSubmitter
-      && isKnowledgeAdminSelfAuditNote(revision.review_note);
+      && isKnowledgeAdminSelfAuditNote(revision.review_note)
+      && isConfiguredAdministrator(reviewerMemberId, reviewerEmail);
     if (hasReview && reviewIdentityOverlapsSubmitter && !adminSelfReview) {
       throw new Error(`Migration knowledge revision ${id} was self-reviewed`);
     }
@@ -419,7 +457,11 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
       const visibilityIdentityOverlapsSubmitter = actorMemberMatchesSubmitter || actorEmailMatchesSubmitter;
       const adminSelfManagement = actorMemberMatchesSubmitter
         && actorEmailMatchesSubmitter
-        && isKnowledgeAdminSelfAuditNote(event.note);
+        && event.note === KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER
+        && isConfiguredAdministrator(
+          typeof event.actor_member_id === "string" ? event.actor_member_id : null,
+          typeof event.actor_email === "string" ? event.actor_email : null,
+        );
       if (visibilityIdentityOverlapsSubmitter && !adminSelfManagement) {
         throw new Error(`Migration knowledge revision ${revisionId} has a self-managed visibility event`);
       }
