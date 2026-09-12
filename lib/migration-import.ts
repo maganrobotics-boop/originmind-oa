@@ -305,6 +305,7 @@ export async function assertMigrationPayloadRelationships(
   const knowledgeItemStatuses = new Set(["pending", "returned", "rejected", "active", "revoked"]);
   const knowledgeRevisionStatuses = new Set(["pending", "returned", "rejected", "active", "superseded", "revoked"]);
   const knowledgeApprovalActions = new Set(["approved", "approved_internal", "approved_public"]);
+  const knowledgeAdminSelfApprovalActions = new Set(["approved_internal", "approved_public"]);
   const knowledgeVisibilityActions = new Set(["visibility_changed_internal", "visibility_changed_public"]);
   const knowledgeItemById = new Map<string, Record<string, string | number | null>>();
   for (const item of knowledgeItems) {
@@ -369,7 +370,7 @@ export async function assertMigrationPayloadRelationships(
       && reviewerEmailMatchesSubmitter
       && isConfiguredAdministrator(reviewerMemberId, reviewerEmail)
       && knowledgeEvents.some((event) => event.revision_id === id
-        && knowledgeApprovalActions.has(event.action as string)
+        && knowledgeAdminSelfApprovalActions.has(event.action as string)
         && event.actor_member_id === reviewerMemberId
         && event.actor_name === reviewerName
         && event.actor_email === reviewerEmail
