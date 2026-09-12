@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 // A newly published Worker or route can briefly return 404/421 while edge state converges.
@@ -111,7 +111,7 @@ function expectedRelease(value) {
   return value;
 }
 
-export function validateReleaseEvidence({ health, status, chat }, releaseIdValue) {
+export function validateServiceEvidence({ health, status, chat }, releaseIdValue) {
   const releaseId = expectedRelease(releaseIdValue);
   if (
     health?.app !== "arts-robotics-ai-assistant" ||
@@ -152,6 +152,18 @@ export function validateReleaseEvidence({ health, status, chat }, releaseIdValue
     model: status.model,
     sources: chat.sources.length,
   };
+}
+
+function validateAdminAuth(adminAuth) {
+  if (adminAuth?.status !== 401 || adminAuth?.error !== "密码不正确") {
+    throw new Error("/api/auth/login did not execute a compatible administrator password check");
+  }
+}
+
+export function validateReleaseEvidence({ health, status, chat, adminAuth }, releaseIdValue) {
+  const evidence = validateServiceEvidence({ health, status, chat }, releaseIdValue);
+  validateAdminAuth(adminAuth);
+  return { ...evidence, adminLoginReady: true };
 }
 
 async function smokeOnce(origin, releaseId) {
@@ -213,29 +225,72 @@ async function smokeOnce(origin, releaseId) {
   }
   apiHeaders(chatResponse, "/api/chat");
   const chat = await json(chatResponse, "/api/chat");
-  return validateReleaseEvidence({ health, status, chat }, releaseId);
+
+  return validateServiceEvidence({ health, status, chat }, releaseId);
 }
 
-export async function smokeCloudflare(originValue, { attempts = 12, releaseId } = {}) {
+async function verifyAdminPasswordRuntime(origin) {
+  // Run this once, outside the release retry loop. A high-entropy wrong
+  // password forces the production runtime to execute the stored KDF without
+  // creating a session or exposing a secret. This catches platform-
+  // incompatible records without exhausting the login rate limit.
+  const diagnosticPassword = `release-smoke-${randomBytes(24).toString("base64url")}`;
+  const authResponse = await request(origin, "/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ password: diagnosticPassword }),
+  });
+  apiHeaders(authResponse, "/api/auth/login");
+  const authPayload = await json(authResponse, "/api/auth/login");
+  const adminAuth = { status: authResponse.status, error: authPayload?.error };
+  if (adminAuth.status !== 401 || adminAuth.error !== "密码不正确") {
+    throw Object.assign(
+      new Error("/api/auth/login did not complete the administrator password check"),
+      { status: authResponse.status, retryable: false },
+    );
+  }
+  validateAdminAuth(adminAuth);
+}
+
+export async function smokeAdminAuthentication(originValue, { verifyAdmin = verifyAdminPasswordRuntime } = {}) {
+  const origin = exactOrigin(originValue);
+  await verifyAdmin(origin);
+  return { adminLoginReady: true };
+}
+
+export async function smokeCloudflare(originValue, {
+  attempts = 12,
+  releaseId,
+  smokeAttempt = smokeOnce,
+  verifyAdmin = verifyAdminPasswordRuntime,
+  sleepImpl = sleep,
+} = {}) {
   const origin = exactOrigin(originValue);
   const expectedReleaseId = expectedRelease(releaseId);
   let lastError;
+  let evidence;
   for (let attempt = 1; attempt <= attempts; attempt += 1) {
     try {
-      return await smokeOnce(origin, expectedReleaseId);
+      evidence = await smokeAttempt(origin, expectedReleaseId);
+      break;
     } catch (error) {
       lastError = error;
-      const transient = isTransientSmokeStatus(error?.status);
+      const transient = error?.retryable !== false && isTransientSmokeStatus(error?.status);
       if (!transient || attempt === attempts) break;
-      await sleep(Math.min(10_000, attempt * 1_500));
+      await sleepImpl(Math.min(10_000, attempt * 1_500));
     }
   }
-  throw lastError || new Error("Cloudflare smoke check failed");
+  if (!evidence) throw lastError || new Error("Cloudflare smoke check failed");
+  await verifyAdmin(origin);
+  return { ...evidence, adminLoginReady: true };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const origin = process.argv[2];
-  smokeCloudflare(origin, { releaseId: process.env.CHAT_RELEASE_ID })
+  const operation = process.argv[3] === "--admin-auth-only"
+    ? smokeAdminAuthentication(origin)
+    : smokeCloudflare(origin, { releaseId: process.env.CHAT_RELEASE_ID });
+  operation
     .then((result) => process.stdout.write(`${JSON.stringify(result)}\n`))
     .catch((error) => {
       process.stderr.write(`${error instanceof Error ? error.message : "Cloudflare smoke check failed"}\n`);
