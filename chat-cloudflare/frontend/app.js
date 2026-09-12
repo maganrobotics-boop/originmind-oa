@@ -10,6 +10,7 @@ const OA_CHAT_IMPORT_URL = "https://oa.omindos.ai/api/knowledge/import-chat";
 const TOPICS = [
   {
     id: "technology",
+    path: "/technology",
     requestTopic: "research",
     index: "01",
     title: "技术成果与产业化",
@@ -24,6 +25,7 @@ const TOPICS = [
   },
   {
     id: "academic",
+    path: "/research",
     requestTopic: "research",
     index: "02",
     title: "科研合作与学术交流",
@@ -38,6 +40,7 @@ const TOPICS = [
   },
   {
     id: "company",
+    path: "/originmind",
     requestTopic: "business",
     index: "03",
     title: "源灵智能科技有限公司",
@@ -52,6 +55,7 @@ const TOPICS = [
   },
   {
     id: "association",
+    path: "/ius",
     requestTopic: "student",
     index: "04",
     title: "智能无人系统创新协会",
@@ -65,6 +69,16 @@ const TOPICS = [
     ],
   },
 ];
+
+const DEFAULT_TOPIC_ID = TOPICS[0].id;
+const TOPIC_ID_BY_PATH = new Map([
+  ["/", DEFAULT_TOPIC_ID],
+  ...TOPICS.map((topic) => [topic.path, topic.id]),
+]);
+
+function topicIdForPath(pathname) {
+  return TOPIC_ID_BY_PATH.get(pathname) || DEFAULT_TOPIC_ID;
+}
 
 const TOPIC_LABELS = Object.freeze({
   student: "课题参与",
@@ -228,7 +242,7 @@ function serviceLabel(service) {
 
 function createPublicApp() {
   const state = {
-    section: "technology",
+    section: topicIdForPath(window.location.pathname),
     service: null,
     serviceError: "",
     sessions: Object.fromEntries(TOPICS.map((topic) => [topic.id, {
@@ -287,19 +301,47 @@ function createPublicApp() {
     }),
   );
 
-  const topicList = element("div", {
+  const topicList = element("nav", {
     className: "topic-list",
-    attributes: { role: "group", "aria-label": "选择咨询方向" },
+    attributes: { "aria-label": "选择咨询方向" },
   });
+  const topicSelect = element("select", {
+    id: "topic-select",
+    className: "topic-select",
+  });
+  for (const topic of TOPICS) {
+    topicSelect.append(element("option", {
+      text: `${topic.index}  ${topic.title}`,
+      attributes: { value: topic.id },
+    }));
+  }
+  topicSelect.value = state.section;
+  topicSelect.addEventListener("change", () => {
+    activateTopic(topicSelect.value, { historyMode: "push", announce: true });
+  });
+  const topicSelectWrap = element("div", { className: "topic-select-wrap" }, [
+    element("label", {
+      className: "topic-select-label",
+      text: "当前模块",
+      attributes: { for: "topic-select" },
+    }),
+    element("span", { className: "topic-select-control" }, [
+      topicSelect,
+      icon("⌄", "topic-select-arrow"),
+    ]),
+  ]);
   const topicStatus = element("p", {
     className: "sr-only",
     attributes: { role: "status", "aria-live": "polite" },
   });
-  const topicButtons = new Map();
+  const topicLinks = new Map();
   for (const topic of TOPICS) {
-    const button = textButton("", "topic-card");
-    button.setAttribute("aria-pressed", topic.id === state.section ? "true" : "false");
-    button.append(
+    const link = element("a", {
+      className: "topic-card",
+      attributes: { href: topic.path },
+    });
+    if (topic.id === state.section) link.setAttribute("aria-current", "page");
+    link.append(
       element("span", { className: "topic-index", text: topic.index, attributes: { "aria-hidden": "true" } }),
       element("span", { className: "topic-copy" }, [
         element("strong", { text: topic.title }),
@@ -307,29 +349,15 @@ function createPublicApp() {
       ]),
       icon("→", "topic-arrow"),
     );
-    button.addEventListener("click", () => {
-      saveCurrentView();
-      state.section = topic.id;
-      for (const [id, candidate] of topicButtons) {
-        const selected = id === state.section;
-        candidate.classList.toggle("selected", selected);
-        candidate.setAttribute("aria-pressed", selected ? "true" : "false");
-      }
-      topicStatus.textContent = `已切换到${topic.title}`;
-      questionInput.value = sessionFor().draft;
-      syncFeedback();
-      updateComposer();
-      const session = sessionFor();
-      renderMessages({
-        scrollMode: session.messages.length === 0
-          ? "start"
-          : session.stickToEnd ? "end" : "restore",
-      });
+    link.addEventListener("click", (event) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      activateTopic(topic.id, { historyMode: "push", announce: true });
     });
-    topicButtons.set(topic.id, button);
-    topicList.append(button);
+    topicLinks.set(topic.id, link);
+    topicList.append(link);
   }
-  topicButtons.get(state.section)?.classList.add("selected");
+  topicLinks.get(state.section)?.classList.add("selected");
 
   const contextBottom = element("div", { className: "context-bottom" });
   const boundary = element("p", {
@@ -340,7 +368,7 @@ function createPublicApp() {
     attributes: { href: "/manage" },
   }, [icon("◇", "manage-icon"), "管理入口"]);
   contextBottom.append(boundary, manageLink);
-  contextPanel.append(contextHeading, topicList, topicStatus, contextBottom);
+  contextPanel.append(contextHeading, topicList, topicSelectWrap, topicStatus, contextBottom);
 
   const conversation = element("section", {
     className: "conversation",
@@ -492,6 +520,46 @@ function createPublicApp() {
       messageScroll.scrollHeight - messageScroll.clientHeight - messageScroll.scrollTop <= 24;
   }
 
+  function syncTopicControls() {
+    for (const [section, link] of topicLinks) {
+      const selected = section === state.section;
+      link.classList.toggle("selected", selected);
+      if (selected) {
+        link.setAttribute("aria-current", "page");
+      } else {
+        link.removeAttribute("aria-current");
+      }
+    }
+    topicSelect.value = state.section;
+  }
+
+  function activateTopic(section, { historyMode = "none", announce = false } = {}) {
+    const nextTopic = TOPICS.find((topic) => topic.id === section);
+    if (!nextTopic) return;
+
+    const changed = state.section !== nextTopic.id;
+    if (changed) saveCurrentView();
+    if (historyMode === "push" && window.location.pathname !== nextTopic.path) {
+      window.history.pushState({ topic: nextTopic.id }, "", nextTopic.path);
+    }
+
+    if (changed) {
+      state.section = nextTopic.id;
+      questionInput.value = sessionFor().draft;
+      syncFeedback();
+      updateComposer();
+      const session = sessionFor();
+      renderMessages({
+        scrollMode: session.messages.length === 0
+          ? "start"
+          : session.stickToEnd ? "end" : "restore",
+      });
+    }
+
+    syncTopicControls();
+    if (announce) topicStatus.textContent = `已切换到${nextTopic.title}`;
+  }
+
   function syncFeedback() {
     const session = sessionFor();
     setRegion(errorRegion, session.error || state.serviceError);
@@ -506,7 +574,7 @@ function createPublicApp() {
     questionInput.disabled = session.sending;
     newConversation.disabled = session.sending || !hasResettableState(session);
     messageScroll.setAttribute("aria-busy", session.sending ? "true" : "false");
-    for (const [section, button] of topicButtons) {
+    for (const [section, button] of topicLinks) {
       const candidate = sessionFor(section);
       button.classList.toggle("busy", candidate.sending);
       button.setAttribute("aria-busy", candidate.sending ? "true" : "false");
@@ -960,7 +1028,11 @@ function createPublicApp() {
     dispatchQuestion(questionInput.value, state.section);
   });
   submitInquiryButton.addEventListener("click", (event) => openInquiry(event.currentTarget));
+  window.addEventListener("popstate", () => {
+    activateTopic(topicIdForPath(window.location.pathname), { announce: true });
+  });
 
+  syncTopicControls();
   renderMessages({ scrollMode: "start" });
   updateComposer();
   void requestJson("/api/status")

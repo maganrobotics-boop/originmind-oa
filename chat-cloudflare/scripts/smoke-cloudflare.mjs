@@ -172,7 +172,7 @@ export function validateReleaseEvidence({ health, status, chat, adminAuth }, rel
 
 async function smokeOnce(origin, releaseId) {
   let frontendAssets;
-  for (const pathname of ["/", "/manage"]) {
+  for (const pathname of ["/", "/technology", "/research", "/originmind", "/ius", "/manage"]) {
     const response = await request(origin, pathname, { headers: { Accept: "text/html" } });
     if (response.status !== 200) throw Object.assign(new Error(`${pathname} returned ${response.status}`), { status: response.status });
     if (!(response.headers.get("content-type") || "").toLowerCase().includes("text/html")) {
@@ -185,7 +185,7 @@ async function smokeOnce(origin, releaseId) {
     }
     const paths = frontendAssetPaths(body);
     if (frontendAssets && JSON.stringify(paths) !== JSON.stringify(frontendAssets)) {
-      throw new Error("Root and manager shells reference different frontend assets");
+      throw new Error("Public and manager shells reference different frontend assets");
     }
     frontendAssets = paths;
   }
