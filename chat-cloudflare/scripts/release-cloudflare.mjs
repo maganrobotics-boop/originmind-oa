@@ -45,6 +45,9 @@ const stagingConfigPath = join(releaseRoot, "wrangler.staging.json");
 const productionConfigPath = join(releaseRoot, "wrangler.production.json");
 let dnsSnapshot = null;
 let cutoverAttempted = false;
+const DNS_AUTO_TTL_MILLISECONDS = 300_000;
+const DNS_PROPAGATION_BUFFER_MILLISECONDS = 30_000;
+const PRODUCTION_DNS_SETTLE_MILLISECONDS = DNS_AUTO_TTL_MILLISECONDS + DNS_PROPAGATION_BUFFER_MILLISECONDS;
 
 function progress(message) {
   process.stdout.write(`${message}\n`);
@@ -52,6 +55,16 @@ function progress(message) {
 
 async function saveText(name, value) {
   await writeFile(join(evidenceRoot, name), redact(value, secretValues), { encoding: "utf8", mode: 0o600, flag: "wx" });
+}
+
+async function settleProductionDns() {
+  progress("Waiting 330 seconds for the previous automatic DNS TTL to expire before live checks.");
+  await new Promise((resolve) => setTimeout(resolve, PRODUCTION_DNS_SETTLE_MILLISECONDS));
+  return {
+    format: "originmind-chat-dns-settle-v1",
+    completedAt: new Date().toISOString(),
+    waitedMilliseconds: PRODUCTION_DNS_SETTLE_MILLISECONDS,
+  };
 }
 
 async function deploy(configPath, secretPath, stage) {
@@ -218,6 +231,8 @@ try {
     cutoverAttempted = true;
     const enabledState = await setDnsProxy(environment, dnsSnapshot, true);
     await writeJson(join(evidenceRoot, "dns-enabled.json"), enabledState);
+
+    await writeJson(join(evidenceRoot, "dns-settle.json"), await settleProductionDns());
 
     const liveSmoke = await smokeCloudflare(PRODUCTION_ORIGIN, { releaseId: environment.releaseId });
     await writeJson(join(evidenceRoot, "smoke-production.json"), liveSmoke);
