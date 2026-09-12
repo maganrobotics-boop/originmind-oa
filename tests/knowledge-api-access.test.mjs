@@ -255,6 +255,31 @@ test("普通成员和项目负责人不能自审，系统管理员可以批准�
   assert.equal(globalThis[stateKey].reviewCalls.length, 1);
 });
 
+test("重新提交要求成员 ID 与邮箱同时匹配投稿人", async () => {
+  const body = {
+    action: "resubmit",
+    mutationRevision: "item-mutation-1",
+    title: "补充后的知识标题",
+    category: "安全规范",
+    content: "这是补充后且长度足够的知识正文内容。",
+  };
+
+  globalThis[stateKey].existing = existingItem({
+    status: "returned",
+    submitter_member_id: "member-review",
+    submitter_email: "other@example.com",
+  });
+  assert.equal((await detailRoute.PATCH(patch(body), params)).status, 404);
+
+  globalThis[stateKey].existing = existingItem({
+    status: "returned",
+    submitter_member_id: "member-other",
+    submitter_email: "review@example.com",
+  });
+  assert.equal((await detailRoute.PATCH(patch(body), params)).status, 404);
+  assert.equal(globalThis[stateKey].reviewCalls.length, 0);
+});
+
 test("未完成 NDA 的成员在读取知识条目前即被拒绝", async () => {
   globalThis[stateKey].authorized = authorizedActor({ ndaCompleted: false });
   const response = await detailRoute.GET(new Request("https://oa.example.test/api/knowledge/11111111-2222-4333-8444-555555555555"), params);
