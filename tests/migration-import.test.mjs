@@ -5,7 +5,13 @@ import { fileURLToPath } from "node:url";
 import { createServer } from "vite";
 
 import { MIGRATION_EXPORT_TABLES } from "../lib/migration-export.mjs";
-import { assertTargetAdministratorReentry, migrationImportD1QueryCount, migrationImportRowBatches, MIGRATION_IMPORT_MAX_JSON_BINDING_BYTES } from "../lib/migration-import-plan.mjs";
+import {
+  assertTargetAdministratorReentry,
+  migrationAdministratorEmails,
+  migrationImportD1QueryCount,
+  migrationImportRowBatches,
+  MIGRATION_IMPORT_MAX_JSON_BINDING_BYTES,
+} from "../lib/migration-import-plan.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const vite = await createServer({ appType: "custom", configFile: false, root, server: { middlewareMode: true, hmr: false } });
@@ -177,6 +183,16 @@ test("migration accepts active Feishu login identities while preserving archive 
 
   const pendingPdfArchive = row("external_archives", { id: "archive-pdf-pending", approval_id: "approval-1", destination: "feishu_drive_pdf", status: "pending", source_revision_hash: null });
   await assert.rejects(migration.assertMigrationPayloadRelationships(payload({ approvals: [approval], external_archives: [pendingPdfArchive] })), /pending external archive/u);
+});
+
+test("migration administrator email lists are canonical and reject unsafe ambiguity", () => {
+  assert.deepEqual(migrationAdministratorEmails(" Admin@Example.com ,second@example.com "), [
+    "admin@example.com",
+    "second@example.com",
+  ]);
+  for (const value of [undefined, "", "not-an-email", "admin@example.com,ADMIN@example.com", "a@example.com|b@example.com"]) {
+    assert.throws(() => migrationAdministratorEmails(value), /administrator email list|administrator email/u);
+  }
 });
 
 test("target staging configuration must retain at least one external-login administrator", () => {
