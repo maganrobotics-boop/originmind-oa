@@ -131,9 +131,9 @@ type MemberAuditRow = { id: string; fullName: string; identityNumber: string; ch
 type ProfileVisibility = { department: boolean; position: boolean; phone: boolean; bio: boolean };
 type ProfileField = Exclude<keyof PersonProfile, "visibility">;
 type PersonProfile = { department: string; position: string; phone: string; bio: string; visibility: ProfileVisibility };
-type Person = { id: string; fullName: string; email: string; role: string; permissions: MemberPermission[]; avatarDataUrl: string; profile: PersonProfile; lastSeenAt: string; online: boolean; ndaCompleted: boolean };
+type Person = { id: string; fullName: string; email: string; role: string; permissions: MemberPermission[]; isAdmin: boolean; avatarDataUrl: string; profile: PersonProfile; lastSeenAt: string; online: boolean; ndaCompleted: boolean };
 type DirectMessage = { id: string; senderEmail: string; senderName: string; recipientEmail: string; recipientName: string; body: string; createdAt: string };
-type ConversationSummary = { peer: { email: string; name?: string; fullName?: string; role?: string; permissions?: MemberPermission[] }; latestMessageId?: string | null; latestCreatedAt?: string | null; latestIncomingId?: string | null };
+type ConversationSummary = { peer: { email: string; name?: string; fullName?: string; role?: string; permissions?: MemberPermission[]; isAdmin?: boolean }; latestMessageId?: string | null; latestCreatedAt?: string | null; latestIncomingId?: string | null };
 type MetricPanel = "approved" | "archive" | null;
 type ApprovalEvent = { id: number; actorName: string; actorEmail: string; action: string; note: string; createdAt: string };
 type AuthProvider = "chatgpt" | "github" | "feishu" | "legacy";
@@ -191,6 +191,14 @@ const officialBrand = "OriginMind × ARTS Robotics";
 const officialName = "OriginMind × ARTS Robotics 联合研发 OA";
 const officialDescription = "面向联合研发项目的技术成果、采购、劳务报酬及保密协议审批与归档平台。";
 const projectName = "OriginMind × ARTS Robotics 联合研发项目";
+
+function sessionRoleLabel(role?: string | null, isAdmin = false) {
+  if (isAdmin) return "系统管理员";
+  if (role === "project_owner") return "项目负责人";
+  if (role === "technical_advisor") return "技术顾问";
+  if (role === "finance_owner") return "经费负责人";
+  return "项目成员";
+}
 const shanghaiMonthFormatter = new Intl.DateTimeFormat("en-CA", { timeZone: "Asia/Shanghai", year: "numeric", month: "2-digit" });
 const localMonthKey = () => {
   const parts = Object.fromEntries(shanghaiMonthFormatter.formatToParts(new Date()).map((part) => [part.type, part.value]));
@@ -244,7 +252,7 @@ function StatusBadge({ status }: { status: ApprovalStatus }) {
   return <Badge variant="outline" className={`status-badge ${meta.className}`}><span className={`status-dot ${meta.dot}`} />{status}</Badge>;
 }
 
-function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马淦", userAvatarDataUrl = "", authProvider = "chatgpt", isAdmin = false, canReviewKnowledge = false }: { activeView: ViewKey; setActiveView: (key: ViewKey) => void; onNew: () => void; onProfile: () => void; userName?: string; userAvatarDataUrl?: string; authProvider?: AuthProvider; isAdmin?: boolean; canReviewKnowledge?: boolean }) {
+function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马淦", userAvatarDataUrl = "", authProvider = "chatgpt", currentRole, isAdmin = false, canReviewKnowledge = false }: { activeView: ViewKey; setActiveView: (key: ViewKey) => void; onNew: () => void; onProfile: () => void; userName?: string; userAvatarDataUrl?: string; authProvider?: AuthProvider; currentRole?: string | null; isAdmin?: boolean; canReviewKnowledge?: boolean }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
   const [pendingMemberCount, setPendingMemberCount] = useState(0);
@@ -349,7 +357,7 @@ function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马�
     <button className="sidebar-nav-item" onClick={onNew}><Plus className="size-[17px]" /><span>新建审核申请</span></button>
     <button className="sidebar-nav-item" onClick={() => setActiveView("rules")}><ShieldCheck className="size-[17px]" /><span>签署与归档规范</span></button>
     <div className="sidebar-footer-card"><div className="footer-card-icon"><UsersRound className="size-4" /></div><div><div className="footer-card-title">联合研发工作区</div><div className="footer-card-text">{officialBrand}</div></div></div>
-    <div className="sidebar-user"><div className="avatar avatar-dark sidebar-user-avatar">{userAvatarDataUrl ? <img src={userAvatarDataUrl} alt="" /> : userName.slice(0, 1)}</div><div className="sidebar-user-copy"><div className="sidebar-user-name">{userName}</div><div className="sidebar-user-role">已登录内部账号</div></div><div className="sidebar-user-control"><button type="button" className="sidebar-user-menu" onClick={() => setUserMenuOpen((open) => !open)} aria-expanded={userMenuOpen} aria-haspopup="menu" aria-label="打开个人账户菜单" title="个人账户菜单"><MoreHorizontal className="size-4" /></button>{userMenuOpen && <div className="sidebar-user-popover" role="menu"><button type="button" role="menuitem" onClick={openProfile}><Settings2 className="size-3.5" />个人设置</button><button type="button" role="menuitem" className="logout-action" onClick={logout}><LogOut className="size-3.5" />退出登录</button></div>}</div></div>
+    <div className="sidebar-user"><div className="avatar avatar-dark sidebar-user-avatar">{userAvatarDataUrl ? <img src={userAvatarDataUrl} alt="" /> : userName.slice(0, 1)}</div><div className="sidebar-user-copy"><div className="sidebar-user-name">{userName}</div><div className="sidebar-user-role">{sessionRoleLabel(currentRole, isAdmin)}</div></div><div className="sidebar-user-control"><button type="button" className="sidebar-user-menu" onClick={() => setUserMenuOpen((open) => !open)} aria-expanded={userMenuOpen} aria-haspopup="menu" aria-label="打开个人账户菜单" title="个人账户菜单"><MoreHorizontal className="size-4" /></button>{userMenuOpen && <div className="sidebar-user-popover" role="menu"><button type="button" role="menuitem" onClick={openProfile}><Settings2 className="size-3.5" />个人设置</button><button type="button" role="menuitem" className="logout-action" onClick={logout}><LogOut className="size-3.5" />退出登录</button></div>}</div></div>
   </aside>;
 }
 
@@ -384,6 +392,7 @@ function FlowCard() {
 
 
 function roleLabel(person: Person) {
+  if (person.isAdmin) return "系统管理员";
   if (person.permissions.includes("project_owner")) return "项目负责人";
   if (person.permissions.includes("technical_advisor")) return "技术顾问";
   return "项目成员";
@@ -412,6 +421,7 @@ function conversationPeer(summary: ConversationSummary): Person {
     email: summary.peer.email.trim().toLowerCase(),
     role: summary.peer.role || "member",
     permissions: Array.isArray(summary.peer.permissions) ? summary.peer.permissions : [],
+    isAdmin: summary.peer.isAdmin === true,
     avatarDataUrl: "",
     profile: emptyProfile(),
     lastSeenAt: summary.latestCreatedAt || "",
@@ -664,7 +674,7 @@ function PeopleView({ currentUser }: { currentUser?: SessionInfo["user"] }) {
   return <div className="people-view"><div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-line" />团队通讯录</div><h1>协作成员</h1><p>已通过审核的成员会自动加入；完成保密协议后可使用私聊和内部协作功能。</p></div><Button variant="outline" onClick={() => self && openProfile(self)} disabled={!self}><Pencil className="size-4" />编辑我的资料</Button></div><div className="people-summary"><div><UsersRound className="size-5" /><strong>{people.length}</strong><span>位协作成员</span></div><div><span className="people-online-indicator" /><strong>{onlineCount}</strong><span>人在线</span></div><small>在线状态每 30 秒刷新一次</small></div>{loading ? <div className="people-loading"><Clock3 className="size-5" />正在加载成员目录…</div> : error ? <div className="empty-state"><UsersRound className="size-6" /><p>{error}</p></div> : people.length === 0 ? <div className="empty-state"><UsersRound className="size-6" /><p>暂无已通过审核的成员</p></div> : <div className="people-grid">{people.map((person) => <article className="person-card" key={person.email}><div className="person-card-head"><PersonAvatar person={person} onClick={() => openProfile(person)} /><div className="person-card-identity"><button type="button" className="person-name" onClick={() => openProfile(person)}>{person.fullName}</button><span className="person-role">{roleLabel(person)}</span><span className={`person-status ${person.online ? "online" : ""}`}><i />{formatLastSeen(person)}</span></div></div><div className="person-card-profile"><span>{profileValue(person, "department", currentEmail, "未填写部门")}</span><span>{profileValue(person, "position", currentEmail, "未填写负责方向")}</span></div><div className="person-card-actions"><button type="button" onClick={() => openProfile(person)}><UserRound className="size-3.5" />查看资料</button>{person.email !== currentEmail && person.ndaCompleted && <button type="button" onClick={() => openChat(person)}><MessageCircle className="size-3.5" />私聊</button>}</div></article>)}</div>}<ProfileDialog person={selectedPerson} open={profileOpen} currentEmail={currentEmail} onOpenChange={setProfileOpen} onSaved={updatePerson} onChat={openChat} /><ChatDialog key={chatPerson?.email || "people-chat-dialog"} person={chatPerson} currentPerson={self} open={Boolean(chatPerson)} currentEmail={currentEmail} onOpenChange={(open) => { if (!open) setChatPerson(null); }} /></div>;
 }
 
-function ProfileSettingsView({ currentUser, migrationExportEnabled = false, migrationUnfreezeEnabled = false, onIdentityChanged }: { currentUser?: SessionInfo["user"]; migrationExportEnabled?: boolean; migrationUnfreezeEnabled?: boolean; onIdentityChanged: (fullName: string, avatarDataUrl: string) => void }) {
+function ProfileSettingsView({ currentUser, currentRole, isAdmin = false, migrationExportEnabled = false, migrationUnfreezeEnabled = false, onIdentityChanged }: { currentUser?: SessionInfo["user"]; currentRole?: string | null; isAdmin?: boolean; migrationExportEnabled?: boolean; migrationUnfreezeEnabled?: boolean; onIdentityChanged: (fullName: string, avatarDataUrl: string) => void }) {
   const [profile, setProfile] = useState<PersonProfile>(emptyProfile());
   const [displayName, setDisplayName] = useState(currentUser?.displayName || "");
   const [avatarDataUrl, setAvatarDataUrl] = useState("");
@@ -791,6 +801,7 @@ function ProfileSettingsView({ currentUser, migrationExportEnabled = false, migr
             <h2>{displayName || "内部成员"}</h2>
             <p className="profile-settings-account">{accountIdentityLabel(currentUser)}</p>
             <div className="profile-settings-account-row"><span>成员状态</span><strong>已通过审核</strong></div>
+            <div className="profile-settings-account-row"><span>系统角色</span><strong>{sessionRoleLabel(currentRole, isAdmin)}</strong></div>
             <div className="profile-settings-account-row"><span>当前登录</span><strong>{authProviderLabel(currentUser?.authProvider)}</strong></div>
             {(feishuLoginEnabled || feishuLinked) && (
               <div className={`feishu-link-panel ${feishuLinked ? "linked" : ""}`}>
@@ -2405,9 +2416,9 @@ export default function Home() {
       <Toaster position="top-right" />
       <button type="button" className={`mobile-nav-overlay ${mobileNavOpen ? "visible" : ""}`} onClick={() => { setMobileNavOpen(false); mobileMenuButtonRef.current?.focus(); }} aria-label="关闭导航" aria-hidden={!mobileNavOpen} tabIndex={mobileNavOpen ? 0 : -1} />
       <div ref={mobileSidebarRef} id="mobile-navigation" className={`mobile-sidebar ${mobileNavOpen ? "open" : ""}`} role="dialog" aria-modal="true" aria-label="移动导航" aria-hidden={!mobileNavOpen}>
-        <Sidebar activeView={activeView} setActiveView={navigate} onNew={() => { openNewRequest(); setMobileNavOpen(false); }} onProfile={() => navigate("profile")} userName={session.user?.displayName} userAvatarDataUrl={myAvatarDataUrl} authProvider={session.user?.authProvider} isAdmin={Boolean(session.isAdmin)} canReviewKnowledge={Boolean(session.canReviewKnowledge)} />
+        <Sidebar activeView={activeView} setActiveView={navigate} onNew={() => { openNewRequest(); setMobileNavOpen(false); }} onProfile={() => navigate("profile")} userName={session.user?.displayName} userAvatarDataUrl={myAvatarDataUrl} authProvider={session.user?.authProvider} currentRole={session.role} isAdmin={Boolean(session.isAdmin)} canReviewKnowledge={Boolean(session.canReviewKnowledge)} />
       </div>
-      <Sidebar activeView={activeView} setActiveView={navigate} onNew={openNewRequest} onProfile={() => navigate("profile")} userName={session.user?.displayName} userAvatarDataUrl={myAvatarDataUrl} authProvider={session.user?.authProvider} isAdmin={Boolean(session.isAdmin)} canReviewKnowledge={Boolean(session.canReviewKnowledge)} />
+      <Sidebar activeView={activeView} setActiveView={navigate} onNew={openNewRequest} onProfile={() => navigate("profile")} userName={session.user?.displayName} userAvatarDataUrl={myAvatarDataUrl} authProvider={session.user?.authProvider} currentRole={session.role} isAdmin={Boolean(session.isAdmin)} canReviewKnowledge={Boolean(session.canReviewKnowledge)} />
       <main className="main-shell">
         <header className="topbar">
           <button ref={mobileMenuButtonRef} className="mobile-menu-button" onClick={() => setMobileNavOpen(true)} aria-label="打开导航" aria-expanded={mobileNavOpen} aria-controls="mobile-navigation"><Menu className="size-5" /></button>
@@ -2421,7 +2432,7 @@ export default function Home() {
             <ChatHub currentUser={session.user} />
           </div>
         </header>
-        {activeView === "notifications" ? <NotificationStatus /> : activeView === "oem" ? <OemInbox /> : activeView === "members" ? <MembersView currentEmail={session.user?.email} /> : activeView === "people" ? <PeopleView currentUser={session.user} /> : activeView === "knowledge" ? <KnowledgeView canReviewKnowledge={Boolean(session.canReviewKnowledge)} /> : activeView === "profile" ? <ProfileSettingsView currentUser={session.user} migrationExportEnabled={session.migrationExportEnabled} migrationUnfreezeEnabled={session.migrationUnfreezeEnabled} onIdentityChanged={(fullName, avatarDataUrl) => { setMyAvatarDataUrl(avatarDataUrl); setSession((current) => current?.user ? { ...current, user: { ...current.user, displayName: fullName } } : current); }} /> : activeView === "rules" ? <RulesView /> : activeView === "requests" ? <RequestsView approvals={approvals} filteredApprovals={filteredApprovals} myPendingApprovals={myPendingApprovals} dataReady={dataReady} activeFilter={activeFilter} setActiveFilter={setActiveFilter} showMineOnly={showMineOnly} onClearMine={() => setShowMineOnly(false)} onOpen={openApproval} /> : <>
+        {activeView === "notifications" ? <NotificationStatus /> : activeView === "oem" ? <OemInbox /> : activeView === "members" ? <MembersView currentEmail={session.user?.email} /> : activeView === "people" ? <PeopleView currentUser={session.user} /> : activeView === "knowledge" ? <KnowledgeView canReviewKnowledge={Boolean(session.canReviewKnowledge)} /> : activeView === "profile" ? <ProfileSettingsView currentUser={session.user} currentRole={session.role} isAdmin={Boolean(session.isAdmin)} migrationExportEnabled={session.migrationExportEnabled} migrationUnfreezeEnabled={session.migrationUnfreezeEnabled} onIdentityChanged={(fullName, avatarDataUrl) => { setMyAvatarDataUrl(avatarDataUrl); setSession((current) => current?.user ? { ...current, user: { ...current.user, displayName: fullName } } : current); }} /> : activeView === "rules" ? <RulesView /> : activeView === "requests" ? <RequestsView approvals={approvals} filteredApprovals={filteredApprovals} myPendingApprovals={myPendingApprovals} dataReady={dataReady} activeFilter={activeFilter} setActiveFilter={setActiveFilter} showMineOnly={showMineOnly} onClearMine={() => setShowMineOnly(false)} onOpen={openApproval} /> : <>
           <section className="page-heading dashboard-heading">
             <div>
               <div className="eyebrow"><span className="eyebrow-line" />{officialName}</div>
