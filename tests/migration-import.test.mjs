@@ -684,9 +684,21 @@ test("knowledge migration validates immutable revisions, historical superseded v
   const adminSelfReviewedRevision = row("knowledge_revisions", {
     ...record("knowledge_revisions", selfReviewedRevision),
   });
-  const adminSelfReviewEvent = row("knowledge_events", {
+  const legacyAdminSelfReviewEvent = row("knowledge_events", {
     ...record("knowledge_events", selfReviewEvent),
     note: adminSelfReviewNote,
+  });
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [item],
+    knowledge_revisions: [adminSelfReviewedRevision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, legacyAdminSelfReviewEvent],
+  }), { administratorEmails: ["member@example.com"] }), /self-reviewed/u);
+
+  const adminSelfReviewEvent = row("knowledge_events", {
+    ...record("knowledge_events", legacyAdminSelfReviewEvent),
+    action: "approved_internal",
   });
   const adminSelfReviewedPayload = payload({
     members: [member, reviewer],
