@@ -6,6 +6,7 @@ import {
   DATABASE_NAME,
   EXPECTED_CONFIRMATION,
   HOSTNAME,
+  OA_WORKER_NAME,
   buildWranglerConfig,
   exactDnsRecord,
   normalizePublicServiceToken,
@@ -93,6 +94,7 @@ test("generated Wrangler targets use explicit Worker-first static routing", () =
   });
   assert.equal(staging.workers_dev, true);
   assert.deepEqual(staging.compatibility_flags, ["global_fetch_strictly_public"]);
+  assert.deepEqual(staging.services, [{ binding: "OA_SERVICE", service: OA_WORKER_NAME }]);
   assert.equal(staging.routes, undefined);
   assert.match(staging.assets.directory, /(?:^|\/)public$/u);
   assert.deepEqual({ ...staging.assets, directory: "<chat-public>" }, {
@@ -114,6 +116,7 @@ test("generated Wrangler targets use explicit Worker-first static routing", () =
   });
   assert.equal(production.workers_dev, false);
   assert.deepEqual(production.compatibility_flags, ["global_fetch_strictly_public"]);
+  assert.deepEqual(production.services, [{ binding: "OA_SERVICE", service: OA_WORKER_NAME }]);
   assert.deepEqual(production.routes, [{ pattern: `${HOSTNAME}/*`, zone_name: "omindos.ai" }]);
   assert.equal(production.d1_databases[0].database_name, DATABASE_NAME);
 });
