@@ -222,7 +222,7 @@ test("verified Bailian config overrides Workers AI and uses hardened fetch optio
   assert.equal(result.body.mode, "ai");
   assert.equal(result.body.provider, "bailian");
   assert.equal(workersCalls, 0);
-  assert.equal(modelFetch.init.redirect, "error");
+  assert.equal(modelFetch.init.redirect, "manual");
   assert.equal(modelFetch.init.cache, "no-store");
   assert.equal(modelFetch.init.credentials, "omit");
   assert.equal(JSON.parse(modelFetch.init.body).stream, false);

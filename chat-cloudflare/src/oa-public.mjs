@@ -135,7 +135,7 @@ export async function retrieveOa(question, context) {
         "x-originmind-public-lab-ai-service-token": token,
       },
       body: JSON.stringify({ question: normalized }),
-      redirect: "error",
+      redirect: "manual",
       cache: "no-store",
       credentials: "omit",
       signal: AbortSignal.timeout(TIMEOUT_MS),
