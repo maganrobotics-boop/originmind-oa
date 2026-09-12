@@ -1,7 +1,7 @@
 import { desc, eq, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
 import { accountProfiles, members } from "../../../db/schema";
-import { getAuthorizedUser, getReviewerDirectory, isNdaAdmittedMember, parseAccountProfile, parseMemberPermissions } from "../_lib/auth";
+import { getAuthorizedUser, getReviewerDirectory, isAdministrator, isNdaAdmittedMember, parseAccountProfile, parseMemberPermissions } from "../_lib/auth";
 import { memberDepartmentLabel } from "../../../lib/member-attributes";
 
 const ONLINE_WINDOW_MS = 5 * 60 * 1000;
@@ -70,7 +70,7 @@ export async function GET(request: Request) {
       const profile = parseAccountProfile(profileRow?.profileJson);
       const permissions = parseMemberPermissions(row.role, row.permissionsJson);
       const lastSeenAt = profileRow?.lastSeenAt || row.lastSeenAt;
-      people.set(email, { id: row.id, fullName: owners.get(email)?.displayName || row.fullName, email, role: permissions.includes("project_owner") ? "project_owner" : permissions.includes("technical_advisor") ? "technical_advisor" : "member", permissions, isAdmin: owners.get(email)?.isAdmin === true, avatarDataUrl: profileRow?.avatarDataUrl || "", profile: profileForViewer(profile, email === currentEmail, row.departmentCode), lastSeenAt, online: confidentialityCompleted && isOnline(lastSeenAt), ndaCompleted: confidentialityCompleted });
+      people.set(email, { id: row.id, fullName: owners.get(email)?.displayName || row.fullName, email, role: permissions.includes("project_owner") ? "project_owner" : permissions.includes("technical_advisor") ? "technical_advisor" : "member", permissions, isAdmin: isAdministrator(row.chatgptAccount, row.accountUserId ?? undefined), avatarDataUrl: profileRow?.avatarDataUrl || "", profile: profileForViewer(profile, email === currentEmail, row.departmentCode), lastSeenAt, online: confidentialityCompleted && isOnline(lastSeenAt), ndaCompleted: confidentialityCompleted });
     }
     for (const owner of owners.values()) {
       if (people.has(owner.email)) continue;
