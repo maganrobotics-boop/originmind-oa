@@ -6,6 +6,16 @@ export type KnowledgeStatus = typeof KNOWLEDGE_STATUSES[number];
 export const KNOWLEDGE_VISIBILITIES = ["internal", "public"] as const;
 export type KnowledgeVisibility = typeof KNOWLEDGE_VISIBILITIES[number];
 export const PUBLIC_KNOWLEDGE_CONFIRMATION = "publish_to_chat.omindos.ai";
+export const KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER = "[系统管理员本人操作]";
+
+export function knowledgeAdminSelfAuditNote(note: string): string {
+  return note ? `${KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER} ${note}` : KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER;
+}
+
+export function isKnowledgeAdminSelfAuditNote(value: unknown): value is string {
+  return typeof value === "string"
+    && (value === KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER || value.startsWith(`${KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER} `));
+}
 
 export const KNOWLEDGE_REVIEW_ACTIONS = ["approve", "return", "reject", "revoke"] as const;
 export type KnowledgeReviewAction = typeof KNOWLEDGE_REVIEW_ACTIONS[number];
