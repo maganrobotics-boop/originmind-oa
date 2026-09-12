@@ -1,6 +1,6 @@
 import { inspectRevisionChain, type ApprovalRevision } from "./approval-revisions";
 import { canonicalJson } from "./canonical-json";
-import { chunkKnowledgeSubmission } from "./knowledge-policy";
+import { chunkKnowledgeSubmission, isKnowledgeAdminSelfAuditNote } from "./knowledge-policy";
 
 type MigrationTable = {
   name: string;
@@ -323,8 +323,15 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
     const hasReview = reviewValues.every((value) => value !== null && value !== "");
     if (reviewValues.some((value) => value !== null) && !hasReview) throw new Error(`Migration knowledge revision ${id} has incomplete review evidence`);
     const item = knowledgeItemById.get(itemId);
-    if (hasReview && (reviewerMemberId === item?.submitter_member_id
-      || reviewerEmail?.toLowerCase() === String(item?.submitter_email || "").toLowerCase())) throw new Error(`Migration knowledge revision ${id} was self-reviewed`);
+    const reviewerMemberMatchesSubmitter = reviewerMemberId === item?.submitter_member_id;
+    const reviewerEmailMatchesSubmitter = reviewerEmail?.toLowerCase() === String(item?.submitter_email || "").toLowerCase();
+    const reviewIdentityOverlapsSubmitter = reviewerMemberMatchesSubmitter || reviewerEmailMatchesSubmitter;
+    const adminSelfReview = reviewerMemberMatchesSubmitter
+      && reviewerEmailMatchesSubmitter
+      && isKnowledgeAdminSelfAuditNote(revision.review_note);
+    if (hasReview && reviewIdentityOverlapsSubmitter && !adminSelfReview) {
+      throw new Error(`Migration knowledge revision ${id} was self-reviewed`);
+    }
     const activatedAt = optionalText(revision, "activated_at");
     const retiredAt = optionalText(revision, "retired_at");
     if (status === "pending") {
@@ -407,11 +414,16 @@ export async function assertMigrationPayloadRelationships(payload: MigrationPayl
       if (!Number.isFinite(eventTimestamp) || eventTimestamp <= previousTimestamp) {
         throw new Error(`Migration knowledge revision ${revisionId} has an invalid visibility timeline`);
       }
-      if (event.actor_member_id === item?.submitter_member_id
-        || String(event.actor_email || "").toLowerCase() === String(item?.submitter_email || "").toLowerCase()) {
+      const actorMemberMatchesSubmitter = event.actor_member_id === item?.submitter_member_id;
+      const actorEmailMatchesSubmitter = String(event.actor_email || "").toLowerCase() === String(item?.submitter_email || "").toLowerCase();
+      const visibilityIdentityOverlapsSubmitter = actorMemberMatchesSubmitter || actorEmailMatchesSubmitter;
+      const adminSelfManagement = actorMemberMatchesSubmitter
+        && actorEmailMatchesSubmitter
+        && isKnowledgeAdminSelfAuditNote(event.note);
+      if (visibilityIdentityOverlapsSubmitter && !adminSelfManagement) {
         throw new Error(`Migration knowledge revision ${revisionId} has a self-managed visibility event`);
       }
-      if (event.note !== "") throw new Error(`Migration knowledge revision ${revisionId} has a malformed visibility event`);
+      if (!adminSelfManagement && event.note !== "") throw new Error(`Migration knowledge revision ${revisionId} has a malformed visibility event`);
       const nextVisibility: "internal" | "public" = event.action === "visibility_changed_public" ? "public" : "internal";
       if (nextVisibility === visibility) throw new Error(`Migration knowledge revision ${revisionId} has a redundant visibility event`);
       visibility = nextVisibility;
