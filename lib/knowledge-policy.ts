@@ -20,7 +20,9 @@ export const MAX_KNOWLEDGE_CONTENT_LENGTH = 20_000;
 export const MAX_KNOWLEDGE_REVIEW_NOTE_LENGTH = 1_000;
 
 export function knowledgeAdminSelfAuditNote(note: string): string {
-  return note ? `${KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER} ${note}` : KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER;
+  if (!note) return KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER;
+  const prefix = `${KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER} `;
+  return `${prefix}${safePrefix(note, MAX_KNOWLEDGE_REVIEW_NOTE_LENGTH - prefix.length)}`;
 }
 
 export function isKnowledgeAdminSelfAuditNote(value: unknown): value is string {
