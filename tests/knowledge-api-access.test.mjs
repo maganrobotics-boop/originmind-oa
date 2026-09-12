@@ -34,6 +34,7 @@ function existingItem(overrides = {}) {
     submitter_name: "投稿成员",
     submitter_email: "submit@example.com",
     status: "pending",
+    visibility: "internal",
     current_revision_no: 1,
     current_revision_id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
     active_revision_id: null,
@@ -90,6 +91,10 @@ const vite = await createServer({
           globalThis.${stateKey}.reviewCalls.push({ existing, actor, action, note, visibility, publicConfirmation });
           return { id: existing.id, status: action === "approve" ? "active" : action };
         }
+        export async function setKnowledgeItemVisibility(existing, actor, visibility, publicConfirmation) {
+          globalThis.${stateKey}.visibilityCalls.push({ existing, actor, visibility, publicConfirmation });
+          return { id: existing.id, status: "active", visibility };
+        }
         export async function knowledgeRevisionHashExists() { return false; }
         export async function resubmitKnowledgeItem() { throw new Error("not used"); }
         export async function getKnowledgeItemDetail() { return null; }
@@ -122,6 +127,7 @@ beforeEach(() => {
     existing: existingItem(),
     findCalls: 0,
     reviewCalls: [],
+    visibilityCalls: [],
   };
 });
 
@@ -243,4 +249,98 @@ test("未完成 NDA 的成员在读取知识条目前即被拒绝", async () => 
   const response = await detailRoute.GET(new Request("https://oa.example.test/api/knowledge/11111111-2222-4333-8444-555555555555"), params);
   assert.equal(response.status, 403);
   assert.equal(globalThis[stateKey].findCalls, 0);
+});
+
+test("已入库知识可由审核人调整范围且公开方向要求精确二次确认", async () => {
+  globalThis[stateKey].existing = existingItem({
+    status: "active",
+    visibility: "internal",
+    active_revision_id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  });
+  for (const publicConfirmation of [undefined, "", "publish_to_chat.omindos.ai ", "PUBLISH_TO_CHAT.OMINDOS.AI"]) {
+    const body = { action: "set_visibility", mutationRevision: "item-mutation-1", visibility: "public" };
+    if (publicConfirmation !== undefined) body.publicConfirmation = publicConfirmation;
+    const response = await detailRoute.PATCH(patch(body), params);
+    assert.equal(response.status, 400);
+  }
+  assert.equal(globalThis[stateKey].findCalls, 0);
+  assert.equal(globalThis[stateKey].visibilityCalls.length, 0);
+
+  const response = await detailRoute.PATCH(patch({
+    action: "set_visibility",
+    mutationRevision: "item-mutation-1",
+    visibility: "public",
+    publicConfirmation: "publish_to_chat.omindos.ai",
+  }), params);
+  assert.equal(response.status, 200);
+  assert.equal(globalThis[stateKey].visibilityCalls.length, 1);
+  assert.equal(globalThis[stateKey].visibilityCalls[0].visibility, "public");
+  assert.equal(globalThis[stateKey].visibilityCalls[0].publicConfirmation, "publish_to_chat.omindos.ai");
+});
+
+test("范围调整仅接受 active 条目的不同目标范围且不修改审核正文", async () => {
+  for (const body of [
+    { action: "set_visibility", mutationRevision: "item-mutation-1" },
+    { action: "set_visibility", mutationRevision: "item-mutation-1", visibility: "private" },
+    { action: "set_visibility", mutationRevision: "item-mutation-1", visibility: "internal", note: "不允许" },
+    { action: "set_visibility", mutationRevision: "item-mutation-1", visibility: "internal", publicConfirmation: "publish_to_chat.omindos.ai" },
+  ]) {
+    assert.equal((await detailRoute.PATCH(patch(body), params)).status, 400);
+  }
+  assert.equal(globalThis[stateKey].findCalls, 0);
+
+  globalThis[stateKey].existing = existingItem({ status: "pending", visibility: "internal" });
+  assert.equal((await detailRoute.PATCH(patch({
+    action: "set_visibility",
+    mutationRevision: "item-mutation-1",
+    visibility: "public",
+    publicConfirmation: "publish_to_chat.omindos.ai",
+  }), params)).status, 409);
+
+  globalThis[stateKey].existing = existingItem({
+    status: "active",
+    visibility: "internal",
+    active_revision_id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  });
+  assert.equal((await detailRoute.PATCH(patch({
+    action: "set_visibility",
+    mutationRevision: "item-mutation-1",
+    visibility: "internal",
+  }), params)).status, 409);
+  assert.equal(globalThis[stateKey].visibilityCalls.length, 0);
+});
+
+test("范围调整保留并发、审核权限和禁止自我管理保护", async () => {
+  globalThis[stateKey].existing = existingItem({
+    status: "active",
+    visibility: "public",
+    active_revision_id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  });
+  assert.equal((await detailRoute.PATCH(patch({
+    action: "set_visibility",
+    mutationRevision: "stale",
+    visibility: "internal",
+  }), params)).status, 409);
+
+  globalThis[stateKey].authorized = authorizedActor({ role: "member", canReviewKnowledge: false });
+  assert.equal((await detailRoute.PATCH(patch({
+    action: "set_visibility",
+    mutationRevision: "item-mutation-1",
+    visibility: "internal",
+  }), params)).status, 403);
+
+  globalThis[stateKey].authorized = authorizedActor();
+  globalThis[stateKey].existing = existingItem({
+    status: "active",
+    visibility: "public",
+    active_revision_id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    submitter_member_id: "member-review",
+    submitter_email: "review@example.com",
+  });
+  assert.equal((await detailRoute.PATCH(patch({
+    action: "set_visibility",
+    mutationRevision: "item-mutation-1",
+    visibility: "internal",
+  }), params)).status, 403);
+  assert.equal(globalThis[stateKey].visibilityCalls.length, 0);
 });

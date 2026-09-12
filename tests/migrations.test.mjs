@@ -52,7 +52,7 @@ test("migration journal keeps one continuous snapshot chain", () => {
 });
 
 test("production-shaped v32 data safely migrates through the GitHub identity migration", () => {
-  assert.equal(migrationFiles.at(-1), "0028_needy_microchip.sql");
+  assert.equal(migrationFiles.at(-1), "0029_knowledge_visibility_reclassification.sql");
   const db = new DatabaseSync(":memory:");
   applyMigrationRange(db, 0, 7);
 
@@ -156,7 +156,7 @@ test("production-shaped v32 data safely migrates through the GitHub identity mig
 
 test("knowledge visibility migration defaults legacy approvals to internal without dropping security triggers", () => {
   const visibilityMigrationIndex = migrationFiles.indexOf("0028_needy_microchip.sql");
-  assert.equal(visibilityMigrationIndex, migrationFiles.length - 1);
+  assert.equal(visibilityMigrationIndex, migrationFiles.length - 2);
   const db = new DatabaseSync(":memory:");
   applyMigrationRange(db, 0, visibilityMigrationIndex);
 
@@ -224,6 +224,79 @@ test("knowledge visibility migration defaults legacy approvals to internal witho
       'reviewer@example.com', 'approved', '')
   `).run().changes, 1);
   assert.throws(() => db.prepare("DELETE FROM knowledge_items WHERE id = 'legacy-item'").run(), /cannot be deleted/u);
+  db.close();
+});
+
+test("knowledge visibility reclassification migration preserves content and permits only guarded active scope changes", () => {
+  const reclassificationMigrationIndex = migrationFiles.indexOf("0029_knowledge_visibility_reclassification.sql");
+  assert.equal(reclassificationMigrationIndex, migrationFiles.length - 1);
+  const db = new DatabaseSync(":memory:");
+  applyMigrationRange(db, 0, reclassificationMigrationIndex);
+  const createdAt = "2026-09-10T00:00:00.000Z";
+  db.prepare(`
+    INSERT INTO knowledge_items (
+      id, project, title, category, submitter_member_id, submitter_name, submitter_email,
+      status, visibility, current_revision_no, current_revision_id, active_revision_id, mutation_revision, created_at, updated_at
+    ) VALUES ('active-item', 'project', '范围测试', '安全规范', 'member-submit', '投稿人', 'submit@example.com',
+      'active', 'internal', 1, 'revision-1', 'revision-1', 'mutation-1', ?, ?)
+  `).run(createdAt, createdAt);
+  db.prepare(`
+    INSERT INTO knowledge_revisions (
+      id, item_id, revision_no, title, category, content, content_hash, status,
+      created_by_member_id, created_by_name, created_by_email, reviewed_by_member_id,
+      reviewed_by_name, reviewed_by_email, review_note, reviewed_at, activated_at, created_at
+    ) VALUES ('revision-1', 'active-item', 1, '范围测试', '安全规范', '只改变范围，不改变正文。', ?,
+      'active', 'member-submit', '投稿人', 'submit@example.com', 'member-review',
+      '审核人', 'review@example.com', '通过', ?, ?, ?)
+  `).run("a".repeat(64), createdAt, createdAt, createdAt);
+  db.prepare(`
+    INSERT INTO knowledge_chunks (id, item_id, revision_id, chunk_no, content, search_text, is_active, created_at)
+    VALUES ('chunk-1', 'active-item', 'revision-1', 1, '只改变范围，不改变正文。', '范围 测试', 1, ?)
+  `).run(createdAt);
+  applyMigrationRange(db, reclassificationMigrationIndex, reclassificationMigrationIndex + 1);
+
+  const revisionBefore = db.prepare("SELECT * FROM knowledge_revisions WHERE id = 'revision-1'").get();
+  const chunkBefore = db.prepare("SELECT * FROM knowledge_chunks WHERE id = 'chunk-1'").get();
+  assert.equal(db.prepare(`
+    UPDATE knowledge_items
+    SET visibility = 'public', mutation_revision = 'mutation-2', updated_at = '2026-09-10T01:00:00.000Z'
+    WHERE id = 'active-item'
+  `).run().changes, 1);
+  assert.equal(db.prepare(`
+    INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note, created_at)
+    VALUES ('event-public', 'active-item', 'revision-1', 'member-review', '审核人', 'review@example.com',
+      'visibility_changed_public', '', '2026-09-10T01:00:00.000Z')
+  `).run().changes, 1);
+  assert.throws(() => db.prepare("UPDATE knowledge_items SET visibility = 'internal' WHERE id = 'active-item'").run(), /invalid knowledge visibility transition/u);
+  assert.throws(() => db.prepare(`
+    UPDATE knowledge_items
+    SET title = '被篡改', visibility = 'internal', mutation_revision = 'mutation-3', updated_at = '2026-09-10T02:00:00.000Z'
+    WHERE id = 'active-item'
+  `).run(), /invalid knowledge visibility transition/u);
+  assert.equal(db.prepare(`
+    UPDATE knowledge_items
+    SET visibility = 'internal', mutation_revision = 'mutation-3', updated_at = '2026-09-10T02:00:00.000Z'
+    WHERE id = 'active-item'
+  `).run().changes, 1);
+  assert.equal(db.prepare(`
+    INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note, created_at)
+    VALUES ('event-internal', 'active-item', 'revision-1', 'member-review', '审核人', 'review@example.com',
+      'visibility_changed_internal', '', '2026-09-10T02:00:00.000Z')
+  `).run().changes, 1);
+  assert.deepEqual(db.prepare("SELECT * FROM knowledge_revisions WHERE id = 'revision-1'").get(), revisionBefore);
+  assert.deepEqual(db.prepare("SELECT * FROM knowledge_chunks WHERE id = 'chunk-1'").get(), chunkBefore);
+  assert.throws(() => db.prepare(`
+    INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note)
+    VALUES ('bad-event', 'active-item', 'revision-1', 'member-review', '审核人', 'review@example.com',
+      'visibility_changed_external', '')
+  `).run(), /invalid knowledge event action/u);
+  for (const trigger of [
+    "knowledge_items_identity_immutable",
+    "knowledge_items_status_transition_guard",
+    "knowledge_items_no_delete",
+    "knowledge_items_visibility_transition_guard",
+    "knowledge_events_action_guard",
+  ]) assert.equal(db.prepare("SELECT COUNT(*) AS count FROM sqlite_master WHERE type = 'trigger' AND name = ?").get(trigger).count, 1, trigger);
   db.close();
 });
 

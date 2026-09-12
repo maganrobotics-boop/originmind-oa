@@ -63,7 +63,7 @@ export function validateReleaseEvidence({ health, status, chat }, releaseIdValue
     health?.ready !== true ||
     health?.releaseId !== releaseId
   ) {
-    throw new Error("/_health did not identify the expected ready ARTS Robotics AI Assistant release");
+    throw new Error("/_health did not identify the expected ready ARTS Robotics AI assistant release");
   }
   if (
     status?.storageReady !== true ||

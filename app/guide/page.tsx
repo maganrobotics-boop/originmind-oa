@@ -60,7 +60,7 @@ export default function GuidePage() {
         <article className="guide-task" id="purchase"><h3>采购审核：先说明需求，再按批准内容执行</h3><ol><li>选择“采购审核”，填写物品、规格型号、数量、用途、预计金额和供应商，补充清单。</li><li>说明它用于哪项任务，以及为什么需要采购，提交技术顾问和项目负责人审核。</li><li>项目负责人从符合准入条件的成员中指定采购人；采购人按批准内容执行并完成采购确认。</li><li>实际金额不得超过批准金额，超额需要退回重审。按页面要求填写实际金额和采购说明。</li></ol><p className="guide-note">“已提交”表示申请已发出，不表示已经获准采购。采购审核记录用于记录项目需求与批准过程；涉及学校经费时，还需办理对应的学校采购和财务手续。</p></article>
         <article className="guide-task" id="nda"><h3>保密协议：本人阅读、本人签署</h3><p>首次加入或系统提示补签、重签时，打开保密协议待办，核对身份和文件类型，阅读、手写签名、预览后提交。普通成员签完后自动归档；负责人承诺书按页面提示提交管理员确认。归档后可在本人有权限的申请记录中查阅。</p><p>如果仍提示未完成，先刷新查看是否已成功提交；有错误提示时保留提示文字，联系管理员，避免反复新建同一份申请。</p></article>
         <article className="guide-task" id="labor"><h3>劳务报酬：按月说明工作和贡献依据</h3><ol><li>每月申请一次，选择“劳务报酬”，核对申请月份。</li><li>关联本人参与的已归档技术成果，填写月度工作总结；其他工时不得重复包含已选成果的工时。</li><li>系统按“成果总工时 × 个人贡献率”折算成果工时；项目负责人填写建议金额及依据，经费负责人终审。</li><li>查看审核结果与归档记录。申请提交、建议金额和归档记录均不等于实际款项已到账。</li></ol><div className="guide-example"><strong>工时示例</strong><p>一项成果总工时为 40 小时，你的贡献率为 25%，对应折算工时为 10 小时。已计入该成果的工作不要再重复填到“其他工时”。</p></div></article>
-        <article className="guide-task" id="knowledge"><h3>实验室 AI：内部在 OA 问，公开知识供马教授 AI 助手升级版使用</h3><ol><li><strong>对内问答在 OA。</strong>只有已登录并完成准入与保密签署的成员，才会看到“实验室 AI（内部）”并在 OA 里提问。</li><li>需要补充时选择“提交知识”，写清标题、分类、摘要和完整正文；有原始记录时可附来源名称和 HTTP/HTTPS 链接。</li><li>提交后在“我的提交”查看状态。被退回时按审核意见修改并重新提交；被拒绝的版本不会进入知识库。</li><li>项目负责人或 OA 管理员批准时必须选择“对内”或“对外公开”。对内知识仅供 OA 成员检索；对外公开必须再次输入指定确认文字，随后供 <a href="https://chat.omindos.ai" target="_blank" rel="noreferrer">chat.omindos.ai</a> 的“马教授 AI 助手”升级版检索，公众无需 OA 登录。</li></ol><p className="guide-note">不要提交账号密码、访问密钥或个人隐私。选择“对外公开”前，应再次核对内容是否允许离开 OA 内部范围。AI 回答用于协作参考，关键操作仍应回看引用原文并按负责人要求执行。</p></article>
+        <article className="guide-task" id="knowledge"><h3>实验室 AI：内部在 OA 问，公开知识供 ARTS Robotics AI assistant 使用</h3><ol><li><strong>对内问答在 OA。</strong>只有已登录并完成准入与保密签署的成员，才会看到“实验室 AI（内部）”并在 OA 里提问。</li><li>需要补充时选择“提交知识”，写清标题、分类、摘要和完整正文；有原始记录时可附来源名称和 HTTP/HTTPS 链接。</li><li>提交后在“我的提交”查看状态。被退回时按审核意见修改并重新提交；被拒绝的版本不会进入知识库。</li><li>项目负责人或 OA 管理员批准时必须选择“对内”或“对外公开”。对内知识仅供 OA 成员检索；对外公开必须再次输入指定确认文字，随后供 <a href="https://chat.omindos.ai" target="_blank" rel="noreferrer">chat.omindos.ai</a> 上的 ARTS Robotics AI assistant 检索，公众无需 OA 登录。</li><li>已入库知识可在“知识库管理”中重新调整范围；改为公开仍需二次确认，每次调整都会保留审计记录。</li></ol><p className="guide-note">不要提交账号密码、访问密钥或个人隐私。选择“对外公开”前，应再次核对内容是否允许离开 OA 内部范围。AI 回答用于协作参考，关键操作仍应回看引用原文并按负责人要求执行。</p></article>
       </section>
 
       <section className="guide-section" id="charter" aria-labelledby="charter-title">
@@ -85,7 +85,7 @@ export default function GuidePage() {
           <article><h3>为什么看不到别人的申请或某个审核按钮？</h3><p>申请和操作入口按本人参与情况与权限显示。先确认登录账户和自己的角色；需要调整时联系管理员。</p></article>
           <article><h3>怎么保存自己的申请材料？</h3><p>进入有权查看的申请详情，使用 PDF 导出入口。需要最终存档材料时，先确认申请状态为“已归档”。</p></article>
           <article><h3>为什么我提交的知识还不能被问到？</h3><p>新投稿需要先由项目负责人或 OA 管理员审核。请到“实验室 AI（内部）—我的提交”查看状态；只有显示“已入库”且未被撤销的当前版本会按所选范围参与问答。</p></article>
-          <article><h3>对内和对外公开有什么区别？</h3><p>“对内”只允许已完成准入的成员登录 OA 后检索；“对外公开”会在二次确认后供 chat.omindos.ai 的“马教授 AI 助手”升级版检索。投稿本身不会自动公开。</p></article>
+          <article><h3>对内和对外公开有什么区别？</h3><p>“对内”只允许已完成准入的成员登录 OA 后检索；“对外公开”会在二次确认后供 chat.omindos.ai 上的 ARTS Robotics AI assistant 检索。投稿本身不会自动公开；已入库知识可由项目负责人或 OA 管理员在“知识库管理”中调整范围。</p></article>
           <article><h3>应该找谁解决问题？</h3><p>任务和验收问题找项目负责人，技术问题找技术顾问，身份、权限或系统异常找 OA 管理员，劳务金额和支付进度找经费负责人或财务。反馈时带上申请编号、报错文字和发生步骤。</p></article>
         </div>
       </section>

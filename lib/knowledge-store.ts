@@ -107,6 +107,12 @@ function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
 }
 
+function timestampAfter(value: string): string {
+  const now = Date.now();
+  const previous = Date.parse(value);
+  return new Date(Number.isFinite(previous) ? Math.max(now, previous + 1) : now).toISOString();
+}
+
 function resultRows<T>(result: D1Result<T> | undefined): T[] {
   return result?.results ?? [];
 }
@@ -436,7 +442,7 @@ export async function resubmitKnowledgeItem(
   contentHash: string,
 ) {
   const database = await getD1Database();
-  const now = new Date().toISOString();
+  const now = timestampAfter(existing.updated_at);
   const revisionId = crypto.randomUUID();
   const mutationRevision = crypto.randomUUID();
   const eventId = crypto.randomUUID();
@@ -506,7 +512,7 @@ export async function reviewKnowledgeItem(
     return null;
   }
   const database = await getD1Database();
-  const now = new Date().toISOString();
+  const now = timestampAfter(existing.updated_at);
   const mutationRevision = crypto.randomUUID();
   const eventId = crypto.randomUUID();
   const nextStatus: KnowledgeStatus = action === "approve" ? "active" : action === "return" ? "returned" : action === "reject" ? "rejected" : "revoked";
@@ -596,6 +602,67 @@ export async function reviewKnowledgeItem(
     reviewed_at: action === "revoke" ? existing.reviewed_at : now,
     activated_at: action === "approve" ? now : existing.activated_at,
     retired_at: action === "revoke" ? now : null,
+  });
+}
+
+export async function setKnowledgeItemVisibility(
+  existing: KnowledgeItemWithRevisionRow,
+  actor: KnowledgeActor,
+  visibility: KnowledgeVisibility,
+  publicConfirmation?: unknown,
+) {
+  if (existing.status !== "active" || !existing.current_revision_id || existing.active_revision_id !== existing.current_revision_id) return null;
+  if (visibility !== "internal" && visibility !== "public") return null;
+  if (visibility === existing.visibility) return null;
+  if (visibility === "public" && !isPublicKnowledgeConfirmation(publicConfirmation)) return null;
+  if (visibility === "internal" && publicConfirmation !== undefined) return null;
+
+  const database = await getD1Database();
+  const now = timestampAfter(existing.updated_at);
+  const mutationRevision = crypto.randomUUID();
+  const eventId = crypto.randomUUID();
+  const guard = actorGuard(actor, true);
+  const [itemResult] = await database.batch([
+    database.prepare(`
+      UPDATE knowledge_items SET
+        visibility = ?, mutation_revision = ?, updated_at = ?
+      WHERE id = ? AND status = 'active' AND visibility = ?
+        AND current_revision_id = ? AND active_revision_id = current_revision_id
+        AND mutation_revision = ?
+        AND submitter_member_id <> ? AND lower(submitter_email) <> ? AND ${guard.sql}
+      RETURNING *
+    `).bind(visibility, mutationRevision, now, existing.id, existing.visibility,
+      existing.current_revision_id, existing.mutation_revision, actor.memberId, normalizeEmail(actor.email), ...guard.values),
+    database.prepare(`
+      INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note, created_at)
+      SELECT ?, ?, ?, ?, ?, ?, ?, '', ?
+      WHERE EXISTS (
+        SELECT 1 FROM knowledge_items
+        WHERE id = ? AND status = 'active' AND visibility = ?
+          AND current_revision_id = ? AND active_revision_id = current_revision_id
+          AND mutation_revision = ? AND updated_at = ?
+      )
+    `).bind(eventId, existing.id, existing.current_revision_id, actor.memberId, actor.name, normalizeEmail(actor.email),
+      visibility === "public" ? "visibility_changed_public" : "visibility_changed_internal", now,
+      existing.id, visibility, existing.current_revision_id, mutationRevision, now),
+  ]);
+  const updated = resultRows(itemResult as D1Result<KnowledgeItemRow>)[0];
+  if (!updated) return null;
+  return serializeItem({
+    ...updated,
+    summary: existing.summary,
+    source_label: existing.source_label,
+    source_url: existing.source_url,
+    content: existing.content,
+    content_hash: existing.content_hash,
+    revision_status: existing.revision_status,
+    reviewed_by_member_id: existing.reviewed_by_member_id,
+    reviewed_by_name: existing.reviewed_by_name,
+    reviewed_by_email: existing.reviewed_by_email,
+    review_note: existing.review_note,
+    reviewed_at: existing.reviewed_at,
+    activated_at: existing.activated_at,
+    retired_at: existing.retired_at,
   });
 }
 

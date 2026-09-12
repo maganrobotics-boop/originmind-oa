@@ -15,6 +15,7 @@ import {
   knowledgeRevisionHashExists,
   resubmitKnowledgeItem,
   reviewKnowledgeItem,
+  setKnowledgeItemVisibility,
   type KnowledgeActor,
 } from "../../../../lib/knowledge-store";
 import { consumeWriteRateLimit } from "../../../../lib/write-rate-limit";
@@ -93,16 +94,19 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   const action = typeof body.action === "string" ? body.action : "";
   const allowedKeys = action === "resubmit"
     ? new Set(["action", "mutationRevision", "title", "category", "summary", "sourceLabel", "sourceUrl", "content"])
+    : action === "set_visibility"
+      ? new Set(["action", "mutationRevision", "visibility", "publicConfirmation"])
     : action === "approve"
       ? new Set(["action", "mutationRevision", "note", "visibility", "publicConfirmation"])
       : new Set(["action", "mutationRevision", "note"]);
   if (Object.keys(body).some((key) => !allowedKeys.has(key))) return privateJson({ error: "知识流转包含不支持的字段。" }, { status: 400 });
   if (typeof body.mutationRevision !== "string" || !body.mutationRevision.trim()) return privateJson({ error: "请刷新知识条目后再操作。" }, { status: 409 });
-  const reviewAction = action === "resubmit" ? null : parseKnowledgeReviewAction(action);
-  if (action !== "resubmit" && !reviewAction) return privateJson({ error: "不支持的知识流转动作。" }, { status: 400 });
-  const parsedApprovalVisibility = reviewAction === "approve" ? parseKnowledgeVisibility(body.visibility) : null;
-  if (reviewAction === "approve" && !parsedApprovalVisibility) {
-    return privateJson({ error: "批准知识时必须选择对内或对外公开。" }, { status: 400 });
+  const changesVisibility = action === "set_visibility";
+  const reviewAction = action === "resubmit" || changesVisibility ? null : parseKnowledgeReviewAction(action);
+  if (action !== "resubmit" && !changesVisibility && !reviewAction) return privateJson({ error: "不支持的知识流转动作。" }, { status: 400 });
+  const parsedApprovalVisibility = reviewAction === "approve" || changesVisibility ? parseKnowledgeVisibility(body.visibility) : null;
+  if ((reviewAction === "approve" || changesVisibility) && !parsedApprovalVisibility) {
+    return privateJson({ error: changesVisibility ? "调整可见范围时必须选择对内或对外公开。" : "批准知识时必须选择对内或对外公开。" }, { status: 400 });
   }
   const approvalVisibility = parsedApprovalVisibility ?? undefined;
   if (approvalVisibility === "public" && !isPublicKnowledgeConfirmation(body.publicConfirmation)) {
@@ -145,9 +149,20 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return item ? privateJson({ item }) : privateJson({ error: "知识条目已更新，请刷新后重试。" }, { status: 409 });
     }
 
-    if (!reviewAction) return privateJson({ error: "不支持的知识流转动作。" }, { status: 400 });
     if (!canReviewKnowledge(access.authorized)) return privateJson({ error: "只有项目负责人或 OA 管理员可以审核知识。" }, { status: 403 });
     if (isSubmitter) return privateJson({ error: "投稿人不能审核自己的知识。" }, { status: 403 });
+    if (changesVisibility) {
+      if (existing.status !== "active") return privateJson({ error: "只有已入库且仍有效的知识可以调整可见范围。" }, { status: 409 });
+      if (existing.visibility === approvalVisibility) return privateJson({ error: "知识已经是所选可见范围。" }, { status: 409 });
+      const db = await getDb();
+      if (!(await consumeWriteRateLimit(db, { actorSubject: access.actor.accountUserId, scope: "knowledge_review", limit: MAX_KNOWLEDGE_WRITES_PER_MINUTE }))) {
+        return privateJson({ error: "知识审核操作过于频繁，请稍后再试。" }, { status: 429, headers: { "retry-after": "60" } });
+      }
+      const item = await setKnowledgeItemVisibility(existing, access.actor, approvalVisibility!, publicConfirmation);
+      return item ? privateJson({ item }) : privateJson({ error: "知识条目已更新，请刷新后重试。" }, { status: 409 });
+    }
+
+    if (!reviewAction) return privateJson({ error: "不支持的知识流转动作。" }, { status: 400 });
     if (!knowledgeActionAllowed(existing.status, reviewAction)) return privateJson({ error: "当前状态不允许执行该审核动作。" }, { status: 409 });
     const parsedNote = parseReviewNote(body.note);
     if (!parsedNote.ok) return privateJson({ error: parsedNote.error }, { status: 400 });

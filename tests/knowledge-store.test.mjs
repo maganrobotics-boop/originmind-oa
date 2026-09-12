@@ -85,10 +85,11 @@ const vite = await createServer({
 
 const policy = await vite.ssrLoadModule("/lib/knowledge-policy.ts");
 const store = await vite.ssrLoadModule("/lib/knowledge-store.ts");
-const [migration, hardeningMigration, visibilityMigration] = await Promise.all([
+const [migration, hardeningMigration, visibilityMigration, reclassificationMigration] = await Promise.all([
   readFile(new URL("../drizzle/0026_rich_jocasta.sql", import.meta.url), "utf8"),
   readFile(new URL("../drizzle/0027_careless_winter_soldier.sql", import.meta.url), "utf8"),
   readFile(new URL("../drizzle/0028_needy_microchip.sql", import.meta.url), "utf8"),
+  readFile(new URL("../drizzle/0029_knowledge_visibility_reclassification.sql", import.meta.url), "utf8"),
 ]);
 
 function createDatabase() {
@@ -109,6 +110,7 @@ function createDatabase() {
   database.exec(migration);
   database.exec(hardeningMigration);
   database.exec(visibilityMigration);
+  database.exec(reclassificationMigration);
   for (const member of [
     ["member-submit", "account-submit", "member-revision-submit", "member"],
     ["member-review", "account-review", "member-revision-review", "project_owner"],
@@ -278,6 +280,79 @@ test("审核必须明确选择内部或公开，公开知识才进入对外检�
 
   const approvalEvents = globalThis[stateKey].sqlite.prepare("SELECT action FROM knowledge_events WHERE action LIKE 'approved_%' ORDER BY rowid").all().map((row) => row.action);
   assert.deepEqual(approvalEvents, ["approved_internal", "approved_public"]);
+});
+
+test("审核人可重新分类 active 知识且不改动正文、版本或分块", async () => {
+  const draft = submission({ title: "可调整范围的设备规范" });
+  const created = await store.createKnowledgeItem(actor("submitter"), draft, await policy.hashKnowledgeSubmission(draft));
+  const pending = await store.findKnowledgeItem(created.id, actor("submitter"));
+  const approved = await store.reviewKnowledgeItem(pending, actor("reviewer"), "approve", "先对内使用", "internal");
+  const activeInternal = await store.findKnowledgeItem(created.id, actor("reviewer"), true);
+  const sqlite = globalThis[stateKey].sqlite;
+  const revisionBefore = sqlite.prepare("SELECT * FROM knowledge_revisions WHERE item_id = ? ORDER BY revision_no").all(created.id);
+  const chunksBefore = sqlite.prepare("SELECT * FROM knowledge_chunks WHERE item_id = ? ORDER BY chunk_no").all(created.id);
+
+  assert.equal(await store.setKnowledgeItemVisibility(activeInternal, actor("submitter"), "public", policy.PUBLIC_KNOWLEDGE_CONFIRMATION), null, "投稿人不能调整自己的知识范围");
+  assert.equal(await store.setKnowledgeItemVisibility(activeInternal, actor("reviewer"), "internal"), null, "相同范围不能生成空审计事件");
+  assert.equal(await store.setKnowledgeItemVisibility(activeInternal, actor("reviewer"), "public"), null, "公开必须二次确认");
+
+  const published = await store.setKnowledgeItemVisibility(
+    activeInternal,
+    actor("reviewer"),
+    "public",
+    policy.PUBLIC_KNOWLEDGE_CONFIRMATION,
+  );
+  assert.equal(published.status, "active");
+  assert.equal(published.visibility, "public");
+  assert.notEqual(published.mutationRevision, approved.mutationRevision);
+  assert.equal(published.currentRevisionId, approved.currentRevisionId);
+  assert.equal(published.activeRevisionId, approved.activeRevisionId);
+  assert.deepEqual(sqlite.prepare("SELECT * FROM knowledge_revisions WHERE item_id = ? ORDER BY revision_no").all(created.id), revisionBefore);
+  assert.deepEqual(sqlite.prepare("SELECT * FROM knowledge_chunks WHERE item_id = ? ORDER BY chunk_no").all(created.id), chunksBefore);
+  assert.ok((await store.getPublicActiveKnowledgeChunks()).length >= 1);
+  assert.equal(await store.setKnowledgeItemVisibility(activeInternal, actor("reviewer"), "public", policy.PUBLIC_KNOWLEDGE_CONFIRMATION), null, "旧 mutation revision 不能重复调整");
+
+  const current = await store.findKnowledgeItem(created.id, actor("reviewer"), true);
+  const internal = await store.setKnowledgeItemVisibility(current, actor("reviewer"), "internal");
+  assert.equal(internal.status, "active");
+  assert.equal(internal.visibility, "internal");
+  assert.deepEqual(await store.getPublicActiveKnowledgeChunks(), []);
+  assert.deepEqual(sqlite.prepare("SELECT * FROM knowledge_revisions WHERE item_id = ? ORDER BY revision_no").all(created.id), revisionBefore);
+  assert.deepEqual(sqlite.prepare("SELECT * FROM knowledge_chunks WHERE item_id = ? ORDER BY chunk_no").all(created.id), chunksBefore);
+
+  const events = sqlite.prepare("SELECT action, created_at FROM knowledge_events WHERE item_id = ? ORDER BY created_at, id").all(created.id);
+  assert.deepEqual(events.map((event) => event.action), ["submitted", "approved_internal", "visibility_changed_public", "visibility_changed_internal"]);
+  assert.ok(Date.parse(events[2].created_at) > Date.parse(events[1].created_at));
+  assert.ok(Date.parse(events[3].created_at) > Date.parse(events[2].created_at));
+
+  const activeInternalAgain = await store.findKnowledgeItem(created.id, actor("reviewer"), true);
+  sqlite.prepare("UPDATE members SET role = 'member' WHERE id = 'member-review'").run();
+  assert.equal(await store.setKnowledgeItemVisibility(activeInternalAgain, actor("reviewer"), "public", policy.PUBLIC_KNOWLEDGE_CONFIRMATION), null, "SQL 写入时必须重新验证审核角色");
+  sqlite.prepare("UPDATE members SET role = 'project_owner' WHERE id = 'member-review'").run();
+
+  sqlite.exec(`
+    CREATE TRIGGER fail_visibility_event
+    BEFORE INSERT ON knowledge_events
+    WHEN NEW.action IN ('visibility_changed_public', 'visibility_changed_internal')
+    BEGIN
+      SELECT RAISE(ABORT, 'forced visibility event failure');
+    END;
+  `);
+  await assert.rejects(
+    store.setKnowledgeItemVisibility(activeInternalAgain, actor("reviewer"), "public", policy.PUBLIC_KNOWLEDGE_CONFIRMATION),
+    /forced visibility event failure/u,
+  );
+  assert.equal(sqlite.prepare("SELECT visibility FROM knowledge_items WHERE id = ?").get(created.id).visibility, "internal", "事件写入失败必须回滚范围更新");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM knowledge_events WHERE item_id = ?").get(created.id).total, 4);
+  sqlite.exec("DROP TRIGGER fail_visibility_event");
+
+  sqlite.prepare("INSERT INTO migration_control (freeze_id) VALUES ('active-freeze')").run();
+  await assert.rejects(
+    store.setKnowledgeItemVisibility(activeInternalAgain, actor("reviewer"), "public", policy.PUBLIC_KNOWLEDGE_CONFIRMATION),
+    /migration write freeze active/u,
+  );
+  assert.equal(sqlite.prepare("SELECT visibility FROM knowledge_items WHERE id = ?").get(created.id).visibility, "internal");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM knowledge_events WHERE item_id = ?").get(created.id).total, 4);
 });
 
 test("退回后只能由投稿人创建不可变的新版本并再次进入待审核", async () => {

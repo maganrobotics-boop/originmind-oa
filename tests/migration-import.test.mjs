@@ -409,6 +409,95 @@ test("knowledge migration validates immutable revisions, historical superseded v
     knowledge_chunks: [chunk],
     knowledge_events: [submittedEvent, publicApprovalEvent],
   })), /approval visibility/u);
+
+  const publishedAt = "2026-09-10T02:00:00.000Z";
+  const visibilityChangedPublic = row("knowledge_events", {
+    id: "knowledge-event-visibility-public",
+    item_id: "knowledge-1",
+    revision_id: "knowledge-revision-1",
+    actor_member_id: "member-reviewer",
+    actor_name: "管理员",
+    actor_email: "admin@example.com",
+    action: "visibility_changed_public",
+    note: "",
+    created_at: publishedAt,
+  });
+  const reclassifiedPublicItem = row("knowledge_items", {
+    ...record("knowledge_items", publicItem),
+    updated_at: publishedAt,
+  });
+  assert.equal(await migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [reclassifiedPublicItem],
+    knowledge_revisions: [revision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, internalApprovalEvent, visibilityChangedPublic],
+  })), true);
+
+  const internalizedAt = "2026-09-10T03:00:00.000Z";
+  const visibilityChangedInternal = row("knowledge_events", {
+    ...record("knowledge_events", visibilityChangedPublic),
+    id: "knowledge-event-visibility-internal",
+    action: "visibility_changed_internal",
+    created_at: internalizedAt,
+  });
+  const reclassifiedInternalItem = row("knowledge_items", {
+    ...record("knowledge_items", item),
+    updated_at: internalizedAt,
+  });
+  assert.equal(await migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [reclassifiedInternalItem],
+    knowledge_revisions: [revision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, internalApprovalEvent, visibilityChangedPublic, visibilityChangedInternal],
+  })), true);
+
+  const redundantInternal = row("knowledge_events", {
+    ...record("knowledge_events", visibilityChangedInternal),
+    created_at: publishedAt,
+  });
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [reclassifiedInternalItem],
+    knowledge_revisions: [revision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, internalApprovalEvent, redundantInternal],
+  })), /redundant visibility event/u);
+
+  const simultaneousPublic = row("knowledge_events", {
+    ...record("knowledge_events", visibilityChangedPublic),
+    created_at: "2026-09-10T01:00:00.000Z",
+  });
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [reclassifiedPublicItem],
+    knowledge_revisions: [revision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, internalApprovalEvent, simultaneousPublic],
+  })), /visibility timeline/u);
+
+  const selfManagedPublic = row("knowledge_events", {
+    ...record("knowledge_events", visibilityChangedPublic),
+    actor_member_id: "member-1",
+    actor_name: "成员",
+    actor_email: "member@example.com",
+  });
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [reclassifiedPublicItem],
+    knowledge_revisions: [revision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, internalApprovalEvent, selfManagedPublic],
+  })), /self-managed visibility/u);
+
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    members: [member, reviewer],
+    knowledge_items: [reclassifiedInternalItem],
+    knowledge_revisions: [revision],
+    knowledge_chunks: [chunk],
+    knowledge_events: [submittedEvent, internalApprovalEvent, visibilityChangedPublic],
+  })), /approval visibility/u);
   const invalidVisibilityItem = row("knowledge_items", {
     ...record("knowledge_items", item),
     visibility: "external",

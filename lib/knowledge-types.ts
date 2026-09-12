@@ -101,4 +101,4 @@ export type KnowledgeAskResponse = {
   error?: string;
 };
 
-export type KnowledgeAction = "approve" | "return" | "reject" | "revoke" | "resubmit";
+export type KnowledgeAction = "approve" | "return" | "reject" | "revoke" | "resubmit" | "set_visibility";
