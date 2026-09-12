@@ -399,7 +399,7 @@ function roleLabel(person: Person) {
 }
 
 function formatLastSeen(person: Person) {
-  if (!person.ndaCompleted) return person.permissions.includes("project_owner") ? "待签负责人保密承诺书" : "待签技术保密协议";
+  if (!person.ndaCompleted) return (person.isAdmin || person.permissions.includes("project_owner")) ? "待签负责人保密承诺书" : "待签技术保密协议";
   if (person.online) return "在线";
   if (!person.lastSeenAt) return "暂未上线";
   const timestamp = Date.parse(person.lastSeenAt);
