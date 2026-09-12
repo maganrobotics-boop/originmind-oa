@@ -36,9 +36,18 @@ function validEnvironment(overrides = {}) {
 
 test("optional generated and administrator credentials may be absent", () => {
   const environment = validateReleaseEnvironment(validEnvironment());
+  assert.equal(environment.oaWorkerName, oaWorkerName);
   assert.equal(environment.encryptionKey, "");
   assert.equal(environment.rateLimitKey, "");
   assert.equal(environment.adminPassword, "");
+  assert.throws(
+    () => validateReleaseEnvironment(validEnvironment({ OA_PRODUCTION_WORKER_NAME: "" })),
+    /OA_PRODUCTION_WORKER_NAME is missing or invalid/u,
+  );
+  assert.throws(
+    () => validateReleaseEnvironment(validEnvironment({ OA_PRODUCTION_WORKER_NAME: "wrong/worker" })),
+    /OA_PRODUCTION_WORKER_NAME is invalid/u,
+  );
 });
 
 test("service token accepts exact values and normalizes copied values deterministically", () => {
