@@ -667,7 +667,6 @@ test("knowledge migration validates immutable revisions, historical superseded v
   const adminSelfReviewNote = knowledgePolicy.knowledgeAdminSelfAuditNote("通过");
   const adminSelfReviewedRevision = row("knowledge_revisions", {
     ...record("knowledge_revisions", selfReviewedRevision),
-    review_note: adminSelfReviewNote,
   });
   const adminSelfReviewEvent = row("knowledge_events", {
     ...record("knowledge_events", selfReviewEvent),
