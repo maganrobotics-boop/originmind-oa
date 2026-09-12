@@ -1,7 +1,6 @@
 "use strict";
 
-const APP_NAME = "ARTS Robotics AI assistant";
-const HEADER_NAME = "ARTS Robotics AI Assistant";
+const APP_NAME = "ARTS Robotics AI Assistant";
 const OFFICIAL_SITE = "https://omindos.ai";
 const BAILIAN_CONSOLE = "https://bailian.console.aliyun.com/";
 const OA_KNOWLEDGE_URL = "https://oa.omindos.ai/";
@@ -138,19 +137,6 @@ function brandLink() {
   return link;
 }
 
-function publicBrandLink() {
-  return element("a", {
-    className: "lab-brand",
-    attributes: { href: "/", "aria-label": "ARTS Robotics 首页" },
-  }, [
-    element("span", { className: "lab-brand-mark", attributes: { "aria-hidden": "true" } }),
-    element("span", { className: "lab-brand-copy" }, [
-      element("span", { className: "lab-brand-cn", text: "机器人自主自动与操作实验室" }),
-      element("strong", { className: "lab-brand-en", text: "ARTS Robotics" }),
-    ]),
-  ]);
-}
-
 function safeHttpUrl(value) {
   if (typeof value !== "string" || !value.trim()) return null;
   try {
@@ -285,73 +271,67 @@ function createPublicApp() {
 
   const app = element("div", { className: "chat-app" });
   const header = element("header", { className: "topbar site-header" });
-  const title = element("div", { className: "topbar-center", text: HEADER_NAME });
-  header.append(publicBrandLink(), title);
-
-  const layout = element("main", { className: "chat-layout" });
-  const contextPanel = element("aside", {
-    className: "context-panel",
-    attributes: { "aria-label": "咨询方向" },
+  const menuButton = textButton("", "menu-button");
+  menuButton.setAttribute("aria-label", "打开主题菜单");
+  menuButton.setAttribute("aria-controls", "topic-drawer");
+  menuButton.setAttribute("aria-expanded", "false");
+  menuButton.append(element("span", {
+    className: "menu-glyph",
+    attributes: { "aria-hidden": "true" },
+  }, [
+    element("span", { className: "menu-line" }),
+    element("span", { className: "menu-line" }),
+  ]));
+  const topicTitle = element("h1", { className: "topic-title", text: topicFor().title });
+  const headerBalance = element("span", {
+    className: "header-balance",
+    attributes: { "aria-hidden": "true" },
   });
-  const contextHeading = element("div", { className: "context-heading" });
-  contextHeading.append(
-    element("h1", { text: "从一个问题，走近机器人研究。" }),
-    element("p", {
-      text: "基于 OA 审核公开资料，按主题了解 ARTS Robotics 的技术成果、合作网络与创新实践。",
-    }),
-  );
-
-  const topicList = element("nav", {
-    className: "topic-list",
-    attributes: { "aria-label": "选择咨询方向" },
+  const statusText = element("span", {
+    className: "sr-only",
+    text: serviceLabel(null),
+    attributes: { role: "status", "aria-live": "polite" },
   });
-  const topicSelect = element("select", {
-    id: "topic-select",
-    className: "topic-select",
-  });
-  for (const topic of TOPICS) {
-    topicSelect.append(element("option", {
-      text: `${topic.index}  ${topic.title}`,
-      attributes: { value: topic.id },
-    }));
-  }
-  topicSelect.value = state.section;
-  topicSelect.addEventListener("change", () => {
-    activateTopic(topicSelect.value, { historyMode: "push", announce: true });
-  });
-  const topicSelectWrap = element("div", { className: "topic-select-wrap" }, [
-    element("label", {
-      className: "topic-select-label",
-      text: "当前模块",
-      attributes: { for: "topic-select" },
-    }),
-    element("span", { className: "topic-select-control" }, [
-      topicSelect,
-      icon("⌄", "topic-select-arrow"),
-    ]),
-  ]);
-  const topicStatus = element("p", {
+  const topicStatus = element("span", {
     className: "sr-only",
     attributes: { role: "status", "aria-live": "polite" },
+  });
+  header.append(menuButton, topicTitle, headerBalance, statusText, topicStatus);
+
+  const topicDrawer = element("dialog", {
+    id: "topic-drawer",
+    className: "topic-drawer",
+    attributes: { "aria-labelledby": "topic-drawer-title" },
+  });
+  const drawerPanel = element("div", { className: "drawer-panel" });
+  const drawerHeader = element("div", { className: "drawer-header" });
+  const drawerTitle = element("div", { className: "drawer-title" }, [
+    element("strong", { id: "topic-drawer-title", text: "ARTS Robotics" }),
+    element("span", { text: "选择主题" }),
+  ]);
+  const drawerClose = textButton("×", "drawer-close");
+  drawerClose.setAttribute("aria-label", "关闭主题菜单");
+  drawerHeader.append(drawerTitle, drawerClose);
+
+  const topicList = element("nav", {
+    className: "drawer-topic-list",
+    attributes: { "aria-label": "选择主题" },
   });
   const topicLinks = new Map();
   for (const topic of TOPICS) {
     const link = element("a", {
-      className: "topic-card",
+      className: "drawer-topic-link",
       attributes: { href: topic.path },
     });
     if (topic.id === state.section) link.setAttribute("aria-current", "page");
     link.append(
-      element("span", { className: "topic-index", text: topic.index, attributes: { "aria-hidden": "true" } }),
-      element("span", { className: "topic-copy" }, [
-        element("strong", { text: topic.title }),
-        element("small", { text: topic.detail }),
-      ]),
-      icon("→", "topic-arrow"),
+      element("span", { text: topic.title }),
+      icon("›", "drawer-topic-arrow"),
     );
     link.addEventListener("click", (event) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
+      closeTopicDrawer();
       activateTopic(topic.id, { historyMode: "push", announce: true });
     });
     topicLinks.set(topic.id, link);
@@ -359,34 +339,50 @@ function createPublicApp() {
   }
   topicLinks.get(state.section)?.classList.add("selected");
 
-  const contextBottom = element("div", { className: "context-bottom" });
-  const boundary = element("p", {
-    text: "仅依据 OA 已审核公开资料\n重要事项由团队负责人确认",
-  });
+  const drawerActions = element("div", { className: "drawer-actions" });
+  const newConversation = textButton("新对话", "drawer-action drawer-reset");
+  newConversation.disabled = true;
+  const officialLink = externalLink("访问官网", OFFICIAL_SITE, "drawer-action drawer-link");
   const manageLink = element("a", {
-    className: "manage-link",
+    className: "drawer-action drawer-link",
     attributes: { href: "/manage" },
-  }, [icon("◇", "manage-icon"), "管理入口"]);
-  contextBottom.append(boundary, manageLink);
-  contextPanel.append(contextHeading, topicList, topicSelectWrap, topicStatus, contextBottom);
+    text: "管理入口",
+  });
+  drawerActions.append(newConversation);
+  if (officialLink) drawerActions.append(officialLink);
+  drawerActions.append(manageLink);
+  drawerPanel.append(drawerHeader, topicList, drawerActions);
+  topicDrawer.append(drawerPanel);
 
+  function closeTopicDrawer() {
+    if (!topicDrawer.open) return;
+    menuButton.setAttribute("aria-expanded", "false");
+    topicDrawer.close();
+  }
+
+  menuButton.addEventListener("click", () => {
+    if (topicDrawer.open) return;
+    menuButton.setAttribute("aria-expanded", "true");
+    topicDrawer.showModal();
+    window.requestAnimationFrame(() => topicLinks.get(state.section)?.focus());
+  });
+  drawerClose.addEventListener("click", closeTopicDrawer);
+  topicDrawer.addEventListener("click", (event) => {
+    if (event.target === topicDrawer) closeTopicDrawer();
+  });
+  topicDrawer.addEventListener("cancel", () => {
+    menuButton.setAttribute("aria-expanded", "false");
+  });
+  topicDrawer.addEventListener("close", () => {
+    menuButton.setAttribute("aria-expanded", "false");
+    menuButton.focus();
+  });
+
+  const layout = element("main", { className: "chat-layout" });
   const conversation = element("section", {
     className: "conversation",
     attributes: { "aria-label": "咨询对话" },
   });
-  const toolbar = element("div", { className: "conversation-toolbar" });
-  const assistantIdentity = element("div", { className: "assistant-identity" });
-  const statusText = element("small", { text: serviceLabel(null) });
-  assistantIdentity.append(
-    element("span", { className: "assistant-avatar", text: "AI", attributes: { "aria-hidden": "true" } }),
-    element("span", { className: "assistant-name" }, [
-      element("strong", { text: APP_NAME }),
-      statusText,
-    ]),
-  );
-  const newConversation = textButton("", "new-conversation");
-  newConversation.append(icon("＋"), element("span", { className: "new-text", text: "新对话" }));
-  newConversation.disabled = true;
   newConversation.addEventListener("click", () => {
     const session = sessionFor();
     if (session.sending || !hasResettableState(session)) return;
@@ -402,13 +398,14 @@ function createPublicApp() {
       state.inquiry.includeConversation = false;
     }
     questionInput.value = "";
+    resizeQuestionInput();
     syncFeedback();
     updateComposer();
     renderMessages({ scrollMode: "start" });
     topicStatus.textContent = `已清空${topicFor().title}对话并返回精选问题`;
-    questionInput.focus();
+    closeTopicDrawer();
+    window.requestAnimationFrame(() => questionInput.focus());
   });
-  toolbar.append(assistantIdentity, newConversation);
 
   const messageScroll = element("div", {
     className: "message-scroll",
@@ -443,41 +440,19 @@ function createPublicApp() {
     id: "question",
     attributes: {
       maxlength: "2000",
-      rows: "2",
-      placeholder: "输入问题，或简要描述你的研究与合作需求…",
+      rows: "1",
+      placeholder: "输入消息",
       autocomplete: "off",
     },
   });
-  const composerBottom = element("div", { className: "composer-bottom" });
-  const characterCount = element("span", { text: "Shift + Enter 换行" });
-  const sendButton = textButton("", "send-button");
+  const sendButton = textButton("发送", "send-button");
   sendButton.type = "submit";
   sendButton.setAttribute("aria-label", "发送问题");
-  sendButton.append(icon("↑", "send-icon"));
   sendButton.disabled = true;
-  composerBottom.append(characterCount, sendButton);
-  composer.append(questionLabel, questionInput, composerBottom);
-
-  const composerFooter = element("div", { className: "composer-footer" });
-  composerFooter.append(
-    element("span", {
-      text: "AI 回答仅供参考，不构成 ARTS Robotics、OriginMind 或任何个人的承诺。请勿输入个人敏感信息、未公开成果或商业机密。",
-    }),
-  );
-  const submitInquiryButton = textButton("", "inquiry-trigger");
-  submitInquiryButton.append(icon("◇"), document.createTextNode("提交咨询"));
-  composerFooter.append(submitInquiryButton);
-  composerArea.append(errorRegion, noticeRegion, composer, composerFooter);
-  conversation.append(toolbar, messageScroll, composerArea);
-  layout.append(contextPanel, conversation);
-
-  const siteFooter = element("footer", { className: "site-footer" });
-  siteFooter.append(element("strong", {
-    className: "site-footer-credit",
-    text: "OriginMind x ARTS Robotics",
-  }));
-  const footerOfficial = externalLink("访问官网", OFFICIAL_SITE, "site-link site-footer-link");
-  if (footerOfficial) siteFooter.append(footerOfficial);
+  composer.append(questionLabel, questionInput, sendButton);
+  composerArea.append(errorRegion, noticeRegion, composer);
+  conversation.append(messageScroll, composerArea);
+  layout.append(conversation);
 
   const sourceDialog = element("dialog", {
     className: "content-dialog source-dialog",
@@ -509,8 +484,13 @@ function createPublicApp() {
     if (opener?.isConnected) opener.focus();
   });
 
-  app.append(header, layout, siteFooter, sourceDialog, inquiryDialog);
+  app.append(header, layout, topicDrawer, sourceDialog, inquiryDialog);
   root.replaceChildren(app);
+
+  function resizeQuestionInput() {
+    questionInput.style.height = "44px";
+    questionInput.style.height = `${Math.min(questionInput.scrollHeight, 112)}px`;
+  }
 
   function saveCurrentView() {
     const session = sessionFor();
@@ -530,7 +510,7 @@ function createPublicApp() {
         link.removeAttribute("aria-current");
       }
     }
-    topicSelect.value = state.section;
+    topicTitle.textContent = topicFor().title;
   }
 
   function activateTopic(section, { historyMode = "none", announce = false } = {}) {
@@ -546,6 +526,7 @@ function createPublicApp() {
     if (changed) {
       state.section = nextTopic.id;
       questionInput.value = sessionFor().draft;
+      resizeQuestionInput();
       syncFeedback();
       updateComposer();
       const session = sessionFor();
@@ -568,10 +549,8 @@ function createPublicApp() {
 
   function updateComposer() {
     const session = sessionFor();
-    const length = questionInput.value.length;
-    characterCount.textContent = length ? `${length}/2000` : "Shift + Enter 换行";
     sendButton.disabled = session.sending || !questionInput.value.trim();
-    questionInput.disabled = session.sending;
+    questionInput.setAttribute("aria-busy", session.sending ? "true" : "false");
     newConversation.disabled = session.sending || !hasResettableState(session);
     messageScroll.setAttribute("aria-busy", session.sending ? "true" : "false");
     for (const [section, button] of topicLinks) {
@@ -628,15 +607,11 @@ function createPublicApp() {
   }
 
   function assistantMessageNode(message, section) {
-    const article = element("article", { className: `message ${message.role}` });
-    const label = element("div", { className: "message-label" });
-    label.append(document.createTextNode(message.role === "user" ? "你" : APP_NAME));
-    if (message.mode === "retrieval") {
-      label.append(element("span", { text: "资料摘录" }));
-    } else if (message.role === "assistant" && message.provider) {
-      label.append(element("span", { text: message.provider === "bailian" ? "千问 · AI 回答" : "备用模型 · AI 回答" }));
-    }
-    article.append(label, element("div", { className: "message-body", text: String(message.content || "") }));
+    const article = element("article", {
+      className: `message ${message.role}`,
+      attributes: { "aria-label": message.role === "user" ? "你发送的消息" : `${APP_NAME} 的回答` },
+    });
+    article.append(element("div", { className: "message-body", text: String(message.content || "") }));
 
     if (message.role === "assistant") {
       const sources = Array.isArray(message.sources) ? message.sources : [];
@@ -668,36 +643,27 @@ function createPublicApp() {
     const question = String(rawQuestion || "").trim();
     if (!question || sessionFor(section).sending) return;
     const request = sendQuestion(question, section);
-    if (state.section === section) messageScroll.focus({ preventScroll: true });
+    if (state.section === section) questionInput.focus({ preventScroll: true });
     void request.catch(() => {});
   }
 
   function welcomeNode() {
     const topic = topicFor();
     const section = state.section;
-    const welcome = element("div", { className: "welcome" });
-    welcome.append(
-      element("p", { className: "eyebrow", text: topic.eyebrow }),
-      element("h2", { text: topic.heading }),
-      element("p", { text: topic.intro }),
-    );
+    const welcome = element("div", { className: "welcome" }, [
+      element("h2", { className: "sr-only", text: topic.title }),
+    ]);
     const suggestions = element("div", {
       className: "suggestions",
       attributes: { role: "group", "aria-label": `${topic.title}精选问题` },
     });
     for (const suggestion of topic.suggestions) {
       const button = textButton("", "suggestion-button");
-      button.append(element("span", { text: suggestion }), icon("→", "suggestion-arrow"));
+      button.append(element("span", { text: suggestion }), icon("›", "suggestion-arrow"));
       button.addEventListener("click", () => dispatchQuestion(suggestion, section));
       suggestions.append(button);
     }
-    welcome.append(
-      suggestions,
-      element("div", { className: "welcome-note" }, [
-        icon("◇"),
-        element("span", { text: "OA 审核公开资料 · 重要事项由团队确认" }),
-      ]),
-    );
+    welcome.append(suggestions);
     return welcome;
   }
 
@@ -772,6 +738,7 @@ function createPublicApp() {
     session.stickToEnd = true;
     if (state.section === section) {
       questionInput.value = "";
+      resizeQuestionInput();
       syncFeedback();
       updateComposer();
       renderMessages({ scrollMode: "end" });
@@ -805,6 +772,7 @@ function createPublicApp() {
       session.error = error instanceof Error ? error.message : "服务暂时不可用";
       if (state.section === section) {
         questionInput.value = session.draft;
+        resizeQuestionInput();
         syncFeedback();
       }
       throw error;
@@ -813,6 +781,7 @@ function createPublicApp() {
       updateComposer();
       if (state.section === section) {
         questionInput.value = session.draft;
+        resizeQuestionInput();
         syncFeedback();
         renderMessages({
           scrollMode: completed
@@ -1015,6 +984,7 @@ function createPublicApp() {
   }, { passive: true });
   questionInput.addEventListener("input", () => {
     sessionFor().draft = questionInput.value;
+    resizeQuestionInput();
     updateComposer();
   });
   questionInput.addEventListener("keydown", (event) => {
@@ -1027,13 +997,13 @@ function createPublicApp() {
     event.preventDefault();
     dispatchQuestion(questionInput.value, state.section);
   });
-  submitInquiryButton.addEventListener("click", (event) => openInquiry(event.currentTarget));
   window.addEventListener("popstate", () => {
     activateTopic(topicIdForPath(window.location.pathname), { announce: true });
   });
 
   syncTopicControls();
   renderMessages({ scrollMode: "start" });
+  resizeQuestionInput();
   updateComposer();
   void requestJson("/api/status")
     .then((payload) => {

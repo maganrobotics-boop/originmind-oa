@@ -83,7 +83,7 @@ test("HTML uses only self-hosted generated assets and retains public metadata", 
   assert.match(html, /<meta\b[^>]*\bname=["']viewport["']/iu);
   assert.match(html, /<meta\b[^>]*\bname=["']robots["'][^>]*\bcontent=["']noindex,nofollow["']/iu);
   assert.match(html, /<meta\b[^>]*\bname=["']description["']/iu);
-  assert.ok(html.includes("ARTS Robotics AI assistant"));
+  assert.ok(html.includes("ARTS Robotics AI Assistant"));
   assert.ok(html.includes(`/assets/${expected.appName}`));
   assert.ok(html.includes(`/assets/${expected.styleName}`));
 
@@ -115,10 +115,7 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
     assert.match(script, new RegExp(`adminRequest\\(["']${endpoint}["']`, "u"), endpoint);
   }
   assert.match(script, /(?:window\.)?location\.pathname\s*===?\s*["']\/manage["']/u);
-  assert.match(script, /\bconst\s+APP_NAME\s*=\s*["']ARTS Robotics AI assistant["']\s*;/u);
-  assert.match(script, /\bconst\s+HEADER_NAME\s*=\s*["']ARTS Robotics AI Assistant["']\s*;/u);
-  assert.ok(script.includes("机器人自主自动与操作实验室"));
-  assert.ok(script.includes("OriginMind x ARTS Robotics"));
+  assert.match(script, /\bconst\s+APP_NAME\s*=\s*["']ARTS Robotics AI Assistant["']\s*;/u);
   for (const section of [
     "技术成果与产业化",
     "科研合作与学术交流",
@@ -177,7 +174,34 @@ test("public topics keep independent view state without a duplicate welcome avat
   assert.doesNotMatch(style, /\.welcome-mark\b/u);
 });
 
-test("public modules expose direct links with history navigation and a mobile selector", async () => {
+test("public chat keeps a minimal topic header and compact message composer", async () => {
+  const [script, style] = await Promise.all([
+    readFile(path.join(frontendDir, "app.js"), "utf8"),
+    readFile(path.join(frontendDir, "styles.css"), "utf8"),
+  ]);
+
+  assert.match(script, /className:\s*["']topic-title["']/u);
+  assert.match(script, /textButton\(["']["'],\s*["']menu-button["']\)/u);
+  assert.match(script, /rows:\s*["']1["']/u);
+  assert.match(script, /placeholder:\s*["']输入消息["']/u);
+  assert.match(script, /textButton\(["']发送["'],\s*["']send-button["']\)/u);
+  for (const removedClass of ["context-panel", "conversation-toolbar", "composer-footer", "site-footer", "topic-select"]) {
+    assert.doesNotMatch(script, new RegExp(`className:\\s*["']${removedClass}["']`, "u"), removedClass);
+  }
+  for (const removedCopy of [
+    "从一个问题，走近机器人研究。",
+    "机器人自主自动与操作实验室",
+    "AI 回答仅供参考，不构成 ARTS Robotics",
+    "OriginMind x ARTS Robotics",
+  ]) {
+    assert.equal(script.includes(removedCopy), false, removedCopy);
+  }
+  assert.match(style, /\.chat-app\s+\.composer\s*\{[\s\S]*?display:\s*flex/u);
+  assert.match(style, /\.chat-app\s+\.composer\s+textarea\s*\{[\s\S]*?min-height:\s*44px[\s\S]*?font-size:\s*16px/u);
+  assert.match(style, /\.chat-app\s+\.send-button\s*\{[\s\S]*?height:\s*44px/u);
+});
+
+test("public modules expose direct links with history navigation and an accessible topic drawer", async () => {
   const [script, style] = await Promise.all([
     readFile(path.join(frontendDir, "app.js"), "utf8"),
     readFile(path.join(frontendDir, "styles.css"), "utf8"),
@@ -198,13 +222,14 @@ test("public modules expose direct links with history navigation and a mobile se
   assert.match(script, /section:\s*topicIdForPath\(window\.location\.pathname\)/u);
   assert.match(script, /window\.history\.pushState\(/u);
   assert.match(script, /window\.addEventListener\(["']popstate["']/u);
-  assert.match(script, /className:\s*["']topic-select["']/u);
-  assert.match(script, /className:\s*["']topic-card["'][\s\S]*?href:\s*topic\.path/u);
-  assert.match(style, /\.topic-select\s*\{[\s\S]*?min-height:\s*48px/u);
-  assert.match(
-    style,
-    /@media\s*\(max-width:\s*960px\)[\s\S]*?\.topic-list\s*\{[\s\S]*?display:\s*none[\s\S]*?\.topic-select-wrap\s*\{[\s\S]*?display:\s*grid/u,
-  );
+  assert.match(script, /className:\s*["']drawer-topic-link["'][\s\S]*?href:\s*topic\.path/u);
+  assert.ok(script.includes('menuButton.setAttribute("aria-controls", "topic-drawer")'));
+  assert.ok(script.includes('menuButton.setAttribute("aria-expanded", "false")'));
+  assert.ok(script.includes("topicDrawer.showModal()"));
+  assert.ok(script.includes('topicDrawer.addEventListener("close"'));
+  assert.match(style, /\.topic-drawer\s*\{[\s\S]*?position:\s*fixed/u);
+  assert.match(style, /\.drawer-topic-link\s*\{[\s\S]*?min-height:\s*54px/u);
+  assert.match(style, /\.drawer-panel\s*\{[\s\S]*?width:\s*min\(86vw,\s*340px\)/u);
 });
 
 test("frontend source avoids executable HTML and dynamic-code sinks", async () => {
