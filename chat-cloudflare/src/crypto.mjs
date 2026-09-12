@@ -115,8 +115,7 @@ export async function verifyPassword(password, record) {
   if (
     record?.algorithm !== PASSWORD_ALGORITHM ||
     !Number.isInteger(record?.iterations) ||
-    record.iterations < 100_000 ||
-    record.iterations > 1_000_000
+    record.iterations !== PASSWORD_ITERATIONS
   ) {
     throw new Error("PASSWORD_RECORD_UNSUPPORTED");
   }
