@@ -1,5 +1,5 @@
 import { pbkdf2Sync, randomBytes } from "node:crypto";
-import { mkdir, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -58,11 +58,15 @@ export function validateAdminInitializationEnvironment(environment) {
   if (!ACCOUNT_ID_PATTERN.test(accountId) || /^0+$/u.test(accountId)) fail("invalid-cloudflare-account-id");
 
   const apiToken = requiredText(environment, "CLOUDFLARE_API_TOKEN", 20, 2_048);
-  const adminPassword = requiredText(environment, "CHAT_ADMIN_PASSWORD", 12, 256);
-  if (apiToken === adminPassword) fail("credentials-must-be-independent");
   const operation = environment.CHAT_ADMIN_OPERATION || "initialize";
-  if (!["initialize", "repair-cloudflare-pbkdf2"].includes(operation)) fail("invalid-operation");
-  const expectedConfirmation = operation === "repair-cloudflare-pbkdf2"
+  if (!["initialize", "prepare-cloudflare-pbkdf2", "repair-cloudflare-pbkdf2"].includes(operation)) {
+    fail("invalid-operation");
+  }
+  const adminPassword = operation === "prepare-cloudflare-pbkdf2"
+    ? null
+    : requiredText(environment, "CHAT_ADMIN_PASSWORD", 12, 256);
+  if (apiToken === adminPassword) fail("credentials-must-be-independent");
+  const expectedConfirmation = operation !== "initialize"
     ? EXPECTED_REPAIR_CONFIRMATION
     : EXPECTED_CONFIRMATION;
   if (requiredText(environment, "CHAT_ADMIN_INITIALIZATION_CONFIRM", 1, 256) !== expectedConfirmation) {
@@ -249,7 +253,7 @@ export async function initializeChatAdmin({
   if (validated.operation === "initialize" && before) {
     return receipt(validated, "already-exists-no-change", false, now(), before);
   }
-  if (validated.operation === "repair-cloudflare-pbkdf2") {
+  if (validated.operation !== "initialize") {
     if (!before) fail("admin-account-missing");
     if (
       before.algorithm !== PASSWORD_ALGORITHM ||
@@ -262,6 +266,9 @@ export async function initializeChatAdmin({
       await onRepairCheckpoint(repairCheckpoint(validated, bookmarkBefore, now()));
     } catch {
       fail("repair-checkpoint-write-failed");
+    }
+    if (validated.operation === "prepare-cloudflare-pbkdf2") {
+      return receipt(validated, "repair-prepared-no-change", false, now(), before, bookmarkBefore);
     }
     if (before.algorithm === PASSWORD_ALGORITHM && before.iterations === PASSWORD_ITERATIONS) {
       await queryDatabase(credentials, database.id, CLEAR_SESSIONS_SQL, [], fetchImpl);
@@ -364,7 +371,24 @@ async function writeEvidence(value) {
 }
 
 async function writeRepairCheckpoint(value) {
-  await writeJsonEvidence(REPAIR_CHECKPOINT_PATH, value);
+  try {
+    await writeJsonEvidence(REPAIR_CHECKPOINT_PATH, value);
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+    const existing = JSON.parse(await readFile(REPAIR_CHECKPOINT_PATH, "utf8"));
+    if (
+      existing?.format !== "originmind-chat-admin-repair-checkpoint-v1" ||
+      existing?.operation !== "prepare-cloudflare-pbkdf2" ||
+      existing?.database !== DATABASE_NAME ||
+      !BOOKMARK_PATTERN.test(existing?.bookmarkBefore || "") ||
+      existing?.commitSha !== value.commitSha ||
+      existing?.githubRun !== value.githubRun
+    ) {
+      throw error;
+    }
+    // The earlier checkpoint was already uploaded by the preceding workflow
+    // step. Preserve it as the authoritative pre-mutation recovery point.
+  }
 }
 
 export async function runCli(environment = process.env) {
