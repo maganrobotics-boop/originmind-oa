@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -17,6 +17,7 @@ import {
   validateProductionMigrationManifest,
   validateProductionMigrationState,
 } from "../lib/production-release.mjs";
+import { normalizePublicLabAiServiceToken } from "../scripts/normalize-public-lab-ai-service-token.mjs";
 import { buildStandaloneConfig, productionTarget } from "../lib/standalone-config.mjs";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
@@ -61,6 +62,58 @@ const expectedSchemaObjects = [...notificationObjects, ...Object.keys(expectedKn
 const migration26SchemaObjects = [...notificationObjects, ...Object.keys(migration26KnowledgeDefinitions)].sort();
 const migration27SchemaObjects = [...notificationObjects, ...Object.keys(migration27KnowledgeDefinitions)].sort();
 const migration28SchemaObjects = [...notificationObjects, ...Object.keys(migration28KnowledgeDefinitions)].sort();
+
+
+test("OA service token normalization matches the Chat release contract", () => {
+  const exactToken = "A".repeat(43);
+  assert.equal(normalizePublicLabAiServiceToken(exactToken, "cloudflare-api-token-long-enough"), exactToken);
+  assert.equal(normalizePublicLabAiServiceToken(`\u00a0${exactToken}\u3000`, "rotated-cloudflare-api-token"), exactToken);
+  const copiedValue = `${"A".repeat(42)}=`;
+  const derived = normalizePublicLabAiServiceToken(copiedValue, "cloudflare-api-token-long-enough");
+  assert.equal(derived, "1deoXJ_E6TPJy6PKS7aTztkKbUiXGr59FlLyiKRPFqE");
+  assert.match(derived, /^[A-Za-z0-9_-]{43}$/u);
+  assert.notEqual(normalizePublicLabAiServiceToken(copiedValue, "rotated-cloudflare-api-token"), derived);
+  assert.match(
+    normalizePublicLabAiServiceToken(`${"A".repeat(21)}\n${"A".repeat(22)}`, "cloudflare-api-token-long-enough"),
+    /^[A-Za-z0-9_-]{43}$/u,
+  );
+  assert.throws(() => normalizePublicLabAiServiceToken(" \r\n ", "cloudflare-api-token-long-enough"), /is required/u);
+  assert.throws(() => normalizePublicLabAiServiceToken("A".repeat(4_097), "cloudflare-api-token-long-enough"), /missing or invalid/u);
+});
+
+test("OA shell captures a derived service token without writing any credential", async () => {
+  const commandDirectory = await mkdtemp(join(tmpdir(), "originmind-oa-token-command-"));
+  const rawToken = `${"A".repeat(42)}=`;
+  const derivedToken = "1deoXJ_E6TPJy6PKS7aTztkKbUiXGr59FlLyiKRPFqE";
+  const apiToken = "cloudflare-api-token-long-enough";
+  try {
+    await symlink(process.execPath, join(commandDirectory, "node"));
+    const run = spawnSync("/bin/bash", [join(projectRoot, "scripts", "release-production.sh"), "production"], {
+      encoding: "utf8",
+      env: {
+        PATH: commandDirectory,
+        ...validProductionEnvironment,
+        CLOUDFLARE_ACCOUNT_ID: validProductionEnvironment.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID,
+        CLOUDFLARE_API_TOKEN: apiToken,
+        PUBLIC_LAB_AI_SERVICE_TOKEN: rawToken,
+        OA_PRODUCTION_RELEASE_CONFIRM: `${validProductionEnvironment.OA_PRODUCTION_WORKER_NAME}:${validProductionEnvironment.OA_PRODUCTION_D1_DATABASE_ID}:${new URL(validProductionEnvironment.OA_PRODUCTION_PUBLIC_ORIGIN).hostname}`,
+        GITHUB_ACTIONS: "true",
+        GITHUB_EVENT_NAME: "workflow_dispatch",
+        GITHUB_REF: "refs/heads/main",
+        GITHUB_SHA: "a".repeat(40),
+        GITHUB_RUN_ID: "12345",
+        GITHUB_RUN_ATTEMPT: "1",
+      },
+    });
+    assert.equal(run.status, 127);
+    assert.match(run.stderr, /mkdir: command not found/u);
+    for (const credential of [rawToken, derivedToken, apiToken]) {
+      assert.ok(!`${run.stdout}${run.stderr}`.includes(credential));
+    }
+  } finally {
+    await rm(commandDirectory, { recursive: true, force: true });
+  }
+});
 
 function queryResult(rows) {
   return [{ success: true, results: rows, meta: { served_by: "test" } }];
@@ -378,14 +431,78 @@ test("workflow and shell expose the token only to a confirmed manual main releas
       GITHUB_RUN_ATTEMPT: "1",
     },
   });
-  assert.equal(invalidTokenRun.status, 64);
-  assert.match(invalidTokenRun.stderr, /exactly 43 unpadded base64url/u);
+  assert.notEqual(invalidTokenRun.status, 64);
+  assert.doesNotMatch(invalidTokenRun.stderr, /PUBLIC_LAB_AI_SERVICE_TOKEN (?:must|is missing)/u);
   assert.ok(!`${invalidTokenRun.stdout}${invalidTokenRun.stderr}`.includes(invalidServiceToken));
-  assert.doesNotMatch(invalidTokenRun.stderr, /command not found/u);
+
+  const clipboardToken = ` \n${"A".repeat(43)}\r\n`;
+  const clipboardTokenRun = spawnSync("/bin/bash", [join(projectRoot, "scripts", "release-production.sh"), "production"], {
+    encoding: "utf8",
+    env: {
+      PATH: "/nonexistent",
+      ...validProductionEnvironment,
+      CLOUDFLARE_ACCOUNT_ID: validProductionEnvironment.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID,
+      CLOUDFLARE_API_TOKEN: "test-token",
+      PUBLIC_LAB_AI_SERVICE_TOKEN: clipboardToken,
+      OA_PRODUCTION_RELEASE_CONFIRM: `${validProductionEnvironment.OA_PRODUCTION_WORKER_NAME}:${validProductionEnvironment.OA_PRODUCTION_D1_DATABASE_ID}:${new URL(validProductionEnvironment.OA_PRODUCTION_PUBLIC_ORIGIN).hostname}`,
+      GITHUB_ACTIONS: "true",
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_REF: "refs/heads/main",
+      GITHUB_SHA: "a".repeat(40),
+      GITHUB_RUN_ID: "12345",
+      GITHUB_RUN_ATTEMPT: "1",
+    },
+  });
+  assert.notEqual(clipboardTokenRun.status, 64);
+  assert.doesNotMatch(clipboardTokenRun.stderr, /PUBLIC_LAB_AI_SERVICE_TOKEN must/u);
+  assert.ok(!`${clipboardTokenRun.stdout}${clipboardTokenRun.stderr}`.includes("A".repeat(43)));
+
+  const internalWhitespaceToken = `${"A".repeat(21)}\n${"A".repeat(22)}`;
+  const internalWhitespaceRun = spawnSync("/bin/bash", [join(projectRoot, "scripts", "release-production.sh"), "production"], {
+    encoding: "utf8",
+    env: {
+      PATH: "/nonexistent",
+      ...validProductionEnvironment,
+      CLOUDFLARE_ACCOUNT_ID: validProductionEnvironment.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID,
+      CLOUDFLARE_API_TOKEN: "test-token",
+      PUBLIC_LAB_AI_SERVICE_TOKEN: internalWhitespaceToken,
+      OA_PRODUCTION_RELEASE_CONFIRM: `${validProductionEnvironment.OA_PRODUCTION_WORKER_NAME}:${validProductionEnvironment.OA_PRODUCTION_D1_DATABASE_ID}:${new URL(validProductionEnvironment.OA_PRODUCTION_PUBLIC_ORIGIN).hostname}`,
+      GITHUB_ACTIONS: "true",
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_REF: "refs/heads/main",
+      GITHUB_SHA: "a".repeat(40),
+      GITHUB_RUN_ID: "12345",
+      GITHUB_RUN_ATTEMPT: "1",
+    },
+  });
+  assert.notEqual(internalWhitespaceRun.status, 64);
+  assert.doesNotMatch(internalWhitespaceRun.stderr, /PUBLIC_LAB_AI_SERVICE_TOKEN (?:must|is missing)/u);
+  assert.ok(!`${internalWhitespaceRun.stdout}${internalWhitespaceRun.stderr}`.includes(internalWhitespaceToken));
+
+  const missingTokenRun = spawnSync("/bin/bash", [join(projectRoot, "scripts", "release-production.sh"), "production"], {
+    encoding: "utf8",
+    env: {
+      PATH: process.env.PATH,
+      ...validProductionEnvironment,
+      CLOUDFLARE_ACCOUNT_ID: validProductionEnvironment.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID,
+      CLOUDFLARE_API_TOKEN: "test-token",
+      PUBLIC_LAB_AI_SERVICE_TOKEN: " \r\n ",
+      OA_PRODUCTION_RELEASE_CONFIRM: `${validProductionEnvironment.OA_PRODUCTION_WORKER_NAME}:${validProductionEnvironment.OA_PRODUCTION_D1_DATABASE_ID}:${new URL(validProductionEnvironment.OA_PRODUCTION_PUBLIC_ORIGIN).hostname}`,
+      GITHUB_ACTIONS: "true",
+      GITHUB_EVENT_NAME: "workflow_dispatch",
+      GITHUB_REF: "refs/heads/main",
+      GITHUB_SHA: "a".repeat(40),
+      GITHUB_RUN_ID: "12345",
+      GITHUB_RUN_ATTEMPT: "1",
+    },
+  });
+  assert.equal(missingTokenRun.status, 64);
+  assert.match(missingTokenRun.stderr, /PUBLIC_LAB_AI_SERVICE_TOKEN is required/u);
 
   assert.match(releaseScript, /run_wrangler deploy --dry-run --strict --keep-vars --config/u);
   assert.match(releaseScript, /run_wrangler deploy --strict --keep-vars --config/u);
   assert.match(releaseScript, /\^\[A-Za-z0-9_-\]\{43\}\$/u);
+  assert.match(releaseScript, /normalize-public-lab-ai-service-token\.mjs/u);
   assert.match(releaseScript, /printf '%s' "\$\{public_lab_ai_service_token\}"[\s\\]*\| run_wrangler secret put PUBLIC_LAB_AI_SERVICE_TOKEN/u);
   assert.equal([...releaseScript.matchAll(/secret put PUBLIC_LAB_AI_SERVICE_TOKEN/gu)].length, 1);
   assert.equal([...releaseScript.matchAll(/--allow-missing-public-lab-ai-service-token true/gu)].length, 1);
