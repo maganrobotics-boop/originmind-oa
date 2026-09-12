@@ -163,13 +163,97 @@ test("the saved administrator password is consumed, verified, and not returned",
   const calls = [];
   const result = await smokeSavedAdminAuthentication("https://chat.omindos.ai", {
     environment,
-    attempts: 1,
+    logoutAttempts: 1,
     verifyAdmin: async (origin, suppliedPassword) => calls.push({ origin, suppliedPassword }),
   });
   assert.deepEqual(calls, [{ origin: "https://chat.omindos.ai", suppliedPassword: password }]);
   assert.equal("CHAT_ADMIN_PASSWORD" in environment, false);
   assert.deepEqual(result, { adminPasswordVerified: true, smokeSessionRevoked: true });
   assert.equal(JSON.stringify(result).includes(password), false);
+});
+
+test("saved-password smoke logs in once and retries logout with the same session", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const password = "saved-administrator-password";
+  const token = "b".repeat(64);
+  const calls = [];
+  let logoutCalls = 0;
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    const headers = {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    };
+    if (url.endsWith("/api/auth/login")) {
+      return new Response(JSON.stringify({ signedIn: true }), {
+        status: 200,
+        headers: {
+          ...headers,
+          "Set-Cookie": `__Host-ma-session=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=28800`,
+        },
+      });
+    }
+    logoutCalls += 1;
+    return new Response(JSON.stringify({ saved: true }), {
+      status: logoutCalls === 1 ? 503 : 200,
+      headers,
+    });
+  };
+  const sleeps = [];
+  const result = await smokeSavedAdminAuthentication("https://chat.omindos.ai", {
+    environment: { CHAT_ADMIN_PASSWORD: password },
+    logoutAttempts: 2,
+    sleepImpl: async (milliseconds) => sleeps.push(milliseconds),
+  });
+  assert.deepEqual(result, { adminPasswordVerified: true, smokeSessionRevoked: true });
+  assert.equal(calls.filter((call) => call.url.endsWith("/api/auth/login")).length, 1);
+  assert.equal(calls.filter((call) => call.url.endsWith("/api/auth/logout")).length, 2);
+  assert.ok(calls.filter((call) => call.url.endsWith("/api/auth/logout")).every(
+    (call) => call.options.headers.Cookie === `__Host-ma-session=${token}`,
+  ));
+  assert.deepEqual(sleeps, [1_500]);
+  assert.equal(JSON.stringify(result).includes(password), false);
+  assert.equal(JSON.stringify(result).includes(token), false);
+});
+
+test("saved-password smoke revokes its session even when login response validation fails", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const token = "c".repeat(64);
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    const headers = {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    };
+    if (url.endsWith("/api/auth/login")) {
+      return new Response(JSON.stringify({ signedIn: false }), {
+        status: 200,
+        headers: {
+          ...headers,
+          "Set-Cookie": `__Host-ma-session=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=28800`,
+        },
+      });
+    }
+    return new Response(JSON.stringify({ saved: true }), { status: 200, headers });
+  };
+  await assert.rejects(
+    smokeSavedAdminAuthentication("https://chat.omindos.ai", {
+      environment: { CHAT_ADMIN_PASSWORD: "saved-administrator-password" },
+    }),
+    /saved administrator password was not accepted/u,
+  );
+  assert.equal(calls.filter((call) => call.url.endsWith("/api/auth/login")).length, 1);
+  assert.equal(calls.filter((call) => call.url.endsWith("/api/auth/logout")).length, 1);
+  assert.equal(calls[1].options.headers.Cookie, `__Host-ma-session=${token}`);
 });
 
 test("frontend smoke accepts one deterministic content-hashed script and stylesheet", () => {
