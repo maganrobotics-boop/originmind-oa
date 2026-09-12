@@ -506,6 +506,15 @@ test("admin authentication is same-origin, cookie-based, and required for admin 
   );
   assert.equal(crossOrigin.status, 403);
 
+  const wrongPassword = await handleRequest(
+    request("/api/auth/login", { method: "POST", body: { password: "definitely not the administrator password" } }),
+    env,
+    {},
+    oaRuntime([]),
+  );
+  assert.equal(wrongPassword.status, 401);
+  assert.deepEqual(await body(wrongPassword), { error: "密码不正确" });
+
   const { response: loginResponse, cookie } = await login(env, password);
   assert.equal(loginResponse.status, 200);
   assert.ok(cookie?.startsWith("__Host-ma-session="));
