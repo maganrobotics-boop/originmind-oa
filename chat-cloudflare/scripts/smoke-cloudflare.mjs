@@ -1,6 +1,11 @@
 import { pathToFileURL } from "node:url";
 
-const TRANSIENT_STATUSES = new Set([408, 425, 429, 500, 502, 503, 504]);
+// A newly published Worker or route can briefly return 404/421 while edge state converges.
+const TRANSIENT_STATUSES = new Set([404, 408, 421, 425, 429, 500, 502, 503, 504]);
+
+export function isTransientSmokeStatus(status) {
+  return status === undefined || TRANSIENT_STATUSES.has(status);
+}
 
 function sleep(milliseconds) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -162,7 +167,7 @@ export async function smokeCloudflare(originValue, { attempts = 12, releaseId } 
       return await smokeOnce(origin, expectedReleaseId);
     } catch (error) {
       lastError = error;
-      const transient = error?.status === undefined || TRANSIENT_STATUSES.has(error.status);
+      const transient = isTransientSmokeStatus(error?.status);
       if (!transient || attempt === attempts) break;
       await sleep(Math.min(10_000, attempt * 1_500));
     }

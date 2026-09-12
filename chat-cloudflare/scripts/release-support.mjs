@@ -275,6 +275,9 @@ export function buildWranglerConfig({ accountId, adminEmail, databaseId, configP
     name: WORKER_NAME,
     main: relativeFromConfig(configPath, resolve(CHAT_ROOT, "src", "index.mjs")),
     compatibility_date: "2026-09-11",
+    // OA is another Worker in the same Cloudflare zone. Route global fetch
+    // through Cloudflare's public front door so oa.omindos.ai reaches it.
+    compatibility_flags: ["global_fetch_strictly_public"],
     workers_dev: !production,
     preview_urls: false,
     assets: {

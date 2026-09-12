@@ -92,6 +92,7 @@ test("generated Wrangler targets use explicit Worker-first static routing", () =
     releaseId,
   });
   assert.equal(staging.workers_dev, true);
+  assert.deepEqual(staging.compatibility_flags, ["global_fetch_strictly_public"]);
   assert.equal(staging.routes, undefined);
   assert.match(staging.assets.directory, /(?:^|\/)public$/u);
   assert.deepEqual({ ...staging.assets, directory: "<chat-public>" }, {
@@ -112,6 +113,7 @@ test("generated Wrangler targets use explicit Worker-first static routing", () =
     releaseId,
   });
   assert.equal(production.workers_dev, false);
+  assert.deepEqual(production.compatibility_flags, ["global_fetch_strictly_public"]);
   assert.deepEqual(production.routes, [{ pattern: `${HOSTNAME}/*`, zone_name: "omindos.ai" }]);
   assert.equal(production.d1_databases[0].database_name, DATABASE_NAME);
 });
