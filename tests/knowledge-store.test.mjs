@@ -275,7 +275,10 @@ test("系统管理员可以批准并调整自己的知识，但不能自行退�
   const publishedCurrent = await store.findKnowledgeItem(created.id, adminSelf, true);
   assert.equal(await store.reviewKnowledgeItem(publishedCurrent, adminSelf, "revoke", "本人不能自行撤销"), null);
 
-  const events = globalThis[stateKey].sqlite.prepare("SELECT action, note FROM knowledge_events ORDER BY created_at, rowid").all();
+  const events = globalThis[stateKey].sqlite
+    .prepare("SELECT action, note FROM knowledge_events ORDER BY created_at, rowid")
+    .all()
+    .map((row) => ({ action: row.action, note: row.note }));
   assert.deepEqual(events, [
     { action: "submitted", note: "" },
     { action: "approved_internal", note: policy.knowledgeAdminSelfAuditNote("确认内容准确") },
