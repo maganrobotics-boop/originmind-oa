@@ -1857,7 +1857,12 @@ textarea {
     display: none;
   }
 
+  .welcome-shell {
+    place-items: start center;
+  }
+
   .welcome {
+    margin: 0 auto;
     padding: 28px 19px 24px;
   }
 

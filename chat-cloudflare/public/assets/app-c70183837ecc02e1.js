@@ -546,7 +546,7 @@ function createPublicApp() {
     messageScroll.replaceChildren(content);
     newConversation.disabled = state.sending || state.messages.length === 0;
     window.requestAnimationFrame(() => {
-      messageScroll.scrollTop = messageScroll.scrollHeight;
+      messageScroll.scrollTop = state.messages.length ? messageScroll.scrollHeight : 0;
     });
   }
 
