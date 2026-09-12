@@ -168,8 +168,9 @@ if (options) {
 
     const config = JSON.parse(serializedConfig);
     const binding = productionBinding(config);
-    const administratorEmails = targetAdministratorEmails(config.vars);
-    assertTargetAdministratorReentry(payload, config.vars);
+    const runtimeVariables = { ...process.env, ...(config.vars || {}) };
+    const administratorEmails = targetAdministratorEmails(runtimeVariables);
+    assertTargetAdministratorReentry(payload, runtimeVariables);
     const authorizedAccountId = process.env.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID?.trim().toLowerCase() || "";
     const authorizedDatabaseId = process.env.OA_PRODUCTION_D1_DATABASE_ID?.trim().toLowerCase() || "";
     if (!ACCOUNT_ID_PATTERN.test(authorizedAccountId) || !UUID_PATTERN.test(authorizedDatabaseId)
@@ -214,13 +215,13 @@ if (options) {
           database_id: binding.database_id,
           remote: true,
         }],
+        vars: { MIGRATION_IMPORT_ADMIN_EMAILS: administratorEmails.join(",") },
       };
       await Promise.all([
         writeFile(temporaryConfigPath, `${JSON.stringify(temporaryConfig)}\n`, { mode: 0o600, flag: "wx" }),
         writeFile(environmentPath, [
           `MIGRATION_IMPORT_TOKEN=${token}`,
           `MIGRATION_IMPORT_AUTH_KEY=${authKey}`,
-          `MIGRATION_IMPORT_ADMIN_EMAILS=${JSON.stringify(administratorEmails.join(","))}`,
           `MIGRATION_IMPORT_EXPECTED_ORIGIN=${expectedOrigin}`,
           `MIGRATION_IMPORT_EXPECTED_SCHEMA_SHA256=${payload.schemaSha256}`,
           `MIGRATION_IMPORT_EXPECTED_FREEZE_ID=${freezeId}`,
