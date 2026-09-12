@@ -225,6 +225,15 @@ test("投稿、审核、检索和下架形成完整且有审计的知识生命�
   assert.equal("contentHash" in publicDetail.revisions[0], false);
   assert.equal("submitterMemberId" in publicDetail.item, false);
 
+  for (const partialIdentity of [
+    { ...actor("submitter"), email: "other@example.com" },
+    { ...reader, email: "submit@example.com" },
+  ]) {
+    const partialDetail = await store.getKnowledgeItemDetail(created.id, partialIdentity, false);
+    assert.equal("submitterMemberId" in partialDetail.item, false);
+    assert.deepEqual(partialDetail.events, []);
+  }
+
   globalThis[stateKey].sqlite.prepare("UPDATE members SET status = 'departed' WHERE id = 'member-reader'").run();
   assert.deepEqual(await store.listKnowledgeItems("all", reader, false), []);
   assert.equal(await store.getKnowledgeItemDetail(created.id, reader, false), null);
