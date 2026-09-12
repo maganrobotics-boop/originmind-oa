@@ -184,7 +184,7 @@ test("OA Service Binding is preferred and preserves the hardened request", async
   assert.equal(boundRequest.credentials, "omit");
   assert.equal(boundRequest.headers.get("content-type"), "application/json");
   assert.equal(boundRequest.headers.get("x-originmind-public-lab-ai-service-token"), SERVICE_TOKEN);
-  assert.deepEqual(await boundRequest.json(), { question: "机器人研究方向有哪些？" });
+  assert.deepEqual(await boundRequest.json(), { question: "机器人研究方向有哪些?" });
 });
 
 test("no matching documents means retrieval mode and no model invocation", async () => {
