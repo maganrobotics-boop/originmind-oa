@@ -4,8 +4,8 @@ set -euo pipefail
 
 target="${1:-}"
 
-# These checks intentionally use only Bash builtins and run before any command
-# that could access Cloudflare or mutate local release output.
+# These checks run before any command that could access Cloudflare or mutate
+# local release output.
 if [[ "${target}" != "production" ]]; then
   echo "Only the production target may use this release entrypoint." >&2
   exit 64
@@ -60,21 +60,23 @@ if [[ -z "${CLOUDFLARE_API_TOKEN:-}" ]]; then
   echo "CLOUDFLARE_API_TOKEN is required from GitHub Actions Secrets." >&2
   exit 64
 fi
-public_lab_ai_service_token="${PUBLIC_LAB_AI_SERVICE_TOKEN:-}"
-# Secret managers and mobile clipboards can append surrounding whitespace.
-# Normalize only the edges; whitespace inside the token still fails closed.
-public_lab_ai_service_token="${public_lab_ai_service_token#"${public_lab_ai_service_token%%[![:space:]]*}"}"
-public_lab_ai_service_token="${public_lab_ai_service_token%"${public_lab_ai_service_token##*[![:space:]]}"}"
+cloudflare_api_token="${CLOUDFLARE_API_TOKEN}"
+script_path="${BASH_SOURCE[0]}"
+script_directory="${script_path%/*}"
+if [[ "${script_directory}" == "${script_path}" ]]; then
+  script_directory="."
+fi
+script_dir="$(cd "${script_directory}" && pwd)"
+project_root="$(cd "${script_dir}/.." && pwd)"
+unset script_path script_directory
+public_lab_ai_service_token="$(node "${script_dir}/normalize-public-lab-ai-service-token.mjs")"
 if [[ ! "${public_lab_ai_service_token}" =~ ^[A-Za-z0-9_-]{43}$ ]]; then
-  echo "PUBLIC_LAB_AI_SERVICE_TOKEN must be exactly 43 unpadded base64url characters." >&2
+  echo "Unable to normalize PUBLIC_LAB_AI_SERVICE_TOKEN." >&2
   exit 64
 fi
-cloudflare_api_token="${CLOUDFLARE_API_TOKEN}"
 unset CLOUDFLARE_API_TOKEN
 unset PUBLIC_LAB_AI_SERVICE_TOKEN
 
-script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-project_root="$(cd "${script_dir}/.." && pwd)"
 wrangler="${project_root}/node_modules/.bin/wrangler"
 release_base="${project_root}/.wrangler/releases"
 run_wrangler() {

@@ -1,4 +1,4 @@
-import { createHash, pbkdf2Sync, randomBytes } from "node:crypto";
+import { createHash, createHmac, pbkdf2Sync, randomBytes } from "node:crypto";
 import { mkdtemp, mkdir, readFile, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve, sep } from "node:path";
@@ -22,6 +22,8 @@ const ACCOUNT_ID_PATTERN = /^[a-f0-9]{32}$/u;
 const UUID_PATTERN = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-8][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
 const RELEASE_ID_PATTERN = /^[a-f0-9]{40}-[1-9][0-9]{0,5}$/u;
 const SUBDOMAIN_PATTERN = /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/u;
+const PUBLIC_TOKEN_PATTERN = /^[A-Za-z0-9_-]{43}$/u;
+const PUBLIC_TOKEN_CONTEXT = "originmind-public-lab-ai-service-token-v1\0";
 
 function requiredText(environment, key, minimum = 1, maximum = 4_096) {
   const value = environment[key];
@@ -29,6 +31,23 @@ function requiredText(environment, key, minimum = 1, maximum = 4_096) {
     throw new Error(`${key} is missing or invalid`);
   }
   return value;
+}
+
+export function normalizePublicServiceToken(rawValue, cloudflareApiToken) {
+  if (typeof rawValue !== "string" || rawValue.length > 4_096) {
+    throw new Error("PUBLIC_LAB_AI_SERVICE_TOKEN is missing or invalid");
+  }
+  const value = rawValue.trim();
+  if (!value) throw new Error("PUBLIC_LAB_AI_SERVICE_TOKEN is missing or invalid");
+  if (PUBLIC_TOKEN_PATTERN.test(value)) return value;
+  if (typeof cloudflareApiToken !== "string" || !cloudflareApiToken) {
+    throw new Error("CLOUDFLARE_API_TOKEN is required to normalize the service token");
+  }
+  // OA uses the same context, UTF-8 encoding, and protected Cloudflare key.
+  return createHmac("sha256", cloudflareApiToken)
+    .update(PUBLIC_TOKEN_CONTEXT, "utf8")
+    .update(value, "utf8")
+    .digest("base64url");
 }
 
 export function validateReleaseEnvironment(environment = process.env) {
@@ -48,8 +67,7 @@ export function validateReleaseEnvironment(environment = process.env) {
   const adminEmail = requiredText(environment, "CHAT_ADMIN_EMAIL", 3, 254).toLowerCase();
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(adminEmail)) throw new Error("CHAT_ADMIN_EMAIL is invalid");
   const apiToken = requiredText(environment, "CLOUDFLARE_API_TOKEN", 20, 2_048);
-  const publicToken = requiredText(environment, "PUBLIC_LAB_AI_SERVICE_TOKEN").trim();
-  if (!/^[A-Za-z0-9_-]{43}$/u.test(publicToken)) throw new Error("PUBLIC_LAB_AI_SERVICE_TOKEN is invalid");
+  const publicToken = normalizePublicServiceToken(environment.PUBLIC_LAB_AI_SERVICE_TOKEN, apiToken);
   const encryptionKey = (environment.CHAT_APP_ENCRYPTION_KEY || "").trim();
   const rateLimitKey = (environment.CHAT_RATE_LIMIT_HMAC_KEY || "").trim();
   const adminPassword = environment.CHAT_ADMIN_PASSWORD || "";

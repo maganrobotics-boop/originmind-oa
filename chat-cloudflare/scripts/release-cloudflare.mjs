@@ -25,8 +25,12 @@ import {
 } from "./release-support.mjs";
 import { smokeCloudflare } from "./smoke-cloudflare.mjs";
 
+const rawPublicToken = process.env.PUBLIC_LAB_AI_SERVICE_TOKEN || "";
 const environment = validateReleaseEnvironment();
+delete process.env.PUBLIC_LAB_AI_SERVICE_TOKEN;
 const secretValues = [
+  rawPublicToken,
+  rawPublicToken.trim(),
   environment.apiToken,
   environment.publicToken,
   environment.encryptionKey,

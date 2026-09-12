@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 
 import {
@@ -7,6 +8,7 @@ import {
   HOSTNAME,
   buildWranglerConfig,
   exactDnsRecord,
+  normalizePublicServiceToken,
   parseWorkerSecretNames,
   selectExactDatabase,
   validateReleaseEnvironment,
@@ -15,6 +17,7 @@ import {
 const accountId = "1234567890abcdef1234567890abcdef";
 const databaseId = "12345678-1234-4234-9234-1234567890ab";
 const releaseId = `${"a".repeat(40)}-1`;
+const releaseEntry = await readFile(new URL("./release-cloudflare.mjs", import.meta.url), "utf8");
 
 function validEnvironment(overrides = {}) {
   return {
@@ -36,24 +39,46 @@ test("optional generated and administrator credentials may be absent", () => {
   assert.equal(environment.adminPassword, "");
 });
 
-test("service token trims only surrounding clipboard whitespace", () => {
+test("service token accepts exact values and normalizes copied values deterministically", () => {
   const token = "A".repeat(43);
   const environment = validateReleaseEnvironment(validEnvironment({
     PUBLIC_LAB_AI_SERVICE_TOKEN: ` \n${token}\r\n`,
   }));
   assert.equal(environment.publicToken, token);
-  assert.throws(
-    () => validateReleaseEnvironment(validEnvironment({
-      PUBLIC_LAB_AI_SERVICE_TOKEN: `${"A".repeat(21)} ${"A".repeat(22)}`,
-    })),
-    /PUBLIC_LAB_AI_SERVICE_TOKEN is invalid/u,
+  assert.equal(normalizePublicServiceToken(`\u00a0${token}\u3000`, "another-cloudflare-api-token"), token);
+  assert.equal(normalizePublicServiceToken(token, "rotated-cloudflare-api-token"), token);
+  const copiedValue = `${"A".repeat(42)}=`;
+  const derived = normalizePublicServiceToken(copiedValue, "cloudflare-api-token-long-enough");
+  assert.equal(derived, "1deoXJ_E6TPJy6PKS7aTztkKbUiXGr59FlLyiKRPFqE");
+  assert.match(derived, /^[A-Za-z0-9_-]{43}$/u);
+  assert.notEqual(normalizePublicServiceToken(copiedValue, "rotated-cloudflare-api-token"), derived);
+  assert.match(
+    normalizePublicServiceToken(`${"A".repeat(21)}\n${"A".repeat(22)}`, "cloudflare-api-token-long-enough"),
+    /^[A-Za-z0-9_-]{43}$/u,
+  );
+  assert.equal(
+    validateReleaseEnvironment(validEnvironment({ PUBLIC_LAB_AI_SERVICE_TOKEN: copiedValue })).publicToken,
+    "1deoXJ_E6TPJy6PKS7aTztkKbUiXGr59FlLyiKRPFqE",
   );
   assert.throws(
-    () => validateReleaseEnvironment(validEnvironment({
-      PUBLIC_LAB_AI_SERVICE_TOKEN: `${"A".repeat(42)}=`,
-    })),
-    /PUBLIC_LAB_AI_SERVICE_TOKEN is invalid/u,
+    () => validateReleaseEnvironment(validEnvironment({ PUBLIC_LAB_AI_SERVICE_TOKEN: " \r\n " })),
+    /PUBLIC_LAB_AI_SERVICE_TOKEN is missing or invalid/u,
   );
+  assert.throws(
+    () => normalizePublicServiceToken("A".repeat(4_097), "cloudflare-api-token-long-enough"),
+    /PUBLIC_LAB_AI_SERVICE_TOKEN is missing or invalid/u,
+  );
+  assert.throws(
+    () => normalizePublicServiceToken(copiedValue, ""),
+    /CLOUDFLARE_API_TOKEN is required/u,
+  );
+});
+
+test("release entry redacts and removes the raw copied token before child processes", () => {
+  assert.ok(releaseEntry.indexOf("const rawPublicToken") < releaseEntry.indexOf("validateReleaseEnvironment()"));
+  assert.ok(releaseEntry.indexOf("validateReleaseEnvironment()") < releaseEntry.indexOf("delete process.env.PUBLIC_LAB_AI_SERVICE_TOKEN"));
+  assert.ok(releaseEntry.indexOf("delete process.env.PUBLIC_LAB_AI_SERVICE_TOKEN") < releaseEntry.indexOf("const secretValues"));
+  assert.match(releaseEntry, /rawPublicToken\.trim\(\)/u);
 });
 
 test("generated Wrangler targets use explicit Worker-first static routing", () => {
