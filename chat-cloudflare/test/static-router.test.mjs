@@ -28,8 +28,8 @@ function mockEnvironment() {
             "/index.html",
             "/favicon.svg",
             "/LICENSES.md",
-            "/assets/index-D2APnqlS.js",
-            "/assets/index-B3Ovyg1J.css",
+            "/assets/app-0123456789abcdef.js",
+            "/assets/styles-0123456789abcdef.css",
           ]);
           if (!known.has(url.pathname)) {
             return new Response("missing", { status: 404 });
@@ -167,9 +167,9 @@ test("unsafe methods cannot retrieve the shell or static assets", async () => {
 });
 
 test("hashed assets are immutable while auxiliary assets use a short TTL", async () => {
-  const { env } = mockEnvironment();
+  const { env, calls } = mockEnvironment();
   const script = await routeStaticRequest(
-    new Request("https://chat.omindos.ai/assets/index-D2APnqlS.js", {
+    new Request("https://chat.omindos.ai/assets/app-0123456789abcdef.js", {
       headers: { "If-None-Match": '"asset-etag"' },
     }),
     env,
@@ -177,6 +177,7 @@ test("hashed assets are immutable while auxiliary assets use a short TTL", async
   assert.equal(script.status, 200);
   assert.equal(script.headers.get("etag"), '"asset-etag"');
   assertHardened(script, "public, max-age=31536000, immutable");
+  assert.equal(calls[0].ifNoneMatch, '"asset-etag"');
 
   for (const path of ["/favicon.svg", "/LICENSES.md"]) {
     const response = await routeStaticRequest(

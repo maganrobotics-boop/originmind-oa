@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { isTransientSmokeStatus, validateReleaseEvidence } from "./smoke-cloudflare.mjs";
+import {
+  frontendAssetPaths,
+  isTransientSmokeStatus,
+  validateReleaseEvidence,
+} from "./smoke-cloudflare.mjs";
 
 const releaseId = `${"a".repeat(40)}-1`;
 const evidence = {
@@ -61,4 +65,31 @@ test("edge propagation responses are retried without retrying authorization fail
     assert.equal(isTransientSmokeStatus(status), true);
   }
   for (const status of [400, 401, 403, 405]) assert.equal(isTransientSmokeStatus(status), false);
+});
+
+test("frontend smoke accepts one deterministic content-hashed script and stylesheet", () => {
+  assert.deepEqual(
+    frontendAssetPaths(
+      '<link rel="stylesheet" href="/assets/styles-0123456789abcdef.css"><script type="module" src="/assets/app-fedcba9876543210.js"></script>',
+    ),
+    [
+      {
+        pathname: "/assets/app-fedcba9876543210.js",
+        hash: "fedcba9876543210",
+        mediaType: "javascript",
+      },
+      {
+        pathname: "/assets/styles-0123456789abcdef.css",
+        hash: "0123456789abcdef",
+        mediaType: "css",
+      },
+    ],
+  );
+  assert.throws(() => frontendAssetPaths("<main>stale shell</main>"), /does not reference/u);
+  assert.throws(
+    () => frontendAssetPaths(
+      '<script src="/assets/app-0123456789abcdef.js"></script><script src="/assets/app-fedcba9876543210.js"></script><link rel="stylesheet" href="/assets/styles-0123456789abcdef.css">',
+    ),
+    /does not reference/u,
+  );
 });

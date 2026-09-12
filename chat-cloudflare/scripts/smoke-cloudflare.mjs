@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { pathToFileURL } from "node:url";
 
 // A newly published Worker or route can briefly return 404/421 while edge state converges.
@@ -54,6 +55,55 @@ function apiHeaders(response, label) {
   }
 }
 
+export function frontendAssetPaths(html) {
+  if (typeof html !== "string") throw new Error("Frontend shell is not text");
+  const app = [
+    ...html.matchAll(
+      /<script\b[^>]*\bsrc=["']\/assets\/(app-([a-f0-9]{16})\.js)["'][^>]*>/giu,
+    ),
+  ];
+  const style = [
+    ...html.matchAll(
+      /<link\b(?=[^>]*\brel=["']stylesheet["'])[^>]*\bhref=["']\/assets\/(styles-([a-f0-9]{16})\.css)["'][^>]*>/giu,
+    ),
+  ];
+  if (app.length !== 1 || style.length !== 1) {
+    throw new Error("Frontend shell does not reference one generated JavaScript and stylesheet asset");
+  }
+  return [
+    { pathname: `/assets/${app[0][1]}`, hash: app[0][2], mediaType: "javascript" },
+    { pathname: `/assets/${style[0][1]}`, hash: style[0][2], mediaType: "css" },
+  ];
+}
+
+async function verifyFrontendAsset(origin, asset) {
+  const response = await request(origin, asset.pathname, {
+    headers: { Accept: asset.mediaType === "css" ? "text/css" : "application/javascript" },
+  });
+  if (response.status !== 200) {
+    throw Object.assign(new Error(`${asset.pathname} returned ${response.status}`), { status: response.status });
+  }
+  const contentType = (response.headers.get("content-type") || "").toLowerCase();
+  if (
+    (asset.mediaType === "css" && !contentType.includes("text/css")) ||
+    (asset.mediaType === "javascript" && !/(?:application|text)\/javascript/u.test(contentType))
+  ) {
+    throw new Error(`${asset.pathname} returned an invalid Content-Type`);
+  }
+  if ((response.headers.get("x-content-type-options") || "").toLowerCase() !== "nosniff") {
+    throw new Error(`${asset.pathname} is missing X-Content-Type-Options: nosniff`);
+  }
+  const cacheControl = (response.headers.get("cache-control") || "").toLowerCase();
+  if (!cacheControl.includes("max-age=31536000") || !cacheControl.includes("immutable")) {
+    throw new Error(`${asset.pathname} is missing immutable caching`);
+  }
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (bytes.length < 200) throw new Error(`${asset.pathname} is incomplete`);
+  if (createHash("sha256").update(bytes).digest("hex").slice(0, 16) !== asset.hash) {
+    throw new Error(`${asset.pathname} does not match its content hash`);
+  }
+}
+
 function expectedRelease(value) {
   if (typeof value !== "string" || !/^[a-f0-9]{40}-[1-9][0-9]{0,5}$/u.test(value)) {
     throw new Error("Smoke check requires the exact Chat release ID");
@@ -105,6 +155,7 @@ export function validateReleaseEvidence({ health, status, chat }, releaseIdValue
 }
 
 async function smokeOnce(origin, releaseId) {
+  let frontendAssets;
   for (const pathname of ["/", "/manage"]) {
     const response = await request(origin, pathname, { headers: { Accept: "text/html" } });
     if (response.status !== 200) throw Object.assign(new Error(`${pathname} returned ${response.status}`), { status: response.status });
@@ -116,7 +167,14 @@ async function smokeOnce(origin, releaseId) {
     if ((response.headers.get("x-content-type-options") || "").toLowerCase() !== "nosniff") {
       throw new Error(`${pathname} is missing X-Content-Type-Options: nosniff`);
     }
+    const paths = frontendAssetPaths(body);
+    if (frontendAssets && JSON.stringify(paths) !== JSON.stringify(frontendAssets)) {
+      throw new Error("Root and manager shells reference different frontend assets");
+    }
+    frontendAssets = paths;
   }
+
+  for (const asset of frontendAssets) await verifyFrontendAsset(origin, asset);
 
   const healthResponse = await request(origin, "/_health");
   if (healthResponse.status !== 200) {

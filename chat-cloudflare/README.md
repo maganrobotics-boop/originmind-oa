@@ -6,6 +6,10 @@ inquiries and operational state, Workers AI is the default model provider, and
 the OA public endpoint contributes only knowledge explicitly approved for
 public visibility.
 
+The dependency-free browser source is maintained under `frontend/`. A small
+deterministic builder writes content-hashed JavaScript and CSS plus the resolved
+HTML shell under `public/`; those generated release assets are checked in.
+
 ## Isolation and visibility
 
 - This Worker and its D1 database are separate from the internal OA Worker and
@@ -38,13 +42,20 @@ own configuration with the exact public origin. Production disables both
 
 ```sh
 npm ci
+npm run build:frontend
 npm run check
 npm run check:wrangler
 ```
 
+Use `npm run check:frontend` when verifying that committed public assets still
+match their source without changing any files. Content-hashed files under
+`/assets/` are cached immutably; `/` and `/manage` always serve the same
+non-cacheable HTML shell.
+
 The production workflow additionally applies the D1 migration, writes secrets
 without logging them, validates the exact release ID and a real Workers AI
-response backed exclusively by OA-public sources, and
+response backed exclusively by OA-public sources, verifies the generated
+frontend source hashes and static responses, and
 only then enables Cloudflare proxying for the existing DNS record. A failed
 live smoke test restores the previous proxy state so the Tencent origin remains
 the fallback.
