@@ -7,6 +7,7 @@ import {
   EXPECTED_CONFIRMATION,
   HOSTNAME,
   OA_WORKER_NAME,
+  PASSWORD_ITERATIONS as RELEASE_PASSWORD_ITERATIONS,
   buildWranglerConfig,
   exactDnsRecord,
   normalizePublicServiceToken,
@@ -14,6 +15,7 @@ import {
   selectExactDatabase,
   validateReleaseEnvironment,
 } from "./release-support.mjs";
+import { PASSWORD_ITERATIONS as RUNTIME_PASSWORD_ITERATIONS } from "../src/crypto.mjs";
 
 const accountId = "1234567890abcdef1234567890abcdef";
 const databaseId = "12345678-1234-4234-9234-1234567890ab";
@@ -34,6 +36,12 @@ function validEnvironment(overrides = {}) {
     ...overrides,
   };
 }
+
+test("password derivation stays within the Cloudflare production PBKDF2 ceiling", () => {
+  assert.equal(RELEASE_PASSWORD_ITERATIONS, 100_000);
+  assert.equal(RUNTIME_PASSWORD_ITERATIONS, RELEASE_PASSWORD_ITERATIONS);
+  assert.ok(RUNTIME_PASSWORD_ITERATIONS <= 100_000);
+});
 
 test("optional generated and administrator credentials may be absent", () => {
   const environment = validateReleaseEnvironment(validEnvironment());
