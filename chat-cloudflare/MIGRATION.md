@@ -40,7 +40,7 @@ For each request:
 - The canonical `APP_ORIGIN` is enforced at the Worker boundary.
 - IP identifiers are HMACed with the independent `RATE_LIMIT_HMAC_KEY`; the encryption key is not reused.
 - The OA response remains capped at 16 KiB and is validated before use.
-- Bailian fetches use `redirect:"error"`, `cache:"no-store"`, and `credentials:"omit"`; JSON is streamed into a maximum 256 KiB buffer and its response shape is validated.
+- Worker-runtime OA and Bailian fetches use workerd-compatible `redirect:"manual"` and reject every non-2xx response, so redirects are never followed; Bailian also uses `cache:"no-store"` and `credentials:"omit"`. JSON is streamed into a maximum 256 KiB buffer and its response shape is validated.
 - At most two user messages and 3,000 total characters reach a model. Client assistant messages never reach it.
 - A model is never called without at least one retrieved source.
 - AI output must cite an existing source with `[n]`; output containing a URL, email, or phone-number pattern is discarded and replaced with retrieval fallback.
