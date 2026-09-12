@@ -1,38 +1,67 @@
 "use strict";
 
 const APP_NAME = "ARTS Robotics AI assistant";
+const HEADER_NAME = "ARTS Robotics AI Assistant";
 const OFFICIAL_SITE = "https://omindos.ai";
 const BAILIAN_CONSOLE = "https://bailian.console.aliyun.com/";
 
 const TOPICS = [
   {
-    id: "student",
+    id: "technology",
+    requestTopic: "research",
     index: "01",
-    title: "课题参与",
-    detail: "研究方向 · 申请准备",
-    prompt: "我想了解 ARTS Robotics 的研究方向，以及申请加入课题组需要准备什么。",
+    title: "技术成果与产业化",
+    detail: "核心成果 · 应用转化",
+    eyebrow: "TECHNOLOGY & IMPACT",
+    heading: "从核心技术到真实场景",
+    intro: "了解数字孪生双臂操作、精密装配、智能巡检等成果与产业应用方向。",
+    suggestions: [
+      "从双臂灵巧操作到 3C 精密装配，团队有哪些可落地技术成果？",
+      "试管抓取如何实现随机姿态 96.6% 成功率与 38.4% 效率提升？",
+    ],
   },
   {
-    id: "research",
+    id: "academic",
+    requestTopic: "research",
     index: "02",
-    title: "科研交流",
-    detail: "研究工作 · 技术讨论",
-    prompt: "课题组在双臂操作和机器人系统方面有哪些公开研究？",
+    title: "科研合作与学术交流",
+    detail: "国际合作 · 学术交流",
+    eyebrow: "RESEARCH & EXCHANGE",
+    heading: "与全球研究网络建立连接",
+    intro: "了解团队的国际科研经历、合作网络与代表性研究成果。",
+    suggestions: [
+      "ARTS Robotics 与哪些国内外高校和科研机构开展合作？",
+      "马淦团队有哪些代表性的国际科研经历与合作成果？",
+    ],
   },
   {
-    id: "business",
+    id: "company",
+    requestTopic: "business",
     index: "03",
-    title: "合作咨询",
-    detail: "应用需求 · 合作咨询",
-    prompt: "我们希望开展机器人项目合作，应该先提供哪些需求信息？",
+    title: "源灵智能科技有限公司",
+    detail: "机器人产品 · OmindOS",
+    eyebrow: "ORIGINMIND",
+    heading: "让机器人硬件与 OmindOS 协同工作",
+    intro: "了解深圳源灵智能科技有限公司的机器人产品、工程适配与商业合作方案。",
+    suggestions: [
+      "源灵智能如何用 OmindOS 让机器人理解任务、自主行动？",
+      "源灵智能能为机器人厂商和场景集成商提供哪些合作方案？",
+    ],
   },
-];
-
-const SUGGESTIONS = [
-  "ARTS Robotics 目前公开的研究方向有哪些？",
-  "想参与课题研究，需要提前准备什么？",
-  "有哪些已公开的双臂操作与机器人系统研究？",
-  "提出机器人应用合作需求前，应准备哪些信息？",
+  {
+    id: "association",
+    requestTopic: "student",
+    index: "04",
+    title: "智能无人系统创新协会",
+    detail: "学生创新 · 科技实践",
+    eyebrow: "STUDENT INNOVATION",
+    heading: "让学生创新走进机器人前沿",
+    intro: "从协会指导教师与所在实验室出发，了解面向学生的智能无人系统研究方向、竞赛与创新成果。",
+    suggestions: [
+      "智能无人系统创新协会由谁指导，可以连接哪些机器人研究方向？",
+      "协会指导教师所在实验室有哪些公开的竞赛与创新成果？",
+    ],
+  },
 ];
 
 const TOPIC_LABELS = Object.freeze({
@@ -91,6 +120,19 @@ function brandLink() {
   link.append(document.createTextNode("OriginMind"));
   link.append(element("span", { className: "brand-square", attributes: { "aria-hidden": "true" } }));
   return link;
+}
+
+function publicBrandLink() {
+  return element("a", {
+    className: "lab-brand",
+    attributes: { href: "/", "aria-label": "ARTS Robotics 首页" },
+  }, [
+    element("span", { className: "lab-brand-mark", attributes: { "aria-hidden": "true" } }),
+    element("span", { className: "lab-brand-copy" }, [
+      element("span", { className: "lab-brand-cn", text: "机器人自主自动与操作实验室" }),
+      element("strong", { className: "lab-brand-en", text: "ARTS Robotics" }),
+    ]),
+  ]);
 }
 
 function safeHttpUrl(value) {
@@ -185,7 +227,8 @@ function serviceLabel(service) {
 function createPublicApp() {
   const state = {
     messages: [],
-    topic: "student",
+    section: "technology",
+    topic: "research",
     service: null,
     sending: false,
     error: "",
@@ -206,10 +249,8 @@ function createPublicApp() {
 
   const app = element("div", { className: "chat-app" });
   const header = element("header", { className: "topbar site-header" });
-  const title = element("div", { className: "topbar-center", text: APP_NAME });
-  const official = externalLink("访问官网", OFFICIAL_SITE, "site-link");
-  header.append(brandLink(), title);
-  if (official) header.append(official);
+  const title = element("div", { className: "topbar-center", text: HEADER_NAME });
+  header.append(publicBrandLink(), title);
 
   const layout = element("main", { className: "chat-layout" });
   const contextPanel = element("aside", {
@@ -218,21 +259,24 @@ function createPublicApp() {
   });
   const contextHeading = element("div", { className: "context-heading" });
   contextHeading.append(
-    element("span", { className: "eyebrow", text: "ARTS ROBOTICS × ORIGINMIND" }),
     element("h1", { text: "从一个问题，走近机器人研究。" }),
     element("p", {
-      text: "基于 OA 审核公开资料，了解 ARTS Robotics 的研究方向、课题参与与合作信息。",
+      text: "基于 OA 审核公开资料，按主题了解 ARTS Robotics 的技术成果、合作网络与创新实践。",
     }),
   );
 
   const topicList = element("div", {
     className: "topic-list",
-    attributes: { "aria-label": "选择咨询方向" },
+    attributes: { role: "group", "aria-label": "选择咨询方向" },
+  });
+  const topicStatus = element("p", {
+    className: "sr-only",
+    attributes: { role: "status", "aria-live": "polite" },
   });
   const topicButtons = new Map();
   for (const topic of TOPICS) {
     const button = textButton("", "topic-card");
-    button.setAttribute("aria-pressed", topic.id === state.topic ? "true" : "false");
+    button.setAttribute("aria-pressed", topic.id === state.section ? "true" : "false");
     button.append(
       element("span", { className: "topic-index", text: topic.index, attributes: { "aria-hidden": "true" } }),
       element("span", { className: "topic-copy" }, [
@@ -242,20 +286,22 @@ function createPublicApp() {
       icon("→", "topic-arrow"),
     );
     button.addEventListener("click", () => {
-      state.topic = topic.id;
+      if (state.sending || state.section === topic.id) return;
+      state.section = topic.id;
+      state.topic = topic.requestTopic;
       for (const [id, candidate] of topicButtons) {
-        const selected = id === state.topic;
+        const selected = id === state.section;
         candidate.classList.toggle("selected", selected);
         candidate.setAttribute("aria-pressed", selected ? "true" : "false");
       }
-      questionInput.value = topic.prompt;
-      updateComposer();
-      questionInput.focus();
+      topicStatus.textContent = `已切换到${topic.title}`;
+      if (state.messages.length === 0) renderMessages();
+      else questionInput.focus();
     });
     topicButtons.set(topic.id, button);
     topicList.append(button);
   }
-  topicButtons.get(state.topic)?.classList.add("selected");
+  topicButtons.get(state.section)?.classList.add("selected");
 
   const contextBottom = element("div", { className: "context-bottom" });
   const boundary = element("p", {
@@ -266,7 +312,7 @@ function createPublicApp() {
     attributes: { href: "/manage" },
   }, [icon("◇", "manage-icon"), "管理入口"]);
   contextBottom.append(boundary, manageLink);
-  contextPanel.append(contextHeading, topicList, contextBottom);
+  contextPanel.append(contextHeading, topicList, topicStatus, contextBottom);
 
   const conversation = element("section", {
     className: "conversation",
@@ -358,6 +404,14 @@ function createPublicApp() {
   conversation.append(toolbar, messageScroll, composerArea);
   layout.append(contextPanel, conversation);
 
+  const siteFooter = element("footer", { className: "site-footer" });
+  siteFooter.append(element("strong", {
+    className: "site-footer-credit",
+    text: "OriginMind x ARTS Robotics",
+  }));
+  const footerOfficial = externalLink("访问官网", OFFICIAL_SITE, "site-link site-footer-link");
+  if (footerOfficial) siteFooter.append(footerOfficial);
+
   const sourceDialog = element("dialog", {
     className: "content-dialog source-dialog",
     attributes: {
@@ -387,7 +441,7 @@ function createPublicApp() {
     if (opener?.isConnected) opener.focus();
   });
 
-  app.append(header, layout, sourceDialog, inquiryDialog);
+  app.append(header, layout, siteFooter, sourceDialog, inquiryDialog);
   root.replaceChildren(app);
 
   function updateComposer() {
@@ -395,6 +449,7 @@ function createPublicApp() {
     characterCount.textContent = length ? `${length}/2000` : "Shift + Enter 换行";
     sendButton.disabled = state.sending || !questionInput.value.trim();
     questionInput.disabled = state.sending;
+    for (const button of topicButtons.values()) button.disabled = state.sending;
     newConversation.disabled = state.sending || state.messages.length === 0;
     messageScroll.setAttribute("aria-busy", state.sending ? "true" : "false");
   }
@@ -480,20 +535,26 @@ function createPublicApp() {
   }
 
   function welcomeNode() {
+    const topic = TOPICS.find((candidate) => candidate.id === state.section) || TOPICS[0];
     const welcome = element("div", { className: "welcome" });
     welcome.append(
       element("div", { className: "welcome-mark", text: "AI", attributes: { "aria-hidden": "true" } }),
-      element("p", { className: "eyebrow", text: "ASK ARTS ROBOTICS" }),
-      element("h2", { text: "欢迎使用 ARTS Robotics AI assistant" }),
-      element("p", {
-        text: "你可以从研究方向、课题参与或合作需求开始。涉及 ARTS Robotics 的事实性回答均以 OA 审核公开资料为依据，并在可用时标注来源。",
-      }),
+      element("p", { className: "eyebrow", text: topic.eyebrow }),
+      element("h2", { text: topic.heading }),
+      element("p", { text: topic.intro }),
     );
-    const suggestions = element("div", { className: "suggestions", attributes: { "aria-label": "建议问题" } });
-    for (const suggestion of SUGGESTIONS) {
+    const suggestions = element("div", {
+      className: "suggestions",
+      attributes: { role: "group", "aria-label": `${topic.title}精选问题` },
+    });
+    for (const suggestion of topic.suggestions) {
       const button = textButton("", "suggestion-button");
       button.append(element("span", { text: suggestion }), icon("→", "suggestion-arrow"));
-      button.addEventListener("click", () => void sendQuestion(suggestion));
+      button.addEventListener("click", () => {
+        void sendQuestion(suggestion)
+          .catch(() => {})
+          .finally(() => questionInput.focus());
+      });
       suggestions.append(button);
     }
     welcome.append(
@@ -525,9 +586,11 @@ function createPublicApp() {
       content.append(welcomeNode());
     }
     messageScroll.replaceChildren(content);
+    messageScroll.setAttribute("role", state.messages.length ? "log" : "region");
+    messageScroll.setAttribute("aria-live", state.messages.length ? "polite" : "off");
     newConversation.disabled = state.sending || state.messages.length === 0;
     window.requestAnimationFrame(() => {
-      messageScroll.scrollTop = messageScroll.scrollHeight;
+      messageScroll.scrollTop = state.messages.length ? messageScroll.scrollHeight : 0;
     });
   }
 
