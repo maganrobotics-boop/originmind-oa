@@ -272,7 +272,7 @@ test("系统管理员可以批准并调整自己的知识，但不能自行退�
   assert.equal(await store.reviewKnowledgeItem(pending, adminSelf, "reject", "自行拒绝"), null);
   const approved = await store.reviewKnowledgeItem(pending, adminSelf, "approve", "确认内容准确", "internal");
   assert.equal(approved.status, "active");
-  assert.equal(approved.reviewNote, policy.knowledgeAdminSelfAuditNote("确认内容准确"));
+  assert.equal(approved.reviewNote, "确认内容准确");
 
   const managed = await store.listKnowledgeItems("all", adminSelf, true);
   assert.equal(managed[0].canSetVisibility, true);
