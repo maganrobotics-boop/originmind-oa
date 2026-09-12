@@ -28,7 +28,10 @@ export type KnowledgeItem = {
   reviewNote?: string;
   revokedAt?: string;
   canReview?: boolean;
+  canReturn?: boolean;
+  canReject?: boolean;
   canRevoke?: boolean;
+  canSetVisibility?: boolean;
 };
 
 export type KnowledgeRevision = {
