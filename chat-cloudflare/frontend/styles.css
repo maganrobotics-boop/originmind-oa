@@ -164,6 +164,13 @@ textarea {
   opacity: 0.45;
 }
 
+.site-header {
+  display: grid;
+  flex-basis: 84px;
+  grid-template-columns: minmax(250px, 1fr) auto minmax(250px, 1fr);
+  min-height: 84px;
+}
+
 .wordmark {
   display: inline-flex;
   align-items: baseline;
@@ -184,13 +191,55 @@ textarea {
   box-shadow: 0 0 14px rgba(56, 214, 229, 0.45);
 }
 
+.lab-brand {
+  display: inline-grid;
+  grid-template-columns: 10px minmax(0, auto);
+  align-items: center;
+  justify-self: start;
+  gap: 11px;
+  min-height: 52px;
+  color: #ffffff;
+}
+
+.lab-brand-mark {
+  width: 9px;
+  height: 22px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, var(--signal), var(--brand-bright));
+  box-shadow: 0 0 18px rgba(56, 214, 229, 0.35);
+}
+
+.lab-brand-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.lab-brand-cn {
+  color: #d8e3f2;
+  font-size: 15px;
+  font-weight: 560;
+  line-height: 1.25;
+  letter-spacing: 0.025em;
+  white-space: nowrap;
+}
+
+.lab-brand-en {
+  font-size: 20px;
+  font-weight: 720;
+  line-height: 1.05;
+  letter-spacing: -0.025em;
+}
+
 .topbar-center {
+  justify-self: center;
   color: #b8c6d9;
   font-family: ui-monospace, "SFMono-Regular", Consolas, monospace;
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 650;
-  letter-spacing: 0.15em;
-  text-transform: uppercase;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
 }
 
 .site-link,
@@ -292,9 +341,9 @@ textarea {
 
 .context-heading h1 {
   max-width: 10em;
-  margin: 20px 0 15px;
+  margin: 0 0 16px;
   color: #f5f8ff;
-  font-size: clamp(29px, 2.3vw, 35px);
+  font-size: clamp(31px, 2.45vw, 38px);
   font-weight: 610;
   line-height: 1.34;
   letter-spacing: -0.035em;
@@ -303,7 +352,7 @@ textarea {
 .context-heading p {
   margin: 0;
   color: var(--text-dark-muted);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.78;
 }
 
@@ -384,7 +433,7 @@ textarea {
 .topic-copy strong {
   display: block;
   color: inherit;
-  font-size: 14px;
+  font-size: 15px;
   font-weight: 590;
 }
 
@@ -392,7 +441,7 @@ textarea {
   display: block;
   margin-top: 5px;
   color: #91a3bd;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
 }
 
@@ -418,14 +467,14 @@ textarea {
   margin: 0 0 13px;
   color: #92a5bf;
   white-space: pre-line;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.75;
 }
 
 .manage-link {
   min-height: 36px;
   color: #93a7c3;
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .manage-icon {
@@ -508,7 +557,7 @@ textarea {
   display: block;
   overflow: hidden;
   color: var(--text);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -519,7 +568,7 @@ textarea {
   margin-top: 4px;
   overflow: hidden;
   color: var(--text-subtle);
-  font-size: 11px;
+  font-size: 12px;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -593,7 +642,7 @@ textarea {
 .welcome h2 {
   margin: 0;
   color: var(--text);
-  font-size: clamp(25px, 2.8vw, 31px);
+  font-size: clamp(28px, 3vw, 34px);
   font-weight: 620;
   line-height: 1.35;
   letter-spacing: -0.035em;
@@ -603,7 +652,7 @@ textarea {
   max-width: 36em;
   margin: 11px 0 0;
   color: var(--text-muted);
-  font-size: 14px;
+  font-size: 15px;
   line-height: 1.75;
 }
 
@@ -626,7 +675,7 @@ textarea {
   background: rgba(255, 255, 255, 0.72);
   color: #334158;
   text-align: left;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.55;
   transition:
     border-color 170ms ease,
@@ -658,7 +707,7 @@ textarea {
   gap: 8px;
   margin-top: 18px;
   color: var(--text-subtle);
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.6;
 }
 
@@ -689,7 +738,7 @@ textarea {
   gap: 8px;
   margin-bottom: 8px;
   color: var(--text-subtle);
-  font-size: 11px;
+  font-size: 12px;
   font-weight: 560;
 }
 
@@ -702,14 +751,14 @@ textarea {
   border-radius: 5px;
   background: #e9eef9;
   color: #4c6080;
-  font-size: 10px;
+  font-size: 11px;
 }
 
 .message-body {
   overflow-wrap: anywhere;
   color: var(--text);
   white-space: pre-wrap;
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.88;
 }
 
@@ -741,7 +790,7 @@ textarea {
   background: #f4f7fb;
   color: #465a76;
   text-align: left;
-  font-size: 11px;
+  font-size: 12px;
   line-height: 1.45;
   transition:
     border-color 150ms ease,
@@ -768,7 +817,7 @@ textarea {
   border-radius: 8px;
   background: transparent;
   color: var(--text-subtle);
-  font-size: 11px;
+  font-size: 12px;
 }
 
 .message-actions button:hover {
@@ -785,7 +834,7 @@ textarea {
   align-items: center;
   gap: 9px;
   color: var(--text-muted);
-  font-size: 13px;
+  font-size: 14px;
 }
 
 .spin {
@@ -832,7 +881,7 @@ textarea {
   outline: 0;
   background: transparent;
   color: var(--text);
-  font-size: 15px;
+  font-size: 16px;
   line-height: 1.65;
 }
 
@@ -904,8 +953,39 @@ textarea {
 .composer-footer > span {
   max-width: 650px;
   color: var(--text-subtle);
-  font-size: 10px;
+  font-size: 11px;
   line-height: 1.55;
+}
+
+.site-footer {
+  display: flex;
+  flex: 0 0 48px;
+  min-height: 48px;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding:
+    0 max(24px, env(safe-area-inset-right))
+    env(safe-area-inset-bottom)
+    max(24px, env(safe-area-inset-left));
+  border-top: 1px solid var(--line-dark);
+  background: rgba(6, 11, 20, 0.82);
+  color: #aebed3;
+  font-size: 13px;
+}
+
+.site-footer-credit {
+  color: #dce6f3;
+  font-weight: 620;
+  letter-spacing: 0.015em;
+  white-space: nowrap;
+}
+
+.site-footer-link {
+  min-height: 36px;
+  color: #b9cae0;
+  font-size: 13px;
+  white-space: nowrap;
 }
 
 .inquiry-trigger,
@@ -918,7 +998,7 @@ textarea {
   padding: 0 4px;
   background: transparent;
   color: #405f9b;
-  font-size: 11px;
+  font-size: 12px;
   white-space: nowrap;
 }
 
@@ -1581,7 +1661,7 @@ textarea {
   }
 
   .context-heading h1 {
-    font-size: 29px;
+    font-size: 31px;
   }
 
   .message-list {
@@ -1600,6 +1680,12 @@ textarea {
     min-height: 64px;
     padding-right: max(22px, env(safe-area-inset-right));
     padding-left: max(22px, env(safe-area-inset-left));
+  }
+
+  .site-header {
+    flex-basis: 78px;
+    grid-template-columns: minmax(230px, 1fr) auto minmax(230px, 1fr);
+    min-height: 78px;
   }
 
   .chat-layout {
@@ -1634,7 +1720,7 @@ textarea {
     max-width: none;
     margin: 0 0 9px;
     color: #dfe8f5;
-    font-size: 13px;
+    font-size: 14px;
     font-weight: 560;
     line-height: 1.45;
     letter-spacing: 0;
@@ -1688,6 +1774,26 @@ textarea {
   }
 }
 
+@media (max-width: 760px) {
+  .site-header {
+    flex-basis: 100px;
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto;
+    gap: 4px;
+    min-height: 100px;
+    padding-top: max(8px, env(safe-area-inset-top));
+    padding-bottom: 9px;
+  }
+
+  .site-header .lab-brand {
+    grid-row: 1;
+  }
+
+  .site-header .topbar-center {
+    grid-row: 2;
+  }
+}
+
 @media (max-width: 600px) {
   .topbar {
     flex-basis: 56px;
@@ -1698,12 +1804,19 @@ textarea {
     padding-left: max(16px, env(safe-area-inset-left));
   }
 
+  .site-header {
+    flex-basis: 100px;
+    min-height: 100px;
+  }
+
   .wordmark {
     font-size: 20px;
   }
 
   .topbar-center {
-    display: none;
+    display: block;
+    font-size: 14px;
+    letter-spacing: 0.055em;
   }
 
   .site-link {
@@ -1718,7 +1831,7 @@ textarea {
 
   .context-heading h1 {
     margin-bottom: 8px;
-    font-size: 12px;
+    font-size: 14px;
   }
 
   .topic-card {
@@ -1737,7 +1850,7 @@ textarea {
 
   .assistant-name strong {
     max-width: 205px;
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .new-text {
@@ -1755,11 +1868,11 @@ textarea {
   }
 
   .welcome h2 {
-    font-size: 25px;
+    font-size: 27px;
   }
 
   .welcome > p:not(.eyebrow) {
-    font-size: 13px;
+    font-size: 14px;
   }
 
   .suggestions {
@@ -1770,7 +1883,7 @@ textarea {
   .suggestion-button {
     min-height: 58px;
     padding: 10px 12px;
-    font-size: 12px;
+    font-size: 13px;
   }
 
   .message-list {
@@ -1786,7 +1899,7 @@ textarea {
   }
 
   .message-body {
-    font-size: 15px;
+    font-size: 16px;
     line-height: 1.82;
   }
 
@@ -1821,7 +1934,20 @@ textarea {
 
   .composer-footer > span {
     max-width: 72%;
-    font-size: 10px;
+    font-size: 11px;
+  }
+
+  .site-footer {
+    flex-basis: 48px;
+    gap: 18px;
+    min-height: 48px;
+    padding-right: max(12px, env(safe-area-inset-right));
+    padding-left: max(12px, env(safe-area-inset-left));
+    font-size: 12px;
+  }
+
+  .site-footer-link {
+    font-size: 12px;
   }
 
   .inquiry-trigger {
@@ -1886,7 +2012,7 @@ textarea {
 }
 
 @media (max-width: 389px) {
-  .site-link {
+  .topbar .site-link {
     font-size: 0;
   }
 
@@ -1913,8 +2039,8 @@ textarea {
   }
 
   .context-heading h1 {
-    margin-top: 13px;
-    font-size: 27px;
+    margin-top: 0;
+    font-size: 29px;
   }
 
   .topic-list {

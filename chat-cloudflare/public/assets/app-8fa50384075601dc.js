@@ -1,6 +1,7 @@
 "use strict";
 
 const APP_NAME = "ARTS Robotics AI assistant";
+const HEADER_NAME = "ARTS Robotics AI Assistant";
 const OFFICIAL_SITE = "https://omindos.ai";
 const BAILIAN_CONSOLE = "https://bailian.console.aliyun.com/";
 
@@ -91,6 +92,19 @@ function brandLink() {
   link.append(document.createTextNode("OriginMind"));
   link.append(element("span", { className: "brand-square", attributes: { "aria-hidden": "true" } }));
   return link;
+}
+
+function publicBrandLink() {
+  return element("a", {
+    className: "lab-brand",
+    attributes: { href: "/", "aria-label": "ARTS Robotics 首页" },
+  }, [
+    element("span", { className: "lab-brand-mark", attributes: { "aria-hidden": "true" } }),
+    element("span", { className: "lab-brand-copy" }, [
+      element("span", { className: "lab-brand-cn", text: "机器人自主自动与操作实验室" }),
+      element("strong", { className: "lab-brand-en", text: "ARTS Robotics" }),
+    ]),
+  ]);
 }
 
 function safeHttpUrl(value) {
@@ -206,10 +220,8 @@ function createPublicApp() {
 
   const app = element("div", { className: "chat-app" });
   const header = element("header", { className: "topbar site-header" });
-  const title = element("div", { className: "topbar-center", text: APP_NAME });
-  const official = externalLink("访问官网", OFFICIAL_SITE, "site-link");
-  header.append(brandLink(), title);
-  if (official) header.append(official);
+  const title = element("div", { className: "topbar-center", text: HEADER_NAME });
+  header.append(publicBrandLink(), title);
 
   const layout = element("main", { className: "chat-layout" });
   const contextPanel = element("aside", {
@@ -218,7 +230,6 @@ function createPublicApp() {
   });
   const contextHeading = element("div", { className: "context-heading" });
   contextHeading.append(
-    element("span", { className: "eyebrow", text: "ARTS ROBOTICS × ORIGINMIND" }),
     element("h1", { text: "从一个问题，走近机器人研究。" }),
     element("p", {
       text: "基于 OA 审核公开资料，了解 ARTS Robotics 的研究方向、课题参与与合作信息。",
@@ -358,6 +369,14 @@ function createPublicApp() {
   conversation.append(toolbar, messageScroll, composerArea);
   layout.append(contextPanel, conversation);
 
+  const siteFooter = element("footer", { className: "site-footer" });
+  siteFooter.append(element("strong", {
+    className: "site-footer-credit",
+    text: "OriginMind x ARTS Robotics",
+  }));
+  const footerOfficial = externalLink("访问官网", OFFICIAL_SITE, "site-link site-footer-link");
+  if (footerOfficial) siteFooter.append(footerOfficial);
+
   const sourceDialog = element("dialog", {
     className: "content-dialog source-dialog",
     attributes: {
@@ -387,7 +406,7 @@ function createPublicApp() {
     if (opener?.isConnected) opener.focus();
   });
 
-  app.append(header, layout, sourceDialog, inquiryDialog);
+  app.append(header, layout, siteFooter, sourceDialog, inquiryDialog);
   root.replaceChildren(app);
 
   function updateComposer() {

@@ -116,6 +116,9 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   }
   assert.match(script, /(?:window\.)?location\.pathname\s*===?\s*["']\/manage["']/u);
   assert.match(script, /\bconst\s+APP_NAME\s*=\s*["']ARTS Robotics AI assistant["']\s*;/u);
+  assert.match(script, /\bconst\s+HEADER_NAME\s*=\s*["']ARTS Robotics AI Assistant["']\s*;/u);
+  assert.ok(script.includes("机器人自主自动与操作实验室"));
+  assert.ok(script.includes("OriginMind x ARTS Robotics"));
   assert.match(script, /\bpublished\s*:\s*0\b/u);
   assert.ok(script.includes("资料已保存为草稿，不会用于公开回答；请在 OA 中提交审核。"));
   assert.ok(script.includes("对外知识必须在 OA 审核为“公开”后由系统接入。"));
@@ -123,7 +126,6 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
 
   for (const forbidden of [
     "马教授 AI 助手",
-    "ARTS Robotics AI Assistant",
     "ask_professor_assistant",
     "legacy_seed",
     "非 OA 审核",
