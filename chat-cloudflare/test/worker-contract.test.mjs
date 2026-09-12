@@ -141,6 +141,52 @@ test("Workers AI is the zero-secret default and status reports the active model"
   assert.equal(calls[0].input.stream, false);
 });
 
+test("OA Service Binding is preferred and preserves the hardened request", async () => {
+  const serviceCalls = [];
+  let globalFetchCalls = 0;
+  const env = environment({
+    OA_SERVICE: {
+      async fetch(boundRequest) {
+        serviceCalls.push(boundRequest.clone());
+        return Response.json({ chunks: OA_CHUNKS }, { headers: { "Content-Type": "application/json" } });
+      },
+    },
+    AI: {
+      async run() {
+        return { response: "根据公开资料，研究方向包括机器人灵巧操作。[1]" };
+      },
+    },
+  });
+  const runtime = {
+    async fetch() {
+      globalFetchCalls += 1;
+      throw new Error("The global OA fetch fallback must not run when OA_SERVICE is bound");
+    },
+  };
+  const response = await handleRequest(
+    request("/api/chat", { method: "POST", body: chatBody("机器人研究方向有哪些？") }),
+    env,
+    {},
+    runtime,
+  );
+  const result = await body(response);
+  assert.equal(response.status, 200);
+  assert.equal(result.mode, "ai");
+  assert.equal(result.oaPublicStatus, "connected");
+  assert.equal(result.sources.length, 1);
+  assert.equal(globalFetchCalls, 0);
+  assert.equal(serviceCalls.length, 1);
+  const boundRequest = serviceCalls[0];
+  assert.equal(boundRequest.url, OA_URL);
+  assert.equal(boundRequest.method, "POST");
+  assert.equal(boundRequest.redirect, "error");
+  assert.equal(boundRequest.cache, "no-store");
+  assert.equal(boundRequest.credentials, "omit");
+  assert.equal(boundRequest.headers.get("content-type"), "application/json");
+  assert.equal(boundRequest.headers.get("x-originmind-public-lab-ai-service-token"), SERVICE_TOKEN);
+  assert.deepEqual(await boundRequest.json(), { question: "机器人研究方向有哪些？" });
+});
+
 test("no matching documents means retrieval mode and no model invocation", async () => {
   let aiCalls = 0;
   const env = environment({
