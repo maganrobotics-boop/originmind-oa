@@ -219,6 +219,32 @@ test("public chat keeps a minimal topic header and compact message composer", as
   assert.match(style, /\.chat-app\s*\{[\s\S]*?height:\s*var\(--chat-viewport-height,\s*100dvh\)[\s\S]*?transform:\s*translateY\(var\(--chat-viewport-offset,\s*0px\)\)/u);
 });
 
+test("public chat keeps five compact live status lights below the fixed header title", async () => {
+  const [script, style] = await Promise.all([
+    readFile(path.join(frontendDir, "app.js"), "utf8"),
+    readFile(path.join(frontendDir, "styles.css"), "utf8"),
+  ]);
+
+  for (const [key, label] of [
+    ["network", "网络"],
+    ["oa", "OA"],
+    ["qwen", "千问"],
+    ["knowledge", "知识"],
+    ["system", "系统"],
+  ]) {
+    assert.match(script, new RegExp(`key:\\s*["']${key}["']\\s*,\\s*label:\\s*["']${label}["']`, "u"), key);
+  }
+  assert.match(script, /className:\s*["']topic-header["'][\s\S]{0,100}?\[topicTitle,\s*systemStatus\]/u);
+  assert.match(script, /header\.append\(menuButton,\s*topicHeader,\s*chatInfoButton/u);
+  assert.match(script, /SYSTEM_STATUS_REFRESH_MS\s*=\s*60_000/u);
+  assert.match(script, /fetch\(["']\/_health["']/u);
+  assert.match(script, /requestJson\(["']\/api\/status["']/u);
+  assert.match(script, /service\.systemReady\s*===\s*true/u);
+  assert.match(style, /\.system-status-strip\s*\{[\s\S]*?height:\s*8px/u);
+  assert.match(style, /\.chat-app\s+\.site-header\s*\{[\s\S]*?grid-template-rows:\s*minmax\(0,\s*1fr\)/u);
+  assert.match(style, /\.system-light-dot\.is-ok\s*\{[\s\S]*?background:\s*#07c160/u);
+});
+
 test("public modules expose direct links with history navigation and an accessible topic drawer", async () => {
   const [script, style] = await Promise.all([
     readFile(path.join(frontendDir, "app.js"), "utf8"),
@@ -248,6 +274,133 @@ test("public modules expose direct links with history navigation and an accessib
   assert.match(style, /\.topic-drawer\s*\{[\s\S]*?position:\s*fixed/u);
   assert.match(style, /\.drawer-topic-link\s*\{[\s\S]*?min-height:\s*54px/u);
   assert.match(style, /\.drawer-panel\s*\{[\s\S]*?width:\s*min\(86vw,\s*340px\)/u);
+});
+
+test("public chat exposes an accessible full-screen chat information surface", async () => {
+  const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
+
+  assert.match(script, /textButton\(\s*["']["']\s*,\s*["']chat-info-button["']\s*\)/u);
+  assert.ok(script.includes('chatInfoButton.setAttribute("aria-label", "聊天信息")'));
+  assert.ok(script.includes('chatInfoButton.setAttribute("aria-controls", "chat-info-dialog")'));
+  assert.ok(script.includes('chatInfoButton.setAttribute("aria-haspopup", "dialog")'));
+  assert.ok(script.includes('chatInfoButton.setAttribute("aria-expanded", "false")'));
+  assert.ok(script.includes('chatInfoButton.setAttribute("aria-expanded", "true")'));
+  assert.match(script, /className:\s*["']more-glyph["'][\s\S]{0,500}?className:\s*["']more-dot["']/u);
+  assert.equal((script.match(/className:\s*["']more-dot["']/gu) || []).length, 3);
+
+  assert.match(script, /const\s+chatInfoDialog\s*=\s*element\(\s*["']dialog["']/u);
+  assert.match(script, /\bid:\s*["']chat-info-dialog["']/u);
+  assert.match(script, /\bclassName:\s*["']chat-info-dialog["']/u);
+  assert.match(script, /element\(\s*["']h2["'][\s\S]{0,180}?\btext:\s*["']聊天信息["']/u);
+  for (const label of [
+    "查找聊天记录",
+    "消息免打扰",
+    "置顶聊天",
+    "提醒",
+    "设置当前聊天背景",
+    "清空聊天记录",
+    "投诉",
+  ]) {
+    assert.ok(script.includes(label), label);
+  }
+  for (const label of ["查找聊天记录", "设置当前聊天背景", "清空聊天记录", "投诉"]) {
+    assert.match(script, new RegExp(`chatInfoActionRow\\(\\s*["']${label}["']`, "u"), label);
+  }
+  assert.match(script, /\bsrc:\s*["']\/favicon\.svg["']/u);
+
+  assert.match(
+    script,
+    /element\(\s*["']input["']\s*,\s*\{(?=[\s\S]{0,300}?className:\s*["']chat-info-switch-input["'])(?=[\s\S]{0,300}?type:\s*["']checkbox["'])/u,
+  );
+  assert.match(script, /className:\s*["'][^"']*\bchat-info-toggle-row\b[^"']*["']/u);
+  assert.match(script, /input\.addEventListener\(\s*["']change["']/u);
+
+  assert.match(script, /function\s+openChatInfo\s*\([^)]*\)\s*\{[\s\S]{0,700}?chatInfoDialog\.showModal\(\)/u);
+  assert.match(script, /function\s+closeChatInfo\s*\([^)]*\)\s*\{[\s\S]{0,500}?chatInfoDialog\.close\(\)/u);
+  assert.ok(script.includes('chatInfoDialog.addEventListener("cancel"'));
+  assert.match(
+    script,
+    /chatInfoDialog\.addEventListener\(\s*["']close["'][\s\S]{0,600}?chatInfoDialogOpener[\s\S]{0,400}?\.focus\(/u,
+  );
+  assert.match(script, /function\s+findChatMessage\s*\(/u);
+  assert.match(script, /window\.prompt\(\s*["']查找聊天记录["']/u);
+  assert.match(
+    script,
+    /chatInfoActionRow\(\s*["']清空聊天记录["']\s*,\s*\(\)\s*=>\s*\{[\s\S]{0,500}?window\.confirm\([^)]*清空当前聊天记录[^)]*\)[\s\S]{0,500}?resetCurrentConversation\(/u,
+  );
+});
+
+test("chat information preferences are safely persisted per public topic", async () => {
+  const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
+
+  assert.match(script, /const\s+CHAT_INFO_STORAGE_KEY\s*=\s*["']originmind-chat-info-preferences-v1["']/u);
+  assert.match(
+    script,
+    /function\s+readChatInfoPreferences\s*\([^)]*\)\s*\{[\s\S]{0,2400}?\btry\s*\{[\s\S]{0,1800}?(?:window\.)?localStorage\.getItem\(CHAT_INFO_STORAGE_KEY\)[\s\S]{0,1800}?\bcatch\s*(?:\([^)]*\))?\s*\{/u,
+  );
+  assert.match(
+    script,
+    /function\s+writeChatInfoPreferences\s*\([^)]*\)\s*\{[\s\S]{0,1200}?\btry\s*\{[\s\S]{0,800}?(?:window\.)?localStorage\.setItem\(CHAT_INFO_STORAGE_KEY,[\s\S]{0,500}?\bcatch\s*(?:\([^)]*\))?\s*\{/u,
+  );
+  assert.match(script, /chatInfoPreferences:\s*readChatInfoPreferences\(\)/u);
+  assert.match(script, /const\s+preferences\s*=\s*state\.chatInfoPreferences\[state\.section\][\s\S]{0,200}?preferences\[key\]\s*=\s*input\.checked/u);
+  assert.match(script, /writeChatInfoPreferences\(state\.chatInfoPreferences\)/u);
+  for (const [label, key] of [
+    ["消息免打扰", "doNotDisturb"],
+    ["置顶聊天", "pinned"],
+    ["提醒", "reminder"],
+  ]) {
+    assert.match(script, new RegExp(`["']${label}["'][^\\n]{0,160}?["']${key}["']`, "u"), label);
+  }
+});
+
+test("chat information styles preserve the Tencent mobile geometry", async () => {
+  const style = await readFile(path.join(frontendDir, "styles.css"), "utf8");
+  const rule = (selector) => {
+    const match = style.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`, "u"));
+    assert.ok(match, selector);
+    return match[1];
+  };
+
+  const button = rule("\\.chat-info-button");
+  assert.match(button, /justify-self:\s*end/u);
+
+  const dialog = rule("#chat-info-dialog\\.chat-info-dialog");
+  for (const declaration of [
+    /position:\s*fixed/u,
+    /inset:\s*0/u,
+    /height:\s*var\(--chat-viewport-height,\s*100dvh\)/u,
+    /max-height:\s*var\(--chat-viewport-height,\s*100dvh\)/u,
+    /width:\s*min\(100%,\s*960px\)/u,
+    /border-radius:\s*0/u,
+    /background:\s*#ededed\b/iu,
+  ]) {
+    assert.match(dialog, declaration);
+  }
+
+  const header = rule("\\.chat-info-header");
+  assert.match(header, /position:\s*sticky/u);
+  assert.match(header, /env\(safe-area-inset-top\)/u);
+  assert.match(header, /env\(safe-area-inset-right\)/u);
+  assert.match(header, /env\(safe-area-inset-left\)/u);
+  assert.match(rule("\\.chat-info-scroll"), /env\(safe-area-inset-bottom\)/u);
+  assert.match(rule("\\.chat-info-block"), /background:\s*#fff(?:fff)?\b/iu);
+
+  const row = rule("\\.chat-info-row,\\s*\\.chat-info-toggle-row");
+  assert.match(row, /min-height:\s*56px/u);
+
+  const members = rule("\\.chat-info-members");
+  assert.match(members, /min-height:\s*112px/u);
+  assert.match(members, /margin-top:\s*8px/u);
+  assert.match(members, /padding:\s*20px\s+16px\s+10px/u);
+
+  const chatSwitch = rule("\\.chat-info-switch");
+  assert.match(chatSwitch, /width:\s*51px/u);
+  assert.match(chatSwitch, /height:\s*31px/u);
+  assert.match(
+    rule("\\.chat-info-switch-input:checked\\s*\\+\\s*\\.chat-info-switch"),
+    /background:\s*#07c160\b/iu,
+  );
 });
 
 test("frontend source avoids executable HTML and dynamic-code sinks", async () => {
