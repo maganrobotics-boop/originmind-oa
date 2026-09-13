@@ -2130,11 +2130,20 @@ textarea {
 }
 
 /* The public chat deliberately follows a quiet, WeChat-like single-column layout. */
+html.public-chat-page,
+body.public-chat-page {
+  height: 100%;
+  overflow: hidden;
+  overscroll-behavior: none;
+}
+
 .chat-app {
+  height: var(--chat-viewport-height, 100dvh);
   min-height: 0;
   background: #ededed;
   color: #111111;
   color-scheme: light;
+  transform: translateY(var(--chat-viewport-offset, 0px));
 }
 
 .chat-app::before,
