@@ -172,7 +172,6 @@ test("Workers AI is the zero-secret default and status reports the active model"
   assert.deepEqual(await body(statusResponse), {
     storageReady: true,
     modelReady: true,
-    documentParsingReady: false,
     provider: "workers-ai",
     model: WORKERS_AI_MODEL,
   });
