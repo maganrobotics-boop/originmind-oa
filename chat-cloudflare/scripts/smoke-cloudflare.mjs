@@ -124,12 +124,23 @@ export function validateServiceEvidence({ health, status, chat }, releaseIdValue
   ) {
     throw new Error("/_health did not identify the expected ready ARTS Robotics AI assistant release");
   }
-  if (
-    status?.storageReady !== true ||
-    status?.modelReady !== true ||
-    !["workers-ai", "bailian"].includes(status?.provider)
-  ) {
-    throw new Error("/api/status is not storage/model ready");
+  const readiness = [
+    status?.storageReady,
+    status?.modelReady,
+    status?.qwenReady,
+    status?.oaReady,
+    status?.knowledgeReady,
+    status?.retrievalReady,
+    status?.budgetReady,
+    status?.systemReady,
+  ];
+  if (readiness.some((value) => value !== true) || !["workers-ai", "bailian"].includes(status?.provider)) {
+    throw Object.assign(new Error("/api/status is not fully ready for the five-light homepage"), {
+      retryable:
+        status?.modelPending === true ||
+        status?.oaPending === true ||
+        (readiness.every((value) => typeof value === "boolean") && readiness.some((value) => value === false)),
+    });
   }
   if (
     chat?.mode !== "ai" ||
@@ -199,13 +210,6 @@ async function smokeOnce(origin, releaseId) {
   apiHeaders(healthResponse, "/_health");
   const health = await json(healthResponse, "/_health");
 
-  const statusResponse = await request(origin, "/api/status");
-  if (statusResponse.status !== 200) {
-    throw Object.assign(new Error(`/api/status returned ${statusResponse.status}`), { status: statusResponse.status });
-  }
-  apiHeaders(statusResponse, "/api/status");
-  const status = await json(statusResponse, "/api/status");
-
   const hostileResponse = await request(origin, "/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: "https://invalid.example" },
@@ -233,6 +237,15 @@ async function smokeOnce(origin, releaseId) {
   }
   apiHeaders(chatResponse, "/api/chat");
   const chat = await json(chatResponse, "/api/chat");
+
+  // A successful chat records fresh model evidence. Read status afterwards so
+  // release validation does not reject the new evidence it just established.
+  const statusResponse = await request(origin, "/api/status");
+  if (statusResponse.status !== 200) {
+    throw Object.assign(new Error(`/api/status returned ${statusResponse.status}`), { status: statusResponse.status });
+  }
+  apiHeaders(statusResponse, "/api/status");
+  const status = await json(statusResponse, "/api/status");
 
   return validateServiceEvidence({ health, status, chat }, releaseId);
 }
