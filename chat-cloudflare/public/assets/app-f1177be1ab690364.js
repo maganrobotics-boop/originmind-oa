@@ -227,6 +227,9 @@ function serviceLabel(service) {
 }
 
 function createPublicApp() {
+  document.documentElement.classList.add("public-chat-page");
+  document.body.classList.add("public-chat-page");
+
   const state = {
     section: topicIdForPath(window.location.pathname),
     service: null,
@@ -486,6 +489,20 @@ function createPublicApp() {
 
   app.append(header, layout, topicDrawer, sourceDialog, inquiryDialog);
   root.replaceChildren(app);
+
+  let viewportFrame = 0;
+  function syncChatViewport() {
+    window.cancelAnimationFrame(viewportFrame);
+    viewportFrame = window.requestAnimationFrame(() => {
+      const viewport = window.visualViewport;
+      const followsVisualViewport = viewport && document.activeElement === questionInput;
+      const height = followsVisualViewport ? viewport.height : window.innerHeight;
+      const offsetTop = followsVisualViewport ? viewport.offsetTop : 0;
+      app.style.setProperty("--chat-viewport-height", `${Math.max(1, Math.round(height))}px`);
+      app.style.setProperty("--chat-viewport-offset", `${Math.max(0, Math.round(offsetTop))}px`);
+      if (sessionFor().stickToEnd) messageScroll.scrollTop = messageScroll.scrollHeight;
+    });
+  }
 
   function resizeQuestionInput() {
     questionInput.style.height = "44px";
@@ -987,6 +1004,11 @@ function createPublicApp() {
     resizeQuestionInput();
     updateComposer();
   });
+  questionInput.addEventListener("focus", syncChatViewport);
+  questionInput.addEventListener("blur", syncChatViewport);
+  window.addEventListener("resize", syncChatViewport, { passive: true });
+  window.visualViewport?.addEventListener("resize", syncChatViewport, { passive: true });
+  window.visualViewport?.addEventListener("scroll", syncChatViewport, { passive: true });
   questionInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
@@ -1004,6 +1026,7 @@ function createPublicApp() {
   syncTopicControls();
   renderMessages({ scrollMode: "start" });
   resizeQuestionInput();
+  syncChatViewport();
   updateComposer();
   void requestJson("/api/status")
     .then((payload) => {
@@ -1057,6 +1080,9 @@ function createPublicApp() {
 }
 
 function createAdminApp() {
+  document.documentElement.classList.remove("public-chat-page");
+  document.body.classList.remove("public-chat-page");
+
   const state = {
     signedIn: null,
     authChecked: false,

@@ -81,6 +81,7 @@ test("HTML uses only self-hosted generated assets and retains public metadata", 
   assert.equal(html.includes("__STYLE_ASSET__"), false);
   assert.match(html, /<html\b[^>]*\blang=["']zh-CN["']/iu);
   assert.match(html, /<meta\b[^>]*\bname=["']viewport["']/iu);
+  assert.match(html, /<meta\b[^>]*\bname=["']viewport["'][^>]*\bcontent=["'][^"']*\binteractive-widget=resizes-content\b[^"']*["']/iu);
   assert.match(html, /<meta\b[^>]*\bname=["']robots["'][^>]*\bcontent=["']noindex,nofollow["']/iu);
   assert.match(html, /<meta\b[^>]*\bname=["']description["']/iu);
   assert.ok(html.includes("ARTS Robotics AI Assistant"));
@@ -199,6 +200,12 @@ test("public chat keeps a minimal topic header and compact message composer", as
   assert.match(style, /\.chat-app\s+\.composer\s*\{[\s\S]*?display:\s*flex/u);
   assert.match(style, /\.chat-app\s+\.composer\s+textarea\s*\{[\s\S]*?min-height:\s*44px[\s\S]*?font-size:\s*16px/u);
   assert.match(style, /\.chat-app\s+\.send-button\s*\{[\s\S]*?height:\s*44px/u);
+  assert.ok(script.includes('document.body.classList.add("public-chat-page")'));
+  assert.ok(script.includes("window.visualViewport"));
+  assert.ok(script.includes('app.style.setProperty("--chat-viewport-height"'));
+  assert.ok(script.includes('app.style.setProperty("--chat-viewport-offset"'));
+  assert.match(style, /body\.public-chat-page\s*\{[\s\S]*?overflow:\s*hidden/u);
+  assert.match(style, /\.chat-app\s*\{[\s\S]*?height:\s*var\(--chat-viewport-height,\s*100dvh\)[\s\S]*?transform:\s*translateY\(var\(--chat-viewport-offset,\s*0px\)\)/u);
 });
 
 test("public modules expose direct links with history navigation and an accessible topic drawer", async () => {
