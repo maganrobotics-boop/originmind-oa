@@ -28,6 +28,16 @@ test("requires the exact second confirmation before publishing knowledge", async
   assert.match(source, /设为公开后，该知识仍可在 OA 内检索，并将同时供 chat\.omindos\.ai 对外检索/u);
 });
 
+test("shows the public-data anonymization rule during submission and review", async () => {
+  const source = await readFile(path.join(root, "components/knowledge/knowledge-view.tsx"), "utf8");
+
+  assert.match(source, /所有公开的数据需要脱敏处理。/u);
+  assert.match(source, /论文和学位材料保留摘要、研究方法、实验过程、结果与结论等技术正文/u);
+  assert.match(source, /扫描件，仅保留匿名化摘要和检索说明/u);
+  assert.match(source, /function KnowledgeAnonymizationNotice\(\)[\s\S]*?role="note"/u);
+  assert.equal((source.match(/<KnowledgeAnonymizationNotice \/>/gu) ?? []).length, 2);
+});
+
 test("explains the internal OA and public ARTS Robotics assistant split", async () => {
   const [knowledgeSource, guideSource, pageSource] = await Promise.all([
     readFile(path.join(root, "components/knowledge/knowledge-view.tsx"), "utf8"),
