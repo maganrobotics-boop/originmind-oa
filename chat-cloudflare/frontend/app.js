@@ -5,6 +5,15 @@ const OFFICIAL_SITE = "https://omindos.ai";
 const BAILIAN_CONSOLE = "https://bailian.console.aliyun.com/";
 const OA_KNOWLEDGE_URL = "https://oa.omindos.ai/";
 const OA_CHAT_IMPORT_URL = "https://oa.omindos.ai/api/knowledge/import-chat";
+const MAX_TEXT_IMPORT_BYTES = 120_000;
+const MAX_BINARY_IMPORT_BYTES = 10 * 1024 * 1024;
+const IMPORT_MIME_BY_EXTENSION = Object.freeze({
+  pdf: "application/pdf",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+});
 
 const TOPICS = [
   {
@@ -205,7 +214,10 @@ async function requestJson(path, options = {}) {
       credentials: "same-origin",
       ...options,
     });
-  } catch {
+  } catch (error) {
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      throw new Error("处理超时，请压缩或拆分文件后重试。");
+    }
     throw new Error("暂时无法连接服务，请稍后重试。");
   }
 
@@ -1527,12 +1539,14 @@ function createAdminApp() {
     title.input.minLength = 2;
     title.input.maxLength = 120;
     title.input.value = state.draft.title;
+    title.input.disabled = Boolean(state.busy);
     title.input.addEventListener("input", (event) => { state.draft.title = event.currentTarget.value; });
 
     const pair = element("div", { className: "form-pair" });
     const categoryLabel = element("label", { attributes: { for: "document-category" } });
     categoryLabel.append(document.createTextNode("咨询方向"));
     const category = element("select", { id: "document-category" });
+    category.disabled = Boolean(state.busy);
     for (const id of ["student", "research", "business"]) {
       const option = element("option", { text: TOPIC_LABELS[id], attributes: { value: id } });
       if (state.draft.category === id) option.selected = true;
@@ -1543,12 +1557,14 @@ function createAdminApp() {
     const date = labelledInput("document-date", "资料日期", "date");
     date.input.required = true;
     date.input.value = state.draft.updatedAt;
+    date.input.disabled = Boolean(state.busy);
     date.input.addEventListener("input", (event) => { state.draft.updatedAt = event.currentTarget.value; });
     pair.append(categoryLabel, date.label);
 
     const url = labelledInput("document-url", "原始资料链接（可选）", "url");
     url.input.maxLength = 1500;
     url.input.value = state.draft.url;
+    url.input.disabled = Boolean(state.busy);
     url.input.addEventListener("input", (event) => { state.draft.url = event.currentTarget.value; });
 
     const bodyLabel = element("label", { attributes: { for: "document-body" } });
@@ -1559,50 +1575,100 @@ function createAdminApp() {
       attributes: { required: true, minlength: "10", maxlength: "30000" },
     });
     body.value = state.draft.body;
+    body.disabled = Boolean(state.busy);
     body.addEventListener("input", (event) => { state.draft.body = event.currentTarget.value; });
     bodyLabel.append(body);
 
     const fileLabel = element("label", { attributes: { for: "document-file" } });
-    fileLabel.append(document.createTextNode("导入文本文件"));
+    fileLabel.append(document.createTextNode(state.busy === "file" ? "正在自动解析…" : "导入资料文件"));
     const fileInput = element("input", {
       id: "document-file",
-      attributes: { type: "file", accept: ".txt,.md" },
+      attributes: {
+        type: "file",
+        accept: ".txt,.md,.pdf,.jpg,.jpeg,.png,.webp,text/plain,text/markdown,application/pdf,image/jpeg,image/png,image/webp",
+      },
     });
+    const focusImportedField = (id) => {
+      window.requestAnimationFrame(() => {
+        const target = document.getElementById(id);
+        target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+        target?.focus?.({ preventScroll: true });
+      });
+    };
     fileInput.disabled = Boolean(state.busy);
     fileInput.addEventListener("change", async (event) => {
       const file = event.currentTarget.files?.[0];
       if (!file || state.busy) return;
-      if (!/\.(txt|md)$/i.test(file.name)) {
-        state.error = "当前版本支持 TXT、Markdown；PDF 或 Word 请先复制需要提交审核的正文。";
+      state.notice = "";
+      const extension = file.name.split(".").at(-1)?.toLowerCase() || "";
+      const isText = extension === "txt" || extension === "md";
+      const extractionMimeType = IMPORT_MIME_BY_EXTENSION[extension];
+      if (!isText && !extractionMimeType) {
+        state.error = "仅支持 TXT、Markdown、PDF、JPG、PNG 和 WebP 文件。";
         renderAdminShell();
+        focusImportedField("document-file");
         return;
       }
-      if (file.size > 120000) {
-        state.error = "文件过大，请分成更短的资料条目。";
+      const maximum = isText ? MAX_TEXT_IMPORT_BYTES : MAX_BINARY_IMPORT_BYTES;
+      if (file.size > maximum) {
+        state.error = isText
+          ? "文本文件过大，请分成更短的资料条目。"
+          : "PDF 或图片不能超过 10 MB，请压缩或拆分后重试。";
         renderAdminShell();
+        focusImportedField("document-file");
+        return;
+      }
+      if (state.draft.body.trim() && !window.confirm("导入新文件将替换当前正文，是否继续？")) {
+        event.currentTarget.value = "";
         return;
       }
       state.busy = "file";
       state.error = "";
       renderAdminShell();
+      let imported = false;
       try {
-        const text = await file.text();
+        let text;
+        if (isText) {
+          text = await file.text();
+        } else {
+          const result = await adminRequest("extract", {
+            method: "POST",
+            headers: {
+              "Content-Type": extractionMimeType,
+              "X-File-Name": encodeURIComponent(file.name),
+            },
+            body: file,
+            signal: AbortSignal.timeout(120_000),
+          });
+          if (typeof result.text !== "string") throw new Error("文件解析结果异常，请稍后重试。");
+          text = result.text;
+        }
         if (text.length > 30000) throw new Error("每条资料最多 30000 字");
-        if (!state.draft.title) state.draft.title = file.name.replace(/\.(txt|md)$/i, "");
+        if (text.trim().length < 10) throw new Error("未识别到足够内容，请手动填写正文。");
+        if (!state.draft.title) {
+          state.draft.title = file.name
+            .replace(/\.(txt|md|pdf|jpe?g|png|webp)$/i, "")
+            .trim()
+            .slice(0, 120);
+        }
         state.draft.body = text;
-        state.notice = "文本已导入，请核对后保存草稿。";
+        imported = true;
+        state.notice = isText
+          ? "文本已导入，请核对后保存草稿。"
+          : `${extension === "pdf" ? "PDF" : "图片"}已由 Cloudflare AI 临时解析（${text.length} 字），本站未保存原件。请核对识别结果后提交。`;
       } catch (error) {
         state.error = error instanceof Error ? error.message : "读取失败";
       } finally {
         state.busy = "";
         renderAdminShell();
+        focusImportedField(imported ? "document-body" : "document-file");
       }
     });
     fileLabel.append(
       fileInput,
       element("span", {
         className: "small-note",
-        text: "支持 TXT、Markdown。PDF 或 Word 可先复制需要提交审核的正文。",
+        text: "支持 TXT、Markdown、PDF、JPG、PNG、WebP。PDF、扫描件和图片会发送至 Cloudflare AI 临时解析，本站不保存原件；识别可能有误，请提交前核对。单个文件不超过 10 MB，解析正文最多 30000 字。",
       }),
     );
 

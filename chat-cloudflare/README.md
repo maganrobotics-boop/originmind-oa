@@ -18,6 +18,14 @@ HTML shell under `public/`; those generated release assets are checked in.
   knowledge.
 - Chat-local document writes remain drafts and never reach the public model.
   Only knowledge returned by the OA approved-public endpoint may reach a model.
+- The authenticated management page accepts TXT, Markdown, PDF, JPEG, PNG and
+  WebP. PDF and image files (up to 10 MiB) are sent to Cloudflare Workers AI and
+  converted transiently through its `toMarkdown` binding. The site does not
+  retain the original binary; the returned text is capped at 30,000 characters
+  and must be reviewed by a human. Saving still creates a private Chat draft,
+  and OA approval remains mandatory before internal or public retrieval.
+- Public Chat responses remain text-only. File ingestion does not add PDF or
+  image generation to visitor-facing answers.
 - The public path works before an administrator password is provisioned.
   Management login is deliberately fail-closed until a controlled password
   record is inserted into D1.
@@ -27,7 +35,7 @@ HTML shell under `public/`; those generated release assets are checked in.
 | Kind | Name | Purpose |
 | --- | --- | --- |
 | D1 | `DB` | Inquiries, sessions, drafts, settings, exact budgets |
-| Workers AI | `AI` | Default `@cf/qwen/qwen3-30b-a3b-fp8` provider |
+| Workers AI | `AI` | Default answer model plus transient PDF/image conversion |
 | Static Assets | `ASSETS` | Public and management frontend |
 | Secret | `APP_ENCRYPTION_KEY` | Optional Bailian credential encryption |
 | Secret | `RATE_LIMIT_HMAC_KEY` | Pseudonymous abuse-control identifiers |

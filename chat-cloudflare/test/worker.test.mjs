@@ -62,6 +62,29 @@ function apiRequest(path, { method = "GET", body, cookie, origin = ORIGIN, ip = 
   });
 }
 
+function uploadRequest(name, mimeType, bytes, {
+  cookie,
+  origin = ORIGIN,
+  ip = "203.0.113.8",
+} = {}) {
+  const headers = new Headers({
+    "CF-Connecting-IP": ip,
+    "Content-Type": mimeType,
+    "Origin": origin,
+    "X-File-Name": encodeURIComponent(name),
+  });
+  if (cookie) headers.set("Cookie", cookie);
+  return new Request(`${ORIGIN}/api/admin/extract`, {
+    method: "POST",
+    headers,
+    body: bytes,
+  });
+}
+
+function pdfBytes() {
+  return new TextEncoder().encode("%PDF-1.7\n1 0 obj\n<<>>\nendobj\nstartxref\n0\n%%EOF\n");
+}
+
 async function responseJson(response) {
   return { status: response.status, body: await response.json() };
 }
@@ -278,6 +301,225 @@ test("Chat admin cannot publish documents directly", async (t) => {
   assert.match(result.body.error, /OA 审核/u);
   const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM documents").first();
   assert.equal(Number(count.n), 0);
+});
+
+test("Chat admin can transiently extract a PDF without storing the original file", async (t) => {
+  let captured;
+  const env = makeEnvironment({
+    AI: {
+      async run() {
+        throw new Error("text generation must not run");
+      },
+      async toMarkdown(document, options) {
+        captured = { document, options };
+        return {
+          id: "conversion-1",
+          name: document.name,
+          mimeType: document.blob.type,
+          format: "markdown",
+          tokens: 32,
+          data: "# 自动识别结果\n\nPDF 中的中文正文已经成功提取。",
+        };
+      },
+    },
+  });
+  t.after(() => env.DB.close());
+  const token = "e".repeat(64);
+  await env.DB.prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+    .bind(await sha256Hex(token), Date.now() + 60_000)
+    .run();
+
+  const result = await responseJson(await handleRequest(
+    uploadRequest("研究报告.pdf", "application/pdf", pdfBytes(), {
+      cookie: `__Host-ma-session=${token}`,
+    }),
+    env,
+    {},
+    runtime(),
+  ));
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.body, {
+    text: "# 自动识别结果\n\nPDF 中的中文正文已经成功提取。",
+    fileName: "研究报告.pdf",
+    mimeType: "application/pdf",
+    characters: 27,
+    tokens: 32,
+    originalStored: false,
+  });
+  assert.equal(captured.document.name, "研究报告.pdf");
+  assert.equal(captured.document.blob.type, "application/pdf");
+  assert.equal(captured.options.conversionOptions.output.format, "markdown");
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM documents").first()).n, 0);
+});
+
+test("file extraction accepts a valid long Chinese filename after header decoding", async (t) => {
+  const env = makeEnvironment({
+    AI: {
+      async toMarkdown() {
+        return { format: "markdown", tokens: 3, data: "这是一段由长文件名资料自动识别出的正文。" };
+      },
+    },
+  });
+  t.after(() => env.DB.close());
+  const token = "b".repeat(64);
+  await env.DB.prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+    .bind(await sha256Hex(token), Date.now() + 60_000)
+    .run();
+
+  const fileName = `${"研".repeat(67)}.pdf`;
+  assert.ok(encodeURIComponent(fileName).length > 600);
+  const result = await responseJson(await handleRequest(
+    uploadRequest(fileName, "application/pdf", pdfBytes(), { cookie: `__Host-ma-session=${token}` }),
+    env,
+    {},
+    runtime(),
+  ));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.fileName, fileName);
+});
+
+test("file extraction requires an authenticated same-origin administrator", async (t) => {
+  let calls = 0;
+  const env = makeEnvironment({
+    AI: {
+      async toMarkdown() {
+        calls += 1;
+        return { format: "markdown", tokens: 1, data: "不应执行的自动识别正文" };
+      },
+    },
+  });
+  t.after(() => env.DB.close());
+  const bytes = pdfBytes();
+  const anonymous = await handleRequest(uploadRequest("report.pdf", "application/pdf", bytes), env, {}, runtime());
+  assert.equal(anonymous.status, 403);
+
+  const token = "d".repeat(64);
+  await env.DB.prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+    .bind(await sha256Hex(token), Date.now() + 60_000)
+    .run();
+  const crossOrigin = await handleRequest(
+    uploadRequest("report.pdf", "application/pdf", bytes, {
+      cookie: `__Host-ma-session=${token}`,
+      origin: "https://evil.example",
+    }),
+    env,
+    {},
+    runtime(),
+  );
+  assert.equal(crossOrigin.status, 403);
+  assert.equal(calls, 0);
+});
+
+test("file extraction rejects a mismatched JPEG signature before invoking Cloudflare AI", async (t) => {
+  let calls = 0;
+  const env = makeEnvironment({
+    AI: {
+      async toMarkdown() {
+        calls += 1;
+        return { format: "markdown", tokens: 1, data: "不应执行的自动识别正文" };
+      },
+    },
+  });
+  t.after(() => env.DB.close());
+  const token = "c".repeat(64);
+  await env.DB.prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+    .bind(await sha256Hex(token), Date.now() + 60_000)
+    .run();
+  const result = await responseJson(await handleRequest(
+    uploadRequest("malware.jpg", "image/jpeg", new TextEncoder().encode("not a jpeg"), {
+      cookie: `__Host-ma-session=${token}`,
+    }),
+    env,
+    {},
+    runtime(),
+  ));
+  assert.equal(result.status, 415);
+  assert.match(result.body.error, /格式/u);
+  assert.equal(calls, 0);
+});
+
+test("file extraction keeps its independent 20 requests per IP hourly limit", async (t) => {
+  let calls = 0;
+  const env = makeEnvironment({
+    AI: {
+      async toMarkdown() {
+        calls += 1;
+        return { format: "markdown", tokens: 2, data: "这是用于验证文件解析频率限制的正文内容。" };
+      },
+    },
+  });
+  t.after(() => env.DB.close());
+  const token = "a".repeat(64);
+  await env.DB.prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+    .bind(await sha256Hex(token), Date.now() + 60_000)
+    .run();
+
+  for (let index = 0; index < 20; index += 1) {
+    const response = await handleRequest(
+      uploadRequest("report.pdf", "application/pdf", pdfBytes(), {
+        cookie: `__Host-ma-session=${token}`,
+        ip: "203.0.113.21",
+      }),
+      env,
+      {},
+      runtime(),
+    );
+    assert.equal(response.status, 200);
+  }
+  const limited = await responseJson(await handleRequest(
+    uploadRequest("report.pdf", "application/pdf", pdfBytes(), {
+      cookie: `__Host-ma-session=${token}`,
+      ip: "203.0.113.21",
+    }),
+    env,
+    {},
+    runtime(),
+  ));
+  assert.equal(limited.status, 429);
+  assert.match(limited.body.error, /频繁/u);
+  assert.equal(calls, 20);
+});
+
+test("file extraction keeps its independent 100 conversions per UTC day budget", async (t) => {
+  let calls = 0;
+  const env = makeEnvironment({
+    AI: {
+      async toMarkdown() {
+        calls += 1;
+        return { format: "markdown", tokens: 2, data: "这是用于验证文件解析每日额度的正文内容。" };
+      },
+    },
+  });
+  t.after(() => env.DB.close());
+  const token = "9".repeat(64);
+  await env.DB.prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+    .bind(await sha256Hex(token), Date.now() + 60_000)
+    .run();
+
+  for (let index = 0; index < 100; index += 1) {
+    const response = await handleRequest(
+      uploadRequest("report.pdf", "application/pdf", pdfBytes(), {
+        cookie: `__Host-ma-session=${token}`,
+        ip: `203.0.113.${30 + Math.floor(index / 20)}`,
+      }),
+      env,
+      {},
+      runtime(),
+    );
+    assert.equal(response.status, 200);
+  }
+  const limited = await responseJson(await handleRequest(
+    uploadRequest("report.pdf", "application/pdf", pdfBytes(), {
+      cookie: `__Host-ma-session=${token}`,
+      ip: "203.0.113.99",
+    }),
+    env,
+    {},
+    runtime(),
+  ));
+  assert.equal(limited.status, 429);
+  assert.match(limited.body.error, /今日文件解析额度/u);
+  assert.equal(calls, 100);
 });
 
 test("rate-limit identity uses the dedicated HMAC secret", () => {

@@ -9,6 +9,11 @@ import {
 import { PublicError, ValidationError } from "./errors.mjs";
 import { conversationHistory, conversationToken, retrievalQuestion } from "./conversation.mjs";
 import {
+  MAX_DOCUMENT_UPLOAD_BYTES,
+  extractDocument,
+  validateDocumentUpload,
+} from "./document-extraction.mjs";
+import {
   aliyunEndpoint,
   displayKnowledgeTitle,
   fallbackAnswer,
@@ -103,10 +108,7 @@ function sameOrigin(context) {
   }
 }
 
-async function readJson(request, maximum = 120_000) {
-  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
-    throw new PublicError("请求格式错误", 415);
-  }
+async function readBytes(request, maximum) {
   if (Number(request.headers.get("content-length") || 0) > maximum) throw new PublicError("内容过长", 413);
   const reader = request.body?.getReader();
   if (!reader) throw new PublicError("缺少内容");
@@ -128,6 +130,14 @@ async function readJson(request, maximum = 120_000) {
     all.set(chunk, offset);
     offset += chunk.length;
   }
+  return all;
+}
+
+async function readJson(request, maximum = 120_000) {
+  if (!request.headers.get("content-type")?.toLowerCase().startsWith("application/json")) {
+    throw new PublicError("请求格式错误", 415);
+  }
+  const all = await readBytes(request, maximum);
   try {
     return JSON.parse(new TextDecoder().decode(all));
   } catch {
@@ -177,6 +187,18 @@ async function globalBudget(context) {
     300,
     now + 172_800,
     "今日 AI 咨询额度已用完，请稍后再试。",
+  );
+}
+
+async function documentExtractionBudget(context) {
+  const day = new Date().toISOString().slice(0, 10);
+  const now = Math.floor(Date.now() / 1_000);
+  await consumeCounter(
+    context,
+    `document-extract-day:${day}`,
+    100,
+    now + 172_800,
+    "今日文件解析额度已用完，请明天再试。",
   );
 }
 
@@ -592,6 +614,29 @@ async function api(context) {
     }
     if (path === "admin/oa-test" && method === "POST") {
       return json({ oaPublicKnowledge: await probeOaPublicKnowledge(context) });
+    }
+    if (path === "admin/extract" && method === "POST") {
+      await limit(context, "document-extract", 20);
+      const encodedName = context.request.headers.get("x-file-name") || "";
+      if (!encodedName || encodedName.length > 2_000) throw new PublicError("缺少有效文件名");
+      let name;
+      try {
+        name = decodeURIComponent(encodedName);
+      } catch {
+        throw new PublicError("文件名不正确，请重新选择文件。");
+      }
+      const bytes = await readBytes(context.request, MAX_DOCUMENT_UPLOAD_BYTES);
+      const upload = validateDocumentUpload(name, context.request.headers.get("content-type"), bytes);
+      await documentExtractionBudget(context);
+      const extracted = await extractDocument(context.env.AI, upload, bytes);
+      return json({
+        text: extracted.text,
+        fileName: upload.name,
+        mimeType: upload.mimeType,
+        characters: extracted.text.length,
+        tokens: extracted.tokens,
+        originalStored: false,
+      });
     }
     if (path === "admin/documents" && method === "GET") {
       return json({ documents: await localDrafts(context) });

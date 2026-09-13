@@ -8,6 +8,7 @@ import {
   smokeCloudflare,
   smokeSavedAdminAuthentication,
   validateReleaseEvidence,
+  validateDocumentExtractionEvidence,
 } from "./smoke-cloudflare.mjs";
 
 const releaseId = `${"a".repeat(40)}-1`;
@@ -197,6 +198,19 @@ test("saved-password smoke logs in once and retries logout with the same session
         },
       });
     }
+    if (url.endsWith("/api/admin/extract")) {
+      const mimeType = options.headers["Content-Type"];
+      const fileName = decodeURIComponent(options.headers["X-File-Name"]);
+      const text = `OriginMind ${mimeType} extraction smoke result.`;
+      return new Response(JSON.stringify({
+        text,
+        fileName,
+        mimeType,
+        characters: text.length,
+        tokens: 8,
+        originalStored: false,
+      }), { status: 200, headers });
+    }
     logoutCalls += 1;
     return new Response(JSON.stringify({ saved: true }), {
       status: logoutCalls === 1 ? 503 : 200,
@@ -209,8 +223,27 @@ test("saved-password smoke logs in once and retries logout with the same session
     logoutAttempts: 2,
     sleepImpl: async (milliseconds) => sleeps.push(milliseconds),
   });
-  assert.deepEqual(result, { adminPasswordVerified: true, smokeSessionRevoked: true });
+  assert.deepEqual(result, {
+    adminPasswordVerified: true,
+    smokeSessionRevoked: true,
+    documentExtractionVerified: true,
+    files: [
+      {
+        fileName: "originmind-release-smoke.pdf",
+        mimeType: "application/pdf",
+        characters: "OriginMind application/pdf extraction smoke result.".length,
+        originalStored: false,
+      },
+      {
+        fileName: "originmind-release-smoke.png",
+        mimeType: "image/png",
+        characters: "OriginMind image/png extraction smoke result.".length,
+        originalStored: false,
+      },
+    ],
+  });
   assert.equal(calls.filter((call) => call.url.endsWith("/api/auth/login")).length, 1);
+  assert.equal(calls.filter((call) => call.url.endsWith("/api/admin/extract")).length, 2);
   assert.equal(calls.filter((call) => call.url.endsWith("/api/auth/logout")).length, 2);
   assert.ok(calls.filter((call) => call.url.endsWith("/api/auth/logout")).every(
     (call) => call.options.headers.Cookie === `__Host-ma-session=${token}`,
@@ -218,6 +251,31 @@ test("saved-password smoke logs in once and retries logout with the same session
   assert.deepEqual(sleeps, [1_500]);
   assert.equal(JSON.stringify(result).includes(password), false);
   assert.equal(JSON.stringify(result).includes(token), false);
+});
+
+test("document extraction evidence requires exact transient PDF or image metadata", () => {
+  const fixture = { name: "release-smoke.pdf", mimeType: "application/pdf" };
+  const text = "OriginMind smoke extraction text.";
+  assert.deepEqual(validateDocumentExtractionEvidence({
+    text,
+    fileName: fixture.name,
+    mimeType: fixture.mimeType,
+    characters: text.length,
+    tokens: 4,
+    originalStored: false,
+  }, fixture), {
+    fileName: fixture.name,
+    mimeType: fixture.mimeType,
+    characters: text.length,
+    originalStored: false,
+  });
+  for (const payload of [
+    { text: "wrong", fileName: fixture.name, mimeType: fixture.mimeType, characters: 5, tokens: 1, originalStored: false },
+    { text, fileName: "other.pdf", mimeType: fixture.mimeType, characters: text.length, tokens: 1, originalStored: false },
+    { text, fileName: fixture.name, mimeType: fixture.mimeType, characters: text.length, tokens: 1, originalStored: true },
+  ]) {
+    assert.throws(() => validateDocumentExtractionEvidence(payload, fixture), /verified transient extraction/u);
+  }
 });
 
 test("saved-password smoke revokes its session even when login response validation fails", async (context) => {
