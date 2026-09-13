@@ -157,6 +157,11 @@ export class MockD1 {
       return { rows: [], changes };
     }
 
+    if (query.startsWith("select count from limits where key")) {
+      const value = this.limits.get(args[0]);
+      return { rows: value ? [{ count: value.count }] : [], changes: 0 };
+    }
+
     if (query.startsWith("select reference from inquiries where request_id")) {
       const row = [...this.inquiries.values()].find((item) => item.requestId === args[0]);
       return { rows: row ? [{ reference: row.reference }] : [], changes: 0 };
