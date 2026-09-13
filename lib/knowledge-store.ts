@@ -805,3 +805,22 @@ export async function getPublicActiveKnowledgeChunks(): Promise<SearchableKnowle
     updatedAt: row.updated_at,
   }));
 }
+
+export async function hasPublicActiveKnowledge(): Promise<boolean> {
+  const database = await getD1Database();
+  const row = await database.prepare(`
+    SELECT EXISTS (
+      SELECT 1
+      FROM knowledge_chunks AS c
+      INNER JOIN knowledge_items AS i ON i.id = c.item_id
+      INNER JOIN knowledge_revisions AS r ON r.id = c.revision_id AND r.item_id = i.id
+      WHERE c.is_active = 1
+        AND i.status = 'active'
+        AND i.visibility = 'public'
+        AND r.status = 'active'
+        AND i.active_revision_id = c.revision_id
+      LIMIT 1
+    ) AS ready
+  `).first<{ ready: number | string }>();
+  return Number(row?.ready ?? 0) === 1;
+}
