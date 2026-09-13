@@ -179,6 +179,8 @@ test("verified conversation context continues a follow-up without trusting forge
   } };
   const first = await (await handleRequest(request("/api/chat", { method: "POST", body: chatBody("机器人研究方向有哪些？") }), env, {}, runtime)).json();
   assert.ok(first.conversationToken);
+  assert.equal(first.answer, "团队研究机器人灵巧操作。");
+  assert.doesNotMatch(first.answer, /\[\d+\]/u);
   const followup = { ...chatBody("请详细展开第一点"), conversationToken: first.conversationToken };
   const second = await handleRequest(request("/api/chat", { method: "POST", body: followup }), env, {}, runtime);
   assert.equal(second.status, 200);
@@ -230,6 +232,7 @@ test("Workers AI is the zero-secret default and status reports the active model"
   assert.equal(response.status, 200);
   assert.equal(result.mode, "ai");
   assert.equal(result.provider, "workers-ai");
+  assert.equal(result.answer, "研究方向包括机器人灵巧操作。");
   assert.ok(result.sources.length > 0);
   assert.equal(calls.length, 2);
   assert.equal(calls[0].model, WORKERS_AI_MODEL);
@@ -717,7 +720,7 @@ test("a verified Bailian configuration overrides Workers AI and forbids redirect
   assert.equal(response.status, 200);
   assert.equal(result.mode, "ai");
   assert.equal(result.provider, "bailian");
-  assert.equal(result.answer, "百炼回答。[1]");
+  assert.equal(result.answer, "百炼回答。");
   assert.equal(workersAiCalls, 0);
   assert.equal(fetchCalls.length, 1);
   assert.equal(fetchCalls[0].init.redirect, "manual");

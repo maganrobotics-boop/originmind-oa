@@ -129,6 +129,16 @@ function expectedRelease(value) {
   return value;
 }
 
+function hasReferenceSection(answer) {
+  return (
+    /(?:参考资料|参考文献|参考来源|资料来源)/u.test(answer) ||
+    /(?:^|[^\p{L}\p{N}_*`#~-])(?:参考|引用|出处)(?:列表|清单)?(?:如下(?:所示)?)?[ \t]*(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*[:：]/iu.test(answer) ||
+    /(?:^|[^\p{L}\p{N}_-])(?:references?|sources?|citations?|bibliography|works[ \t]+cited)(?:[ \t]+list)?[ \t]*[:：]/iu.test(answer) ||
+    /^[ \t]*(?:(?:[-+*•>]|[0-9０-９]+[.)、．。])[ \t]+)?(?:#{1,6}[ \t]+)?(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*(?:(?:参考资料|参考文献|参考来源|资料来源|参考|引用|出处)(?:列表|清单)?|(?:references?|sources?|citations?|bibliography)(?:[ \t]+list)?|works[ \t]+cited|(?:来源|source)(?:列表|清单|[ \t]+list)?)(?:如下(?:所示)?)?[ \t]*(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*(?:[:：]|(?=[\[［【]\s*[0-9０-９]))/imu.test(answer) ||
+    /^[ \t]*(?:(?:[-+*•>]|[0-9０-９]+[.)、．。])[ \t]+)?(?:#{1,6}[ \t]+)?(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*(?:(?:参考资料|参考文献|参考来源|资料来源|参考|引用|出处)(?:列表|清单)?|(?:references?|sources?|citations?|bibliography)(?:[ \t]+list)?|works[ \t]+cited|(?:来源|source)(?:列表|清单|[ \t]+list)?)(?:如下(?:所示)?)?[ \t]*(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*(?:[:：])?[ \t]*$/imu.test(answer)
+  );
+}
+
 export function validateServiceEvidence({ health, status, chat }, releaseIdValue) {
   const releaseId = expectedRelease(releaseIdValue);
   if (
@@ -162,9 +172,11 @@ export function validateServiceEvidence({ health, status, chat }, releaseIdValue
     chat?.oaPublicStatus !== "connected" ||
     chat?.releaseId !== releaseId ||
     typeof chat?.answer !== "string" ||
-    !chat.answer.trim()
+    !chat.answer.trim() ||
+    /[\[［【][^\]］】\r\n]*[0-9０-９]+[^\]］】\r\n]*[\]］】]/u.test(chat.answer) ||
+    hasReferenceSection(chat.answer)
   ) {
-    throw new Error("/api/chat did not return an OA-backed AI answer from the expected release");
+    throw new Error("/api/chat did not return a citation-free OA-backed AI answer from the expected release");
   }
   if (
     !Array.isArray(chat.sources) ||

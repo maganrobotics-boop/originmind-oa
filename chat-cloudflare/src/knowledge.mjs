@@ -17,12 +17,9 @@ export function displayKnowledgeTitle(item) {
 
 export function fallbackAnswer(documents) {
   if (!documents.length) {
-    return "经 OA 审核公开的资料中暂未找到足够依据。你可以补充问题背景，或点击“提交咨询”留下希望沟通的事项，由团队负责人确认。";
+    return "目前没有足够信息回答这个问题。你可以补充具体方向、对象或时间范围；如需团队确认，请点击“提交咨询”。";
   }
-  const excerpts = documents
-    .map((document, index) => `[${String(index + 1)}] ${document.title}\n${document.body.slice(0, 1_100)}`)
-    .join("\n\n");
-  return `当前提供资料检索，以下是经 OA 审核公开的相关资料摘录：\n\n${excerpts}\n\n如需确认当前安排，请点击“提交咨询”，由团队负责人进一步处理。`;
+  return "暂时无法整理出可靠答案。你可以换个更具体的问法；如需确认当前安排，请点击“提交咨询”。";
 }
 
 export function safeSourceUrl(value) {

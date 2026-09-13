@@ -206,7 +206,14 @@ test("Workers AI gets only two bounded user turns and never client assistant tex
     AI: {
       run: async (model, input) => {
         captured = { model, input };
-        return { choices: [{ message: { role: "assistant", content: "基于资料的 AI 回答 [1]" } }] };
+        return {
+          choices: [{
+            message: {
+              role: "assistant",
+              content: "根据公开资料显示，团队主要研究机器人灵巧操作。[1]\n\n参考资料：\n[1] 公开知识",
+            },
+          }],
+        };
       },
     },
   });
@@ -226,6 +233,7 @@ test("Workers AI gets only two bounded user turns and never client assistant tex
   assert.equal(result.status, 200);
   assert.equal(result.body.mode, "ai");
   assert.equal(result.body.provider, "workers-ai");
+  assert.equal(result.body.answer, "团队主要研究机器人灵巧操作。");
   assert.equal(captured.model, WORKERS_AI_MODEL);
   assert.equal(captured.input.stream, false);
   const nonSystem = captured.input.messages.slice(1);
@@ -233,8 +241,155 @@ test("Workers AI gets only two bounded user turns and never client assistant tex
   assert.ok(nonSystem.every((message) => message.role === "user"));
   assert.ok(nonSystem.reduce((sum, message) => sum + message.content.length, 0) <= 3_000);
   assert.doesNotMatch(JSON.stringify(captured.input), /CLIENT_ASSISTANT_MUST_NOT_REACH_MODEL/u);
+  assert.match(captured.input.messages[0].content, /先直接回答问题/u);
+  assert.match(captured.input.messages[0].content, /不要单列“参考资料”/u);
   const daily = await env.DB.prepare("SELECT count FROM limits WHERE key LIKE 'model-day:%'").first();
   assert.equal(Number(daily.count), 1);
+});
+
+test("user-visible answers remove citation markers and formatted reference sections", async () => {
+  const examples = [
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n\n**参考资料**\n[1] OA 公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1] 参考资料：[1] OA 公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n\n### 参考来源\n[1] OA 公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n\nReferences:\n[1] OA public knowledge",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "第一项是机器人灵巧操作[1]。第二项是系统设计。[1]",
+      expected: "第一项是机器人灵巧操作。第二项是系统设计。",
+    },
+    {
+      output: "机器人灵巧操作。[1，1] 系统设计。【１—１】",
+      expected: "机器人灵巧操作。 系统设计。",
+    },
+    {
+      output: "根据资料不足，我们建议先补充问题背景。[1]",
+      expected: "根据资料不足，我们建议先补充问题背景。",
+    },
+    {
+      output: "据资料库记录，团队研究机器人灵巧操作。[1]",
+      expected: "据资料库记录，团队研究机器人灵巧操作。",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n\n- **参考资料**\n[1] OA 公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n\n1. 参考资料：\n[1] OA 公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n\n参考资料列表：\n[1] OA 公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n\n参考资料如下所示：\n[1] OA 公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n\n> 参考资料\n[1] OA 公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "Team focuses on robotic manipulation.[1]\n\nBibliography:\n[1] OA public knowledge",
+      expected: "Team focuses on robotic manipulation.",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n\n参考：\n[1] OA 公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n\n出处：\n[1] OA 公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "Team focuses on robotic manipulation.[1]\n\nCitation:\n[1] OA public knowledge",
+      expected: "Team focuses on robotic manipulation.",
+    },
+    {
+      output: "Team focuses on robotic manipulation.[1]\n\nSources [1] OA public knowledge",
+      expected: "Team focuses on robotic manipulation.",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n\n[1] OA 公开知识\n[1] 第二条公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n\n• [1] OA 公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "团队主要研究机器人灵巧操作。[1]\n[1] OA 公开知识",
+      expected: "团队主要研究机器人灵巧操作。",
+    },
+    {
+      output: "Available Resources: robotics lab and test platform.[1]",
+      expected: "Available Resources: robotics lab and test platform.",
+    },
+    {
+      output: "Preference: concise answers.[1]",
+      expected: "Preference: concise answers.",
+    },
+    {
+      output: "The project is open-source: selected components are public.[1]",
+      expected: "The project is open-source: selected components are public.",
+    },
+  ];
+
+  for (const example of examples) {
+    const env = makeEnvironment({
+      AI: { run: async () => ({ choices: [{ message: { role: "assistant", content: example.output } }] }) },
+    });
+    try {
+      const request = apiRequest("/api/chat", {
+        method: "POST",
+        body: { messages: [{ role: "user", content: "研究方向是什么？" }], topic: "research" },
+      });
+      const result = await responseJson(await handleRequest(request, env, {}, runtime()));
+      assert.equal(result.status, 200);
+      assert.equal(result.body.mode, "ai");
+      assert.equal(result.body.answer, example.expected);
+    } finally {
+      env.DB.close();
+    }
+  }
+});
+
+test("uncited or residual citation-shaped model output fails closed", async () => {
+  for (const output of [
+    "团队主要研究机器人灵巧操作。",
+    "团队主要研究机器人灵巧操作。[1] 同时保留嵌套编号[[1]]",
+    "团队主要研究机器人灵巧操作。[1] 同时保留异常编号[1/2]",
+    "团队主要研究机器人灵巧操作。[1] 可参考资料：[1] OA 公开知识",
+    "团队主要研究机器人灵巧操作。[1] 可查看**参考资料**：[1] OA 公开知识",
+  ]) {
+    const env = makeEnvironment({
+      AI: { run: async () => ({ choices: [{ message: { role: "assistant", content: output } }] }) },
+    });
+    try {
+      const request = apiRequest("/api/chat", {
+        method: "POST",
+        body: { messages: [{ role: "user", content: "研究方向是什么？" }], topic: "research" },
+      });
+      const result = await responseJson(await handleRequest(request, env, {}, runtime()));
+      assert.equal(result.status, 200);
+      assert.equal(result.body.mode, "retrieval");
+      assert.doesNotMatch(result.body.answer, /\[\[\s*\d+\s*\]\]|[［【]\s*\d+\s*[］】]|参考(?:资料|文献|来源)/u);
+    } finally {
+      env.DB.close();
+    }
+  }
 });
 
 test("unsafe or uncited model output is discarded before it reaches the browser", async (t) => {
@@ -251,6 +406,7 @@ test("unsafe or uncited model output is discarded before it reaches the browser"
   assert.equal(result.status, 200);
   assert.equal(result.body.mode, "retrieval");
   assert.doesNotMatch(result.body.answer, /example\.test/u);
+  assert.doesNotMatch(result.body.answer, /\[\d+\]|参考(?:资料|文献)|资料来源/u);
   assert.ok(result.body.sources.length > 0);
 });
 
@@ -273,6 +429,7 @@ test("verified Bailian config overrides Workers AI and uses hardened fetch optio
   assert.equal(result.status, 200);
   assert.equal(result.body.mode, "ai");
   assert.equal(result.body.provider, "bailian");
+  assert.equal(result.body.answer, "百炼回答");
   assert.equal(workersCalls, 0);
   assert.equal(modelFetch.init.redirect, "manual");
   assert.equal(modelFetch.init.cache, "no-store");

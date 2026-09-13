@@ -255,12 +255,58 @@ function makeRequestId() {
   return `${hex.slice(0, 4).join("")}-${hex.slice(4, 6).join("")}-${hex.slice(6, 8).join("")}-${hex.slice(8, 10).join("")}-${hex.slice(10).join("")}`;
 }
 
-function sourceOriginLabel(origin) {
-  return origin === "oa_public" ? "OA 已审核公开" : "公开资料";
-}
-
 function adminSourceOriginLabel(origin) {
   return origin === "oa_public" ? "OA 已审核公开" : "Chat 待审核草稿";
+}
+
+function referenceSectionStart(value) {
+  const lineMarkers = [
+    value.match(
+      /^[ \t]*(?:(?:[-+*•>]|[0-9０-９]+[.)、．。])[ \t]+)?(?:#{1,6}[ \t]+)?(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*(?:(?:参考资料|参考文献|参考来源|资料来源|参考|引用|出处)(?:列表|清单)?|(?:references?|sources?|citations?|bibliography)(?:[ \t]+list)?|works[ \t]+cited|(?:来源|source)(?:列表|清单|[ \t]+list)?)(?:如下(?:所示)?)?[ \t]*(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*(?:[:：]|(?=[\[［【]\s*[0-9０-９]))/imu,
+    ),
+    value.match(
+      /^[ \t]*(?:(?:[-+*•>]|[0-9０-９]+[.)、．。])[ \t]+)?(?:#{1,6}[ \t]+)?(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*(?:(?:参考资料|参考文献|参考来源|资料来源|参考|引用|出处)(?:列表|清单)?|(?:references?|sources?|citations?|bibliography)(?:[ \t]+list)?|works[ \t]+cited|(?:来源|source)(?:列表|清单|[ \t]+list)?)(?:如下(?:所示)?)?[ \t]*(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*(?:[:：])?[ \t]*$/imu,
+    ),
+    value.match(
+      /(?:^|\r?\n)[ \t]*(?:[-+*•>][ \t]+)?[\[［【]\s*[0-9０-９]+(?:\s*[,，、;；\-–—]\s*[0-9０-９]+)*\s*[\]］】]/u,
+    ),
+  ].filter(Boolean);
+  const inlineMarker = value.match(
+    /(^|[^\p{L}\p{N}_*`#~-])(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*(?:参考资料|参考文献|参考来源|资料来源|参考|引用|出处)(?:列表|清单)?(?:如下(?:所示)?)?[ \t]*(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*[:：]/iu,
+  );
+  const inlineCitationMarker = value.match(
+    /(^|[^\p{L}\p{N}_*`#~-])(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*(?:(?:参考资料|参考文献|参考来源|资料来源|参考|引用|出处)(?:列表|清单)?|(?:references?|sources?|citations?|bibliography)(?:[ \t]+list)?|works[ \t]+cited)[ \t]*(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*(?=[\[［【]\s*[0-9０-９])/iu,
+  );
+  const indexes = lineMarkers.map((marker) => marker.index);
+  if (inlineMarker) indexes.push(inlineMarker.index + inlineMarker[1].length);
+  if (inlineCitationMarker) indexes.push(inlineCitationMarker.index + inlineCitationMarker[1].length);
+  return indexes.length ? Math.min(...indexes) : -1;
+}
+
+function userFacingAnswer(value) {
+  const answer = String(value || "");
+  const sectionStart = referenceSectionStart(answer);
+  const answerBody = sectionStart === -1 ? answer : answer.slice(0, sectionStart);
+  if (/\[\s*\[\s*[0-9０-９][\s\S]*?\]\s*\]/u.test(answerBody)) return "暂时没有可显示的回答。";
+  const withoutReferences = answerBody
+    .replace(
+      /[ \t]*[\[［【]\s*[0-9０-９]+(?:\s*[,，、;；\-–—]\s*[0-9０-９]+)*\s*[\]］】]/gu,
+      "",
+    )
+    .replace(
+      /^(?:(?:根据|据)(?:现有|上述|相关|公开|所提供的|提供的)?(?:参考)?资料(?:显示|可知|表明)|参考资料(?:显示|表明|提到)|(?:根据|据)(?:现有|上述|相关|公开|所提供的|提供的)?(?:参考)?资料)[，,:：]\s*/u,
+      "",
+    )
+    .replace(/[ \t]+([，。！？；：])/gu, "$1")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+  const hasResidualMarker =
+    /[\[［【][^\]］】\r\n]*[0-9０-９]+[^\]］】\r\n]*[\]］】]/u.test(withoutReferences) ||
+    /(?:参考资料|参考文献|参考来源|资料来源)/u.test(withoutReferences) ||
+    /(?:^|[^\p{L}\p{N}_*`#~-])(?:参考|引用|出处)(?:列表|清单)?(?:如下(?:所示)?)?[ \t]*(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*[:：]/iu.test(withoutReferences) ||
+    /(?:^|[^\p{L}\p{N}_-])(?:references?|sources?|citations?|bibliography|works[ \t]+cited)(?:[ \t]+list)?[ \t]*[:：]/iu.test(withoutReferences) ||
+    referenceSectionStart(withoutReferences) !== -1;
+  return withoutReferences && !hasResidualMarker ? withoutReferences : "暂时没有可显示的回答。";
 }
 
 function serviceLabel(service) {
@@ -597,40 +643,6 @@ function createPublicApp() {
     return row;
   }
 
-  function chatInfoUnavailableActionRow(labelText) {
-    const row = textButton("", "chat-info-row chat-info-row-unavailable");
-    row.disabled = true;
-    row.setAttribute("aria-label", `${labelText}（暂未开放）`);
-    row.append(
-      element("span", { className: "chat-info-label", text: labelText }),
-      element("span", { className: "chat-info-unavailable-badge", text: "暂未开放" }),
-    );
-    return row;
-  }
-
-  function chatInfoUnavailableToggleRow(labelText) {
-    const row = element("div", {
-      className: "chat-info-row chat-info-toggle-row chat-info-row-unavailable",
-      attributes: { "aria-disabled": "true" },
-    });
-    const input = element("input", {
-      className: "chat-info-switch-input",
-      attributes: { type: "checkbox", "aria-label": `${labelText}（暂未开放）`, disabled: true },
-    });
-    row.append(
-      element("span", { className: "chat-info-label", text: labelText }),
-      element("span", { className: "chat-info-unavailable-control" }, [
-        element("span", { className: "chat-info-unavailable-badge", text: "暂未开放" }),
-        input,
-        element("span", {
-          className: "chat-info-switch",
-          attributes: { "aria-hidden": "true" },
-        }),
-      ]),
-    );
-    return row;
-  }
-
   const chatInfoDialog = element("dialog", {
     id: "chat-info-dialog",
     className: "chat-info-dialog",
@@ -664,32 +676,10 @@ function createPublicApp() {
     }),
     element("span", { className: "chat-info-member-name", text: APP_NAME }),
   );
-  const chatInfoAdd = textButton("", "chat-info-add");
-  chatInfoAdd.setAttribute("aria-label", "添加成员（暂未开放）");
-  chatInfoAdd.disabled = true;
-  chatInfoAdd.append(element("span", {
-    className: "chat-info-add-glyph",
-    text: "+",
-    attributes: { "aria-hidden": "true" },
-  }));
-  const chatInfoAddMember = element("div", { className: "chat-info-member" }, [
-    chatInfoAdd,
-    element("span", { className: "chat-info-member-name", text: "暂未开放" }),
-  ]);
-  chatInfoMembers.append(chatInfoMember, chatInfoAddMember);
+  chatInfoMembers.append(chatInfoMember);
 
   const chatInfoSearchBlock = element("section", { className: "chat-info-block" });
   chatInfoSearchBlock.append(chatInfoActionRow("查找聊天记录", findChatMessage));
-
-  const chatInfoToggleBlock = element("section", { className: "chat-info-block" });
-  chatInfoToggleBlock.append(
-    chatInfoUnavailableToggleRow("消息免打扰"),
-    chatInfoUnavailableToggleRow("置顶聊天"),
-    chatInfoUnavailableToggleRow("提醒"),
-  );
-
-  const chatInfoBackgroundBlock = element("section", { className: "chat-info-block" });
-  chatInfoBackgroundBlock.append(chatInfoUnavailableActionRow("设置当前聊天背景"));
 
   const chatInfoClearBlock = element("section", { className: "chat-info-block" });
   const clearChatHistory = chatInfoActionRow("清空聊天记录", () => {
@@ -700,16 +690,10 @@ function createPublicApp() {
   }, "chat-info-clear");
   chatInfoClearBlock.append(clearChatHistory);
 
-  const chatInfoComplaintBlock = element("section", { className: "chat-info-block" });
-  chatInfoComplaintBlock.append(chatInfoUnavailableActionRow("投诉"));
-
   chatInfoScroll.append(
     chatInfoMembers,
     chatInfoSearchBlock,
-    chatInfoToggleBlock,
-    chatInfoBackgroundBlock,
     chatInfoClearBlock,
-    chatInfoComplaintBlock,
   );
   chatInfoPage.append(chatInfoHeader, chatInfoScroll);
   chatInfoDialog.append(chatInfoPage);
@@ -728,13 +712,6 @@ function createPublicApp() {
     if (opener?.isConnected) opener.focus({ preventScroll: true });
   });
 
-  const sourceDialog = element("dialog", {
-    className: "content-dialog source-dialog",
-    attributes: {
-      "aria-labelledby": "source-dialog-title",
-      "aria-describedby": "source-dialog-description",
-    },
-  });
   const inquiryDialog = element("dialog", {
     className: "content-dialog inquiry-dialog",
     attributes: {
@@ -742,14 +719,8 @@ function createPublicApp() {
       "aria-describedby": "inquiry-dialog-description",
     },
   });
-  let sourceDialogOpener = null;
   let inquiryDialogOpener = null;
   let renderEpoch = 0;
-  sourceDialog.addEventListener("close", () => {
-    const opener = sourceDialogOpener;
-    sourceDialogOpener = null;
-    if (opener?.isConnected) opener.focus();
-  });
   inquiryDialog.addEventListener("close", () => {
     state.inquiry.reference = "";
     state.inquiry.error = "";
@@ -758,7 +729,7 @@ function createPublicApp() {
     if (opener?.isConnected) opener.focus();
   });
 
-  app.append(header, layout, topicDrawer, chatInfoDialog, sourceDialog, inquiryDialog);
+  app.append(header, layout, topicDrawer, chatInfoDialog, inquiryDialog);
   root.replaceChildren(app);
 
   let systemStatusEpoch = 0;
@@ -1100,40 +1071,6 @@ function createPublicApp() {
     }
   }
 
-  function openSource(source, opener) {
-    sourceDialogOpener = opener || document.activeElement;
-    sourceDialog.replaceChildren();
-    const headerBlock = element("div", { className: "dialog-header" });
-    headerBlock.append(
-      element("p", { className: "eyebrow", text: "SOURCE" }),
-      element("h2", { id: "source-dialog-title", text: String(source?.title || "参考资料") }),
-      element("p", {
-        id: "source-dialog-description",
-        className: "dialog-description",
-        text: "本回答引用的 OA 审核公开资料",
-      }),
-    );
-    const closeButton = textButton("关闭", "dialog-close");
-    closeButton.setAttribute("aria-label", "关闭资料详情");
-    closeButton.addEventListener("click", () => sourceDialog.close());
-    headerBlock.append(closeButton);
-    sourceDialog.append(
-      headerBlock,
-      element("p", { className: "source-excerpt", text: String(source?.excerpt || "") }),
-      element("p", {
-        className: "small-note",
-        text: `公开范围：${sourceOriginLabel(source?.origin)}`,
-      }),
-      element("p", {
-        className: "small-note",
-        text: `资料日期：${String(source?.updatedAt || "未标注")}`,
-      }),
-    );
-    const original = externalLink("打开原始资料", source?.url, "primary-link");
-    if (original) sourceDialog.append(original);
-    if (!sourceDialog.open) sourceDialog.showModal();
-  }
-
   async function copyAnswer(content, section) {
     const session = sessionFor(section);
     try {
@@ -1154,26 +1091,17 @@ function createPublicApp() {
         tabindex: "-1",
       },
     });
-    article.append(element("div", { className: "message-body", text: String(message.content || "") }));
+    const answer = message.role === "assistant"
+      ? userFacingAnswer(message.content)
+      : String(message.content || "");
+    article.append(element("div", { className: "message-body", text: answer }));
 
     if (message.role === "assistant") {
-      const sources = Array.isArray(message.sources) ? message.sources : [];
-      if (sources.length) {
-        const sourceList = element("div", { className: "source-list", attributes: { "aria-label": "回答来源" } });
-        sources.forEach((source, index) => {
-          const button = textButton("", "source-button");
-          button.append(icon("□"), element("span", { text: `[${index + 1}] ${String(source?.title || "参考资料")}` }));
-          button.addEventListener("click", (event) => openSource(source, event.currentTarget));
-          sourceList.append(button);
-        });
-        article.append(sourceList);
-      }
-
       const actions = element("div", { className: "message-actions" });
       const copy = textButton("", "copy-answer");
       copy.setAttribute("aria-label", "复制回答");
       copy.append(icon("□"));
-      copy.addEventListener("click", () => void copyAnswer(String(message.content || ""), section));
+      copy.addEventListener("click", () => void copyAnswer(answer, section));
       const further = textButton("需要进一步交流", "further-inquiry");
       further.addEventListener("click", (event) => openInquiry(event.currentTarget));
       actions.append(copy, further);
@@ -1222,7 +1150,7 @@ function createPublicApp() {
             attributes: { role: "status", "aria-live": "polite" },
           }, [
             icon("◌", "spin"),
-            state.service?.modelReady ? "正在查阅公开资料并组织回答…" : "正在检索公开资料…",
+            "正在整理回答…",
           ]),
         );
       }
@@ -1290,8 +1218,7 @@ function createPublicApp() {
       }));
       const assistant = {
         role: "assistant",
-        content: typeof payload.answer === "string" ? payload.answer : "暂时没有可显示的回答。",
-        sources: Array.isArray(payload.sources) ? payload.sources : [],
+        content: userFacingAnswer(payload.answer),
         mode: payload.mode,
         provider: payload.provider,
       };
@@ -1300,7 +1227,6 @@ function createPublicApp() {
       completed = true;
       return {
         answer: assistant.content,
-        sourceTitles: assistant.sources.map((source) => String(source?.title || "参考资料")),
       };
     } catch (error) {
       session.messages = previousMessages;
