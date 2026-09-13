@@ -126,14 +126,14 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
     assert.ok(script.includes(section), section);
   }
   for (const question of [
-    "从双臂灵巧操作到 3C 精密装配，团队有哪些可落地技术成果？",
-    "试管抓取如何实现随机姿态 96.6% 成功率与 38.4% 效率提升？",
-    "ARTS Robotics 与哪些国内外高校和科研机构开展合作？",
-    "马淦团队有哪些代表性的国际科研经历与合作成果？",
-    "源灵智能如何用 OmindOS 让机器人理解任务、自主行动？",
-    "源灵智能能为机器人厂商和场景集成商提供哪些合作方案？",
-    "智能无人系统创新协会由谁指导，可以连接哪些机器人研究方向？",
-    "协会指导教师所在实验室有哪些公开的竞赛与创新成果？",
+    "四足巡检机器人最近有什么新进展？",
+    "最近公开了哪些机器人技术成果？",
+    "ARTS Robotics 最近公开了哪些研究成果？",
+    "近期有哪些新的科研合作与交流？",
+    "新上线的四个 AI 模块有什么区别？",
+    "OmindOS 最近新增了哪些能力？",
+    "IUS 最近有哪些活动或项目？",
+    "近期开放了哪些学生创新机会？",
   ]) {
     assert.ok(script.includes(question), question);
   }
@@ -186,6 +186,13 @@ test("public chat keeps a minimal topic header and compact message composer", as
   assert.match(script, /rows:\s*["']1["']/u);
   assert.match(script, /placeholder:\s*["']输入消息["']/u);
   assert.match(script, /textButton\(["']发送["'],\s*["']send-button["']\)/u);
+  assert.match(script, /className:\s*["']composer-suggestions["']/u);
+  assert.match(script, /className:\s*["']suggestion-title["'],\s*text:\s*["']聊聊新话题["']/u);
+  assert.match(script, /composerArea\.append\(errorRegion,\s*noticeRegion,\s*suggestionPanel,\s*composer\)/u);
+  assert.match(script, /suggestionPanel\.hidden\s*=\s*session\.messages\.length\s*>\s*0/u);
+  assert.match(script, /function\s+suggestionsForTopic\s*\(/u);
+  assert.match(script, /selected\.length\s*===\s*2/u);
+  assert.doesNotMatch(script, /className:\s*["']suggestion-arrow["']/u);
   for (const removedClass of ["context-panel", "conversation-toolbar", "composer-footer", "site-footer", "topic-select"]) {
     assert.doesNotMatch(script, new RegExp(`className:\\s*["']${removedClass}["']`, "u"), removedClass);
   }
@@ -198,6 +205,10 @@ test("public chat keeps a minimal topic header and compact message composer", as
     assert.equal(script.includes(removedCopy), false, removedCopy);
   }
   assert.match(style, /\.chat-app\s+\.composer\s*\{[\s\S]*?display:\s*flex/u);
+  assert.match(style, /\.chat-app\s+\.composer-suggestions\s*\{[\s\S]*?padding:\s*0 2px 10px/u);
+  assert.match(style, /\.chat-app\s+\.suggestion-button\s*\{[\s\S]*?min-height:\s*44px[\s\S]*?border-radius:\s*15px/u);
+  assert.match(style, /\.chat-app\s+:focus-visible\s*\{[\s\S]*?outline-color:\s*#0b57d0/u);
+  assert.match(style, /\.chat-app\s+\.composer\s+textarea:focus-visible\s*\{[\s\S]*?outline:\s*3px solid #0b57d0/u);
   assert.match(style, /\.chat-app\s+\.composer\s+textarea\s*\{[\s\S]*?min-height:\s*44px[\s\S]*?font-size:\s*16px/u);
   assert.match(style, /\.chat-app\s+\.send-button\s*\{[\s\S]*?height:\s*44px/u);
   assert.ok(script.includes('document.body.classList.add("public-chat-page")'));

@@ -17,9 +17,13 @@ const TOPICS = [
     eyebrow: "TECHNOLOGY & IMPACT",
     heading: "从核心技术到真实场景",
     intro: "了解数字孪生双臂操作、精密装配、智能巡检等成果与产业应用方向。",
-    suggestions: [
-      "从双臂灵巧操作到 3C 精密装配，团队有哪些可落地技术成果？",
-      "试管抓取如何实现随机姿态 96.6% 成功率与 38.4% 效率提升？",
+    featuredSuggestions: [
+      { kind: "latest", text: "四足巡检机器人最近有什么新进展？" },
+      { kind: "latest", text: "最近公开了哪些机器人技术成果？" },
+    ],
+    fallbackSuggestions: [
+      "团队有哪些可落地的机器人技术成果？",
+      "机器人自主移动与操作包含哪些核心能力？",
     ],
   },
   {
@@ -32,9 +36,13 @@ const TOPICS = [
     eyebrow: "RESEARCH & EXCHANGE",
     heading: "与全球研究网络建立连接",
     intro: "了解团队的国际科研经历、合作网络与代表性研究成果。",
-    suggestions: [
-      "ARTS Robotics 与哪些国内外高校和科研机构开展合作？",
-      "马淦团队有哪些代表性的国际科研经历与合作成果？",
+    featuredSuggestions: [
+      { kind: "latest", text: "ARTS Robotics 最近公开了哪些研究成果？" },
+      { kind: "latest", text: "近期有哪些新的科研合作与交流？" },
+    ],
+    fallbackSuggestions: [
+      "ARTS Robotics 主要研究哪些方向？",
+      "团队开展过哪些国内外科研合作？",
     ],
   },
   {
@@ -47,9 +55,13 @@ const TOPICS = [
     eyebrow: "ORIGINMIND",
     heading: "让机器人硬件与 OmindOS 协同工作",
     intro: "了解深圳源灵智能科技有限公司的机器人产品、工程适配与商业合作方案。",
-    suggestions: [
-      "源灵智能如何用 OmindOS 让机器人理解任务、自主行动？",
-      "源灵智能能为机器人厂商和场景集成商提供哪些合作方案？",
+    featuredSuggestions: [
+      { kind: "feature", text: "新上线的四个 AI 模块有什么区别？" },
+      { kind: "feature", text: "OmindOS 最近新增了哪些能力？" },
+    ],
+    fallbackSuggestions: [
+      "源灵智能有哪些机器人产品与解决方案？",
+      "机器人厂商可以怎样与源灵智能合作？",
     ],
   },
   {
@@ -62,9 +74,13 @@ const TOPICS = [
     eyebrow: "STUDENT INNOVATION",
     heading: "让学生创新走进机器人前沿",
     intro: "从协会指导教师与所在实验室出发，了解面向学生的智能无人系统研究方向、竞赛与创新成果。",
-    suggestions: [
-      "智能无人系统创新协会由谁指导，可以连接哪些机器人研究方向？",
-      "协会指导教师所在实验室有哪些公开的竞赛与创新成果？",
+    featuredSuggestions: [
+      { kind: "latest", text: "IUS 最近有哪些活动或项目？" },
+      { kind: "latest", text: "近期开放了哪些学生创新机会？" },
+    ],
+    fallbackSuggestions: [
+      "IUS 主要开展哪些机器人创新实践？",
+      "学生可以怎样参与协会项目？",
     ],
   },
 ];
@@ -77,6 +93,21 @@ const TOPIC_ID_BY_PATH = new Map([
 
 function topicIdForPath(pathname) {
   return TOPIC_ID_BY_PATH.get(pathname) || DEFAULT_TOPIC_ID;
+}
+
+function suggestionsForTopic(topic) {
+  const selected = [];
+  const candidates = [
+    ...(Array.isArray(topic.featuredSuggestions) ? topic.featuredSuggestions.map((item) => item?.text) : []),
+    ...(Array.isArray(topic.fallbackSuggestions) ? topic.fallbackSuggestions : []),
+  ];
+  for (const candidate of candidates) {
+    const text = typeof candidate === "string" ? candidate.trim() : "";
+    if (!text || selected.includes(text)) continue;
+    selected.push(text);
+    if (selected.length === 2) break;
+  }
+  return selected;
 }
 
 const TOPIC_LABELS = Object.freeze({
@@ -433,6 +464,17 @@ function createPublicApp() {
   errorRegion.hidden = true;
   noticeRegion.hidden = true;
 
+  const suggestionPanel = element("section", {
+    className: "composer-suggestions",
+    attributes: { "aria-label": "聊聊新话题" },
+  });
+  const suggestionTitle = element("p", { className: "suggestion-title", text: "聊聊新话题" });
+  const suggestionList = element("div", {
+    className: "suggestions",
+    attributes: { role: "group" },
+  });
+  suggestionPanel.append(suggestionTitle, suggestionList);
+
   const composer = element("form", { className: "composer" });
   const questionLabel = element("label", {
     className: "sr-only",
@@ -453,7 +495,7 @@ function createPublicApp() {
   sendButton.setAttribute("aria-label", "发送问题");
   sendButton.disabled = true;
   composer.append(questionLabel, questionInput, sendButton);
-  composerArea.append(errorRegion, noticeRegion, composer);
+  composerArea.append(errorRegion, noticeRegion, suggestionPanel, composer);
   conversation.append(messageScroll, composerArea);
   layout.append(conversation);
 
@@ -664,24 +706,20 @@ function createPublicApp() {
     void request.catch(() => {});
   }
 
-  function welcomeNode() {
+  function renderSuggestions() {
     const topic = topicFor();
     const section = state.section;
-    const welcome = element("div", { className: "welcome" }, [
-      element("h2", { className: "sr-only", text: topic.title }),
-    ]);
-    const suggestions = element("div", {
-      className: "suggestions",
-      attributes: { role: "group", "aria-label": `${topic.title}精选问题` },
-    });
-    for (const suggestion of topic.suggestions) {
+    const session = sessionFor(section);
+    suggestionPanel.hidden = session.messages.length > 0;
+    suggestionList.replaceChildren();
+    suggestionList.setAttribute("aria-label", `${topic.title}精选问题`);
+    if (suggestionPanel.hidden) return;
+    for (const suggestion of suggestionsForTopic(topic)) {
       const button = textButton("", "suggestion-button");
-      button.append(element("span", { text: suggestion }), icon("›", "suggestion-arrow"));
+      button.append(element("span", { text: suggestion }));
       button.addEventListener("click", () => dispatchQuestion(suggestion, section));
-      suggestions.append(button);
+      suggestionList.append(button);
     }
-    welcome.append(suggestions);
-    return welcome;
   }
 
   function renderMessages({ scrollMode = "restore" } = {}) {
@@ -690,7 +728,7 @@ function createPublicApp() {
     const topic = topicFor(section);
     const restoreTop = session.scrollTop;
     const epoch = ++renderEpoch;
-    const content = element("div", { className: session.messages.length ? "message-list" : "welcome-shell" });
+    const content = element("div", { className: session.messages.length ? "message-list" : "empty-conversation" });
     if (session.messages.length) {
       for (const message of session.messages) content.append(assistantMessageNode(message, section));
       if (session.sending) {
@@ -704,14 +742,13 @@ function createPublicApp() {
           ]),
         );
       }
-    } else {
-      content.append(welcomeNode());
     }
     messageScroll.setAttribute("aria-live", "off");
     messageScroll.replaceChildren(content);
     messageScroll.setAttribute("role", session.messages.length ? "log" : "region");
     messageScroll.setAttribute("aria-label", `${topic.title}对话内容`);
     messageScroll.setAttribute("aria-live", session.messages.length ? "polite" : "off");
+    renderSuggestions();
     newConversation.disabled = session.sending || !hasResettableState(session);
     window.requestAnimationFrame(() => {
       if (state.section !== section || renderEpoch !== epoch) return;
