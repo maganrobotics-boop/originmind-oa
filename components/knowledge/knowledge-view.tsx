@@ -57,6 +57,7 @@ type ReviewDetail = Required<Pick<KnowledgeDetailResponse, "revisions" | "events
 
 const categories = ["技术方案", "实验记录", "设备与操作", "软件与代码", "项目规范", "常见问题", "其他"];
 const emptyDraft = (): KnowledgeDraft => ({ title: "", category: categories[0], summary: "", content: "", sourceLabel: "", sourceUrl: "" });
+const PUBLIC_DATA_ANONYMIZATION_NOTICE = "所有公开的数据需要脱敏处理。脱敏时，论文和学位材料保留摘要、研究方法、实验过程、结果与结论等技术正文，删除封面、参考文献作者表、致谢、评语、签字页等身份信息密集内容；对于扫描件，仅保留匿名化摘要和检索说明，不嵌入含姓名、学号、签名、地址等个人隐私的原始图片。";
 
 const statusMeta: Record<KnowledgeStatus, { label: string; detail: string }> = {
   pending: { label: "待审核", detail: "等待项目负责人或 OA 管理员审核" },
@@ -136,6 +137,10 @@ function LoadingPanel({ label }: { label: string }) {
 
 function ErrorPanel({ message, onRetry }: { message: string; onRetry: () => void }) {
   return <div className="knowledge-error" role="alert"><AlertTriangle className="size-5" /><div><strong>暂时无法加载</strong><p>{message}</p></div><Button type="button" variant="outline" size="sm" onClick={onRetry}><RotateCcw className="size-3.5" />重试</Button></div>;
+}
+
+function KnowledgeAnonymizationNotice() {
+  return <div className="knowledge-submit-note knowledge-anonymization-note" role="note"><ShieldCheck className="size-4" /><p><strong>公开数据脱敏要求</strong>{PUBLIC_DATA_ANONYMIZATION_NOTICE}</p></div>;
 }
 
 function CitationList({ citations, turnId }: { citations: KnowledgeCitation[]; turnId: string }) {
@@ -244,6 +249,7 @@ function KnowledgeSubmitPanel({
         <label className="form-field"><span className="field-label">来源名称 <small>可选</small></span><Input value={draft.sourceLabel} onChange={(event) => setDraft((current) => ({ ...current, sourceLabel: event.target.value }))} placeholder="例如：底盘联调记录 2026-09" maxLength={160} disabled={submitting} /></label>
         <label className="form-field"><span className="field-label">来源链接 <small>可选，仅 http/https</small></span><Input type="url" inputMode="url" value={draft.sourceUrl} onChange={(event) => setDraft((current) => ({ ...current, sourceUrl: event.target.value }))} placeholder="https://…" maxLength={2048} disabled={submitting} /></label>
       </div>
+      <KnowledgeAnonymizationNotice />
       <div className="knowledge-submit-note"><Info className="size-4" /><p><strong>提交前请确认</strong>内容不含个人隐私、账号密码或密钥；审核人批准时会选择仅供 OA 内部使用，或经二次确认后对外公开。</p></div>
       <div className="knowledge-form-actions">{editingItem && <Button type="button" variant="outline" onClick={onCancelEdit} disabled={submitting}>取消修改</Button>}<Button type="submit" className="primary-button" disabled={submitting}>{submitting ? <LoaderCircle className="size-4" /> : <Send className="size-4" />}{submitting ? "提交中" : editingItem ? "重新提交审核" : "提交审核"}</Button></div>
     </form>
@@ -347,6 +353,7 @@ function KnowledgeReviewDialog({ detail, open, loading, error, note, setNote, vi
       {!actionable && savedVisibility && <section><h3>当前可见范围</h3><p><KnowledgeVisibilityBadge item={detail.item} />{savedVisibility === "public" ? " 已供 chat.omindos.ai 的 ARTS Robotics AI assistant 检索使用。" : " 仅已登录并完成准入与保密签署的成员可在 OA 内检索。"}</p></section>}
       <KnowledgeHistory detail={detail} />
       {actionable && <label className="form-field"><span className="field-label">审核意见 <small>退回或拒绝时至少填写 2 个字符</small></span><Textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="说明核对结论，或写清需要修改的具体内容" rows={4} minLength={2} maxLength={1000} disabled={Boolean(actioning)} /></label>}
+      {(actionable || visibilityEditable) && <KnowledgeAnonymizationNotice />}
       {(actionable || visibilityEditable) && <fieldset className="knowledge-visibility-choice" disabled={Boolean(actioning)}><legend>{actionable ? "批准后的可见范围" : "调整可见范围"} <b className="required-mark">*</b></legend><p>{actionable ? "批准前必须选择一个范围；投稿人提交时不会自动决定公开范围。" : "已入库知识可以在对内与公开之间调整；每次调整都会保留审计记录。"}</p><div className="knowledge-visibility-options">
         <label className={visibility === "internal" ? "selected" : ""}><input type="radio" name="knowledge-visibility" value="internal" checked={visibility === "internal"} onChange={() => { setVisibility("internal"); setPublicConfirmation(""); }} /><ShieldCheck className="size-4" /><span><strong>对内</strong><small>仅登录 OA 且完成准入与保密签署的成员可见；在 OA 里提问。</small></span></label>
         <label className={visibility === "public" ? "selected public" : ""}><input type="radio" name="knowledge-visibility" value="public" checked={visibility === "public"} onChange={() => setVisibility("public")} /><Globe2 className="size-4" /><span><strong>对外公开</strong><small>供 chat.omindos.ai 的 ARTS Robotics AI assistant 检索；访客无需登录 OA。</small></span></label>
