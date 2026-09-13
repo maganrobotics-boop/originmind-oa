@@ -5,6 +5,7 @@ const OFFICIAL_SITE = "https://omindos.ai";
 const BAILIAN_CONSOLE = "https://bailian.console.aliyun.com/";
 const OA_KNOWLEDGE_URL = "https://oa.omindos.ai/";
 const OA_CHAT_IMPORT_URL = "https://oa.omindos.ai/api/knowledge/import-chat";
+const OA_CHAT_IMPORT_STATUS_URL = "https://oa.omindos.ai/api/knowledge/import-chat/status";
 const MAX_TEXT_IMPORT_BYTES = 5 * 1024 * 1024;
 const MAX_BINARY_IMPORT_BYTES = 10 * 1024 * 1024;
 const MAX_CHAT_DRAFT_CHARACTERS = 30_000;
@@ -1615,7 +1616,9 @@ function createAdminApp() {
       workersAiReady: false,
     },
     documents: [],
-    importReceipts: {},
+    oaStatusSyncRequired: false,
+    oaStatusSyncing: false,
+    oaStatusSyncQueued: false,
     inquiries: [],
     draft: emptyDraft(),
     returnedKnowledgeItemId: returnedKnowledgeItemIdFromSearch(window.location.search),
@@ -1630,6 +1633,9 @@ function createAdminApp() {
       category: "research",
       updatedAt: new Date().toISOString().slice(0, 10),
       published: 0,
+      draftRevision: null,
+      oaSubmissionState: "unsubmitted",
+      submissionRequestId: "",
     };
   }
 
@@ -1645,6 +1651,7 @@ function createAdminApp() {
     } catch {
       // The OA update has already succeeded; URL cleanup must not turn it into a false failure.
     }
+    void reconcileUnknownDocumentStatuses();
   }
 
   async function submitDocumentToOa(draft, { retainedAsChatDraft = true, submissionContext = null } = {}) {
@@ -1655,6 +1662,37 @@ function createAdminApp() {
     const retryCopy = retainedAsChatDraft
       ? "Chat 草稿已保留"
       : "正文和导入编号仍保留在当前页面";
+    if (retainedAsChatDraft) {
+      if (!Number.isSafeInteger(draft.draftRevision) || draft.draftRevision < 1) {
+        throw new Error("Chat 草稿版本无效，请刷新后重试。");
+      }
+      let checkpoint;
+      try {
+        checkpoint = await adminRequest("documents", jsonOptions({
+          id: draft.id,
+          draftRevision: draft.draftRevision,
+          submissionState: "unknown",
+        }, "PATCH"));
+      } catch {
+        throw new Error("Chat 暂时无法记录提交操作，尚未发送至 OA。请刷新后重试。");
+      }
+      const checkpointDocument = checkpoint?.document;
+      if (!checkpointDocument
+        || checkpointDocument.id !== draft.id
+        || Number(checkpointDocument.draftRevision) !== draft.draftRevision
+        || !["unknown", "submitted"].includes(checkpointDocument.oaSubmissionState)
+        || (checkpointDocument.oaSubmissionState === "submitted"
+          && !SAFE_RETURNED_KNOWLEDGE_ITEM_ID.test(String(checkpointDocument.oaItemId || "")))) {
+        throw new Error("Chat 提交状态返回异常，尚未发送至 OA。请刷新后重试。");
+      }
+      state.documents = state.documents.map((document) => (
+        document.id === draft.id ? { ...document, ...checkpointDocument } : document
+      ));
+      if (checkpointDocument.oaSubmissionState === "submitted") {
+        state.notice = "该版本资料已提交 OA，重复操作不会新增条目。请打开 OA 查看当前审核状态。";
+        return;
+      }
+    }
     let response;
     try {
       response = await fetch(OA_CHAT_IMPORT_URL, {
@@ -1671,13 +1709,60 @@ function createAdminApp() {
         signal: AbortSignal.timeout(120_000),
       });
     } catch {
+      if (retainedAsChatDraft) {
+        state.oaStatusSyncRequired = true;
+        void reconcileUnknownDocumentStatuses();
+      }
       throw new Error(`${retryCopy}，暂未确认进入 OA。请确认已登录 OA 后重试；重复提交不会重复建单。`);
     }
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.error || `${retryCopy}，OA 暂未接收，请稍后重试。`);
+    if (!response.ok) {
+      if (retainedAsChatDraft) {
+        state.oaStatusSyncRequired = true;
+        void reconcileUnknownDocumentStatuses();
+      }
+      throw new Error(result.error || `${retryCopy}，OA 暂未接收，请稍后重试。`);
+    }
     const receipt = oaImportReceipt(result, draft.body);
-    if (!receipt.items.length) throw new Error(`OA 未返回接收记录，${retryCopy}，请重试。`);
-    state.importReceipts[draft.id] = receipt.items;
+    const item = receipt.items.length === 1 ? receipt.items[0] : null;
+    const oaItemId = String(item?.id || "").toLowerCase();
+    if (!item
+      || !SAFE_RETURNED_KNOWLEDGE_ITEM_ID.test(oaItemId)
+      || (returnedKnowledgeItemId && oaItemId !== returnedKnowledgeItemId.toLowerCase())) {
+      if (retainedAsChatDraft) {
+        state.oaStatusSyncRequired = true;
+        void reconcileUnknownDocumentStatuses();
+      }
+      throw new Error(`OA 未返回有效接收记录，${retryCopy}，请刷新后重试。`);
+    }
+    if (retainedAsChatDraft) {
+      let persisted;
+      try {
+        persisted = await adminRequest("documents", jsonOptions({
+          id: draft.id,
+          draftRevision: draft.draftRevision,
+          submissionState: "submitted",
+          oaItemId,
+        }, "PATCH"));
+      } catch {
+        state.oaStatusSyncRequired = true;
+        void reconcileUnknownDocumentStatuses();
+        throw new Error("OA 已接收，但 Chat 未能保存提交状态。请刷新后重试；重复提交不会新增条目。");
+      }
+      const persistedDocument = persisted?.document;
+      if (!persistedDocument
+        || persistedDocument.id !== draft.id
+        || Number(persistedDocument.draftRevision) !== draft.draftRevision
+        || persistedDocument.oaSubmissionState !== "submitted"
+        || String(persistedDocument.oaItemId || "").toLowerCase() !== oaItemId) {
+        state.oaStatusSyncRequired = true;
+        void reconcileUnknownDocumentStatuses();
+        throw new Error("OA 已接收，但 Chat 提交状态返回异常。请刷新后重试；重复提交不会新增条目。");
+      }
+      state.documents = state.documents.map((document) => (
+        document.id === draft.id ? { ...document, ...persistedDocument } : document
+      ));
+    }
     if (returnedKnowledgeItemId) clearReturnedKnowledgeContext(returnedKnowledgeItemId);
     const isLargeDocument = draft.body.length > MAX_CHAT_DRAFT_CHARACTERS;
     state.notice = returnedKnowledgeItemId
@@ -1687,6 +1772,85 @@ function createAdminApp() {
         ? `已提交 OA，作为 1 条资料待审，并存为 ${receipt.partCount} 个片段（每个不超过 20000 字）。Chat 未保留原文件或正文草稿。`
         : `已提交 OA 待审（${receipt.items.length} 条）。在 OA“实验室 AI”的待审核列表中处理，对内或公开由审核时选择。`
       : "OA 已接收过该版本资料，重复提交不会新增条目。请打开 OA 查看当前审核状态。";
+  }
+
+  async function lookupDocumentSubmissionState(document) {
+    const response = await fetch(OA_CHAT_IMPORT_STATUS_URL, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        document: {
+          id: document.id,
+          title: document.title,
+          body: document.body,
+          url: document.url || "",
+          category: document.category,
+          updatedAt: document.updatedAt,
+        },
+      }),
+      signal: AbortSignal.timeout(30_000),
+    });
+    const result = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(result.error || "暂时无法核对 OA 提交状态。");
+    if (result.documentId !== document.id || typeof result.submitted !== "boolean") {
+      throw new Error("OA 提交状态返回异常。");
+    }
+    const oaItemId = result.submitted ? String(result.item?.id || "") : "";
+    if (result.submitted && !SAFE_RETURNED_KNOWLEDGE_ITEM_ID.test(oaItemId)) {
+      throw new Error("OA 提交状态返回异常。");
+    }
+    const persisted = await adminRequest("documents", jsonOptions({
+      id: document.id,
+      draftRevision: document.draftRevision,
+      submissionState: result.submitted ? "submitted" : "unsubmitted",
+      ...(result.submitted ? { oaItemId } : {}),
+    }, "PATCH"));
+    const persistedDocument = persisted?.document;
+    const expectedState = result.submitted ? "submitted" : "unsubmitted";
+    if (!persistedDocument
+      || persistedDocument.id !== document.id
+      || Number(persistedDocument.draftRevision) !== document.draftRevision
+      || persistedDocument.oaSubmissionState !== expectedState
+      || (result.submitted && String(persistedDocument.oaItemId || "").toLowerCase() !== oaItemId.toLowerCase())) {
+      throw new Error("Chat 提交状态返回异常。");
+    }
+    state.documents = state.documents.map((candidate) => (
+      candidate.id === document.id ? { ...candidate, ...persistedDocument } : candidate
+    ));
+  }
+
+  async function reconcileUnknownDocumentStatuses() {
+    const unknown = state.documents.filter((document) => document.oaSubmissionState === "unknown");
+    if (!unknown.length) {
+      state.oaStatusSyncRequired = false;
+      return;
+    }
+    if (state.returnedKnowledgeItemId) return;
+    if (state.oaStatusSyncing) {
+      state.oaStatusSyncQueued = true;
+      return;
+    }
+    state.oaStatusSyncing = true;
+    state.oaStatusSyncQueued = false;
+    let failed = false;
+    try {
+      for (let index = 0; index < unknown.length; index += 5) {
+        const results = await Promise.allSettled(unknown.slice(index, index + 5).map(lookupDocumentSubmissionState));
+        if (results.some((result) => result.status === "rejected")) failed = true;
+        if (!state.loading) renderAdminShell();
+      }
+    } catch {
+      failed = true;
+    } finally {
+      state.oaStatusSyncRequired = failed
+        || state.documents.some((document) => document.oaSubmissionState === "unknown");
+      const rerun = state.oaStatusSyncQueued;
+      state.oaStatusSyncQueued = false;
+      state.oaStatusSyncing = false;
+      if (!state.loading) renderAdminShell();
+      if (rerun && !state.returnedKnowledgeItemId) void reconcileUnknownDocumentStatuses();
+    }
   }
 
   async function fetchAdminData(initial = false) {
@@ -1701,6 +1865,10 @@ function createAdminApp() {
       apiKey: "",
     };
     state.documents = Array.isArray(documentPayload.documents) ? documentPayload.documents : [];
+    if (!state.documents.some((document) => document.oaSubmissionState === "unknown")) {
+      state.oaStatusSyncRequired = false;
+    }
+    void reconcileUnknownDocumentStatuses();
     state.inquiries = Array.isArray(inquiryPayload.inquiries) ? inquiryPayload.inquiries : [];
     if (initial && !state.initialized) {
       state.activeTab = state.returnedKnowledgeItemId ? "documents" : state.config.keyConfigured ? "inquiries" : "model";
@@ -2226,9 +2394,12 @@ function createAdminApp() {
         if (normalizedBody.trim().length < 10) throw new Error("正文至少需要 10 个字符。");
         state.draft.body = normalizedBody;
         const returnedKnowledgeItemId = state.returnedKnowledgeItemId;
+        if (!returnedKnowledgeItemId && state.draft.id && normalizedBody.length > MAX_CHAT_DRAFT_CHARACTERS) {
+          throw new Error("已有 Chat 草稿不能直接改为超过 30000 字。请取消编辑后，将大文档作为新资料直接提交 OA。");
+        }
         if (returnedKnowledgeItemId || normalizedBody.length > MAX_CHAT_DRAFT_CHARACTERS) {
-          const id = state.draft.id || makeRequestId();
-          state.draft.id = id;
+          const id = state.draft.id || state.draft.submissionRequestId || makeRequestId();
+          state.draft.submissionRequestId = id;
           await submitDocumentToOa({ ...state.draft, id }, {
             retainedAsChatDraft: false,
             ...(returnedKnowledgeItemId ? { submissionContext: { returnedKnowledgeItemId } } : {}),
@@ -2239,6 +2410,7 @@ function createAdminApp() {
         const draft = { ...state.draft };
         const saved = await adminRequest("documents", jsonOptions({
           ...(state.draft.id ? { id: state.draft.id } : {}),
+          ...(state.draft.id ? { draftRevision: state.draft.draftRevision } : {}),
           title: state.draft.title,
           body: normalizedBody,
           url: state.draft.url,
@@ -2246,11 +2418,12 @@ function createAdminApp() {
           updatedAt: state.draft.updatedAt,
           published: 0,
         }));
-        delete state.importReceipts[saved.id];
         const payload = await adminRequest("documents");
         state.documents = Array.isArray(payload.documents) ? payload.documents : [];
         state.draft = emptyDraft();
-        await submitDocumentToOa({ ...draft, id: saved.id });
+        const savedDocument = state.documents.find((document) => document.id === saved.id);
+        if (!savedDocument) throw new Error("资料已保存，但暂时无法读取，请刷新后重试。");
+        await submitDocumentToOa({ ...draft, ...savedDocument });
       });
     });
     editor.append(form);
@@ -2261,6 +2434,12 @@ function createAdminApp() {
       element("h2", { text: `资料列表 · ${state.documents.length}` }),
       externalLink("打开 OA 登录／查看待审核", OA_KNOWLEDGE_URL, "primary-link"),
     );
+    if (state.oaStatusSyncRequired) {
+      list.append(element("p", {
+        className: "admin-notice",
+        text: "部分历史资料尚未核对。请先在同一浏览器登录 OA，再刷新本页；核对不会提交资料。",
+      }));
+    }
     if (state.returnedKnowledgeItemId) {
       list.append(element("div", {
         className: "admin-empty",
@@ -2272,34 +2451,55 @@ function createAdminApp() {
       for (const document of state.documents) {
         const article = element("article", { className: "admin-item" });
         const head = element("div", { className: "admin-item-head" });
+        const submissionState = document.oaSubmissionState === "submitted"
+          ? "submitted"
+          : document.oaSubmissionState === "unsubmitted"
+            ? "unsubmitted"
+            : "unknown";
+        const submissionLabel = submissionState === "submitted"
+          ? "OA 待审核"
+          : submissionState === "unsubmitted"
+            ? "待提交 OA 审核"
+            : "待核对 OA 状态";
         head.append(
           element("div", {}, [
             element("h3", { text: String(document.title || "未命名资料") }),
             element("p", {
-              text: `${TOPIC_LABELS[document.category] || "未分类"} · ${String(document.updatedAt || "未标注")} · ${state.importReceipts[document.id] ? "OA 已接收" : "Chat 草稿，可提交 OA"}`,
+              text: `${TOPIC_LABELS[document.category] || "未分类"} · ${String(document.updatedAt || "未标注")} · ${submissionLabel}`,
             }),
           ]),
         );
-        const edit = textButton("编辑", "secondary-button small-button");
-        edit.disabled = Boolean(state.busy);
-        edit.addEventListener("click", () => {
-          state.draft = {
-            id: String(document.id || ""),
-            title: String(document.title || ""),
-            body: String(document.body || ""),
-            url: String(document.url || ""),
-            category: TOPIC_LABELS[document.category] ? document.category : "research",
-            updatedAt: String(document.updatedAt || emptyDraft().updatedAt),
-            published: 0,
-          };
-          renderAdminShell();
-          window.scrollTo({ top: 0, behavior: "smooth" });
-        });
-        head.append(edit);
-        const submit = textButton(state.busy === `submit-${document.id}` ? "正在提交…" : "提交 OA 待审", "primary-button small-button");
-        submit.disabled = Boolean(state.busy);
-        submit.addEventListener("click", () => { void runAdminAction(`submit-${document.id}`, () => submitDocumentToOa(document)); });
-        head.append(submit);
+        if (submissionState === "unsubmitted") {
+          const edit = textButton("编辑", "secondary-button small-button");
+          edit.disabled = Boolean(state.busy);
+          edit.addEventListener("click", () => {
+            state.draft = {
+              id: String(document.id || ""),
+              title: String(document.title || ""),
+              body: String(document.body || ""),
+              url: String(document.url || ""),
+              category: TOPIC_LABELS[document.category] ? document.category : "research",
+              updatedAt: String(document.updatedAt || emptyDraft().updatedAt),
+              published: 0,
+              draftRevision: Number(document.draftRevision),
+              oaSubmissionState: "unsubmitted",
+              submissionRequestId: "",
+            };
+            renderAdminShell();
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          });
+          head.append(edit);
+          const submit = textButton(state.busy === `submit-${document.id}` ? "正在提交…" : "提交 OA 待审", "primary-button small-button");
+          submit.disabled = Boolean(state.busy);
+          submit.addEventListener("click", () => { void runAdminAction(`submit-${document.id}`, () => submitDocumentToOa(document)); });
+          head.append(submit);
+        } else {
+          head.append(externalLink(
+            submissionState === "submitted" ? "查看 OA" : "登录 OA 核对",
+            OA_KNOWLEDGE_URL,
+            "secondary-button small-button",
+          ));
+        }
         const documentBody = String(document.body || "");
         article.append(
           head,

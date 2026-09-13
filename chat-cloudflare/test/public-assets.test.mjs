@@ -65,26 +65,108 @@ async function frontendImportHelpers() {
   );
 }
 
-async function frontendReturnedImportHarness({ ok, payload }) {
+async function frontendReturnedImportHarness({
+  ok,
+  payload,
+  returnedKnowledgeItemId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+  initialOaSubmissionState = "unsubmitted",
+  failSubmittedPatchCount = 0,
+  deferStatus = false,
+}) {
   const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
   const start = script.indexOf("function clearReturnedKnowledgeContext");
-  const end = script.indexOf("async function fetchAdminData", start);
+  const end = script.indexOf("async function runAdminAction", start);
   assert.ok(start >= 0 && end > start, "returned-import lifecycle must remain directly testable");
-  const calls = { request: null, replacedUrl: "" };
-  const state = {
-    returnedKnowledgeItemId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
-    importReceipts: {},
-    notice: "",
+  const draft = {
+    id: "11111111-2222-4333-8444-555555555555",
+    title: "修订稿",
+    body: "已按审核意见修改后的正文内容。",
+    url: "",
+    category: "research",
+    updatedAt: "2026-09-13",
+    draftRevision: 3,
+    oaSubmissionState: initialOaSubmissionState,
+    submissionRequestId: "",
   };
-  const api = runInNewContext(`${script.slice(start, end)}\n({ submitDocumentToOa });`, {
+  const calls = {
+    request: null,
+    requestUrl: "",
+    importRequests: [],
+    statusRequests: [],
+    adminRequests: [],
+    events: [],
+    renders: 0,
+    replacedUrl: "",
+  };
+  const state = {
+    returnedKnowledgeItemId,
+    notice: "",
+    documents: [draft],
+    oaStatusSyncRequired: false,
+    oaStatusSyncing: false,
+    loading: false,
+    config: { keyConfigured: false },
+    inquiries: [],
+    initialized: false,
+    activeTab: "inquiries",
+  };
+  let remainingSubmittedPatchFailures = failSubmittedPatchCount;
+  const api = runInNewContext(`${script.slice(start, end)}\n({ submitDocumentToOa, fetchAdminData });`, {
     state,
     OA_CHAT_IMPORT_URL: "https://oa.omindos.ai/api/knowledge/import-chat",
+    OA_CHAT_IMPORT_STATUS_URL: "https://oa.omindos.ai/api/knowledge/import-chat/status",
     MAX_CHAT_DRAFT_CHARACTERS: 30_000,
     SAFE_RETURNED_KNOWLEDGE_ITEM_ID: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     AbortSignal,
-    fetch: async (_url, options) => {
-      calls.request = JSON.parse(options.body);
+    fetch: async (url, options) => {
+      const request = JSON.parse(options.body);
+      if (url === "https://oa.omindos.ai/api/knowledge/import-chat/status") {
+        calls.statusRequests.push(request);
+        calls.events.push("oa:status");
+        if (deferStatus) return new Promise(() => {});
+        return {
+          ok: true,
+          json: async () => ({ documentId: request.document.id, submitted: false }),
+        };
+      }
+      calls.requestUrl = url;
+      calls.request = request;
+      calls.importRequests.push(request);
+      calls.events.push("oa:import");
       return { ok, json: async () => payload };
+    },
+    jsonOptions: (body, method = "POST") => ({
+      method,
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    }),
+    adminRequest: async (endpoint, options = {}) => {
+      if (!options.method) {
+        if (endpoint === "config") return { keyConfigured: false };
+        if (endpoint === "documents") return { documents: state.documents };
+        if (endpoint === "inquiries") return { inquiries: [] };
+      }
+      const request = {
+        endpoint,
+        method: options.method || "GET",
+        body: options.body ? JSON.parse(options.body) : null,
+      };
+      calls.adminRequests.push(request);
+      calls.events.push(`chat:${request.body?.submissionState || request.method.toLowerCase()}`);
+      if (request.body?.submissionState === "submitted" && remainingSubmittedPatchFailures > 0) {
+        remainingSubmittedPatchFailures -= 1;
+        throw new Error("Chat PATCH failed");
+      }
+      const current = state.documents.find((document) => document.id === request.body?.id) || draft;
+      return {
+        saved: true,
+        document: {
+          ...current,
+          oaSubmissionState: request.body?.submissionState || current.oaSubmissionState,
+          oaItemId: request.body?.oaItemId || "",
+          oaSubmittedAt: "2026-09-13T06:00:00.000Z",
+        },
+      };
     },
     oaImportReceipt: (result) => ({ items: result.item ? [result.item] : [], partCount: Number(result.partCount) || 1 }),
     withoutReturnedKnowledgeItemQuery: (href) => {
@@ -99,8 +181,8 @@ async function frontendReturnedImportHarness({ ok, payload }) {
         replaceState: (_state, _title, url) => { calls.replacedUrl = url; },
       },
     },
+    renderAdminShell: () => { calls.renders += 1; },
   });
-  const draft = { id: "11111111-2222-4333-8444-555555555555", title: "修订稿", body: "已按审核意见修改后的正文内容。", url: "", category: "research", updatedAt: "2026-09-13" };
   return { api, calls, draft, state };
 }
 
@@ -235,18 +317,43 @@ test("returned-import context survives failure and is cleared only after OA ackn
 });
 
 test("local drafts never inherit an unrelated returned-import context", async () => {
+  const oaItemId = "22222222-3333-4444-8555-666666666666";
   const local = await frontendReturnedImportHarness({
     ok: true,
-    payload: { item: { id: "new-item", status: "pending" }, partCount: 1 },
+    payload: { item: { id: oaItemId, status: "pending" }, partCount: 1 },
   });
   await local.api.submitDocumentToOa(local.draft);
+  assert.equal(local.calls.requestUrl, "https://oa.omindos.ai/api/knowledge/import-chat");
   assert.equal(Object.hasOwn(local.calls.request, "returnedKnowledgeItemId"), false);
+  assert.equal(local.calls.adminRequests.length, 2);
+  assert.deepEqual(local.calls.adminRequests[0], {
+    endpoint: "documents",
+    method: "PATCH",
+    body: {
+      id: local.draft.id,
+      draftRevision: local.draft.draftRevision,
+      submissionState: "unknown",
+    },
+  });
+  assert.deepEqual(local.calls.adminRequests[1], {
+    endpoint: "documents",
+    method: "PATCH",
+    body: {
+      id: local.draft.id,
+      draftRevision: local.draft.draftRevision,
+      submissionState: "submitted",
+      oaItemId,
+    },
+  });
+  assert.deepEqual(local.calls.events, ["chat:unknown", "oa:import", "chat:submitted"]);
+  assert.equal(local.state.documents[0].oaSubmissionState, "submitted");
+  assert.equal(local.state.documents[0].oaItemId, oaItemId);
   assert.equal(local.state.returnedKnowledgeItemId, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
   assert.equal(local.calls.replacedUrl, "");
 
   const invalid = await frontendReturnedImportHarness({
     ok: true,
-    payload: { item: { id: "new-item", status: "pending" }, partCount: 1 },
+    payload: { item: { id: oaItemId, status: "pending" }, partCount: 1 },
   });
   await assert.rejects(
     () => invalid.api.submitDocumentToOa(invalid.draft, {
@@ -255,6 +362,58 @@ test("local drafts never inherit an unrelated returned-import context", async ()
     /退回资料上下文无效/u,
   );
   assert.equal(invalid.calls.request, null);
+  assert.equal(invalid.calls.adminRequests.length, 0);
+});
+
+test("a failed final Chat PATCH leaves the draft unknown and starts OA reconciliation", async () => {
+  const uncertain = await frontendReturnedImportHarness({
+    ok: true,
+    payload: {
+      item: { id: "22222222-3333-4444-8555-666666666666", status: "pending" },
+      partCount: 1,
+    },
+    returnedKnowledgeItemId: "",
+    failSubmittedPatchCount: 1,
+    deferStatus: true,
+  });
+
+  await assert.rejects(
+    () => uncertain.api.submitDocumentToOa(uncertain.draft),
+    /OA 已接收，但 Chat 未能保存提交状态/u,
+  );
+  assert.deepEqual(uncertain.calls.events, [
+    "chat:unknown",
+    "oa:import",
+    "chat:submitted",
+    "oa:status",
+  ]);
+  assert.equal(uncertain.calls.importRequests.length, 1);
+  assert.equal(uncertain.calls.statusRequests.length, 1);
+  assert.equal(uncertain.state.documents[0].oaSubmissionState, "unknown");
+  assert.equal(uncertain.state.oaStatusSyncRequired, true);
+  assert.equal(uncertain.state.oaStatusSyncing, true);
+});
+
+test("initial admin loading starts legacy OA reconciliation without awaiting it", async () => {
+  const legacy = await frontendReturnedImportHarness({
+    ok: true,
+    payload: {},
+    returnedKnowledgeItemId: "",
+    initialOaSubmissionState: "unknown",
+    deferStatus: true,
+  });
+
+  await legacy.api.fetchAdminData(true);
+  assert.equal(legacy.state.initialized, true);
+  assert.equal(legacy.calls.statusRequests.length, 1);
+  assert.equal(legacy.state.oaStatusSyncing, true);
+
+  const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
+  const start = script.indexOf("async function fetchAdminData");
+  const end = script.indexOf("async function runAdminAction", start);
+  const fetchAdminDataSource = script.slice(start, end);
+  assert.match(fetchAdminDataSource, /void reconcileUnknownDocumentStatuses\(\)/u);
+  assert.doesNotMatch(fetchAdminDataSource, /await reconcileUnknownDocumentStatuses\(\)/u);
 });
 
 test("vanilla frontend preserves every same-origin API and visibility contract", async () => {
@@ -328,19 +487,35 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.doesNotMatch(script, /await file\.text\(\)/u);
   assert.doesNotMatch(script, /id:\s*["']document-body["'][\s\S]{0,160}maxlength:\s*["']30000["']/u);
   assert.match(script, /signal:\s*AbortSignal\.timeout\(120_000\)/u);
-  assert.match(script, /const id = state\.draft\.id \|\| makeRequestId\(\)/u);
+  assert.match(script, /submissionRequestId:\s*["']["']/u);
+  assert.match(script, /if \(!returnedKnowledgeItemId && state\.draft\.id && normalizedBody\.length > MAX_CHAT_DRAFT_CHARACTERS\)[\s\S]*?已有 Chat 草稿不能直接改为超过 30000 字/u);
+  assert.match(script, /const id = state\.draft\.id \|\| state\.draft\.submissionRequestId \|\| makeRequestId\(\)/u);
+  assert.match(script, /state\.draft\.submissionRequestId = id/u);
   assert.match(script, /await submitDocumentToOa\(\{ \.\.\.state\.draft, id \}, \{[\s\S]*?submissionContext: \{ returnedKnowledgeItemId \}[\s\S]*?\}\);[\s\S]*?state\.draft = emptyDraft\(\)/u);
   assert.match(script, /if \(returnedKnowledgeItemId \|\| normalizedBody\.length > MAX_CHAT_DRAFT_CHARACTERS\)[\s\S]*?await submitDocumentToOa[\s\S]*?return;[\s\S]*?adminRequest\("documents"/u);
-  const submitToOa = script.slice(script.indexOf("async function submitDocumentToOa"), script.indexOf("async function fetchAdminData"));
+  const directSubmitStart = script.indexOf("if (returnedKnowledgeItemId || normalizedBody.length > MAX_CHAT_DRAFT_CHARACTERS)");
+  const directSubmitEnd = script.indexOf("const draft = { ...state.draft }", directSubmitStart);
+  assert.ok(directSubmitStart >= 0 && directSubmitEnd > directSubmitStart);
+  assert.doesNotMatch(script.slice(directSubmitStart, directSubmitEnd), /state\.draft\.id\s*=\s*id/u);
+  const submitToOa = script.slice(script.indexOf("async function submitDocumentToOa"), script.indexOf("async function lookupDocumentSubmissionState"));
   assert.doesNotMatch(submitToOa, /state\.returnedKnowledgeItemId/u);
   assert.match(submitToOa, /\.\.\.\(returnedKnowledgeItemId \? \{ returnedKnowledgeItemId \} : \{\}\)/u);
+  const checkpointIndex = submitToOa.indexOf('submissionState: "unknown"');
+  const oaPostIndex = submitToOa.indexOf("fetch(OA_CHAT_IMPORT_URL");
+  assert.ok(checkpointIndex >= 0 && oaPostIndex > checkpointIndex);
+  assert.match(script, /Promise\.allSettled\(unknown\.slice\(index, index \+ 5\)\.map\(lookupDocumentSubmissionState\)\)/u);
+  assert.match(script, /if \(state\.oaStatusSyncing\)[\s\S]*?state\.oaStatusSyncQueued = true/u);
+  assert.match(script, /if \(rerun && !state\.returnedKnowledgeItemId\) void reconcileUnknownDocumentStatuses\(\)/u);
   assert.equal(submitToOa.match(/clearReturnedKnowledgeContext\(returnedKnowledgeItemId\)/gu)?.length, 1);
-  assert.ok(submitToOa.indexOf("clearReturnedKnowledgeContext(returnedKnowledgeItemId)") > submitToOa.indexOf("if (!receipt.items.length) throw"));
+  assert.ok(submitToOa.indexOf("clearReturnedKnowledgeContext(returnedKnowledgeItemId)") > submitToOa.indexOf("const oaItemId"));
   assert.match(script, /state\.returnedKnowledgeItemId = "";[\s\S]*?history\.replaceState[\s\S]*?withoutReturnedKnowledgeItemQuery/u);
   assert.match(script, /if \(state\.returnedKnowledgeItemId\) \{[\s\S]*?本地草稿已暂时隐藏，不能编辑或提交[\s\S]*?\} else if \(!state\.documents\.length\)/u);
   assert.match(script, /submitDocumentToOa\(document\)\);/u);
   const externalApis = [...script.matchAll(/https?:\/\/[^\s"'`]+\/api\/[^\s"'`]+/giu)].map((match) => match[0]);
-  assert.deepEqual(externalApis, ["https://oa.omindos.ai/api/knowledge/import-chat"]);
+  assert.deepEqual(externalApis, [
+    "https://oa.omindos.ai/api/knowledge/import-chat",
+    "https://oa.omindos.ai/api/knowledge/import-chat/status",
+  ]);
 
   for (const forbidden of [
     "马教授 AI 助手",
@@ -352,6 +527,32 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
     assert.equal(script.includes(forbidden), false, forbidden);
   }
   assert.doesNotMatch(script, /\bpublished\s*:\s*(?:1|true)\b/u);
+});
+
+test("document rows show exact persisted OA labels and submit only unsubmitted drafts", async () => {
+  const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
+  const start = script.indexOf("function renderDocumentsPanel");
+  const end = script.indexOf("function parseTranscript", start);
+  assert.ok(start >= 0 && end > start, "document panel must remain directly testable");
+  const panel = script.slice(start, end);
+
+  assert.match(
+    panel,
+    /const submissionLabel = submissionState === "submitted"\s*\? "OA 待审核"\s*: submissionState === "unsubmitted"\s*\? "待提交 OA 审核"/u,
+  );
+  assert.equal((panel.match(/["']OA 待审核["']/gu) || []).length, 1);
+  assert.equal((panel.match(/["']待提交 OA 审核["']/gu) || []).length, 1);
+
+  const guardStart = panel.indexOf('if (submissionState === "unsubmitted")');
+  const otherStateStart = panel.indexOf("} else {", guardStart);
+  const rowBodyStart = panel.indexOf("const documentBody", otherStateStart);
+  assert.ok(guardStart >= 0 && otherStateStart > guardStart && rowBodyStart > otherStateStart);
+  const unsubmittedActions = panel.slice(guardStart, otherStateStart);
+  const otherStateActions = panel.slice(otherStateStart, rowBodyStart);
+  assert.match(unsubmittedActions, /textButton\([^)]*"提交 OA 待审"/u);
+  assert.match(unsubmittedActions, /submitDocumentToOa\(document\)/u);
+  assert.doesNotMatch(otherStateActions, /提交 OA 待审|submitDocumentToOa\(document\)/u);
+  assert.equal((panel.match(/submitDocumentToOa\(document\)/gu) || []).length, 1);
 });
 
 test("public topics keep independent view state without a duplicate welcome avatar", async () => {

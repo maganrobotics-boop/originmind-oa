@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { readdirSync, readFileSync } from "node:fs";
+import { DatabaseSync } from "node:sqlite";
 import test from "node:test";
 
 import { handleRequest } from "../src/app.mjs";
@@ -487,6 +488,334 @@ test("Chat admin cannot publish documents directly", async (t) => {
   assert.match(result.body.error, /OA 审核/u);
   const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM documents").first();
   assert.equal(Number(count.n), 0);
+});
+
+test("the document submission migration preserves legacy rows as unknown", (t) => {
+  const sqlite = new DatabaseSync(":memory:");
+  t.after(() => sqlite.close());
+  sqlite.exec(readFileSync(new URL("../migrations/0001_initial.sql", import.meta.url), "utf8"));
+  sqlite.prepare(`
+    INSERT INTO documents (id,title,body,url,category,updated_at,published)
+    VALUES (?,?,?,?,?,?,?)
+  `).run(
+    "legacy-document",
+    "迁移前资料",
+    "这是一条在 OA 提交状态字段出现前保存的历史资料。",
+    "",
+    "research",
+    "2026-09-12",
+    0,
+  );
+
+  sqlite.exec(readFileSync(new URL("../migrations/0002_document_oa_submission_state.sql", import.meta.url), "utf8"));
+  const legacy = sqlite.prepare(`
+    SELECT oa_submission_state AS oaSubmissionState,
+           oa_item_id AS oaItemId,
+           oa_submitted_at AS oaSubmittedAt,
+           draft_revision AS draftRevision
+    FROM documents WHERE id = ?
+  `).get("legacy-document");
+
+  assert.deepEqual({ ...legacy }, {
+    oaSubmissionState: "unknown",
+    oaItemId: null,
+    oaSubmittedAt: null,
+    draftRevision: 1,
+  });
+});
+
+test("Chat document OA submission state persists across refresh and is CAS protected", async (t) => {
+  const env = makeEnvironment();
+  t.after(() => env.DB.close());
+  const token = "8".repeat(64);
+  const cookie = `__Host-ma-session=${token}`;
+  await env.DB.prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+    .bind(await sha256Hex(token), Date.now() + 60_000)
+    .run();
+
+  const created = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    method: "POST",
+    cookie,
+    body: {
+      title: "OA 状态持久化资料",
+      body: "这是尚未提交 OA、用于验证状态持久化的资料正文。",
+      url: "",
+      category: "research",
+      updatedAt: "2026-09-13",
+      published: 0,
+    },
+  }), env, {}, runtime()));
+  assert.equal(created.status, 200);
+  assert.equal(created.body.oaSubmissionState, "unsubmitted");
+  assert.equal(created.body.draftRevision, 1);
+  const documentId = created.body.id;
+
+  const initialRefresh = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    cookie,
+    origin: null,
+  }), env, {}, runtime()));
+  assert.equal(initialRefresh.status, 200);
+  assert.equal(initialRefresh.body.documents.length, 1);
+  assert.deepEqual(
+    {
+      state: initialRefresh.body.documents[0].oaSubmissionState,
+      itemId: initialRefresh.body.documents[0].oaItemId,
+      submittedAt: initialRefresh.body.documents[0].oaSubmittedAt,
+      revision: initialRefresh.body.documents[0].draftRevision,
+    },
+    { state: "unsubmitted", itemId: null, submittedAt: null, revision: 1 },
+  );
+
+  const editedBody = "这是保存后的第二版正文，用于证明旧版本回执不能覆盖当前版本。";
+  const edited = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    method: "POST",
+    cookie,
+    body: {
+      id: documentId,
+      draftRevision: 1,
+      title: "OA 状态持久化资料",
+      body: editedBody,
+      url: "",
+      category: "research",
+      updatedAt: "2026-09-13",
+      published: 0,
+    },
+  }), env, {}, runtime()));
+  assert.equal(edited.status, 200);
+  assert.equal(edited.body.draftRevision, 2);
+  assert.equal(edited.body.oaSubmissionState, "unsubmitted");
+
+  const oaItemId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const staleReceipt = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    method: "PATCH",
+    cookie,
+    body: {
+      id: documentId,
+      draftRevision: 1,
+      submissionState: "submitted",
+      oaItemId,
+    },
+  }), env, {}, runtime()));
+  assert.equal(staleReceipt.status, 409);
+  assert.match(staleReceipt.body.error, /版本已变化/u);
+
+  const submitted = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    method: "PATCH",
+    cookie,
+    body: {
+      id: documentId,
+      draftRevision: 2,
+      submissionState: "submitted",
+      oaItemId,
+    },
+  }), env, {}, runtime()));
+  assert.equal(submitted.status, 200);
+  assert.equal(submitted.body.document.oaSubmissionState, "submitted");
+  assert.equal(submitted.body.document.oaItemId, oaItemId);
+  assert.match(submitted.body.document.oaSubmittedAt, /^\d{4}-\d{2}-\d{2}T/u);
+  const submittedAt = submitted.body.document.oaSubmittedAt;
+
+  const refreshed = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    cookie,
+    origin: null,
+  }), env, {}, runtime()));
+  assert.equal(refreshed.status, 200);
+  assert.equal(refreshed.body.documents[0].oaSubmissionState, "submitted");
+  assert.equal(refreshed.body.documents[0].oaItemId, oaItemId);
+  assert.equal(refreshed.body.documents[0].oaSubmittedAt, submittedAt);
+  assert.equal(refreshed.body.documents[0].draftRevision, 2);
+
+  const repeatedReceipt = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    method: "PATCH",
+    cookie,
+    body: {
+      id: documentId,
+      draftRevision: 2,
+      submissionState: "submitted",
+      oaItemId,
+    },
+  }), env, {}, runtime()));
+  assert.equal(repeatedReceipt.status, 200);
+  assert.equal(repeatedReceipt.body.document.oaSubmittedAt, submittedAt);
+
+  const downgrade = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    method: "PATCH",
+    cookie,
+    body: {
+      id: documentId,
+      draftRevision: 2,
+      submissionState: "unsubmitted",
+    },
+  }), env, {}, runtime()));
+  assert.equal(downgrade.status, 409);
+  assert.match(downgrade.body.error, /不能改回未提交状态/u);
+
+  const editSubmitted = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    method: "POST",
+    cookie,
+    body: {
+      id: documentId,
+      draftRevision: 2,
+      title: "不应保存的新标题",
+      body: "这段内容不应覆盖已经提交 OA 的资料正文。",
+      url: "",
+      category: "research",
+      updatedAt: "2026-09-13",
+      published: 0,
+    },
+  }), env, {}, runtime()));
+  assert.equal(editSubmitted.status, 409);
+  assert.match(editSubmitted.body.error, /已提交 OA/u);
+
+  const stored = await env.DB.prepare(`
+    SELECT title,body,oa_submission_state AS oaSubmissionState,
+           oa_item_id AS oaItemId,oa_submitted_at AS oaSubmittedAt,
+           draft_revision AS draftRevision
+    FROM documents WHERE id=?
+  `).bind(documentId).first();
+  assert.deepEqual({ ...stored }, {
+    title: "OA 状态持久化资料",
+    body: editedBody,
+    oaSubmissionState: "submitted",
+    oaItemId,
+    oaSubmittedAt: submittedAt,
+    draftRevision: 2,
+  });
+});
+
+test("Chat document unknown checkpoints persist and resolve through revision CAS", async (t) => {
+  const env = makeEnvironment();
+  t.after(() => env.DB.close());
+  const token = "7".repeat(64);
+  const cookie = `__Host-ma-session=${token}`;
+  await env.DB.prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+    .bind(await sha256Hex(token), Date.now() + 60_000)
+    .run();
+
+  async function createDocument(title) {
+    return responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+      method: "POST",
+      cookie,
+      body: {
+        title,
+        body: `这是 ${title} 的完整测试正文，用于验证 OA 核对检查点。`,
+        url: "",
+        category: "research",
+        updatedAt: "2026-09-13",
+        published: 0,
+      },
+    }), env, {}, runtime()));
+  }
+
+  async function patchSubmission(id, draftRevision, submissionState, oaItemId) {
+    return responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+      method: "PATCH",
+      cookie,
+      body: {
+        id,
+        draftRevision,
+        submissionState,
+        ...(oaItemId ? { oaItemId } : {}),
+      },
+    }), env, {}, runtime()));
+  }
+
+  const submitCandidate = await createDocument("核对后确认已提交");
+  assert.equal(submitCandidate.status, 200);
+  assert.equal(submitCandidate.body.oaSubmissionState, "unsubmitted");
+  const submittedDocumentId = submitCandidate.body.id;
+
+  const submittedCheckpoint = await patchSubmission(submittedDocumentId, 1, "unknown");
+  assert.equal(submittedCheckpoint.status, 200);
+  assert.deepEqual(
+    {
+      state: submittedCheckpoint.body.document.oaSubmissionState,
+      itemId: submittedCheckpoint.body.document.oaItemId,
+      submittedAt: submittedCheckpoint.body.document.oaSubmittedAt,
+      revision: submittedCheckpoint.body.document.draftRevision,
+    },
+    { state: "unknown", itemId: null, submittedAt: null, revision: 1 },
+  );
+
+  const checkpointRefresh = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    cookie,
+    origin: null,
+  }), env, {}, runtime()));
+  const refreshedUnknown = checkpointRefresh.body.documents.find((document) => document.id === submittedDocumentId);
+  assert.equal(checkpointRefresh.status, 200);
+  assert.equal(refreshedUnknown.oaSubmissionState, "unknown");
+  assert.equal(refreshedUnknown.draftRevision, 1);
+
+  const editUnknown = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    method: "POST",
+    cookie,
+    body: {
+      id: submittedDocumentId,
+      draftRevision: 1,
+      title: "未知状态时不应保存",
+      body: "未知状态资料正在 OA 提交前核对，不能同时修改正文。",
+      url: "",
+      category: "research",
+      updatedAt: "2026-09-13",
+      published: 0,
+    },
+  }), env, {}, runtime()));
+  assert.equal(editUnknown.status, 409);
+  assert.match(editUnknown.body.error, /核对该资料的提交状态/u);
+
+  const staleUnknownToSubmitted = await patchSubmission(
+    submittedDocumentId,
+    2,
+    "submitted",
+    "11111111-2222-4333-8444-555555555555",
+  );
+  assert.equal(staleUnknownToSubmitted.status, 409);
+  assert.match(staleUnknownToSubmitted.body.error, /版本已变化/u);
+
+  const resolvedSubmitted = await patchSubmission(
+    submittedDocumentId,
+    1,
+    "submitted",
+    "11111111-2222-4333-8444-555555555555",
+  );
+  assert.equal(resolvedSubmitted.status, 200);
+  assert.equal(resolvedSubmitted.body.document.oaSubmissionState, "submitted");
+  assert.equal(resolvedSubmitted.body.document.draftRevision, 1);
+
+  const unsubmittedCandidate = await createDocument("核对后确认未提交");
+  assert.equal(unsubmittedCandidate.status, 200);
+  assert.equal(unsubmittedCandidate.body.oaSubmissionState, "unsubmitted");
+  const unsubmittedDocumentId = unsubmittedCandidate.body.id;
+  const unsubmittedCheckpoint = await patchSubmission(unsubmittedDocumentId, 1, "unknown");
+  assert.equal(unsubmittedCheckpoint.status, 200);
+  assert.equal(unsubmittedCheckpoint.body.document.oaSubmissionState, "unknown");
+
+  const staleUnknownToUnsubmitted = await patchSubmission(unsubmittedDocumentId, 2, "unsubmitted");
+  assert.equal(staleUnknownToUnsubmitted.status, 409);
+  assert.match(staleUnknownToUnsubmitted.body.error, /版本已变化/u);
+
+  const resolvedUnsubmitted = await patchSubmission(unsubmittedDocumentId, 1, "unsubmitted");
+  assert.equal(resolvedUnsubmitted.status, 200);
+  assert.deepEqual(
+    {
+      state: resolvedUnsubmitted.body.document.oaSubmissionState,
+      itemId: resolvedUnsubmitted.body.document.oaItemId,
+      submittedAt: resolvedUnsubmitted.body.document.oaSubmittedAt,
+      revision: resolvedUnsubmitted.body.document.draftRevision,
+    },
+    { state: "unsubmitted", itemId: null, submittedAt: null, revision: 1 },
+  );
+
+  const finalRefresh = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    cookie,
+    origin: null,
+  }), env, {}, runtime()));
+  assert.equal(finalRefresh.status, 200);
+  const finalStates = Object.fromEntries(
+    finalRefresh.body.documents.map((document) => [document.id, document.oaSubmissionState]),
+  );
+  assert.equal(finalStates[submittedDocumentId], "submitted");
+  assert.equal(finalStates[unsubmittedDocumentId], "unsubmitted");
 });
 
 test("Chat admin can transiently extract a PDF without storing the original file", async (t) => {

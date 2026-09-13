@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 
 class D1PreparedAdapter {
@@ -35,8 +35,15 @@ class D1PreparedAdapter {
 export class D1DatabaseAdapter {
   constructor() {
     this.sqlite = new DatabaseSync(":memory:");
-    const migration = readFileSync(new URL("../migrations/0001_initial.sql", import.meta.url), "utf8");
-    this.sqlite.exec(migration);
+    const migrations = readdirSync(new URL("../migrations/", import.meta.url))
+      .filter((name) => /^\d+_.+\.sql$/u.test(name))
+      .sort((left, right) => {
+        const versionOrder = Number.parseInt(left, 10) - Number.parseInt(right, 10);
+        return versionOrder || left.localeCompare(right);
+      });
+    for (const migration of migrations) {
+      this.sqlite.exec(readFileSync(new URL(`../migrations/${migration}`, import.meta.url), "utf8"));
+    }
   }
 
   prepare(sql) {
