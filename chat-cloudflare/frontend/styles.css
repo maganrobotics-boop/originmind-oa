@@ -2151,6 +2151,10 @@ body.public-chat-page {
   display: none;
 }
 
+.chat-app :focus-visible {
+  outline-color: #0b57d0;
+}
+
 .chat-app .site-header {
   position: relative;
   display: grid;
@@ -2247,35 +2251,48 @@ body.public-chat-page {
   scrollbar-color: #c6c6c6 transparent;
 }
 
-.chat-app .welcome-shell {
+.chat-app .empty-conversation {
   min-height: 100%;
-  place-items: center;
 }
 
-.chat-app .welcome {
-  width: min(100%, 680px);
-  margin: auto;
-  padding: 24px 18px;
-  animation: enter-soft 240ms ease both;
+.chat-app .composer-suggestions {
+  width: min(100%, 760px);
+  margin: 0 auto;
+  padding: 0 2px 10px;
+  animation: enter-soft 180ms ease both;
+}
+
+.chat-app .suggestion-title {
+  margin: 0 0 8px;
+  color: #666666;
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.4;
+  text-align: center;
 }
 
 .chat-app .suggestions {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 10px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
   margin: 0;
 }
 
 .chat-app .suggestion-button {
-  grid-template-columns: minmax(0, 1fr) 18px;
-  min-height: 58px;
-  padding: 12px 14px;
+  display: inline-flex;
+  width: fit-content;
+  max-width: 100%;
+  min-height: 44px;
+  align-items: center;
+  padding: 9px 14px;
   border: 1px solid #d8d8d8;
-  border-radius: 9px;
+  border-radius: 15px;
   background: #ffffff;
   color: #252525;
   font-size: 15px;
-  line-height: 1.5;
+  line-height: 1.45;
+  text-align: left;
   box-shadow: none;
 }
 
@@ -2285,12 +2302,6 @@ body.public-chat-page {
   color: #111111;
   box-shadow: none;
   transform: none;
-}
-
-.chat-app .suggestion-arrow {
-  color: #a0a0a0;
-  font-size: 23px;
-  font-weight: 300;
 }
 
 .chat-app .message-list {
@@ -2426,6 +2437,12 @@ body.public-chat-page {
 
 .chat-app .composer textarea:focus {
   border-color: #b7b7b7;
+}
+
+.chat-app .composer textarea:focus-visible {
+  border-color: #0b57d0;
+  outline: 3px solid #0b57d0;
+  outline-offset: 1px;
 }
 
 .chat-app .composer textarea::placeholder {
@@ -2661,9 +2678,14 @@ body.public-chat-page {
     font-size: 16px;
   }
 
-  .chat-app .welcome {
-    padding-right: 12px;
-    padding-left: 12px;
+  .chat-app .composer-suggestions {
+    padding-right: 0;
+    padding-left: 0;
+  }
+
+  .chat-app .suggestions {
+    flex-direction: column;
+    align-items: flex-start;
   }
 
   .chat-app .message-list {
