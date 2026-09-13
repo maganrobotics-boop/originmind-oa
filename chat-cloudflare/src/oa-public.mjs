@@ -1,4 +1,8 @@
-import { OA_PUBLIC_RETRIEVE_URL, PUBLIC_LAB_AI_SERVICE_TOKEN_PATTERN } from "./constants.mjs";
+import {
+  OA_PUBLIC_RETRIEVE_URL,
+  OA_PUBLIC_STATUS_URL,
+  PUBLIC_LAB_AI_SERVICE_TOKEN_PATTERN,
+} from "./constants.mjs";
 
 const MAX_QUESTION_LENGTH = 500;
 const MAX_RESPONSE_BYTES = 16 * 1024;
@@ -170,6 +174,44 @@ export async function retrieveOa(question, context) {
 
 export async function retrieveOaPublicKnowledge(question, context) {
   return (await retrieveOa(question, context)).documents;
+}
+
+export async function inspectOaPublicKnowledge(context) {
+  const token = context.env.PUBLIC_LAB_AI_SERVICE_TOKEN || "";
+  if (!PUBLIC_LAB_AI_SERVICE_TOKEN_PATTERN.test(token)) {
+    return { status: "not_configured", documentCount: 0 };
+  }
+  try {
+    const init = {
+      method: "GET",
+      headers: { "x-originmind-public-lab-ai-service-token": token },
+      redirect: "manual",
+      cache: "no-store",
+      credentials: "omit",
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    };
+    const service = context.env.OA_SERVICE;
+    const response = typeof service?.fetch === "function"
+      ? await service.fetch(new Request(OA_PUBLIC_STATUS_URL, init))
+      : await context.runtime.fetch(OA_PUBLIC_STATUS_URL, init);
+    const mediaType = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+    if (!response.ok || mediaType !== "application/json") return { status: "unavailable", documentCount: 0 };
+    const value = exactObject(await boundedJson(response), ["oaReady", "publicKnowledgeReady", "retrievalReady"]);
+    if (
+      value.oaReady !== true ||
+      typeof value.publicKnowledgeReady !== "boolean" ||
+      typeof value.retrievalReady !== "boolean"
+    ) {
+      return { status: "unavailable", documentCount: 0 };
+    }
+    return {
+      status: "connected",
+      documentCount: value.publicKnowledgeReady ? 1 : 0,
+      retrievalReady: value.retrievalReady,
+    };
+  } catch {
+    return { status: "unavailable", documentCount: 0 };
+  }
 }
 
 export async function probeOaPublicKnowledge(context) {

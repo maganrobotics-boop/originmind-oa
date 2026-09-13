@@ -232,6 +232,40 @@ test("public chat keeps a minimal topic header and compact message composer", as
   assert.match(style, /\.chat-app\s*\{[\s\S]*?height:\s*var\(--chat-viewport-height,\s*100dvh\)[\s\S]*?transform:\s*translateY\(var\(--chat-viewport-offset,\s*0px\)\)/u);
 });
 
+test("public chat keeps five compact live status lights below the fixed header title", async () => {
+  const [script, style] = await Promise.all([
+    readFile(path.join(frontendDir, "app.js"), "utf8"),
+    readFile(path.join(frontendDir, "styles.css"), "utf8"),
+  ]);
+
+  for (const [key, label] of [
+    ["network", "网络"],
+    ["oa", "OA"],
+    ["qwen", "千问"],
+    ["knowledge", "知识"],
+    ["system", "系统"],
+  ]) {
+    assert.match(script, new RegExp(`key:\\s*["']${key}["']\\s*,\\s*label:\\s*["']${label}["']`, "u"), key);
+  }
+  assert.match(script, /className:\s*["']topic-header["'][\s\S]{0,160}?\[\s*topicTitle,\s*systemStatus,/u);
+  assert.match(script, /header\.append\(menuButton,\s*topicHeader,\s*chatInfoButton/u);
+  assert.match(script, /SYSTEM_STATUS_REFRESH_MS\s*=\s*60_000/u);
+  assert.match(script, /fetch\(["']\/_health["']/u);
+  assert.match(script, /requestJson\(["']\/api\/status["']/u);
+  assert.match(script, /service\.systemReady\s*===\s*true/u);
+  assert.match(script, /textButton\(\s*["']["']\s*,\s*["']system-status-strip["']\s*\)/u);
+  assert.ok(script.includes('systemStatus.setAttribute("aria-controls", "system-status-details")'));
+  assert.ok(script.includes('systemStatus.setAttribute("aria-expanded", "false")'));
+  assert.match(script, /id:\s*["']system-status-details["'][\s\S]{0,180}?role:\s*["']region["']/u);
+  assert.match(script, /systemStatusAnnouncement[\s\S]{0,220}?role:\s*["']status["'][\s\S]{0,120}?["']aria-live["']:\s*["']polite["']/u);
+  assert.match(script, /nodes\.panelDetail\.textContent\s*=\s*detail/u);
+  assert.match(script, /systemStatusAnnouncement\.textContent\s*=\s*description/u);
+  assert.match(style, /\.system-status-strip\s*\{[\s\S]*?height:\s*24px/u);
+  assert.match(style, /\.system-status-details\s*\{[\s\S]*?position:\s*absolute/u);
+  assert.match(style, /\.chat-app\s+\.site-header\s*\{[\s\S]*?grid-template-rows:\s*minmax\(0,\s*1fr\)/u);
+  assert.match(style, /\.system-light-dot\.is-ok\s*\{[\s\S]*?background:\s*#067a3d/u);
+});
+
 test("public modules expose direct links with history navigation and an accessible topic drawer", async () => {
   const [script, style] = await Promise.all([
     readFile(path.join(frontendDir, "app.js"), "utf8"),
@@ -261,6 +295,145 @@ test("public modules expose direct links with history navigation and an accessib
   assert.match(style, /\.topic-drawer\s*\{[\s\S]*?position:\s*fixed/u);
   assert.match(style, /\.drawer-topic-link\s*\{[\s\S]*?min-height:\s*54px/u);
   assert.match(style, /\.drawer-panel\s*\{[\s\S]*?width:\s*min\(86vw,\s*340px\)/u);
+});
+
+test("public chat exposes an accessible full-screen chat information surface", async () => {
+  const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
+
+  assert.match(script, /textButton\(\s*["']["']\s*,\s*["']chat-info-button["']\s*\)/u);
+  assert.ok(script.includes('chatInfoButton.setAttribute("aria-label", "聊天信息")'));
+  assert.ok(script.includes('chatInfoButton.setAttribute("aria-controls", "chat-info-dialog")'));
+  assert.ok(script.includes('chatInfoButton.setAttribute("aria-haspopup", "dialog")'));
+  assert.ok(script.includes('chatInfoButton.setAttribute("aria-expanded", "false")'));
+  assert.ok(script.includes('chatInfoButton.setAttribute("aria-expanded", "true")'));
+  assert.match(script, /className:\s*["']more-glyph["'][\s\S]{0,500}?className:\s*["']more-dot["']/u);
+  assert.equal((script.match(/className:\s*["']more-dot["']/gu) || []).length, 3);
+
+  assert.match(script, /const\s+chatInfoDialog\s*=\s*element\(\s*["']dialog["']/u);
+  assert.match(script, /\bid:\s*["']chat-info-dialog["']/u);
+  assert.match(script, /\bclassName:\s*["']chat-info-dialog["']/u);
+  assert.match(script, /element\(\s*["']h2["'][\s\S]{0,180}?\btext:\s*["']聊天信息["']/u);
+  for (const label of [
+    "查找聊天记录",
+    "消息免打扰",
+    "置顶聊天",
+    "提醒",
+    "设置当前聊天背景",
+    "清空聊天记录",
+    "投诉",
+  ]) {
+    assert.ok(script.includes(label), label);
+  }
+  for (const label of ["查找聊天记录", "清空聊天记录"]) {
+    assert.match(script, new RegExp(`chatInfoActionRow\\(\\s*["']${label}["']`, "u"), label);
+  }
+  for (const label of ["设置当前聊天背景", "投诉"]) {
+    assert.match(script, new RegExp(`chatInfoUnavailableActionRow\\(\\s*["']${label}["']`, "u"), label);
+  }
+  assert.match(script, /\bsrc:\s*["']\/favicon\.svg["']/u);
+
+  assert.match(
+    script,
+    /element\(\s*["']input["']\s*,\s*\{(?=[\s\S]{0,300}?className:\s*["']chat-info-switch-input["'])(?=[\s\S]{0,300}?type:\s*["']checkbox["'])/u,
+  );
+  assert.match(script, /className:\s*["'][^"']*\bchat-info-toggle-row\b[^"']*["']/u);
+  assert.match(script, /className:\s*["']chat-info-switch-input["'][\s\S]{0,220}?disabled:\s*true/u);
+
+  assert.match(script, /function\s+openChatInfo\s*\([^)]*\)\s*\{[\s\S]{0,700}?chatInfoDialog\.showModal\(\)/u);
+  assert.match(script, /function\s+closeChatInfo\s*\([^)]*\)\s*\{[\s\S]{0,500}?chatInfoDialog\.close\(\)/u);
+  assert.ok(script.includes('chatInfoDialog.addEventListener("cancel"'));
+  assert.match(
+    script,
+    /chatInfoDialog\.addEventListener\(\s*["']close["'][\s\S]{0,600}?chatInfoDialogOpener[\s\S]{0,400}?\.focus\(/u,
+  );
+  assert.match(script, /function\s+findChatMessage\s*\(/u);
+  assert.match(script, /window\.prompt\(\s*["']查找聊天记录["']/u);
+  assert.match(
+    script,
+    /chatInfoActionRow\(\s*["']清空聊天记录["']\s*,\s*\(\)\s*=>\s*\{[\s\S]{0,500}?window\.confirm\([^)]*清空当前聊天记录[^)]*\)[\s\S]{0,500}?resetCurrentConversation\(/u,
+  );
+});
+
+test("unavailable chat information controls are explicit and cannot be operated", async () => {
+  const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
+
+  assert.doesNotMatch(script, /CHAT_INFO_STORAGE_KEY|readChatInfoPreferences|writeChatInfoPreferences/u);
+  assert.doesNotMatch(script, /syncChatInfoSwitches/u);
+  assert.doesNotMatch(script, /input\.addEventListener\(\s*["']change["']/u);
+  assert.match(script, /function\s+chatInfoUnavailableActionRow\s*\(/u);
+  assert.match(script, /function\s+chatInfoUnavailableToggleRow\s*\(/u);
+  assert.match(script, /row\.disabled\s*=\s*true/u);
+  assert.match(script, /chatInfoAdd\.disabled\s*=\s*true/u);
+  assert.match(script, /className:\s*["']chat-info-unavailable-badge["']\s*,\s*text:\s*["']暂未开放["']/u);
+  for (const label of ["消息免打扰", "置顶聊天", "提醒"]) {
+    assert.match(script, new RegExp(`chatInfoUnavailableToggleRow\\(\\s*["']${label}["']\\s*\\)`, "u"), label);
+  }
+  assert.doesNotMatch(script, /功能暂未开放。/u);
+});
+
+test("chat record search moves focus and marks the matching message semantically", async () => {
+  const [script, style] = await Promise.all([
+    readFile(path.join(frontendDir, "app.js"), "utf8"),
+    readFile(path.join(frontendDir, "styles.css"), "utf8"),
+  ]);
+
+  assert.match(script, /className:\s*`message \$\{message\.role\}`[\s\S]{0,220}?tabindex:\s*["']-1["']/u);
+  assert.match(script, /closeChatInfo\(\{\s*restoreFocus:\s*false\s*\}\)/u);
+  assert.match(script, /match\.setAttribute\(\s*["']aria-current["']\s*,\s*["']true["']\s*\)/u);
+  assert.match(script, /聊天记录搜索结果：\$\{originalLabel\}/u);
+  assert.match(script, /match\.focus\(\{\s*preventScroll:\s*true\s*\}\)/u);
+  assert.match(script, /match\.removeAttribute\(\s*["']aria-current["']\s*\)/u);
+  assert.match(script, /data-search-original-label/u);
+  assert.match(style, /\.message\.search-match\s+\.message-body\s*\{[\s\S]*?outline:\s*3px solid #9a6500/u);
+});
+
+test("chat information styles preserve the Tencent mobile geometry", async () => {
+  const style = await readFile(path.join(frontendDir, "styles.css"), "utf8");
+  const rule = (selector) => {
+    const match = style.match(new RegExp(`${selector}\\s*\\{([^}]*)\\}`, "u"));
+    assert.ok(match, selector);
+    return match[1];
+  };
+
+  const button = rule("\\.chat-info-button");
+  assert.match(button, /justify-self:\s*end/u);
+
+  const dialog = rule("#chat-info-dialog\\.chat-info-dialog");
+  for (const declaration of [
+    /position:\s*fixed/u,
+    /inset:\s*0/u,
+    /height:\s*var\(--chat-viewport-height,\s*100dvh\)/u,
+    /max-height:\s*var\(--chat-viewport-height,\s*100dvh\)/u,
+    /width:\s*min\(100%,\s*960px\)/u,
+    /border-radius:\s*0/u,
+    /background:\s*#ededed\b/iu,
+  ]) {
+    assert.match(dialog, declaration);
+  }
+
+  const header = rule("\\.chat-info-header");
+  assert.match(header, /position:\s*sticky/u);
+  assert.match(header, /env\(safe-area-inset-top\)/u);
+  assert.match(header, /env\(safe-area-inset-right\)/u);
+  assert.match(header, /env\(safe-area-inset-left\)/u);
+  assert.match(rule("\\.chat-info-scroll"), /env\(safe-area-inset-bottom\)/u);
+  assert.match(rule("\\.chat-info-block"), /background:\s*#fff(?:fff)?\b/iu);
+
+  const row = rule("\\.chat-info-row,\\s*\\.chat-info-toggle-row");
+  assert.match(row, /min-height:\s*56px/u);
+
+  const members = rule("\\.chat-info-members");
+  assert.match(members, /min-height:\s*112px/u);
+  assert.match(members, /margin-top:\s*8px/u);
+  assert.match(members, /padding:\s*20px\s+16px\s+10px/u);
+
+  const chatSwitch = rule("\\.chat-info-switch");
+  assert.match(chatSwitch, /width:\s*51px/u);
+  assert.match(chatSwitch, /height:\s*31px/u);
+  assert.match(
+    rule("\\.chat-info-switch-input:checked\\s*\\+\\s*\\.chat-info-switch"),
+    /background:\s*#07c160\b/iu,
+  );
 });
 
 test("frontend source avoids executable HTML and dynamic-code sinks", async () => {

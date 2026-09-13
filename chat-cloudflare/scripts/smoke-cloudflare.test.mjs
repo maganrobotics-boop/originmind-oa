@@ -14,7 +14,19 @@ import {
 const releaseId = `${"a".repeat(40)}-1`;
 const evidence = {
   health: { app: "arts-robotics-ai-assistant", ready: true, releaseId },
-  status: { storageReady: true, modelReady: true, provider: "workers-ai", model: "test-model" },
+  status: {
+    storageReady: true,
+    modelReady: true,
+    qwenReady: true,
+    oaReady: true,
+    knowledgeReady: true,
+    retrievalReady: true,
+    budgetReady: true,
+    systemReady: true,
+    documentParsingReady: true,
+    provider: "workers-ai",
+    model: "test-model",
+  },
   chat: {
     mode: "ai",
     answer: "经审核公开资料支持该回答。[1]",
@@ -62,6 +74,39 @@ test("release evidence rejects unavailable OA and retrieval-only fallback", () =
       chat: { ...evidence.chat, mode: "retrieval", oaPublicStatus: "unavailable", sources: [] },
     }, releaseId),
     /OA-backed AI answer/u,
+  );
+});
+
+test("release evidence rejects any unready homepage service light", () => {
+  for (const field of ["qwenReady", "oaReady", "knowledgeReady", "retrievalReady", "budgetReady", "systemReady"]) {
+    assert.throws(
+      () => validateReleaseEvidence({
+        ...evidence,
+        status: { ...evidence.status, [field]: false },
+      }, releaseId),
+      (error) => error instanceof Error && error.retryable === true && /five-light homepage/u.test(error.message),
+      field,
+    );
+  }
+});
+
+test("release evidence fails fast when the status contract is malformed", () => {
+  assert.throws(
+    () => validateReleaseEvidence({
+      ...evidence,
+      status: { ...evidence.status, knowledgeReady: undefined },
+    }, releaseId),
+    (error) => error instanceof Error && error.retryable !== true && /five-light homepage/u.test(error.message),
+  );
+});
+
+test("release evidence treats an in-flight status probe as retryable", () => {
+  assert.throws(
+    () => validateReleaseEvidence({
+      ...evidence,
+      status: { ...evidence.status, modelReady: false, qwenReady: false, modelPending: true },
+    }, releaseId),
+    (error) => error instanceof Error && error.retryable === true && /five-light homepage/u.test(error.message),
   );
 });
 

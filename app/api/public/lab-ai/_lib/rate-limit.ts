@@ -3,10 +3,25 @@ export const PUBLIC_LAB_AI_RETRIEVE_LIMIT_PER_MINUTE = 120;
 const RATE_LIMIT_SCOPE = "public_lab_ai_retrieve";
 const RATE_LIMIT_ACTOR = "chat.omindos.ai";
 
-export async function consumePublicLabAiRetrieveRateLimit(database: D1Database, now = new Date()): Promise<boolean> {
+function retrieveRateLimitBucket(now: Date): { bucketKey: string; windowStartedAt: string } {
   const windowStartedAt = new Date(Math.floor(now.getTime() / 60_000) * 60_000).toISOString();
+  return {
+    bucketKey: JSON.stringify([RATE_LIMIT_SCOPE, RATE_LIMIT_ACTOR, windowStartedAt]),
+    windowStartedAt,
+  };
+}
+
+export async function isPublicLabAiRetrieveAvailable(database: D1Database, now = new Date()): Promise<boolean> {
+  const { bucketKey } = retrieveRateLimitBucket(now);
+  const bucket = await database.prepare("SELECT used FROM write_rate_buckets WHERE bucket_key = ?")
+    .bind(bucketKey)
+    .first<{ used: number }>();
+  return Number(bucket?.used ?? 0) < PUBLIC_LAB_AI_RETRIEVE_LIMIT_PER_MINUTE;
+}
+
+export async function consumePublicLabAiRetrieveRateLimit(database: D1Database, now = new Date()): Promise<boolean> {
+  const { bucketKey, windowStartedAt } = retrieveRateLimitBucket(now);
   const updatedAt = now.toISOString();
-  const bucketKey = JSON.stringify([RATE_LIMIT_SCOPE, RATE_LIMIT_ACTOR, windowStartedAt]);
   const bucket = await database.prepare(`
     INSERT INTO write_rate_buckets (bucket_key, actor_subject, scope, window_started_at, used, updated_at)
     VALUES (?, ?, ?, ?, 1, ?)

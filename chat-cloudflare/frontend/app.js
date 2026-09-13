@@ -269,12 +269,23 @@ function serviceLabel(service) {
   return service.modelReady ? "基于 OA 审核公开资料回答" : "公开资料检索模式";
 }
 
+const SYSTEM_LIGHTS = Object.freeze([
+  { key: "network", label: "网络" },
+  { key: "oa", label: "OA" },
+  { key: "qwen", label: "千问" },
+  { key: "knowledge", label: "知识" },
+  { key: "system", label: "系统" },
+]);
+const SYSTEM_STATUS_REFRESH_MS = 60_000;
+const SYSTEM_STATUS_TIMEOUT_MS = 12_000;
+
 function createPublicApp() {
   document.documentElement.classList.add("public-chat-page");
   document.body.classList.add("public-chat-page");
 
   const state = {
     section: topicIdForPath(window.location.pathname),
+    networkReady: null,
     service: null,
     serviceError: "",
     sessions: Object.fromEntries(TOPICS.map((topic) => [topic.id, {
@@ -329,10 +340,91 @@ function createPublicApp() {
     element("span", { className: "menu-line" }),
   ]));
   const topicTitle = element("h1", { className: "topic-title", text: topicFor().title });
-  const headerBalance = element("span", {
-    className: "header-balance",
-    attributes: { "aria-hidden": "true" },
+  const systemStatus = textButton("", "system-status-strip");
+  systemStatus.setAttribute("aria-label", "系统连接状态：正在检测");
+  systemStatus.setAttribute("aria-controls", "system-status-details");
+  systemStatus.setAttribute("aria-expanded", "false");
+  systemStatus.setAttribute("title", "系统连接状态：正在检测");
+  const systemStatusDetails = element("div", {
+    id: "system-status-details",
+    className: "system-status-details",
+    attributes: { role: "region", "aria-label": "系统连接详情" },
   });
+  systemStatusDetails.hidden = true;
+  systemStatusDetails.append(element("strong", {
+    className: "system-status-details-title",
+    text: "系统连接详情",
+  }));
+  const systemStatusDetailsList = element("div", { className: "system-status-details-list" });
+  systemStatusDetails.append(systemStatusDetailsList);
+  const systemStatusAnnouncement = element("span", {
+    className: "sr-only",
+    attributes: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
+  });
+  const systemLightNodes = new Map();
+  for (const light of SYSTEM_LIGHTS) {
+    const detail = element("span", { className: "sr-only", text: `${light.label}：正在检测` });
+    const dot = element("span", {
+      className: "system-light-dot is-pending",
+      attributes: { "aria-hidden": "true" },
+    });
+    const item = element("span", {
+      className: "system-light",
+      attributes: { title: `${light.label}：正在检测` },
+    }, [dot, detail]);
+    const panelDetail = element("span", {
+      className: "system-status-detail-value",
+      text: "正在检测",
+    });
+    const panelRow = element("div", {
+      className: "system-status-detail-row is-pending",
+    }, [
+      element("span", { className: "system-status-detail-label", text: light.label }),
+      panelDetail,
+    ]);
+    systemLightNodes.set(light.key, { item, dot, detail, panelDetail, panelRow });
+    systemStatus.append(item);
+    systemStatusDetailsList.append(panelRow);
+  }
+  const topicHeader = element("div", { className: "topic-header" }, [
+    topicTitle,
+    systemStatus,
+    systemStatusDetails,
+    systemStatusAnnouncement,
+  ]);
+
+  function setSystemStatusDetailsOpen(open) {
+    const nextOpen = open === true;
+    systemStatusDetails.hidden = !nextOpen;
+    systemStatus.setAttribute("aria-expanded", String(nextOpen));
+  }
+
+  systemStatus.addEventListener("click", () => {
+    setSystemStatusDetailsOpen(systemStatusDetails.hidden);
+  });
+  document.addEventListener("click", (event) => {
+    if (!systemStatusDetails.hidden && !topicHeader.contains(event.target)) {
+      setSystemStatusDetailsOpen(false);
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || systemStatusDetails.hidden) return;
+    setSystemStatusDetailsOpen(false);
+    systemStatus.focus({ preventScroll: true });
+  });
+  const chatInfoButton = textButton("", "chat-info-button");
+  chatInfoButton.setAttribute("aria-label", "聊天信息");
+  chatInfoButton.setAttribute("aria-controls", "chat-info-dialog");
+  chatInfoButton.setAttribute("aria-haspopup", "dialog");
+  chatInfoButton.setAttribute("aria-expanded", "false");
+  chatInfoButton.append(element("span", {
+    className: "more-glyph",
+    attributes: { "aria-hidden": "true" },
+  }, [
+    element("span", { className: "more-dot" }),
+    element("span", { className: "more-dot" }),
+    element("span", { className: "more-dot" }),
+  ]));
   const statusText = element("span", {
     className: "sr-only",
     text: serviceLabel(null),
@@ -342,7 +434,7 @@ function createPublicApp() {
     className: "sr-only",
     attributes: { role: "status", "aria-live": "polite" },
   });
-  header.append(menuButton, topicTitle, headerBalance, statusText, topicStatus);
+  header.append(menuButton, topicHeader, chatInfoButton, statusText, topicStatus);
 
   const topicDrawer = element("dialog", {
     id: "topic-drawer",
@@ -430,27 +522,7 @@ function createPublicApp() {
     attributes: { "aria-label": "咨询对话" },
   });
   newConversation.addEventListener("click", () => {
-    const session = sessionFor();
-    if (session.sending || !hasResettableState(session)) return;
-    session.messages = [];
-    session.conversationToken = "";
-    session.draft = "";
-    session.scrollTop = 0;
-    session.stickToEnd = true;
-    session.error = "";
-    session.notice = "";
-    if (state.inquiry.section === state.section) {
-      state.inquiry.summary = "";
-      state.inquiry.includeConversation = false;
-    }
-    questionInput.value = "";
-    resizeQuestionInput();
-    syncFeedback();
-    updateComposer();
-    renderMessages({ scrollMode: "start" });
-    topicStatus.textContent = `已清空${topicFor().title}对话并返回精选问题`;
-    closeTopicDrawer();
-    window.requestAnimationFrame(() => questionInput.focus());
+    resetCurrentConversation({ closeDrawer: true });
   });
 
   const messageScroll = element("div", {
@@ -511,6 +583,151 @@ function createPublicApp() {
   conversation.append(messageScroll, composerArea);
   layout.append(conversation);
 
+  function chatInfoActionRow(labelText, action, extraClass = "") {
+    const row = textButton("", `chat-info-row${extraClass ? ` ${extraClass}` : ""}`);
+    row.append(
+      element("span", { className: "chat-info-label", text: labelText }),
+      element("span", {
+        className: "chat-info-chevron",
+        text: "›",
+        attributes: { "aria-hidden": "true" },
+      }),
+    );
+    row.addEventListener("click", action);
+    return row;
+  }
+
+  function chatInfoUnavailableActionRow(labelText) {
+    const row = textButton("", "chat-info-row chat-info-row-unavailable");
+    row.disabled = true;
+    row.setAttribute("aria-label", `${labelText}（暂未开放）`);
+    row.append(
+      element("span", { className: "chat-info-label", text: labelText }),
+      element("span", { className: "chat-info-unavailable-badge", text: "暂未开放" }),
+    );
+    return row;
+  }
+
+  function chatInfoUnavailableToggleRow(labelText) {
+    const row = element("div", {
+      className: "chat-info-row chat-info-toggle-row chat-info-row-unavailable",
+      attributes: { "aria-disabled": "true" },
+    });
+    const input = element("input", {
+      className: "chat-info-switch-input",
+      attributes: { type: "checkbox", "aria-label": `${labelText}（暂未开放）`, disabled: true },
+    });
+    row.append(
+      element("span", { className: "chat-info-label", text: labelText }),
+      element("span", { className: "chat-info-unavailable-control" }, [
+        element("span", { className: "chat-info-unavailable-badge", text: "暂未开放" }),
+        input,
+        element("span", {
+          className: "chat-info-switch",
+          attributes: { "aria-hidden": "true" },
+        }),
+      ]),
+    );
+    return row;
+  }
+
+  const chatInfoDialog = element("dialog", {
+    id: "chat-info-dialog",
+    className: "chat-info-dialog",
+    attributes: { "aria-labelledby": "chat-info-title" },
+  });
+  const chatInfoPage = element("div", { className: "chat-info-page" });
+  const chatInfoHeader = element("header", { className: "chat-info-header" });
+  const chatInfoBack = textButton("", "chat-info-back");
+  chatInfoBack.setAttribute("aria-label", "返回聊天");
+  chatInfoBack.append(element("span", {
+    className: "chat-info-back-glyph",
+    text: "‹",
+    attributes: { "aria-hidden": "true" },
+  }));
+  chatInfoHeader.append(
+    chatInfoBack,
+    element("h2", { id: "chat-info-title", text: "聊天信息" }),
+    element("span", {
+      className: "chat-info-header-balance",
+      attributes: { "aria-hidden": "true" },
+    }),
+  );
+
+  const chatInfoScroll = element("div", { className: "chat-info-scroll" });
+  const chatInfoMembers = element("section", { className: "chat-info-block chat-info-members" });
+  const chatInfoMember = element("div", { className: "chat-info-member" });
+  chatInfoMember.append(
+    element("img", {
+      className: "chat-info-avatar",
+      attributes: { src: "/favicon.svg", alt: "" },
+    }),
+    element("span", { className: "chat-info-member-name", text: APP_NAME }),
+  );
+  const chatInfoAdd = textButton("", "chat-info-add");
+  chatInfoAdd.setAttribute("aria-label", "添加成员（暂未开放）");
+  chatInfoAdd.disabled = true;
+  chatInfoAdd.append(element("span", {
+    className: "chat-info-add-glyph",
+    text: "+",
+    attributes: { "aria-hidden": "true" },
+  }));
+  const chatInfoAddMember = element("div", { className: "chat-info-member" }, [
+    chatInfoAdd,
+    element("span", { className: "chat-info-member-name", text: "暂未开放" }),
+  ]);
+  chatInfoMembers.append(chatInfoMember, chatInfoAddMember);
+
+  const chatInfoSearchBlock = element("section", { className: "chat-info-block" });
+  chatInfoSearchBlock.append(chatInfoActionRow("查找聊天记录", findChatMessage));
+
+  const chatInfoToggleBlock = element("section", { className: "chat-info-block" });
+  chatInfoToggleBlock.append(
+    chatInfoUnavailableToggleRow("消息免打扰"),
+    chatInfoUnavailableToggleRow("置顶聊天"),
+    chatInfoUnavailableToggleRow("提醒"),
+  );
+
+  const chatInfoBackgroundBlock = element("section", { className: "chat-info-block" });
+  chatInfoBackgroundBlock.append(chatInfoUnavailableActionRow("设置当前聊天背景"));
+
+  const chatInfoClearBlock = element("section", { className: "chat-info-block" });
+  const clearChatHistory = chatInfoActionRow("清空聊天记录", () => {
+    const session = sessionFor();
+    if (session.sending || !hasResettableState(session)) return;
+    if (!window.confirm("确定清空当前聊天记录吗？")) return;
+    resetCurrentConversation({ closeInfo: true });
+  }, "chat-info-clear");
+  chatInfoClearBlock.append(clearChatHistory);
+
+  const chatInfoComplaintBlock = element("section", { className: "chat-info-block" });
+  chatInfoComplaintBlock.append(chatInfoUnavailableActionRow("投诉"));
+
+  chatInfoScroll.append(
+    chatInfoMembers,
+    chatInfoSearchBlock,
+    chatInfoToggleBlock,
+    chatInfoBackgroundBlock,
+    chatInfoClearBlock,
+    chatInfoComplaintBlock,
+  );
+  chatInfoPage.append(chatInfoHeader, chatInfoScroll);
+  chatInfoDialog.append(chatInfoPage);
+
+  let chatInfoDialogOpener = null;
+  chatInfoButton.addEventListener("click", openChatInfo);
+  chatInfoBack.addEventListener("click", () => closeChatInfo());
+  chatInfoDialog.addEventListener("cancel", () => {
+    chatInfoButton.setAttribute("aria-expanded", "false");
+  });
+  chatInfoDialog.addEventListener("close", () => {
+    chatInfoButton.setAttribute("aria-expanded", "false");
+    syncChatViewport();
+    const opener = chatInfoDialogOpener;
+    chatInfoDialogOpener = null;
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+  });
+
   const sourceDialog = element("dialog", {
     className: "content-dialog source-dialog",
     attributes: {
@@ -541,8 +758,167 @@ function createPublicApp() {
     if (opener?.isConnected) opener.focus();
   });
 
-  app.append(header, layout, topicDrawer, sourceDialog, inquiryDialog);
+  app.append(header, layout, topicDrawer, chatInfoDialog, sourceDialog, inquiryDialog);
   root.replaceChildren(app);
+
+  let systemStatusEpoch = 0;
+  let systemStatusController = null;
+  let systemStatusCheckedAt = 0;
+  let systemStatusRefreshTimer = null;
+  let announcedSystemDescription = "";
+
+  function setSystemLight(key, tone, detail) {
+    const nodes = systemLightNodes.get(key);
+    if (!nodes) return;
+    nodes.dot.className = `system-light-dot is-${tone}`;
+    nodes.item.setAttribute("title", `${SYSTEM_LIGHTS.find((light) => light.key === key)?.label || key}：${detail}`);
+    nodes.detail.textContent = `${SYSTEM_LIGHTS.find((light) => light.key === key)?.label || key}：${detail}`;
+    nodes.panelRow.className = `system-status-detail-row is-${tone}`;
+    nodes.panelDetail.textContent = detail;
+  }
+
+  function updateSystemLights() {
+    const service = state.service;
+    const details = [];
+    const networkTone = state.networkReady === null ? "pending" : state.networkReady ? "ok" : "error";
+    const networkDetail = state.networkReady === null ? "正在检测" : state.networkReady ? "已连接" : "连接异常";
+    setSystemLight("network", networkTone, networkDetail);
+    details.push(`网络：${networkDetail}`);
+
+    const unavailable = !service || state.networkReady === false;
+    const oaTone = unavailable || service.oaPending ? "pending" : service.oaReady ? "ok" : "error";
+    const oaDetail = unavailable || service.oaPending ? "正在检测" : service.oaReady ? "已连接" : "连接异常";
+    setSystemLight("oa", oaTone, oaDetail);
+    details.push(`OA：${oaDetail}`);
+
+    const qwenTone = unavailable || service.modelPending ? "pending" : service.qwenReady ? "ok" : "error";
+    const qwenDetail = unavailable || service.modelPending ? "正在检测" : service.qwenReady ? "已连接" : "连接异常";
+    setSystemLight("qwen", qwenTone, qwenDetail);
+    details.push(`千问：${qwenDetail}`);
+
+    const knowledgeTone = unavailable || service.oaPending ? "pending" : service.knowledgeReady ? "ok" : "error";
+    const knowledgeDetail = unavailable || service.oaPending
+      ? "正在检测"
+      : service.knowledgeReady
+        ? "公开知识可用"
+        : "公开知识不可用";
+    setSystemLight("knowledge", knowledgeTone, knowledgeDetail);
+    details.push(`知识：${knowledgeDetail}`);
+
+    const servicePending = unavailable || service.modelPending || service.oaPending;
+    const allReady = !servicePending && state.networkReady === true && service.systemReady === true;
+    const systemTone = servicePending ? "pending" : allReady ? "ok" : "error";
+    const systemDetail = servicePending
+      ? "正在检测"
+      : allReady
+        ? "运行正常"
+        : service.budgetReady === false
+          ? "今日 AI 额度已用完"
+          : service.oaReady === true && service.retrievalReady === false
+            ? "OA 检索繁忙"
+            : "运行异常";
+    setSystemLight("system", systemTone, systemDetail);
+    details.push(`系统：${systemDetail}`);
+
+    const readyCount = [
+      state.networkReady === true,
+      service?.oaReady === true,
+      service?.qwenReady === true,
+      service?.knowledgeReady === true,
+      allReady,
+    ].filter(Boolean).length;
+    const summary = allReady
+      ? "系统运行正常 · 5/5"
+      : servicePending
+        ? "系统连接状态：正在检测"
+        : `部分服务异常 · ${readyCount}/5`;
+    const description = `${summary}；${details.join("；")}`;
+    systemStatus.setAttribute("aria-label", description);
+    systemStatus.setAttribute("title", description);
+    if (description !== announcedSystemDescription) {
+      announcedSystemDescription = description;
+      systemStatusAnnouncement.textContent = description;
+    }
+  }
+
+  async function probeNetwork(signal) {
+    if (navigator.onLine === false) return false;
+    try {
+      const response = await fetch("/_health", {
+        credentials: "same-origin",
+        cache: "no-store",
+        signal,
+      });
+      if (!response.ok) return false;
+      const payload = await response.json();
+      return payload?.ready === true;
+    } catch {
+      return false;
+    }
+  }
+
+  function scheduleSystemStatusRefresh(delay = SYSTEM_STATUS_REFRESH_MS) {
+    if (systemStatusRefreshTimer !== null) window.clearTimeout(systemStatusRefreshTimer);
+    systemStatusRefreshTimer = window.setTimeout(() => {
+      systemStatusRefreshTimer = null;
+      if (document.hidden) {
+        scheduleSystemStatusRefresh();
+        return;
+      }
+      void loadSystemStatus();
+    }, delay);
+  }
+
+  async function loadSystemStatus({ showPending = false } = {}) {
+    if (systemStatusController) return;
+    const epoch = ++systemStatusEpoch;
+    const controller = new AbortController();
+    systemStatusController = controller;
+    const timeout = window.setTimeout(() => controller.abort(), SYSTEM_STATUS_TIMEOUT_MS);
+    if (showPending || state.service === null) {
+      state.networkReady = null;
+      state.service = null;
+      state.serviceError = "";
+      updateSystemLights();
+    }
+    const [networkResult, statusResult] = await Promise.allSettled([
+      probeNetwork(controller.signal),
+      requestJson("/api/status", { cache: "no-store", signal: controller.signal }),
+    ]);
+    window.clearTimeout(timeout);
+    if (epoch !== systemStatusEpoch) return;
+    systemStatusController = null;
+    state.networkReady =
+      (networkResult.status === "fulfilled" && networkResult.value === true) ||
+      statusResult.status === "fulfilled";
+    if (statusResult.status === "fulfilled") {
+      state.service = statusResult.value;
+      state.serviceError = "";
+    } else {
+      state.service = {
+        storageReady: false,
+        modelReady: false,
+        qwenReady: false,
+        modelPending: false,
+        oaReady: false,
+        knowledgeReady: false,
+        retrievalReady: false,
+        oaPending: false,
+        budgetReady: false,
+        systemReady: false,
+      };
+      state.serviceError = statusResult.reason instanceof Error
+        ? statusResult.reason.message
+        : "暂时无法连接服务，请稍后重试。";
+    }
+    systemStatusCheckedAt = Date.now();
+    statusText.textContent = serviceLabel(state.service);
+    updateSystemLights();
+    syncFeedback();
+    scheduleSystemStatusRefresh(
+      state.service.modelPending === true || state.service.oaPending === true ? 2_000 : SYSTEM_STATUS_REFRESH_MS,
+    );
+  }
 
   let viewportFrame = 0;
   function syncChatViewport() {
@@ -556,6 +932,98 @@ function createPublicApp() {
       app.style.setProperty("--chat-viewport-offset", `${Math.max(0, Math.round(offsetTop))}px`);
       if (sessionFor().stickToEnd) messageScroll.scrollTop = messageScroll.scrollHeight;
     });
+  }
+
+  function openChatInfo() {
+    if (chatInfoDialog.open) return;
+    chatInfoDialogOpener = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : chatInfoButton;
+    questionInput.blur();
+    syncChatViewport();
+    chatInfoButton.setAttribute("aria-expanded", "true");
+    chatInfoDialog.showModal();
+    window.requestAnimationFrame(() => {
+      syncChatViewport();
+      chatInfoBack.focus({ preventScroll: true });
+    });
+  }
+
+  function closeChatInfo({ restoreFocus = true } = {}) {
+    if (!chatInfoDialog.open) return;
+    if (!restoreFocus) chatInfoDialogOpener = null;
+    chatInfoDialog.close();
+  }
+
+  function clearSearchMatches() {
+    for (const match of messageScroll.querySelectorAll(".search-match")) {
+      match.classList.remove("search-match");
+      match.removeAttribute("aria-current");
+      const originalLabel = match.getAttribute("data-search-original-label");
+      if (originalLabel) match.setAttribute("aria-label", originalLabel);
+      match.removeAttribute("data-search-original-label");
+    }
+  }
+
+  function findChatMessage() {
+    const rawQuery = window.prompt("查找聊天记录");
+    if (rawQuery === null) return;
+    const query = rawQuery.trim();
+    if (!query) return;
+    closeChatInfo({ restoreFocus: false });
+    clearSearchMatches();
+
+    const section = state.section;
+    const session = sessionFor(section);
+    const normalizedQuery = query.toLocaleLowerCase();
+    const matchIndex = session.messages.findIndex((message) => (
+      String(message.content || "").toLocaleLowerCase().includes(normalizedQuery)
+    ));
+    if (matchIndex < 0) {
+      window.alert("未找到相关聊天记录。");
+      return;
+    }
+
+    window.requestAnimationFrame(() => {
+      if (state.section !== section) return;
+      const match = messageScroll.querySelectorAll(".message").item(matchIndex);
+      if (!(match instanceof HTMLElement)) return;
+      const originalLabel = match.getAttribute("aria-label") || "聊天消息";
+      match.classList.add("search-match");
+      match.setAttribute("aria-current", "true");
+      match.setAttribute("data-search-original-label", originalLabel);
+      match.setAttribute("aria-label", `聊天记录搜索结果：${originalLabel}`);
+      match.scrollIntoView({ behavior: "smooth", block: "center" });
+      match.focus({ preventScroll: true });
+      topicStatus.textContent = `已找到包含“${query}”的聊天记录`;
+    });
+  }
+
+  function resetCurrentConversation({ closeDrawer = false, closeInfo = false } = {}) {
+    const session = sessionFor();
+    if (session.sending || !hasResettableState(session)) return false;
+    session.messages = [];
+    session.conversationToken = "";
+    session.draft = "";
+    session.scrollTop = 0;
+    session.stickToEnd = true;
+    session.error = "";
+    session.notice = "";
+    if (state.inquiry.section === state.section) {
+      state.inquiry.summary = "";
+      state.inquiry.includeConversation = false;
+    }
+    questionInput.value = "";
+    clearSearchMatches();
+    resizeQuestionInput();
+    syncFeedback();
+    updateComposer();
+    renderMessages({ scrollMode: "start" });
+    topicStatus.textContent = `已清空${topicFor().title}对话并返回精选问题`;
+    if (closeDrawer) closeTopicDrawer();
+    if (closeInfo) closeChatInfo();
+    window.requestAnimationFrame(() => questionInput.focus());
+    return true;
   }
 
   function resizeQuestionInput() {
@@ -623,6 +1091,7 @@ function createPublicApp() {
     sendButton.disabled = session.sending || !questionInput.value.trim();
     questionInput.setAttribute("aria-busy", session.sending ? "true" : "false");
     newConversation.disabled = session.sending || !hasResettableState(session);
+    clearChatHistory.disabled = session.sending || !hasResettableState(session);
     messageScroll.setAttribute("aria-busy", session.sending ? "true" : "false");
     for (const [section, button] of topicLinks) {
       const candidate = sessionFor(section);
@@ -680,7 +1149,10 @@ function createPublicApp() {
   function assistantMessageNode(message, section) {
     const article = element("article", {
       className: `message ${message.role}`,
-      attributes: { "aria-label": message.role === "user" ? "你发送的消息" : `${APP_NAME} 的回答` },
+      attributes: {
+        "aria-label": message.role === "user" ? "你发送的消息" : `${APP_NAME} 的回答`,
+        tabindex: "-1",
+      },
     });
     article.append(element("div", { className: "message-body", text: String(message.content || "") }));
 
@@ -1077,19 +1549,24 @@ function createPublicApp() {
   resizeQuestionInput();
   syncChatViewport();
   updateComposer();
-  void requestJson("/api/status")
-    .then((payload) => {
-      state.service = payload;
-      state.serviceError = "";
-      statusText.textContent = serviceLabel(payload);
-      syncFeedback();
-    })
-    .catch((error) => {
-      state.service = { storageReady: false, modelReady: false };
-      statusText.textContent = serviceLabel(state.service);
-      state.serviceError = error instanceof Error ? error.message : "暂时无法连接服务，请稍后重试。";
-      syncFeedback();
-    });
+  updateSystemLights();
+  void loadSystemStatus({ showPending: true });
+  window.addEventListener("online", () => void loadSystemStatus({ showPending: true }));
+  window.addEventListener("offline", () => {
+    systemStatusEpoch += 1;
+    systemStatusController?.abort();
+    systemStatusController = null;
+    state.networkReady = false;
+    state.service = null;
+    state.serviceError = "暂时无法连接服务，请稍后重试。";
+    updateSystemLights();
+    syncFeedback();
+  });
+  document.addEventListener("visibilitychange", () => {
+    if (!document.hidden && Date.now() - systemStatusCheckedAt >= SYSTEM_STATUS_REFRESH_MS) {
+      void loadSystemStatus();
+    }
+  });
 
   const modelContext = document.modelContext;
   if (modelContext && typeof modelContext.registerTool === "function") {

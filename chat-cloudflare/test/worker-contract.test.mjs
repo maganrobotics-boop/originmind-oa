@@ -12,6 +12,7 @@ import { MockD1, mockAssets } from "./contract-mock-d1.mjs";
 
 const ORIGIN = "https://chat.omindos.ai";
 const OA_URL = "https://oa.omindos.ai/api/public/lab-ai/retrieve";
+const OA_STATUS_URL = "https://oa.omindos.ai/api/public/lab-ai/status";
 const SERVICE_TOKEN = "A".repeat(43);
 const RELEASE_ID = `${"a".repeat(40)}-1`;
 const ENCRYPTION_KEY = "encryption-key-for-tests-only-0123456789abcdef";
@@ -35,6 +36,12 @@ function oaRuntime(chunks = OA_CHUNKS, externalFetch = null) {
     async fetch(url, init) {
       if (String(url) === OA_URL) {
         return Response.json({ chunks }, { headers: { "Content-Type": "application/json" } });
+      }
+      if (String(url) === OA_STATUS_URL) {
+        return Response.json(
+          { oaReady: true, publicKnowledgeReady: chunks.length > 0, retrievalReady: true },
+          { headers: { "Content-Type": "application/json" } },
+        );
       }
       if (externalFetch) return externalFetch(url, init);
       throw new Error(`Unexpected external fetch: ${url}`);
@@ -121,7 +128,7 @@ test("saving a verified model again keeps Bailian active, and a failed candidate
     assert.equal(response.status, 200);
     assert.equal((await response.json()).connected, true);
     assert.ok(JSON.parse(DB.settings.get("model")).verifiedAt);
-    const status = await handleRequest(request("/api/status"), env, {});
+    const status = await handleRequest(request("/api/status"), env, {}, runtime);
     assert.equal((await status.json()).provider, "bailian");
   }
   assert.equal(calls, 2);
@@ -129,6 +136,34 @@ test("saving a verified model again keeps Bailian active, and a failed candidate
   const failed = await handleRequest(request("/api/admin/config", { method: "POST", cookie, body: { ...config, apiKey: "invalid-new-key" } }), env, {}, oaRuntime(OA_CHUNKS, async () => new Response(null, { status: 401 })));
   assert.equal(failed.status, 502);
   assert.equal(DB.settings.get("model"), previous);
+});
+
+test("a failed Bailian admin test keeps Qwen green when the Workers AI fallback is live", async () => {
+  const DB = await bailianDatabase();
+  DB.adminAccount = await createPasswordRecord("test-password-123456");
+  let workersCalls = 0;
+  const env = environment({
+    DB,
+    AI: { async run() {
+      workersCalls += 1;
+      return { response: "连接成功" };
+    } },
+  });
+  const { cookie } = await login(env, "test-password-123456");
+  const failedBailianRuntime = oaRuntime(OA_CHUNKS, async () => new Response(null, { status: 401 }));
+  const testResponse = await handleRequest(
+    request("/api/admin/test", { method: "POST", cookie, body: {} }),
+    env,
+    {},
+    failedBailianRuntime,
+  );
+  assert.equal(testResponse.status, 502);
+
+  const statusResponse = await handleRequest(request("/api/status", { origin: null }), env, {}, failedBailianRuntime);
+  const status = await body(statusResponse);
+  assert.equal(status.qwenReady, true);
+  assert.equal(status.provider, "workers-ai");
+  assert.equal(workersCalls, 1);
 });
 
 test("verified conversation context continues a follow-up without trusting forged client assistant text", async () => {
@@ -167,11 +202,20 @@ test("Workers AI is the zero-secret default and status reports the active model"
     },
   });
 
-  const statusResponse = await handleRequest(request("/api/status", { origin: null }), env, {});
+  const statusResponse = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
   assert.equal(statusResponse.status, 200);
   assert.deepEqual(await body(statusResponse), {
     storageReady: true,
     modelReady: true,
+    qwenReady: true,
+    modelPending: false,
+    oaReady: true,
+    knowledgeReady: true,
+    retrievalReady: true,
+    oaPending: false,
+    budgetReady: true,
+    systemReady: true,
+    documentParsingReady: false,
     provider: "workers-ai",
     model: WORKERS_AI_MODEL,
   });
@@ -187,9 +231,251 @@ test("Workers AI is the zero-secret default and status reports the active model"
   assert.equal(result.mode, "ai");
   assert.equal(result.provider, "workers-ai");
   assert.ok(result.sources.length > 0);
-  assert.equal(calls.length, 1);
+  assert.equal(calls.length, 2);
   assert.equal(calls[0].model, WORKERS_AI_MODEL);
-  assert.equal(calls[0].input.stream, false);
+  assert.equal(calls[0].input.max_tokens, 8);
+  assert.equal(calls[1].model, WORKERS_AI_MODEL);
+  assert.equal(calls[1].input.stream, false);
+});
+
+test("status requires a live Qwen probe and caches failed probes briefly", async () => {
+  let aiCalls = 0;
+  let oaCalls = 0;
+  const env = environment({
+    AI: {
+      async run() {
+        aiCalls += 1;
+        throw new Error("Qwen unavailable");
+      },
+    },
+    OA_SERVICE: {
+      async fetch() {
+        oaCalls += 1;
+        return Response.json({ oaReady: true, publicKnowledgeReady: true, retrievalReady: true });
+      },
+    },
+  });
+  for (let count = 0; count < 2; count += 1) {
+    const response = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+    assert.equal(response.status, 200);
+    const result = await body(response);
+    assert.equal(result.modelReady, false);
+    assert.equal(result.qwenReady, false);
+    assert.equal(result.systemReady, false);
+    assert.equal(result.provider, null);
+  }
+  assert.equal(aiCalls, 1);
+  assert.equal(oaCalls, 1);
+});
+
+test("status probe budget prevents unbounded unauthenticated model calls", async () => {
+  const day = new Date().toISOString().slice(0, 10);
+  let aiCalls = 0;
+  const env = environment({
+    DB: new MockD1({ limits: { [`model-status-day:${day}`]: 300 } }),
+    AI: { async run() { aiCalls += 1; return { response: "连接成功" }; } },
+  });
+  const response = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+  assert.equal(response.status, 200);
+  const result = await body(response);
+  assert.equal(result.qwenReady, false);
+  assert.equal(result.systemReady, false);
+  assert.equal(aiCalls, 0);
+});
+
+test("Bailian failure and Workers fallback consume one aggregate status-probe budget unit", async () => {
+  const day = new Date().toISOString().slice(0, 10);
+  const budgetKey = `model-status-day:${day}`;
+  const DB = await bailianDatabase();
+  DB.limits.set(budgetKey, { count: 299, expires: Number.MAX_SAFE_INTEGER });
+  let bailianCalls = 0;
+  let workersCalls = 0;
+  const env = environment({
+    DB,
+    AI: {
+      async run() {
+        workersCalls += 1;
+        return { response: "连接成功" };
+      },
+    },
+  });
+  const runtime = oaRuntime(OA_CHUNKS, async () => {
+    bailianCalls += 1;
+    return new Response(null, { status: 503 });
+  });
+  const budgetWrites = () => DB.statements.filter(
+    ({ query, args }) => query.startsWith("insert into limits") && args[0] === budgetKey,
+  );
+
+  const response = await handleRequest(request("/api/status", { origin: null }), env, {}, runtime);
+  assert.equal(response.status, 200);
+  const result = await body(response);
+  assert.equal(result.modelReady, true);
+  assert.equal(result.qwenReady, true);
+  assert.equal(result.systemReady, true);
+  assert.equal(result.provider, "workers-ai");
+  assert.equal(result.model, WORKERS_AI_MODEL);
+  assert.equal(bailianCalls, 1);
+  assert.equal(workersCalls, 1);
+  assert.equal(DB.limits.get(budgetKey)?.count, 300);
+  assert.equal(budgetWrites().length, 1);
+
+  const cachedResponse = await handleRequest(request("/api/status", { origin: null }), env, {}, runtime);
+  const cached = await body(cachedResponse);
+  assert.equal(cached.qwenReady, true);
+  assert.equal(cached.systemReady, true);
+  assert.equal(cached.provider, "workers-ai");
+  assert.equal(bailianCalls, 1);
+  assert.equal(workersCalls, 1);
+  assert.equal(DB.limits.get(budgetKey)?.count, 300);
+  assert.equal(budgetWrites().length, 1);
+});
+
+test("a failed real chat call immediately replaces a cached green Qwen status", async () => {
+  let aiCalls = 0;
+  const env = environment({
+    AI: {
+      async run() {
+        aiCalls += 1;
+        if (aiCalls === 1) return { response: "连接成功" };
+        throw new Error("Qwen unavailable after the probe");
+      },
+    },
+  });
+  const firstStatus = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+  assert.equal((await body(firstStatus)).systemReady, true);
+
+  const failedChat = await handleRequest(
+    request("/api/chat", { method: "POST", body: chatBody("机器人研究方向有哪些？") }),
+    env,
+    {},
+    oaRuntime(),
+  );
+  assert.equal(failedChat.status, 502);
+  const updatedStatus = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+  const result = await body(updatedStatus);
+  assert.equal(result.qwenReady, false);
+  assert.equal(result.systemReady, false);
+  assert.equal(aiCalls, 2);
+});
+
+test("an obsolete Qwen probe cannot overwrite a newer configuration status", async () => {
+  const DB = await bailianDatabase();
+  const env = environment({ DB });
+  let releaseFirstProbe;
+  let markFirstProbeStarted;
+  const firstProbeStarted = new Promise((resolve) => {
+    markFirstProbeStarted = resolve;
+  });
+  const firstProbeResponse = new Promise((resolve) => {
+    releaseFirstProbe = resolve;
+  });
+  const probeRuntime = oaRuntime(OA_CHUNKS, async (_url, init) => {
+    if (new Headers(init.headers).get("authorization") === "Bearer test-bailian-api-key") {
+      markFirstProbeStarted();
+      return firstProbeResponse;
+    }
+    return new Response(null, { status: 401 });
+  });
+
+  const obsoleteRequest = handleRequest(request("/api/status", { origin: null }), env, {}, probeRuntime);
+  await firstProbeStarted;
+  DB.settings.set("model", JSON.stringify({
+    baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    model: "qwen-plus",
+    encryptedKey: await encryptSecret("new-invalid-key", ENCRYPTION_KEY),
+    verifiedAt: "2026-09-12T00:00:00.000Z",
+  }));
+  const currentResponse = await handleRequest(request("/api/status", { origin: null }), env, {}, probeRuntime);
+  assert.equal((await body(currentResponse)).qwenReady, false);
+
+  releaseFirstProbe(Response.json({ choices: [{ message: { role: "assistant", content: "连接成功" } }] }));
+  const obsoleteResponse = await obsoleteRequest;
+  assert.equal((await body(obsoleteResponse)).qwenReady, true);
+  const finalResponse = await handleRequest(request("/api/status", { origin: null }), env, {}, probeRuntime);
+  assert.equal((await body(finalResponse)).qwenReady, false);
+  const cachedRecords = [...DB.settings]
+    .filter(([key]) => key.startsWith("system-status-model-v1:"))
+    .map(([, value]) => JSON.parse(value));
+  assert.equal(cachedRecords.some((record) => record.result.ready === false), true);
+});
+
+test("status rejects cache-busting query parameters before probing dependencies", async () => {
+  let calls = 0;
+  const env = environment({
+    AI: { async run() { calls += 1; return { response: "连接成功" }; } },
+    OA_SERVICE: { async fetch() { calls += 1; return Response.json({ oaReady: true, publicKnowledgeReady: true, retrievalReady: true }); } },
+  });
+  const response = await handleRequest(request("/api/status?refresh=1", { origin: null }), env, {}, oaRuntime());
+  assert.equal(response.status, 400);
+  assert.equal(calls, 0);
+});
+
+test("the aggregate system light turns off when the daily AI budget is exhausted", async () => {
+  const day = new Date().toISOString().slice(0, 10);
+  const env = environment({
+    DB: new MockD1({ limits: { [`model-day:${day}`]: { count: 300, expires: Number.MAX_SAFE_INTEGER } } }),
+    AI: { async run() { return { response: "连接成功" }; } },
+  });
+  const response = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+  const result = await body(response);
+  assert.equal(result.qwenReady, true);
+  assert.equal(result.oaReady, true);
+  assert.equal(result.knowledgeReady, true);
+  assert.equal(result.budgetReady, false);
+  assert.equal(result.systemReady, false);
+});
+
+test("the aggregate system light turns off while OA retrieval capacity is exhausted", async () => {
+  const env = environment({
+    AI: { async run() { return { response: "连接成功" }; } },
+    OA_SERVICE: {
+      async fetch() {
+        return Response.json({ oaReady: true, publicKnowledgeReady: true, retrievalReady: false });
+      },
+    },
+  });
+  const response = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+  const result = await body(response);
+  assert.equal(result.oaReady, true);
+  assert.equal(result.knowledgeReady, true);
+  assert.equal(result.retrievalReady, false);
+  assert.equal(result.systemReady, false);
+});
+
+test("five-light status uses the authenticated OA Service Binding without exposing its token", async () => {
+  const serviceCalls = [];
+  const env = environment({
+    OA_SERVICE: {
+      async fetch(boundRequest) {
+        serviceCalls.push(boundRequest.clone());
+        return Response.json(
+          { oaReady: true, publicKnowledgeReady: true, retrievalReady: true },
+          { headers: { "Content-Type": "application/json" } },
+        );
+      },
+    },
+    AI: { async run() { return { response: "unused" }; } },
+  });
+  const response = await handleRequest(request("/api/status", { origin: null }), env, {}, {
+    async fetch() {
+      throw new Error("The public network fallback must not run when OA_SERVICE is bound");
+    },
+  });
+  assert.equal(response.status, 200);
+  const result = await body(response);
+  assert.equal(result.oaReady, true);
+  assert.equal(result.knowledgeReady, true);
+  assert.equal(result.qwenReady, true);
+  assert.equal(result.systemReady, true);
+  assert.equal(Object.hasOwn(result, "token"), false);
+  assert.equal(serviceCalls.length, 1);
+  const boundRequest = serviceCalls[0];
+  assert.equal(boundRequest.url, OA_STATUS_URL);
+  assert.equal(boundRequest.method, "GET");
+  assert.equal(boundRequest.headers.get("x-originmind-public-lab-ai-service-token"), SERVICE_TOKEN);
+  assert.equal(boundRequest.headers.has("cookie"), false);
+  assert.equal(boundRequest.headers.has("authorization"), false);
 });
 
 test("OA Service Binding is preferred and preserves the hardened request", async () => {
