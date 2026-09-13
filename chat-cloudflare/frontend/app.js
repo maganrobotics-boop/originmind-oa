@@ -5,6 +5,15 @@ const OFFICIAL_SITE = "https://omindos.ai";
 const BAILIAN_CONSOLE = "https://bailian.console.aliyun.com/";
 const OA_KNOWLEDGE_URL = "https://oa.omindos.ai/";
 const OA_CHAT_IMPORT_URL = "https://oa.omindos.ai/api/knowledge/import-chat";
+const MAX_TEXT_IMPORT_BYTES = 120_000;
+const MAX_BINARY_IMPORT_BYTES = 10 * 1024 * 1024;
+const IMPORT_MIME_BY_EXTENSION = Object.freeze({
+  pdf: "application/pdf",
+  jpg: "image/jpeg",
+  jpeg: "image/jpeg",
+  png: "image/png",
+  webp: "image/webp",
+});
 
 const TOPICS = [
   {
@@ -90,47 +99,6 @@ const TOPIC_ID_BY_PATH = new Map([
   ["/", DEFAULT_TOPIC_ID],
   ...TOPICS.map((topic) => [topic.path, topic.id]),
 ]);
-const CHAT_INFO_STORAGE_KEY = "originmind-chat-info-preferences-v1";
-
-function readChatInfoPreferences() {
-  const preferences = Object.fromEntries(TOPICS.map((topic) => [topic.id, {
-    doNotDisturb: false,
-    pinned: false,
-    reminder: false,
-  }]));
-  try {
-    const stored = window.localStorage.getItem(CHAT_INFO_STORAGE_KEY);
-    if (!stored) return preferences;
-    const parsed = JSON.parse(stored);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return preferences;
-    for (const topic of TOPICS) {
-      const candidate = parsed[topic.id];
-      if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) continue;
-      for (const key of ["doNotDisturb", "pinned", "reminder"]) {
-        if (typeof candidate[key] === "boolean") preferences[topic.id][key] = candidate[key];
-      }
-    }
-  } catch {
-    // Storage can be unavailable in private or restricted browsing contexts.
-  }
-  return preferences;
-}
-
-function writeChatInfoPreferences(preferences) {
-  try {
-    const stored = Object.fromEntries(TOPICS.map((topic) => {
-      const candidate = preferences?.[topic.id] || {};
-      return [topic.id, {
-        doNotDisturb: candidate.doNotDisturb === true,
-        pinned: candidate.pinned === true,
-        reminder: candidate.reminder === true,
-      }];
-    }));
-    window.localStorage.setItem(CHAT_INFO_STORAGE_KEY, JSON.stringify(stored));
-  } catch {
-    // Keep the in-memory preference when persistent storage is unavailable.
-  }
-}
 
 function topicIdForPath(pathname) {
   return TOPIC_ID_BY_PATH.get(pathname) || DEFAULT_TOPIC_ID;
@@ -246,7 +214,10 @@ async function requestJson(path, options = {}) {
       credentials: "same-origin",
       ...options,
     });
-  } catch {
+  } catch (error) {
+    if (error?.name === "TimeoutError" || error?.name === "AbortError") {
+      throw new Error("处理超时，请压缩或拆分文件后重试。");
+    }
     throw new Error("暂时无法连接服务，请稍后重试。");
   }
 
@@ -317,7 +288,6 @@ function createPublicApp() {
     networkReady: null,
     service: null,
     serviceError: "",
-    chatInfoPreferences: readChatInfoPreferences(),
     sessions: Object.fromEntries(TOPICS.map((topic) => [topic.id, {
       requestTopic: topic.requestTopic,
       messages: [],
@@ -370,13 +340,26 @@ function createPublicApp() {
     element("span", { className: "menu-line" }),
   ]));
   const topicTitle = element("h1", { className: "topic-title", text: topicFor().title });
-  const systemStatus = element("span", {
-    className: "system-status-strip",
-    attributes: {
-      role: "group",
-      "aria-label": "系统连接状态：正在检测",
-      title: "系统连接状态：正在检测",
-    },
+  const systemStatus = textButton("", "system-status-strip");
+  systemStatus.setAttribute("aria-label", "系统连接状态：正在检测");
+  systemStatus.setAttribute("aria-controls", "system-status-details");
+  systemStatus.setAttribute("aria-expanded", "false");
+  systemStatus.setAttribute("title", "系统连接状态：正在检测");
+  const systemStatusDetails = element("div", {
+    id: "system-status-details",
+    className: "system-status-details",
+    attributes: { role: "region", "aria-label": "系统连接详情" },
+  });
+  systemStatusDetails.hidden = true;
+  systemStatusDetails.append(element("strong", {
+    className: "system-status-details-title",
+    text: "系统连接详情",
+  }));
+  const systemStatusDetailsList = element("div", { className: "system-status-details-list" });
+  systemStatusDetails.append(systemStatusDetailsList);
+  const systemStatusAnnouncement = element("span", {
+    className: "sr-only",
+    attributes: { role: "status", "aria-live": "polite", "aria-atomic": "true" },
   });
   const systemLightNodes = new Map();
   for (const light of SYSTEM_LIGHTS) {
@@ -389,10 +372,46 @@ function createPublicApp() {
       className: "system-light",
       attributes: { title: `${light.label}：正在检测` },
     }, [dot, detail]);
-    systemLightNodes.set(light.key, { item, dot, detail });
+    const panelDetail = element("span", {
+      className: "system-status-detail-value",
+      text: "正在检测",
+    });
+    const panelRow = element("div", {
+      className: "system-status-detail-row is-pending",
+    }, [
+      element("span", { className: "system-status-detail-label", text: light.label }),
+      panelDetail,
+    ]);
+    systemLightNodes.set(light.key, { item, dot, detail, panelDetail, panelRow });
     systemStatus.append(item);
+    systemStatusDetailsList.append(panelRow);
   }
-  const topicHeader = element("div", { className: "topic-header" }, [topicTitle, systemStatus]);
+  const topicHeader = element("div", { className: "topic-header" }, [
+    topicTitle,
+    systemStatus,
+    systemStatusDetails,
+    systemStatusAnnouncement,
+  ]);
+
+  function setSystemStatusDetailsOpen(open) {
+    const nextOpen = open === true;
+    systemStatusDetails.hidden = !nextOpen;
+    systemStatus.setAttribute("aria-expanded", String(nextOpen));
+  }
+
+  systemStatus.addEventListener("click", () => {
+    setSystemStatusDetailsOpen(systemStatusDetails.hidden);
+  });
+  document.addEventListener("click", (event) => {
+    if (!systemStatusDetails.hidden && !topicHeader.contains(event.target)) {
+      setSystemStatusDetailsOpen(false);
+    }
+  });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || systemStatusDetails.hidden) return;
+    setSystemStatusDetailsOpen(false);
+    systemStatus.focus({ preventScroll: true });
+  });
   const chatInfoButton = textButton("", "chat-info-button");
   chatInfoButton.setAttribute("aria-label", "聊天信息");
   chatInfoButton.setAttribute("aria-controls", "chat-info-dialog");
@@ -564,8 +583,6 @@ function createPublicApp() {
   conversation.append(messageScroll, composerArea);
   layout.append(conversation);
 
-  const chatInfoSwitches = new Map();
-
   function chatInfoActionRow(labelText, action, extraClass = "") {
     const row = textButton("", `chat-info-row${extraClass ? ` ${extraClass}` : ""}`);
     row.append(
@@ -580,27 +597,37 @@ function createPublicApp() {
     return row;
   }
 
-  function chatInfoToggleRow(labelText, key) {
-    const row = element("label", { className: "chat-info-row chat-info-toggle-row" });
+  function chatInfoUnavailableActionRow(labelText) {
+    const row = textButton("", "chat-info-row chat-info-row-unavailable");
+    row.disabled = true;
+    row.setAttribute("aria-label", `${labelText}（暂未开放）`);
+    row.append(
+      element("span", { className: "chat-info-label", text: labelText }),
+      element("span", { className: "chat-info-unavailable-badge", text: "暂未开放" }),
+    );
+    return row;
+  }
+
+  function chatInfoUnavailableToggleRow(labelText) {
+    const row = element("div", {
+      className: "chat-info-row chat-info-toggle-row chat-info-row-unavailable",
+      attributes: { "aria-disabled": "true" },
+    });
     const input = element("input", {
       className: "chat-info-switch-input",
-      attributes: { type: "checkbox", "aria-label": labelText },
-    });
-    input.addEventListener("change", () => {
-      const preferences = state.chatInfoPreferences[state.section];
-      if (!preferences) return;
-      preferences[key] = input.checked;
-      writeChatInfoPreferences(state.chatInfoPreferences);
+      attributes: { type: "checkbox", "aria-label": `${labelText}（暂未开放）`, disabled: true },
     });
     row.append(
       element("span", { className: "chat-info-label", text: labelText }),
-      input,
-      element("span", {
-        className: "chat-info-switch",
-        attributes: { "aria-hidden": "true" },
-      }),
+      element("span", { className: "chat-info-unavailable-control" }, [
+        element("span", { className: "chat-info-unavailable-badge", text: "暂未开放" }),
+        input,
+        element("span", {
+          className: "chat-info-switch",
+          attributes: { "aria-hidden": "true" },
+        }),
+      ]),
     );
-    chatInfoSwitches.set(key, input);
     return row;
   }
 
@@ -638,29 +665,31 @@ function createPublicApp() {
     element("span", { className: "chat-info-member-name", text: APP_NAME }),
   );
   const chatInfoAdd = textButton("", "chat-info-add");
-  chatInfoAdd.setAttribute("aria-label", "添加成员");
+  chatInfoAdd.setAttribute("aria-label", "添加成员（暂未开放）");
+  chatInfoAdd.disabled = true;
   chatInfoAdd.append(element("span", {
     className: "chat-info-add-glyph",
     text: "+",
     attributes: { "aria-hidden": "true" },
   }));
-  chatInfoAdd.addEventListener("click", () => window.alert("添加成员功能暂未开放。"));
-  chatInfoMembers.append(chatInfoMember, chatInfoAdd);
+  const chatInfoAddMember = element("div", { className: "chat-info-member" }, [
+    chatInfoAdd,
+    element("span", { className: "chat-info-member-name", text: "暂未开放" }),
+  ]);
+  chatInfoMembers.append(chatInfoMember, chatInfoAddMember);
 
   const chatInfoSearchBlock = element("section", { className: "chat-info-block" });
   chatInfoSearchBlock.append(chatInfoActionRow("查找聊天记录", findChatMessage));
 
   const chatInfoToggleBlock = element("section", { className: "chat-info-block" });
   chatInfoToggleBlock.append(
-    chatInfoToggleRow("消息免打扰", "doNotDisturb"),
-    chatInfoToggleRow("置顶聊天", "pinned"),
-    chatInfoToggleRow("提醒", "reminder"),
+    chatInfoUnavailableToggleRow("消息免打扰"),
+    chatInfoUnavailableToggleRow("置顶聊天"),
+    chatInfoUnavailableToggleRow("提醒"),
   );
 
   const chatInfoBackgroundBlock = element("section", { className: "chat-info-block" });
-  chatInfoBackgroundBlock.append(chatInfoActionRow("设置当前聊天背景", () => {
-    window.alert("聊天背景功能暂未开放。");
-  }));
+  chatInfoBackgroundBlock.append(chatInfoUnavailableActionRow("设置当前聊天背景"));
 
   const chatInfoClearBlock = element("section", { className: "chat-info-block" });
   const clearChatHistory = chatInfoActionRow("清空聊天记录", () => {
@@ -672,9 +701,7 @@ function createPublicApp() {
   chatInfoClearBlock.append(clearChatHistory);
 
   const chatInfoComplaintBlock = element("section", { className: "chat-info-block" });
-  chatInfoComplaintBlock.append(chatInfoActionRow("投诉", () => {
-    window.alert("投诉功能暂未开放。");
-  }));
+  chatInfoComplaintBlock.append(chatInfoUnavailableActionRow("投诉"));
 
   chatInfoScroll.append(
     chatInfoMembers,
@@ -689,7 +716,7 @@ function createPublicApp() {
 
   let chatInfoDialogOpener = null;
   chatInfoButton.addEventListener("click", openChatInfo);
-  chatInfoBack.addEventListener("click", closeChatInfo);
+  chatInfoBack.addEventListener("click", () => closeChatInfo());
   chatInfoDialog.addEventListener("cancel", () => {
     chatInfoButton.setAttribute("aria-expanded", "false");
   });
@@ -738,6 +765,7 @@ function createPublicApp() {
   let systemStatusController = null;
   let systemStatusCheckedAt = 0;
   let systemStatusRefreshTimer = null;
+  let announcedSystemDescription = "";
 
   function setSystemLight(key, tone, detail) {
     const nodes = systemLightNodes.get(key);
@@ -745,6 +773,8 @@ function createPublicApp() {
     nodes.dot.className = `system-light-dot is-${tone}`;
     nodes.item.setAttribute("title", `${SYSTEM_LIGHTS.find((light) => light.key === key)?.label || key}：${detail}`);
     nodes.detail.textContent = `${SYSTEM_LIGHTS.find((light) => light.key === key)?.label || key}：${detail}`;
+    nodes.panelRow.className = `system-status-detail-row is-${tone}`;
+    nodes.panelDetail.textContent = detail;
   }
 
   function updateSystemLights() {
@@ -805,6 +835,10 @@ function createPublicApp() {
     const description = `${summary}；${details.join("；")}`;
     systemStatus.setAttribute("aria-label", description);
     systemStatus.setAttribute("title", description);
+    if (description !== announcedSystemDescription) {
+      announcedSystemDescription = description;
+      systemStatusAnnouncement.textContent = description;
+    }
   }
 
   async function probeNetwork(signal) {
@@ -900,18 +934,11 @@ function createPublicApp() {
     });
   }
 
-  function syncChatInfoSwitches() {
-    const preferences = state.chatInfoPreferences[state.section];
-    if (!preferences) return;
-    for (const [key, input] of chatInfoSwitches) input.checked = preferences[key] === true;
-  }
-
   function openChatInfo() {
     if (chatInfoDialog.open) return;
     chatInfoDialogOpener = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : chatInfoButton;
-    syncChatInfoSwitches();
     questionInput.blur();
     syncChatViewport();
     chatInfoButton.setAttribute("aria-expanded", "true");
@@ -922,14 +949,19 @@ function createPublicApp() {
     });
   }
 
-  function closeChatInfo() {
+  function closeChatInfo({ restoreFocus = true } = {}) {
     if (!chatInfoDialog.open) return;
+    if (!restoreFocus) chatInfoDialogOpener = null;
     chatInfoDialog.close();
   }
 
   function clearSearchMatches() {
     for (const match of messageScroll.querySelectorAll(".search-match")) {
       match.classList.remove("search-match");
+      match.removeAttribute("aria-current");
+      const originalLabel = match.getAttribute("data-search-original-label");
+      if (originalLabel) match.setAttribute("aria-label", originalLabel);
+      match.removeAttribute("data-search-original-label");
     }
   }
 
@@ -938,7 +970,7 @@ function createPublicApp() {
     if (rawQuery === null) return;
     const query = rawQuery.trim();
     if (!query) return;
-    closeChatInfo();
+    closeChatInfo({ restoreFocus: false });
     clearSearchMatches();
 
     const section = state.section;
@@ -956,8 +988,13 @@ function createPublicApp() {
       if (state.section !== section) return;
       const match = messageScroll.querySelectorAll(".message").item(matchIndex);
       if (!(match instanceof HTMLElement)) return;
+      const originalLabel = match.getAttribute("aria-label") || "聊天消息";
       match.classList.add("search-match");
+      match.setAttribute("aria-current", "true");
+      match.setAttribute("data-search-original-label", originalLabel);
+      match.setAttribute("aria-label", `聊天记录搜索结果：${originalLabel}`);
       match.scrollIntoView({ behavior: "smooth", block: "center" });
+      match.focus({ preventScroll: true });
       topicStatus.textContent = `已找到包含“${query}”的聊天记录`;
     });
   }
@@ -1013,7 +1050,6 @@ function createPublicApp() {
       }
     }
     topicTitle.textContent = topicFor().title;
-    syncChatInfoSwitches();
   }
 
   function activateTopic(section, { historyMode = "none", announce = false } = {}) {
@@ -1113,7 +1149,10 @@ function createPublicApp() {
   function assistantMessageNode(message, section) {
     const article = element("article", {
       className: `message ${message.role}`,
-      attributes: { "aria-label": message.role === "user" ? "你发送的消息" : `${APP_NAME} 的回答` },
+      attributes: {
+        "aria-label": message.role === "user" ? "你发送的消息" : `${APP_NAME} 的回答`,
+        tabindex: "-1",
+      },
     });
     article.append(element("div", { className: "message-body", text: String(message.content || "") }));
 
@@ -1977,12 +2016,14 @@ function createAdminApp() {
     title.input.minLength = 2;
     title.input.maxLength = 120;
     title.input.value = state.draft.title;
+    title.input.disabled = Boolean(state.busy);
     title.input.addEventListener("input", (event) => { state.draft.title = event.currentTarget.value; });
 
     const pair = element("div", { className: "form-pair" });
     const categoryLabel = element("label", { attributes: { for: "document-category" } });
     categoryLabel.append(document.createTextNode("咨询方向"));
     const category = element("select", { id: "document-category" });
+    category.disabled = Boolean(state.busy);
     for (const id of ["student", "research", "business"]) {
       const option = element("option", { text: TOPIC_LABELS[id], attributes: { value: id } });
       if (state.draft.category === id) option.selected = true;
@@ -1993,12 +2034,14 @@ function createAdminApp() {
     const date = labelledInput("document-date", "资料日期", "date");
     date.input.required = true;
     date.input.value = state.draft.updatedAt;
+    date.input.disabled = Boolean(state.busy);
     date.input.addEventListener("input", (event) => { state.draft.updatedAt = event.currentTarget.value; });
     pair.append(categoryLabel, date.label);
 
     const url = labelledInput("document-url", "原始资料链接（可选）", "url");
     url.input.maxLength = 1500;
     url.input.value = state.draft.url;
+    url.input.disabled = Boolean(state.busy);
     url.input.addEventListener("input", (event) => { state.draft.url = event.currentTarget.value; });
 
     const bodyLabel = element("label", { attributes: { for: "document-body" } });
@@ -2009,50 +2052,100 @@ function createAdminApp() {
       attributes: { required: true, minlength: "10", maxlength: "30000" },
     });
     body.value = state.draft.body;
+    body.disabled = Boolean(state.busy);
     body.addEventListener("input", (event) => { state.draft.body = event.currentTarget.value; });
     bodyLabel.append(body);
 
     const fileLabel = element("label", { attributes: { for: "document-file" } });
-    fileLabel.append(document.createTextNode("导入文本文件"));
+    fileLabel.append(document.createTextNode(state.busy === "file" ? "正在自动解析…" : "导入资料文件"));
     const fileInput = element("input", {
       id: "document-file",
-      attributes: { type: "file", accept: ".txt,.md" },
+      attributes: {
+        type: "file",
+        accept: ".txt,.md,.pdf,.jpg,.jpeg,.png,.webp,text/plain,text/markdown,application/pdf,image/jpeg,image/png,image/webp",
+      },
     });
+    const focusImportedField = (id) => {
+      window.requestAnimationFrame(() => {
+        const target = document.getElementById(id);
+        target?.scrollIntoView?.({ behavior: "smooth", block: "center" });
+        target?.focus?.({ preventScroll: true });
+      });
+    };
     fileInput.disabled = Boolean(state.busy);
     fileInput.addEventListener("change", async (event) => {
       const file = event.currentTarget.files?.[0];
       if (!file || state.busy) return;
-      if (!/\.(txt|md)$/i.test(file.name)) {
-        state.error = "当前版本支持 TXT、Markdown；PDF 或 Word 请先复制需要提交审核的正文。";
+      state.notice = "";
+      const extension = file.name.split(".").at(-1)?.toLowerCase() || "";
+      const isText = extension === "txt" || extension === "md";
+      const extractionMimeType = IMPORT_MIME_BY_EXTENSION[extension];
+      if (!isText && !extractionMimeType) {
+        state.error = "仅支持 TXT、Markdown、PDF、JPG、PNG 和 WebP 文件。";
         renderAdminShell();
+        focusImportedField("document-file");
         return;
       }
-      if (file.size > 120000) {
-        state.error = "文件过大，请分成更短的资料条目。";
+      const maximum = isText ? MAX_TEXT_IMPORT_BYTES : MAX_BINARY_IMPORT_BYTES;
+      if (file.size > maximum) {
+        state.error = isText
+          ? "文本文件过大，请分成更短的资料条目。"
+          : "PDF 或图片不能超过 10 MB，请压缩或拆分后重试。";
         renderAdminShell();
+        focusImportedField("document-file");
+        return;
+      }
+      if (state.draft.body.trim() && !window.confirm("导入新文件将替换当前正文，是否继续？")) {
+        event.currentTarget.value = "";
         return;
       }
       state.busy = "file";
       state.error = "";
       renderAdminShell();
+      let imported = false;
       try {
-        const text = await file.text();
+        let text;
+        if (isText) {
+          text = await file.text();
+        } else {
+          const result = await adminRequest("extract", {
+            method: "POST",
+            headers: {
+              "Content-Type": extractionMimeType,
+              "X-File-Name": encodeURIComponent(file.name),
+            },
+            body: file,
+            signal: AbortSignal.timeout(120_000),
+          });
+          if (typeof result.text !== "string") throw new Error("文件解析结果异常，请稍后重试。");
+          text = result.text;
+        }
         if (text.length > 30000) throw new Error("每条资料最多 30000 字");
-        if (!state.draft.title) state.draft.title = file.name.replace(/\.(txt|md)$/i, "");
+        if (text.trim().length < 10) throw new Error("未识别到足够内容，请手动填写正文。");
+        if (!state.draft.title) {
+          state.draft.title = file.name
+            .replace(/\.(txt|md|pdf|jpe?g|png|webp)$/i, "")
+            .trim()
+            .slice(0, 120);
+        }
         state.draft.body = text;
-        state.notice = "文本已导入，请核对后保存草稿。";
+        imported = true;
+        state.notice = isText
+          ? "文本已导入，请核对后保存草稿。"
+          : `${extension === "pdf" ? "PDF" : "图片"}已由 Cloudflare AI 临时解析（${text.length} 字），本站未保存原件。请核对识别结果后提交。`;
       } catch (error) {
         state.error = error instanceof Error ? error.message : "读取失败";
       } finally {
         state.busy = "";
         renderAdminShell();
+        focusImportedField(imported ? "document-body" : "document-file");
       }
     });
     fileLabel.append(
       fileInput,
       element("span", {
         className: "small-note",
-        text: "支持 TXT、Markdown。PDF 或 Word 可先复制需要提交审核的正文。",
+        text: "支持 TXT、Markdown、PDF、JPG、PNG、WebP。PDF、扫描件和图片会发送至 Cloudflare AI 临时解析，本站不保存原件；识别可能有误，请提交前核对。单个文件不超过 10 MB，解析正文最多 30000 字。",
       }),
     );
 
@@ -2353,4 +2446,3 @@ if (window.location.pathname === "/manage") {
 } else {
   createPublicApp();
 }
-

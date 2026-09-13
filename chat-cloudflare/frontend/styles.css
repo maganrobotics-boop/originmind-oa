@@ -2234,8 +2234,8 @@ textarea {
   box-shadow: none;
 }
 
-button.chat-info-row:hover,
-button.chat-info-row:active {
+button.chat-info-row:not(:disabled):hover,
+button.chat-info-row:not(:disabled):active {
   background: #f7f7f7;
 }
 
@@ -2361,8 +2361,37 @@ button.chat-info-row:active {
   background: #f7f7f7;
 }
 
+.chat-info-add:disabled {
+  border-color: #d2d2d2;
+  background: #f7f7f7;
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
 .chat-info-toggle-row {
-  cursor: pointer;
+  cursor: not-allowed;
+}
+
+.chat-info-row-unavailable,
+.chat-info-row-unavailable .chat-info-label {
+  color: #666666;
+}
+
+.chat-info-row-unavailable {
+  cursor: not-allowed;
+}
+
+.chat-info-unavailable-control {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.chat-info-unavailable-badge {
+  flex: 0 0 auto;
+  color: #666666;
+  font-size: 13px;
+  line-height: 1.35;
 }
 
 .chat-info-switch-input {
@@ -2418,7 +2447,7 @@ button.chat-info-row:active {
 }
 
 .message.search-match .message-body {
-  outline: 3px solid #f2c94c;
+  outline: 3px solid #9a6500;
   outline-offset: 2px;
 }
 
@@ -2624,52 +2653,133 @@ body.public-chat-page {
 
 .system-status-strip {
   display: flex;
-  min-width: 0;
-  height: 8px;
+  min-width: 64px;
+  height: 24px;
   align-items: center;
   justify-content: center;
   gap: 4px;
-  cursor: help;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 12px;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
   user-select: none;
+}
+
+.system-status-strip:hover,
+.system-status-strip[aria-expanded="true"] {
+  background: rgba(0, 0, 0, 0.055);
 }
 
 .system-light {
   display: grid;
-  width: 6px;
+  width: 8px;
   height: 8px;
   place-items: center;
 }
 
 .system-light-dot {
   display: block;
-  width: 6px;
-  height: 6px;
-  border: 1px solid rgba(0, 0, 0, 0.08);
+  width: 8px;
+  height: 8px;
+  border: 1px solid #4f4f4f;
   border-radius: 50%;
-  background: #a8a8a8;
-  box-shadow: 0 0 0 2px rgba(168, 168, 168, 0.12);
+  background: #666666;
+  box-shadow: 0 0 0 2px rgba(102, 102, 102, 0.12);
 }
 
 .system-light-dot.is-ok {
-  border-color: #079d4f;
-  background: #07c160;
+  border-color: #045b2d;
+  background: #067a3d;
   box-shadow: 0 0 0 2px rgba(7, 193, 96, 0.12), 0 0 6px rgba(7, 193, 96, 0.32);
 }
 
 .system-light-dot.is-warning {
-  border-color: #c88200;
-  background: #f2a900;
+  border-color: #704200;
+  background: #9a5b00;
   box-shadow: 0 0 0 2px rgba(242, 169, 0, 0.12);
 }
 
 .system-light-dot.is-error {
-  border-color: #ba332b;
-  background: #d9473f;
+  border-color: #7a1711;
+  background: #b42318;
   box-shadow: 0 0 0 2px rgba(217, 71, 63, 0.12);
 }
 
 .system-light-dot.is-pending {
   animation: status-pulse 1.4s ease-in-out infinite;
+}
+
+.system-status-details {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% - 2px);
+  left: 50%;
+  display: grid;
+  width: min(320px, calc(100vw - 24px));
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid #d2d2d2;
+  border-radius: 10px;
+  background: #ffffff;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.16);
+  color: #191919;
+  text-align: left;
+  transform: translateX(-50%);
+}
+
+.system-status-details[hidden] {
+  display: none;
+}
+
+.system-status-details-title {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+.system-status-details-list {
+  display: grid;
+  gap: 8px;
+}
+
+.system-status-detail-row {
+  display: grid;
+  grid-template-columns: 10px 48px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  color: #555555;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.system-status-detail-row::before {
+  width: 8px;
+  height: 8px;
+  border: 1px solid #4f4f4f;
+  border-radius: 50%;
+  background: #666666;
+  content: "";
+}
+
+.system-status-detail-row.is-ok::before {
+  border-color: #045b2d;
+  background: #067a3d;
+}
+
+.system-status-detail-row.is-warning::before {
+  border-color: #704200;
+  background: #9a5b00;
+}
+
+.system-status-detail-row.is-error::before {
+  border-color: #7a1711;
+  background: #b42318;
+}
+
+.system-status-detail-label {
+  color: #191919;
+  font-weight: 600;
 }
 
 @keyframes status-pulse {

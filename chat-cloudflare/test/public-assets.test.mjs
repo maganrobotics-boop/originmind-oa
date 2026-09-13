@@ -112,7 +112,7 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
     assert.ok(script.includes(route), route);
   }
   assert.ok(script.includes("/api/admin/${endpoint}"));
-  for (const endpoint of ["config", "test", "oa-test", "documents", "inquiries"]) {
+  for (const endpoint of ["config", "test", "oa-test", "extract", "documents", "inquiries"]) {
     assert.match(script, new RegExp(`adminRequest\\(["']${endpoint}["']`, "u"), endpoint);
   }
   assert.match(script, /(?:window\.)?location\.pathname\s*===?\s*["']\/manage["']/u);
@@ -144,6 +144,19 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.match(script, /\bpublished\s*:\s*0\b/u);
   assert.ok(script.includes("保存并提交 OA 待审"));
   assert.ok(script.includes("未经审核的资料不会用于回答。"));
+  assert.ok(script.includes(".txt,.md,.pdf,.jpg,.jpeg,.png,.webp"));
+  assert.ok(script.includes("PDF、扫描件和图片"));
+  assert.ok(script.includes("发送至 Cloudflare AI 临时解析"));
+  assert.ok(script.includes("本站不保存原件"));
+  assert.ok(script.includes("解析正文最多 30000 字"));
+  assert.ok(script.includes("导入新文件将替换当前正文"));
+  for (const control of ["title.input", "category", "date.input", "url.input", "body"]) {
+    assert.match(script, new RegExp(`${control.replace(".", "\\.")}\\.disabled\\s*=\\s*Boolean\\(state\\.busy\\)`, "u"));
+  }
+  assert.match(script, /\.slice\(0,\s*120\)/u);
+  assert.match(script, /focusImportedField\(imported\s*\?\s*["']document-body["']\s*:\s*["']document-file["']\)/u);
+  assert.match(script, /adminRequest\(["']extract["'][\s\S]*?body:\s*file/u);
+  assert.match(script, /"X-File-Name":\s*encodeURIComponent\(file\.name\)/u);
   const externalApis = [...script.matchAll(/https?:\/\/[^\s"'`]+\/api\/[^\s"'`]+/giu)].map((match) => match[0]);
   assert.deepEqual(externalApis, ["https://oa.omindos.ai/api/knowledge/import-chat"]);
 
@@ -234,15 +247,23 @@ test("public chat keeps five compact live status lights below the fixed header t
   ]) {
     assert.match(script, new RegExp(`key:\\s*["']${key}["']\\s*,\\s*label:\\s*["']${label}["']`, "u"), key);
   }
-  assert.match(script, /className:\s*["']topic-header["'][\s\S]{0,100}?\[topicTitle,\s*systemStatus\]/u);
+  assert.match(script, /className:\s*["']topic-header["'][\s\S]{0,160}?\[\s*topicTitle,\s*systemStatus,/u);
   assert.match(script, /header\.append\(menuButton,\s*topicHeader,\s*chatInfoButton/u);
   assert.match(script, /SYSTEM_STATUS_REFRESH_MS\s*=\s*60_000/u);
   assert.match(script, /fetch\(["']\/_health["']/u);
   assert.match(script, /requestJson\(["']\/api\/status["']/u);
   assert.match(script, /service\.systemReady\s*===\s*true/u);
-  assert.match(style, /\.system-status-strip\s*\{[\s\S]*?height:\s*8px/u);
+  assert.match(script, /textButton\(\s*["']["']\s*,\s*["']system-status-strip["']\s*\)/u);
+  assert.ok(script.includes('systemStatus.setAttribute("aria-controls", "system-status-details")'));
+  assert.ok(script.includes('systemStatus.setAttribute("aria-expanded", "false")'));
+  assert.match(script, /id:\s*["']system-status-details["'][\s\S]{0,180}?role:\s*["']region["']/u);
+  assert.match(script, /systemStatusAnnouncement[\s\S]{0,220}?role:\s*["']status["'][\s\S]{0,120}?["']aria-live["']:\s*["']polite["']/u);
+  assert.match(script, /nodes\.panelDetail\.textContent\s*=\s*detail/u);
+  assert.match(script, /systemStatusAnnouncement\.textContent\s*=\s*description/u);
+  assert.match(style, /\.system-status-strip\s*\{[\s\S]*?height:\s*24px/u);
+  assert.match(style, /\.system-status-details\s*\{[\s\S]*?position:\s*absolute/u);
   assert.match(style, /\.chat-app\s+\.site-header\s*\{[\s\S]*?grid-template-rows:\s*minmax\(0,\s*1fr\)/u);
-  assert.match(style, /\.system-light-dot\.is-ok\s*\{[\s\S]*?background:\s*#07c160/u);
+  assert.match(style, /\.system-light-dot\.is-ok\s*\{[\s\S]*?background:\s*#067a3d/u);
 });
 
 test("public modules expose direct links with history navigation and an accessible topic drawer", async () => {
@@ -303,8 +324,11 @@ test("public chat exposes an accessible full-screen chat information surface", a
   ]) {
     assert.ok(script.includes(label), label);
   }
-  for (const label of ["查找聊天记录", "设置当前聊天背景", "清空聊天记录", "投诉"]) {
+  for (const label of ["查找聊天记录", "清空聊天记录"]) {
     assert.match(script, new RegExp(`chatInfoActionRow\\(\\s*["']${label}["']`, "u"), label);
+  }
+  for (const label of ["设置当前聊天背景", "投诉"]) {
+    assert.match(script, new RegExp(`chatInfoUnavailableActionRow\\(\\s*["']${label}["']`, "u"), label);
   }
   assert.match(script, /\bsrc:\s*["']\/favicon\.svg["']/u);
 
@@ -313,7 +337,7 @@ test("public chat exposes an accessible full-screen chat information surface", a
     /element\(\s*["']input["']\s*,\s*\{(?=[\s\S]{0,300}?className:\s*["']chat-info-switch-input["'])(?=[\s\S]{0,300}?type:\s*["']checkbox["'])/u,
   );
   assert.match(script, /className:\s*["'][^"']*\bchat-info-toggle-row\b[^"']*["']/u);
-  assert.match(script, /input\.addEventListener\(\s*["']change["']/u);
+  assert.match(script, /className:\s*["']chat-info-switch-input["'][\s\S]{0,220}?disabled:\s*true/u);
 
   assert.match(script, /function\s+openChatInfo\s*\([^)]*\)\s*\{[\s\S]{0,700}?chatInfoDialog\.showModal\(\)/u);
   assert.match(script, /function\s+closeChatInfo\s*\([^)]*\)\s*\{[\s\S]{0,500}?chatInfoDialog\.close\(\)/u);
@@ -330,28 +354,37 @@ test("public chat exposes an accessible full-screen chat information surface", a
   );
 });
 
-test("chat information preferences are safely persisted per public topic", async () => {
+test("unavailable chat information controls are explicit and cannot be operated", async () => {
   const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
 
-  assert.match(script, /const\s+CHAT_INFO_STORAGE_KEY\s*=\s*["']originmind-chat-info-preferences-v1["']/u);
-  assert.match(
-    script,
-    /function\s+readChatInfoPreferences\s*\([^)]*\)\s*\{[\s\S]{0,2400}?\btry\s*\{[\s\S]{0,1800}?(?:window\.)?localStorage\.getItem\(CHAT_INFO_STORAGE_KEY\)[\s\S]{0,1800}?\bcatch\s*(?:\([^)]*\))?\s*\{/u,
-  );
-  assert.match(
-    script,
-    /function\s+writeChatInfoPreferences\s*\([^)]*\)\s*\{[\s\S]{0,1200}?\btry\s*\{[\s\S]{0,800}?(?:window\.)?localStorage\.setItem\(CHAT_INFO_STORAGE_KEY,[\s\S]{0,500}?\bcatch\s*(?:\([^)]*\))?\s*\{/u,
-  );
-  assert.match(script, /chatInfoPreferences:\s*readChatInfoPreferences\(\)/u);
-  assert.match(script, /const\s+preferences\s*=\s*state\.chatInfoPreferences\[state\.section\][\s\S]{0,200}?preferences\[key\]\s*=\s*input\.checked/u);
-  assert.match(script, /writeChatInfoPreferences\(state\.chatInfoPreferences\)/u);
-  for (const [label, key] of [
-    ["消息免打扰", "doNotDisturb"],
-    ["置顶聊天", "pinned"],
-    ["提醒", "reminder"],
-  ]) {
-    assert.match(script, new RegExp(`["']${label}["'][^\\n]{0,160}?["']${key}["']`, "u"), label);
+  assert.doesNotMatch(script, /CHAT_INFO_STORAGE_KEY|readChatInfoPreferences|writeChatInfoPreferences/u);
+  assert.doesNotMatch(script, /syncChatInfoSwitches/u);
+  assert.doesNotMatch(script, /input\.addEventListener\(\s*["']change["']/u);
+  assert.match(script, /function\s+chatInfoUnavailableActionRow\s*\(/u);
+  assert.match(script, /function\s+chatInfoUnavailableToggleRow\s*\(/u);
+  assert.match(script, /row\.disabled\s*=\s*true/u);
+  assert.match(script, /chatInfoAdd\.disabled\s*=\s*true/u);
+  assert.match(script, /className:\s*["']chat-info-unavailable-badge["']\s*,\s*text:\s*["']暂未开放["']/u);
+  for (const label of ["消息免打扰", "置顶聊天", "提醒"]) {
+    assert.match(script, new RegExp(`chatInfoUnavailableToggleRow\\(\\s*["']${label}["']\\s*\\)`, "u"), label);
   }
+  assert.doesNotMatch(script, /功能暂未开放。/u);
+});
+
+test("chat record search moves focus and marks the matching message semantically", async () => {
+  const [script, style] = await Promise.all([
+    readFile(path.join(frontendDir, "app.js"), "utf8"),
+    readFile(path.join(frontendDir, "styles.css"), "utf8"),
+  ]);
+
+  assert.match(script, /className:\s*`message \$\{message\.role\}`[\s\S]{0,220}?tabindex:\s*["']-1["']/u);
+  assert.match(script, /closeChatInfo\(\{\s*restoreFocus:\s*false\s*\}\)/u);
+  assert.match(script, /match\.setAttribute\(\s*["']aria-current["']\s*,\s*["']true["']\s*\)/u);
+  assert.match(script, /聊天记录搜索结果：\$\{originalLabel\}/u);
+  assert.match(script, /match\.focus\(\{\s*preventScroll:\s*true\s*\}\)/u);
+  assert.match(script, /match\.removeAttribute\(\s*["']aria-current["']\s*\)/u);
+  assert.match(script, /data-search-original-label/u);
+  assert.match(style, /\.message\.search-match\s+\.message-body\s*\{[\s\S]*?outline:\s*3px solid #9a6500/u);
 });
 
 test("chat information styles preserve the Tencent mobile geometry", async () => {

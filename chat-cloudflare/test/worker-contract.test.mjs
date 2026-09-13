@@ -215,6 +215,7 @@ test("Workers AI is the zero-secret default and status reports the active model"
     oaPending: false,
     budgetReady: true,
     systemReady: true,
+    documentParsingReady: false,
     provider: "workers-ai",
     model: WORKERS_AI_MODEL,
   });
@@ -280,6 +281,54 @@ test("status probe budget prevents unbounded unauthenticated model calls", async
   assert.equal(result.qwenReady, false);
   assert.equal(result.systemReady, false);
   assert.equal(aiCalls, 0);
+});
+
+test("Bailian failure and Workers fallback consume one aggregate status-probe budget unit", async () => {
+  const day = new Date().toISOString().slice(0, 10);
+  const budgetKey = `model-status-day:${day}`;
+  const DB = await bailianDatabase();
+  DB.limits.set(budgetKey, { count: 299, expires: Number.MAX_SAFE_INTEGER });
+  let bailianCalls = 0;
+  let workersCalls = 0;
+  const env = environment({
+    DB,
+    AI: {
+      async run() {
+        workersCalls += 1;
+        return { response: "连接成功" };
+      },
+    },
+  });
+  const runtime = oaRuntime(OA_CHUNKS, async () => {
+    bailianCalls += 1;
+    return new Response(null, { status: 503 });
+  });
+  const budgetWrites = () => DB.statements.filter(
+    ({ query, args }) => query.startsWith("insert into limits") && args[0] === budgetKey,
+  );
+
+  const response = await handleRequest(request("/api/status", { origin: null }), env, {}, runtime);
+  assert.equal(response.status, 200);
+  const result = await body(response);
+  assert.equal(result.modelReady, true);
+  assert.equal(result.qwenReady, true);
+  assert.equal(result.systemReady, true);
+  assert.equal(result.provider, "workers-ai");
+  assert.equal(result.model, WORKERS_AI_MODEL);
+  assert.equal(bailianCalls, 1);
+  assert.equal(workersCalls, 1);
+  assert.equal(DB.limits.get(budgetKey)?.count, 300);
+  assert.equal(budgetWrites().length, 1);
+
+  const cachedResponse = await handleRequest(request("/api/status", { origin: null }), env, {}, runtime);
+  const cached = await body(cachedResponse);
+  assert.equal(cached.qwenReady, true);
+  assert.equal(cached.systemReady, true);
+  assert.equal(cached.provider, "workers-ai");
+  assert.equal(bailianCalls, 1);
+  assert.equal(workersCalls, 1);
+  assert.equal(DB.limits.get(budgetKey)?.count, 300);
+  assert.equal(budgetWrites().length, 1);
 });
 
 test("a failed real chat call immediately replaces a cached green Qwen status", async () => {
