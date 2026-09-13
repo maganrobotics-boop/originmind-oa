@@ -33,6 +33,14 @@ HTML shell under `public/`; those generated release assets are checked in.
 | Secret | `RATE_LIMIT_HMAC_KEY` | Pseudonymous abuse-control identifiers |
 | Secret | `PUBLIC_LAB_AI_SERVICE_TOKEN` | OA public retrieval authentication |
 
+The same Workers AI binding also converts administrator-selected PDF, JPEG,
+PNG, and WebP files to editable Markdown. The parsing route is administrator-
+only, same-origin, size-bounded, rate-limited, and validates both the declared
+type and file signature. Original binary files are not retained. Parsed text
+remains a Chat draft until the administrator reviews it and submits it to the
+existing OA internal/public approval flow; long results are split into bounded
+parts before submission.
+
 `APP_ORIGIN` is strict: preview and production deployments must generate their
 own configuration with the exact public origin. Production disables both
 `workers.dev` and preview URLs and is attached using the route

@@ -21,17 +21,18 @@ function exactOrigin(value) {
 }
 
 async function request(origin, pathname, init = {}) {
+  const { timeoutMilliseconds = 45_000, ...fetchOptions } = init;
   try {
     return await fetch(`${origin}${pathname}`, {
-      ...init,
+      ...fetchOptions,
       headers: {
         Accept: "application/json, text/html;q=0.9",
         "Cache-Control": "no-cache",
         "User-Agent": "OriginMind-Chat-Release-Smoke/1.0",
-        ...(init.headers || {}),
+        ...(fetchOptions.headers || {}),
       },
       redirect: "error",
-      signal: AbortSignal.timeout(45_000),
+      signal: AbortSignal.timeout(timeoutMilliseconds),
     });
   } catch {
     throw Object.assign(new Error("Smoke request failed"), { retryable: true });
@@ -127,9 +128,10 @@ export function validateServiceEvidence({ health, status, chat }, releaseIdValue
   if (
     status?.storageReady !== true ||
     status?.modelReady !== true ||
+    status?.documentParsingReady !== true ||
     !["workers-ai", "bailian"].includes(status?.provider)
   ) {
-    throw new Error("/api/status is not storage/model ready");
+    throw new Error("/api/status is not storage/model/document-parser ready");
   }
   if (
     chat?.mode !== "ai" ||
@@ -162,6 +164,35 @@ function validateAdminAuth(adminAuth) {
   if (adminAuth?.status !== 401 || adminAuth?.error !== "密码不正确") {
     throw new Error("/api/auth/login did not execute a compatible administrator password check");
   }
+}
+
+export function releaseSmokePdf() {
+  const stream = "BT\n/F1 18 Tf\n72 720 Td\n(OriginMind document parser smoke 2026) Tj\nET";
+  const objects = [
+    "<< /Type /Catalog /Pages 2 0 R >>",
+    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
+    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
+    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
+    `<< /Length ${Buffer.byteLength(stream, "ascii")} >>\nstream\n${stream}\nendstream`,
+  ];
+  let source = "%PDF-1.4\n";
+  const offsets = [0];
+  for (const [index, object] of objects.entries()) {
+    offsets.push(Buffer.byteLength(source, "ascii"));
+    source += `${index + 1} 0 obj\n${object}\nendobj\n`;
+  }
+  const xrefOffset = Buffer.byteLength(source, "ascii");
+  source += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
+  source += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
+  source += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
+  return Buffer.from(source, "ascii");
+}
+
+export function releaseSmokePng() {
+  return Buffer.from(
+    "iVBORw0KGgoAAAANSUhEUgAAAPAAAABAAQAAAAAM5MdKAAAAsUlEQVR42mP8z4AXNOCTZGTCr5lFHp/pvwjoHpUelR4a0iwMDCcOfCx5++VcyRZtA6mX9zB0fzH518DAwJAh9eD84rOYhh9i+Akxh4NBAbvdjY0PBBgYHjBiddqZvw0MDAwMzy4YyhZjOo1B58U/BgYGBhkTTx5BTN12HOwMDgc4/jAwyGH4k4mBgYfhNwMjA8MMhgOMsQ7ols//jwf8HE0to9Kj0gwsDxkpqEMZ8VfQADQ7RHGKtQ37AAAAAElFTkSuQmCC",
+    "base64",
+  );
 }
 
 export function validateReleaseEvidence({ health, status, chat, adminAuth }, releaseIdValue) {
@@ -347,6 +378,63 @@ async function verifySavedAdminPasswordRuntime(origin, password, { logoutAttempt
   }
 }
 
+async function verifyDocumentParsingRuntime(origin, password, { logoutAttempts = 3, sleepImpl = sleep } = {}) {
+  const loginResponse = await request(origin, "/api/auth/login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Origin: origin },
+    body: JSON.stringify({ password }),
+  });
+  const cookie = loginResponse.headers.get("set-cookie") || "";
+  const tokenMatch = /^__Host-ma-session=([a-f0-9]{64})(?:;|$)/u.exec(cookie);
+  const validCookie = /^__Host-ma-session=[a-f0-9]{64}; Path=\/; Secure; HttpOnly; SameSite=Strict; Max-Age=[1-9][0-9]*$/u.test(cookie);
+  try {
+    apiHeaders(loginResponse, "/api/auth/login");
+    const login = await json(loginResponse, "/api/auth/login");
+    if (loginResponse.status !== 200 || login?.signedIn !== true || !validCookie || !tokenMatch) {
+      throw Object.assign(new Error("The saved administrator password could not start the parser smoke session"), {
+        status: loginResponse.status,
+        retryable: isTransientSmokeStatus(loginResponse.status),
+      });
+    }
+
+    const fixtures = [
+      { name: "originmind-release-smoke.pdf", mimeType: "application/pdf", body: releaseSmokePdf() },
+      { name: "originmind-release-smoke.png", mimeType: "image/png", body: releaseSmokePng() },
+    ];
+    for (const fixture of fixtures) {
+      const parseResponse = await request(origin, `/api/admin/parse-file?name=${fixture.name}`, {
+        method: "POST",
+        timeoutMilliseconds: 120_000,
+        headers: {
+          "Content-Type": fixture.mimeType,
+          Origin: origin,
+          Cookie: `__Host-ma-session=${tokenMatch[1]}`,
+        },
+        body: fixture.body,
+      });
+      apiHeaders(parseResponse, "/api/admin/parse-file");
+      const parsed = await json(parseResponse, "/api/admin/parse-file");
+      if (
+        parseResponse.status !== 200 ||
+        typeof parsed?.markdown !== "string" ||
+        parsed.markdown.trim().length < 10 ||
+        parsed.mimeType !== fixture.mimeType ||
+        parsed.sourceStored !== false ||
+        parsed.characterCount !== parsed.markdown.length
+      ) {
+        throw Object.assign(new Error(`The live ${fixture.mimeType} parser did not return valid Markdown`), {
+          status: parseResponse.status,
+          retryable: isTransientSmokeStatus(parseResponse.status),
+        });
+      }
+    }
+  } finally {
+    if (tokenMatch) {
+      await revokeSmokeSession(origin, tokenMatch[1], { attempts: logoutAttempts, sleepImpl });
+    }
+  }
+}
+
 export async function smokeAdminAuthentication(originValue, {
   verifyAdmin = verifyAdminPasswordRuntime,
   attempts = 2,
@@ -373,11 +461,26 @@ export async function smokeSavedAdminAuthentication(originValue, {
   return { adminPasswordVerified: true, smokeSessionRevoked: true };
 }
 
+export async function smokeDocumentParsing(originValue, password, {
+  verifyParser = verifyDocumentParsingRuntime,
+  logoutAttempts = 3,
+  sleepImpl = sleep,
+} = {}) {
+  const origin = exactOrigin(originValue);
+  if (typeof password !== "string" || password.length < 12 || password.length > 256) {
+    throw new Error("A valid saved administrator password is required for parser smoke");
+  }
+  await verifyParser(origin, password, { logoutAttempts, sleepImpl });
+  return { documentParsingVerified: true, smokeSessionRevoked: true };
+}
+
 export async function smokeCloudflare(originValue, {
   attempts = 12,
   releaseId,
+  adminPassword = "",
   smokeAttempt = smokeOnce,
   verifyAdmin = verifyAdminPasswordRuntime,
+  verifyParser = verifyDocumentParsingRuntime,
   sleepImpl = sleep,
 } = {}) {
   const origin = exactOrigin(originValue);
@@ -397,7 +500,9 @@ export async function smokeCloudflare(originValue, {
   }
   if (!evidence) throw lastError || new Error("Cloudflare smoke check failed");
   await runAdminProbe(origin, verifyAdmin, { sleepImpl });
-  return { ...evidence, adminKdfCompatible: true };
+  if (!adminPassword) return { ...evidence, adminKdfCompatible: true };
+  await verifyParser(origin, adminPassword, { sleepImpl });
+  return { ...evidence, adminKdfCompatible: true, documentParsingVerified: true };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {

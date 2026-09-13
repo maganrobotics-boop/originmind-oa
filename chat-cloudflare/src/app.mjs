@@ -26,6 +26,13 @@ import {
 
 const SESSION_COOKIE = "__Host-ma-session";
 const SESSION_SECONDS = 43_200;
+const MAX_PARSED_CHARACTERS = 120_000;
+const PARSE_FILE_LIMITS = Object.freeze({
+  "application/pdf": { extensions: ["pdf"], maximum: 8 * 1024 * 1024 },
+  "image/jpeg": { extensions: ["jpg", "jpeg"], maximum: 5 * 1024 * 1024 },
+  "image/png": { extensions: ["png"], maximum: 5 * 1024 * 1024 },
+  "image/webp": { extensions: ["webp"], maximum: 5 * 1024 * 1024 },
+});
 
 function json(data, status = 200, headers = {}) {
   return Response.json(data, {
@@ -133,6 +140,151 @@ async function readJson(request, maximum = 120_000) {
   } catch {
     throw new PublicError("JSON 格式错误");
   }
+}
+
+function parseUploadDescriptor(request) {
+  const mediaType = request.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase() || "";
+  const format = PARSE_FILE_LIMITS[mediaType];
+  if (!format) throw new PublicError("当前支持 PDF、JPG、PNG 和 WebP 文件。", 415);
+  const rawName = new URL(request.url).searchParams.get("name") || "";
+  const name = rawName.normalize("NFC").trim();
+  if (!name || name.length > 160 || /[\u0000-\u001f\u007f/\\]/u.test(name)) {
+    throw new PublicError("文件名不正确。", 400);
+  }
+  const extension = name.includes(".") ? name.split(".").at(-1).toLowerCase() : "";
+  if (!format.extensions.includes(extension)) throw new PublicError("文件扩展名与内容类型不一致。", 415);
+  const contentEncoding = request.headers.get("content-encoding");
+  if (contentEncoding && contentEncoding.toLowerCase() !== "identity") {
+    throw new PublicError("不支持压缩上传。", 415);
+  }
+  return { mediaType, name, maximum: format.maximum };
+}
+
+async function readBinary(request, maximum) {
+  const declaredText = request.headers.get("content-length");
+  if (declaredText && !/^\d+$/u.test(declaredText)) throw new PublicError("文件大小不正确。", 400);
+  const declared = Number(declaredText || 0);
+  if (declared > maximum) throw new PublicError("文件过大，请压缩或拆分后重试。", 413);
+  const reader = request.body?.getReader();
+  if (!reader) throw new PublicError("没有收到文件。", 400);
+  const chunks = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.length;
+    if (total > maximum) {
+      await reader.cancel();
+      throw new PublicError("文件过大，请压缩或拆分后重试。", 413);
+    }
+    chunks.push(value);
+  }
+  if (!total) throw new PublicError("文件内容为空。", 400);
+  const bytes = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return bytes;
+}
+
+function matchesUploadSignature(mediaType, bytes) {
+  if (mediaType === "application/pdf") {
+    return bytes.length >= 5 && bytes[0] === 0x25 && bytes[1] === 0x50 && bytes[2] === 0x44 && bytes[3] === 0x46 && bytes[4] === 0x2d;
+  }
+  if (mediaType === "image/png") {
+    const signature = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a];
+    return bytes.length >= signature.length && signature.every((value, index) => bytes[index] === value);
+  }
+  if (mediaType === "image/jpeg") {
+    return bytes.length >= 3 && bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+  }
+  if (mediaType === "image/webp") {
+    return bytes.length >= 12
+      && String.fromCharCode(...bytes.slice(0, 4)) === "RIFF"
+      && String.fromCharCode(...bytes.slice(8, 12)) === "WEBP";
+  }
+  return false;
+}
+
+async function documentParsingBudget(context) {
+  const day = new Date().toISOString().slice(0, 10);
+  const now = Math.floor(Date.now() / 1_000);
+  await consumeCounter(
+    context,
+    `document-parse-day:${day}`,
+    100,
+    now + 172_800,
+    "今日文件解析额度已用完，请明天再试。",
+  );
+}
+
+function normalizedConvertedMarkdown(value) {
+  const markdown = typeof value === "string"
+    ? value.replace(/\r\n?/gu, "\n").replace(/\u0000/gu, "").trim()
+    : "";
+  if (markdown.length < 10) throw new PublicError("没有识别到足够内容；扫描件请转成清晰图片后上传。", 422);
+  if (markdown.length > MAX_PARSED_CHARACTERS) {
+    throw new PublicError("解析结果超过 12 万字，请拆分文件后重试。", 422);
+  }
+  return markdown;
+}
+
+async function parseKnowledgeFile(context) {
+  const descriptor = parseUploadDescriptor(context.request);
+  await limit(context, "document-parse", 20);
+  const bytes = await readBinary(context.request, descriptor.maximum);
+  if (!matchesUploadSignature(descriptor.mediaType, bytes)) {
+    throw new PublicError("文件内容与所选格式不一致。", 415);
+  }
+  if (typeof context.env.AI?.toMarkdown !== "function") {
+    throw new PublicError("文件解析服务暂不可用，请稍后重试。", 503);
+  }
+  await documentParsingBudget(context);
+  let converted;
+  try {
+    converted = await context.env.AI.toMarkdown(
+      { name: descriptor.name, blob: new Blob([bytes], { type: descriptor.mediaType }) },
+      {
+        conversionOptions: {
+          output: { format: "markdown" },
+          ...(descriptor.mediaType === "application/pdf"
+            ? { pdf: { metadata: false, images: { convert: true, maxConvertedImages: 20 } } }
+            : { image: {} }),
+        },
+      },
+    );
+  } catch (error) {
+    const statusValue = Number(error?.statusCode ?? error?.status);
+    const upstreamStatus = Number.isInteger(statusValue) && statusValue >= 100 && statusValue <= 599
+      ? statusValue
+      : null;
+    console.error("Document conversion failed", {
+      type: error instanceof Error ? error.name : "unknown",
+      upstreamStatus,
+    });
+    if (upstreamStatus === 429) throw new PublicError("文件解析请求过多，请稍后重试。", 429);
+    if (upstreamStatus && upstreamStatus >= 400 && upstreamStatus < 500) {
+      throw new PublicError("文件无法解析，请检查文件是否完整。", 422);
+    }
+    throw new PublicError("文件自动解析失败，请稍后重试。", 503);
+  }
+  if (!converted || converted.format !== "markdown") {
+    throw new PublicError("文件自动解析失败，请检查文件是否完整。", 422);
+  }
+  const markdown = normalizedConvertedMarkdown(converted.data);
+  return {
+    markdown,
+    fileName: descriptor.name,
+    mimeType: descriptor.mediaType,
+    characterCount: markdown.length,
+    tokens: Number.isFinite(converted.tokens) ? Math.max(0, Math.floor(converted.tokens)) : undefined,
+    sourceStored: false,
+    warnings: [descriptor.mediaType === "application/pdf"
+      ? "PDF 中的扫描页、公式、图表和复杂表格可能存在识别误差；超过 20 个嵌入图片时可能无法完整识别，请核对正文。"
+      : "图片中的文字、公式、图表和场景描述可能存在识别误差，请核对正文。"],
+  };
 }
 
 async function hmacHex(secret, value) {
@@ -409,11 +561,12 @@ async function api(context) {
         return json({
           storageReady: true,
           modelReady: Boolean(active.provider),
+          documentParsingReady: typeof context.env.AI?.toMarkdown === "function",
           provider: active.provider,
           model: active.model,
         });
       } catch {
-        return json({ storageReady: false, modelReady: false, provider: null, model: null }, 503);
+        return json({ storageReady: false, modelReady: false, documentParsingReady: false, provider: null, model: null }, 503);
       }
     }
     if (path.startsWith("admin/")) await requireOwner(context);
@@ -552,8 +705,12 @@ async function api(context) {
         encryptionReady: context.env.APP_ENCRYPTION_KEY.length >= 40,
         activeProvider: modelProvider(context, config).provider,
         workersAiReady: typeof context.env.AI?.run === "function",
+        documentParsingReady: typeof context.env.AI?.toMarkdown === "function",
         verifiedAt: config?.verifiedAt || null,
       });
+    }
+    if (path === "admin/parse-file" && method === "POST") {
+      return json(await parseKnowledgeFile(context));
     }
     if (path === "admin/config" && method === "POST") {
       await limit(context, "test", 10);
@@ -603,8 +760,11 @@ async function api(context) {
       }
       const id = payload.id || crypto.randomUUID();
       const url = safeSourceUrl(payload.url);
+      const existing = payload.id
+        ? await database(context).prepare("SELECT id FROM documents WHERE id=? LIMIT 1").bind(id).first()
+        : null;
       const count = await database(context).prepare("SELECT COUNT(*) AS n FROM documents").first();
-      if (!payload.id && Number(count?.n || 0) >= 200) {
+      if (!existing && Number(count?.n || 0) >= 200) {
         throw new PublicError("资料数量已达到当前上限，请整理现有资料后再添加");
       }
       await database(context)
