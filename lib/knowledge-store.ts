@@ -15,10 +15,21 @@ import {
   type KnowledgeVisibility,
   type SearchableKnowledgeChunk,
 } from "./knowledge-policy";
+import {
+  KNOWLEDGE_LIST_QUERY_MAX_LENGTH,
+  KNOWLEDGE_LIST_SORTS,
+  type KnowledgeListOptions,
+  type KnowledgeListSort,
+} from "./knowledge-types";
 
 const KNOWLEDGE_LIST_LIMIT = 100;
 const KNOWLEDGE_SEARCH_CANDIDATE_LIMIT = MAX_KNOWLEDGE_CHUNKS;
 const KNOWLEDGE_SQL_SEARCH_TERM_LIMIT = 16;
+const KNOWLEDGE_TITLE_COLLATOR = new Intl.Collator("zh-CN-u-co-pinyin", {
+  usage: "sort",
+  sensitivity: "base",
+  numeric: true,
+});
 // D1 allows at most 2 MiB of bound data and 50 queries per free-plan Worker
 // invocation. Packing at most 1.5 MB/256 rows leaves headroom for JSON and
 // keeps a worst-case 5 MiB Markdown approval comfortably below that budget.
@@ -160,6 +171,46 @@ export type KnowledgeItemWithRevisionRow = KnowledgeItemRow & {
 type KnowledgeItemListRow = Omit<KnowledgeItemWithRevisionRow, "content" | "content_hash">;
 
 export type KnowledgeListScope = "mine" | "review" | "all";
+
+function normalizeKnowledgeListOptions(options?: KnowledgeListOptions): { query: string; sort?: KnowledgeListSort } {
+  const query = options?.query?.trim() || "";
+  if (Array.from(query).length > KNOWLEDGE_LIST_QUERY_MAX_LENGTH) {
+    throw new RangeError("knowledge list query is too long");
+  }
+  const sort = options?.sort;
+  if (sort && !(KNOWLEDGE_LIST_SORTS as readonly string[]).includes(sort)) {
+    throw new RangeError("invalid knowledge list sort");
+  }
+  return { query, sort };
+}
+
+function knowledgeListSearchFilter(query: string): { sql: string; values: string[] } {
+  if (!query) return { sql: "", values: [] };
+  return {
+    sql: `AND (
+      instr(lower(COALESCE(i.title, '')), lower(?)) > 0
+      OR instr(lower(COALESCE(i.category, '')), lower(?)) > 0
+      OR instr(lower(COALESCE(r.summary, '')), lower(?)) > 0
+      OR instr(lower(COALESCE(r.source_label, '')), lower(?)) > 0
+      OR instr(lower(COALESCE(r.content, '')), lower(?)) > 0
+      OR EXISTS (
+        SELECT 1
+        FROM knowledge_revision_parts AS list_part
+        WHERE list_part.item_id = i.id
+          AND list_part.revision_id = i.current_revision_id
+          AND instr(lower(list_part.content), lower(?)) > 0
+      )
+    )`,
+    values: Array.from({ length: 6 }, () => query),
+  };
+}
+
+function compareKnowledgeTitles(left: KnowledgeItemListRow, right: KnowledgeItemListRow, sort: KnowledgeListSort): number {
+  const titleOrder = KNOWLEDGE_TITLE_COLLATOR.compare(left.title, right.title);
+  return (sort === "title_desc" ? -titleOrder : titleOrder)
+    || right.updated_at.localeCompare(left.updated_at)
+    || left.id.localeCompare(right.id);
+}
 
 function normalizeEmail(value: string): string {
   return value.trim().toLowerCase();
@@ -504,10 +555,11 @@ const LIST_ITEM_WITH_REVISION_SELECT = `
   LEFT JOIN knowledge_revisions AS r ON r.id = i.current_revision_id
 `;
 
-export async function listKnowledgeItems(scope: KnowledgeListScope, actor: KnowledgeActor, canReview: boolean) {
+export async function listKnowledgeItems(scope: KnowledgeListScope, actor: KnowledgeActor, canReview: boolean, options?: KnowledgeListOptions) {
   const database = await getD1Database();
   const guard = actorGuard(actor, canReview);
   let statement: D1PreparedStatement;
+  let titleSort: KnowledgeListSort | undefined;
   if (scope === "mine") {
     statement = database.prepare(`${LIST_ITEM_WITH_REVISION_SELECT}
       WHERE i.submitter_member_id = ? AND lower(i.submitter_email) = ? AND ${guard.sql}
@@ -526,10 +578,21 @@ export async function listKnowledgeItems(scope: KnowledgeListScope, actor: Knowl
     `).bind(actor.memberId, normalizeEmail(actor.email), actor.isAdmin ? 1 : 0,
       actor.memberId, normalizeEmail(actor.email), ...guard.values, KNOWLEDGE_LIST_LIMIT);
   } else if (canReview) {
+    const normalizedOptions = normalizeKnowledgeListOptions(options);
+    const search = knowledgeListSearchFilter(normalizedOptions.query);
+    titleSort = normalizedOptions.sort === "title_asc" || normalizedOptions.sort === "title_desc" ? normalizedOptions.sort : undefined;
+    const orderAndLimit = titleSort
+      ? ""
+      : normalizedOptions.sort === "updated_asc"
+        ? "ORDER BY i.updated_at ASC, i.id ASC LIMIT ?"
+        : normalizedOptions.sort === "updated_desc"
+          ? "ORDER BY i.updated_at DESC, i.id DESC LIMIT ?"
+          : "ORDER BY CASE i.status WHEN 'pending' THEN 0 ELSE 1 END, i.updated_at DESC, i.id DESC LIMIT ?";
     statement = database.prepare(`${LIST_ITEM_WITH_REVISION_SELECT}
       WHERE ${guard.sql}
-      ORDER BY CASE i.status WHEN 'pending' THEN 0 ELSE 1 END, i.updated_at DESC, i.id DESC LIMIT ?
-    `).bind(...guard.values, KNOWLEDGE_LIST_LIMIT);
+        ${search.sql}
+      ${orderAndLimit}
+    `).bind(...guard.values, ...search.values, ...(titleSort ? [] : [KNOWLEDGE_LIST_LIMIT]));
   } else {
     statement = database.prepare(`${LIST_ITEM_WITH_REVISION_SELECT}
       WHERE (i.status = 'active' OR (i.submitter_member_id = ? AND lower(i.submitter_email) = ?))
@@ -538,7 +601,11 @@ export async function listKnowledgeItems(scope: KnowledgeListScope, actor: Knowl
     `).bind(actor.memberId, normalizeEmail(actor.email), ...guard.values, KNOWLEDGE_LIST_LIMIT);
   }
   const result = await statement.all<KnowledgeItemListRow>();
-  return result.results.map((row) => {
+  const appliedTitleSort = titleSort;
+  const rows = appliedTitleSort
+    ? [...result.results].sort((left, right) => compareKnowledgeTitles(left, right, appliedTitleSort)).slice(0, KNOWLEDGE_LIST_LIMIT)
+    : result.results;
+  return rows.map((row) => {
     const isOwner = row.submitter_member_id === actor.memberId && normalizeEmail(row.submitter_email) === normalizeEmail(actor.email);
     const item = canReview || isOwner ? serializeItem(row) : serializePublicItem(row);
     return { ...item, ...itemCapabilities(row, actor, canReview) };

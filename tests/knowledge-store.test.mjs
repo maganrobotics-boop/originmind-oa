@@ -158,6 +158,47 @@ function submission(overrides = {}) {
   };
 }
 
+function insertKnowledgeListFixture({
+  number,
+  title = `知识条目 ${number}`,
+  category = "测试分类",
+  summary = "测试摘要",
+  sourceLabel = "测试来源",
+  content = "测试正文",
+  parts = [],
+  status = "active",
+  updatedAt = "2026-09-01T00:00:00.000Z",
+}) {
+  const sqlite = globalThis[stateKey].sqlite;
+  const itemId = `list-item-${number}`;
+  const revisionId = `list-revision-${number}`;
+  const storedContent = parts.length ? "" : content;
+  sqlite.prepare(`
+    INSERT INTO knowledge_items (
+      id, project, title, category, submitter_member_id, submitter_name, submitter_email,
+      status, visibility, current_revision_no, current_revision_id, active_revision_id,
+      mutation_revision, created_at, updated_at, revoked_at
+    ) VALUES (?, '测试项目', ?, ?, 'member-submit', '投稿成员', 'submit@example.com', ?, 'internal', 1, ?, ?, ?, ?, ?, NULL)
+  `).run(itemId, title, category, status, revisionId, status === "active" ? revisionId : null,
+    `list-mutation-${number}`, updatedAt, updatedAt);
+  sqlite.prepare(`
+    INSERT INTO knowledge_revisions (
+      id, item_id, revision_no, previous_revision_id, title, category, content, summary,
+      source_label, source_url, content_hash, status, created_by_member_id, created_by_name,
+      created_by_email, reviewed_by_member_id, reviewed_by_name, reviewed_by_email,
+      review_note, created_at, reviewed_at, activated_at, retired_at
+    ) VALUES (?, ?, 1, NULL, ?, ?, ?, ?, ?, '', ?, ?, 'member-submit', '投稿成员',
+      'submit@example.com', NULL, NULL, NULL, '', ?, NULL, NULL, NULL)
+  `).run(revisionId, itemId, title, category, storedContent, summary, sourceLabel,
+    number.toString(16).padStart(64, "0"), status, updatedAt);
+  const insertPart = sqlite.prepare(`
+    INSERT INTO knowledge_revision_parts (id, item_id, revision_id, part_no, content, created_at)
+    VALUES (?, ?, ?, ?, ?, ?)
+  `);
+  parts.forEach((part, index) => insertPart.run(`list-part-${number}-${index + 1}`, itemId, revisionId, index + 1, part, updatedAt));
+  return itemId;
+}
+
 beforeEach(() => {
   globalThis[stateKey].sqlite?.close();
   const sqlite = createDatabase();
@@ -437,6 +478,83 @@ test("投稿、审核、检索和下架形成完整且有审计的知识生命�
 
   const events = globalThis[stateKey].sqlite.prepare("SELECT action FROM knowledge_events ORDER BY created_at, rowid").all().map((row) => row.action);
   assert.deepEqual(events, ["submitted", "approved_internal", "revoked"]);
+});
+
+test("管理列表关键词覆盖当前版本元数据、内联正文和 multipart 正文", async () => {
+  const expected = new Map([
+    ["TITLE-token", insertKnowledgeListFixture({ number: 1001, title: "title-token 操作规范" })],
+    ["category-token", insertKnowledgeListFixture({ number: 1002, category: "category-token" })],
+    ["summary-token", insertKnowledgeListFixture({ number: 1003, summary: "包含 summary-token 的摘要" })],
+    ["source-token", insertKnowledgeListFixture({ number: 1004, sourceLabel: "source-token 手册" })],
+    ["inline-token", insertKnowledgeListFixture({ number: 1005, content: "正文包含 inline-token" })],
+    ["multipart-token", insertKnowledgeListFixture({ number: 1006, parts: ["第一部分", "第二部分包含 multipart-token"] })],
+    ["100%_safe'", insertKnowledgeListFixture({ number: 1007, content: "字面量 100%_safe' 可检索" })],
+  ]);
+  insertKnowledgeListFixture({ number: 1008, title: "完全不匹配" });
+
+  for (const [query, expectedId] of expected) {
+    const matches = await store.listKnowledgeItems("all", actor("reviewer"), true, { query, sort: "updated_desc" });
+    assert.deepEqual(matches.map((item) => item.id), [expectedId], `query ${query} should match its current revision field`);
+  }
+});
+
+test("管理列表先过滤全库再应用 100 条上限，并由 SQL 按更新时间排序", async () => {
+  const targetId = insertKnowledgeListFixture({
+    number: 2000,
+    title: "唯一目标记录",
+    content: "正文含有 needle-token",
+    updatedAt: "2020-01-01T00:00:00.000Z",
+  });
+  for (let index = 1; index <= 101; index += 1) {
+    insertKnowledgeListFixture({
+      number: 2000 + index,
+      title: `无关记录 ${index}`,
+      updatedAt: `2026-09-${String((index % 28) + 1).padStart(2, "0")}T00:00:00.000Z`,
+    });
+  }
+
+  const filtered = await store.listKnowledgeItems("all", actor("reviewer"), true, { query: "needle-token", sort: "updated_desc" });
+  assert.deepEqual(filtered.map((item) => item.id), [targetId]);
+
+  const newestFirst = await store.listKnowledgeItems("all", actor("reviewer"), true, { sort: "updated_desc" });
+  const oldestFirst = await store.listKnowledgeItems("all", actor("reviewer"), true, { sort: "updated_asc" });
+  assert.equal(newestFirst.length, 100);
+  assert.equal(oldestFirst.length, 100);
+  assert.equal(oldestFirst[0].id, targetId);
+  assert.ok(newestFirst.every((item, index) => index === 0 || item.updatedAt <= newestFirst[index - 1].updatedAt));
+  assert.ok(oldestFirst.every((item, index) => index === 0 || item.updatedAt >= oldestFirst[index - 1].updatedAt));
+});
+
+test("标题按中文拼音对全匹配结果排序后再截取 100 条", async () => {
+  const firstId = insertKnowledgeListFixture({
+    number: 3000,
+    title: "阿尔法规范",
+    updatedAt: "2020-01-01T00:00:00.000Z",
+  });
+  for (let index = 1; index <= 100; index += 1) {
+    insertKnowledgeListFixture({
+      number: 3000 + index,
+      title: `中间规范 ${index}`,
+      updatedAt: `2026-08-${String((index % 28) + 1).padStart(2, "0")}T00:00:00.000Z`,
+    });
+  }
+
+  const ascending = await store.listKnowledgeItems("all", actor("reviewer"), true, { sort: "title_asc" });
+  const descending = await store.listKnowledgeItems("all", actor("reviewer"), true, { sort: "title_desc" });
+  assert.equal(ascending.length, 100);
+  assert.equal(descending.length, 100);
+  assert.equal(ascending[0].id, firstId, "old but alphabetically first item must not be cut off before title sorting");
+  assert.equal(descending.some((item) => item.id === firstId), false);
+  const collator = new Intl.Collator("zh-CN-u-co-pinyin", { usage: "sort", sensitivity: "base", numeric: true });
+  assert.ok(ascending.every((item, index) => index === 0 || collator.compare(ascending[index - 1].title, item.title) <= 0));
+  assert.ok(descending.every((item, index) => index === 0 || collator.compare(descending[index - 1].title, item.title) >= 0));
+});
+
+test("管理列表无查询参数时保留待审核优先的原默认排序", async () => {
+  insertKnowledgeListFixture({ number: 4001, title: "较新的已入库记录", status: "active", updatedAt: "2026-09-12T00:00:00.000Z" });
+  const pendingId = insertKnowledgeListFixture({ number: 4002, title: "较旧的待审核记录", status: "pending", updatedAt: "2026-01-01T00:00:00.000Z" });
+  const items = await store.listKnowledgeItems("all", actor("reviewer"), true);
+  assert.equal(items[0].id, pendingId);
 });
 
 test("系统管理员可以批准并调整自己的知识，但不能自行退回、拒绝或撤销", async () => {

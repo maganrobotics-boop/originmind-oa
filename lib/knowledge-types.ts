@@ -2,6 +2,14 @@ export type KnowledgeStatus = "pending" | "returned" | "rejected" | "active" | "
 export type KnowledgeVisibility = "internal" | "public";
 export type KnowledgeRevisionStatus = KnowledgeStatus | "superseded";
 
+export const KNOWLEDGE_LIST_QUERY_MAX_LENGTH = 100;
+export const KNOWLEDGE_LIST_SORTS = ["updated_desc", "updated_asc", "title_asc", "title_desc"] as const;
+export type KnowledgeListSort = typeof KNOWLEDGE_LIST_SORTS[number];
+export type KnowledgeListOptions = {
+  query?: string;
+  sort?: KnowledgeListSort;
+};
+
 export type KnowledgeItem = {
   id: string;
   project?: string;
