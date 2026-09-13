@@ -33,7 +33,17 @@ function oaResponse() {
 function makeEnvironment(overrides = {}) {
   return {
     DB: new D1DatabaseAdapter(),
-    AI: { run: async () => ({ choices: [{ message: { role: "assistant", content: "AI 回答" } }] }) },
+    AI: {
+      run: async () => ({ choices: [{ message: { role: "assistant", content: "AI 回答" } }] }),
+      toMarkdown: async ({ name, blob }) => ({
+        id: "converted-test-file",
+        name,
+        mimeType: blob.type,
+        format: "markdown",
+        tokens: 12,
+        data: "# 自动解析结果\n\n这是文件中识别出的正文。",
+      }),
+    },
     APP_ORIGIN: ORIGIN,
     ADMIN_EMAIL: "owner@example.test",
     APP_ENCRYPTION_KEY: "encryption-key-".padEnd(48, "e"),
@@ -62,8 +72,30 @@ function apiRequest(path, { method = "GET", body, cookie, origin = ORIGIN, ip = 
   });
 }
 
+function fileRequest(fileName, contentType, bytes, { cookie, origin = ORIGIN, contentLength } = {}) {
+  const headers = new Headers({
+    "CF-Connecting-IP": "203.0.113.8",
+    "Content-Type": contentType,
+    Origin: origin,
+  });
+  if (cookie) headers.set("Cookie", cookie);
+  if (contentLength !== undefined) headers.set("Content-Length", String(contentLength));
+  return new Request(`${ORIGIN}/api/admin/parse-file?name=${encodeURIComponent(fileName)}`, {
+    method: "POST",
+    headers,
+    body: bytes,
+  });
+}
+
 async function responseJson(response) {
   return { status: response.status, body: await response.json() };
+}
+
+async function administratorCookie(env, token = "e".repeat(64)) {
+  await env.DB.prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+    .bind(await sha256Hex(token), Date.now() + 60_000)
+    .run();
+  return `__Host-ma-session=${token}`;
 }
 
 async function storeVerifiedBailianConfig(env, credential = "test-key-not-a-real-secret") {
@@ -106,6 +138,7 @@ test("status marks Workers AI as the default ready provider without a Bailian ke
     body: {
       storageReady: true,
       modelReady: true,
+      documentParsingReady: true,
       provider: "workers-ai",
       model: WORKERS_AI_MODEL,
     },
@@ -254,6 +287,111 @@ test("Bailian rejects a chunked JSON response larger than 256 KiB", async (t) =>
   assert.match(result.body.error, /模型服务暂时不可用/u);
 });
 
+test("authenticated Chat admin converts a PDF to reviewable Markdown without storing the source file", async (t) => {
+  let captured;
+  const env = makeEnvironment({
+    AI: {
+      run: async () => ({ response: "unused" }),
+      async toMarkdown(file, options) {
+        captured = { file, options };
+        return {
+          id: "conversion-1",
+          name: file.name,
+          mimeType: file.blob.type,
+          format: "markdown",
+          tokens: 37,
+          data: "# 机器人资料\r\n\r\n自动提取的 PDF 正文。",
+        };
+      },
+    },
+  });
+  t.after(() => env.DB.close());
+  const cookie = await administratorCookie(env);
+  const bytes = new TextEncoder().encode("%PDF-1.7\nsmall test fixture");
+  const result = await responseJson(await handleRequest(
+    fileRequest("机器人资料.pdf", "application/pdf", bytes, { cookie }),
+    env,
+    {},
+    runtime(),
+  ));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.markdown, "# 机器人资料\n\n自动提取的 PDF 正文。");
+  assert.equal(result.body.mimeType, "application/pdf");
+  assert.equal(result.body.sourceStored, false);
+  assert.equal(result.body.tokens, 37);
+  assert.equal(captured.file.name, "机器人资料.pdf");
+  assert.equal(captured.file.blob.type, "application/pdf");
+  assert.equal(captured.file.blob.size, bytes.length);
+  assert.equal(captured.options.conversionOptions.pdf.metadata, false);
+  assert.equal(captured.options.conversionOptions.pdf.images.convert, true);
+});
+
+test("image parsing verifies authentication, same origin, extension, MIME type, and magic bytes", async (t) => {
+  let conversionCalls = 0;
+  const env = makeEnvironment({
+    AI: {
+      run: async () => ({ response: "unused" }),
+      async toMarkdown(file) {
+        conversionCalls += 1;
+        return { id: "conversion-2", name: file.name, mimeType: file.blob.type, format: "markdown", tokens: 9, data: "## 图片内容\n\n识别到一台巡检机器人。" };
+      },
+    },
+  });
+  t.after(() => env.DB.close());
+  const png = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00]);
+  const anonymous = await responseJson(await handleRequest(
+    fileRequest("robot.png", "image/png", png), env, {}, runtime(),
+  ));
+  assert.equal(anonymous.status, 403);
+
+  const cookie = await administratorCookie(env, "d".repeat(64));
+  const hostile = await responseJson(await handleRequest(
+    fileRequest("robot.png", "image/png", png, { cookie, origin: "https://attacker.example" }), env, {}, runtime(),
+  ));
+  assert.equal(hostile.status, 403);
+
+  const mismatchedExtension = await responseJson(await handleRequest(
+    fileRequest("robot.pdf", "image/png", png, { cookie }), env, {}, runtime(),
+  ));
+  assert.equal(mismatchedExtension.status, 415);
+
+  const spoofed = await responseJson(await handleRequest(
+    fileRequest("robot.png", "image/png", new TextEncoder().encode("not a png"), { cookie }), env, {}, runtime(),
+  ));
+  assert.equal(spoofed.status, 415);
+
+  const accepted = await responseJson(await handleRequest(
+    fileRequest("robot.png", "image/png", png, { cookie }), env, {}, runtime(),
+  ));
+  assert.equal(accepted.status, 200);
+  assert.match(accepted.body.markdown, /巡检机器人/u);
+  assert.equal(conversionCalls, 1);
+});
+
+test("file parsing rejects declared oversize input and empty conversion output", async (t) => {
+  const env = makeEnvironment({
+    AI: {
+      run: async () => ({ response: "unused" }),
+      async toMarkdown(file) {
+        return { id: "conversion-empty", name: file.name, mimeType: file.blob.type, format: "markdown", tokens: 0, data: "  " };
+      },
+    },
+  });
+  t.after(() => env.DB.close());
+  const cookie = await administratorCookie(env, "c".repeat(64));
+  const pdf = new TextEncoder().encode("%PDF-1.7\nfixture");
+  const oversized = await responseJson(await handleRequest(
+    fileRequest("large.pdf", "application/pdf", pdf, { cookie, contentLength: 8 * 1024 * 1024 + 1 }), env, {}, runtime(),
+  ));
+  assert.equal(oversized.status, 413);
+
+  const empty = await responseJson(await handleRequest(
+    fileRequest("empty.pdf", "application/pdf", pdf, { cookie }), env, {}, runtime(),
+  ));
+  assert.equal(empty.status, 422);
+  assert.match(empty.body.error, /没有识别到/u);
+});
+
 test("Chat admin cannot publish documents directly", async (t) => {
   const env = makeEnvironment();
   t.after(() => env.DB.close());
@@ -278,6 +416,50 @@ test("Chat admin cannot publish documents directly", async (t) => {
   assert.match(result.body.error, /OA 审核/u);
   const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM documents").first();
   assert.equal(Number(count.n), 0);
+});
+
+test("client-generated document ids are retry-safe without bypassing the draft limit", async (t) => {
+  const env = makeEnvironment();
+  t.after(() => env.DB.close());
+  const cookie = await administratorCookie(env, "b".repeat(64));
+  for (let index = 0; index < 200; index += 1) {
+    await env.DB.prepare(
+      "INSERT INTO documents (id,title,body,url,category,updated_at,published) VALUES (?,?,?,?,?,?,?)",
+    ).bind(
+      `existing-${index}`,
+      `已有资料 ${index}`,
+      "这是已经保存在 Chat 中等待 OA 审核的资料正文。",
+      "",
+      "research",
+      "2026-09-13",
+      0,
+    ).run();
+  }
+  const document = {
+    title: "重试安全资料",
+    body: "这是一段用于验证响应丢失后重复保存不会新增草稿的正文。",
+    url: "",
+    category: "research",
+    updatedAt: "2026-09-13",
+    published: 0,
+  };
+  const existing = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    method: "POST",
+    cookie,
+    body: { ...document, id: "existing-0" },
+  }), env, {}, runtime()));
+  assert.equal(existing.status, 200);
+  assert.equal(existing.body.id, "existing-0");
+
+  const newAtLimit = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
+    method: "POST",
+    cookie,
+    body: { ...document, id: crypto.randomUUID() },
+  }), env, {}, runtime()));
+  assert.equal(newAtLimit.status, 400);
+  assert.match(newAtLimit.body.error, /数量已达到/u);
+  const count = await env.DB.prepare("SELECT COUNT(*) AS n FROM documents").first();
+  assert.equal(Number(count.n), 200);
 });
 
 test("rate-limit identity uses the dedicated HMAC secret", () => {

@@ -7,6 +7,8 @@ import test from "node:test";
 import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 
+import { importedDocumentTitle, partTitle, splitDocumentBody } from "../frontend/app.js";
+
 const executeFile = promisify(execFile);
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const frontendDir = path.join(root, "frontend");
@@ -115,6 +117,7 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   for (const endpoint of ["config", "test", "oa-test", "documents", "inquiries"]) {
     assert.match(script, new RegExp(`adminRequest\\(["']${endpoint}["']`, "u"), endpoint);
   }
+  assert.ok(script.includes("parse-file?name="));
   assert.match(script, /(?:window\.)?location\.pathname\s*===?\s*["']\/manage["']/u);
   assert.match(script, /\bconst\s+APP_NAME\s*=\s*["']ARTS Robotics AI Assistant["']\s*;/u);
   for (const section of [
@@ -144,6 +147,10 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.match(script, /\bpublished\s*:\s*0\b/u);
   assert.ok(script.includes("保存并提交 OA 待审"));
   assert.ok(script.includes("未经审核的资料不会用于回答。"));
+  assert.ok(script.includes(".txt,.md,.pdf,.jpg,.jpeg,.png,.webp"));
+  assert.ok(script.includes("PDF 和图片会自动解析为可编辑正文"));
+  assert.match(script, /function\s+splitDocumentBody\s*\(/u);
+  assert.match(script, /MAX_DOCUMENT_PART_CHARACTERS\s*=\s*30000/u);
   const externalApis = [...script.matchAll(/https?:\/\/[^\s"'`]+\/api\/[^\s"'`]+/giu)].map((match) => match[0]);
   assert.deepEqual(externalApis, ["https://oa.omindos.ai/api/knowledge/import-chat"]);
 
@@ -157,6 +164,24 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
     assert.equal(script.includes(forbidden), false, forbidden);
   }
   assert.doesNotMatch(script, /\bpublished\s*:\s*(?:1|true)\b/u);
+});
+
+test("imported documents keep valid title and part boundaries", () => {
+  const sentenceBoundary = `${"甲".repeat(30_000)}。${"乙".repeat(20)}`;
+  const twoCharacterBoundary = `${"甲".repeat(29_999)}. ${"乙".repeat(20)}`;
+  for (const body of [sentenceBoundary, twoCharacterBoundary]) {
+    const parts = splitDocumentBody(body);
+    assert.equal(parts.join(""), body.replace(/\s/gu, ""));
+    assert.ok(parts.every((part) => part.length <= 30_000));
+  }
+
+  assert.equal(importedDocumentTitle("图.png"), "图资料");
+  assert.ok(importedDocumentTitle(`${"长".repeat(121)}.pdf`).length <= 120);
+  const emojiTitle = `${"甲".repeat(114)}😀尾部`;
+  const splitTitle = partTitle(emojiTitle, 0, 2);
+  assert.ok(splitTitle.length <= 120);
+  assert.equal(splitTitle.includes("�"), false);
+  assert.doesNotMatch(splitTitle, /[\uD800-\uDBFF]$/u);
 });
 
 test("public topics keep independent view state without a duplicate welcome avatar", async () => {

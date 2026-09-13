@@ -5,6 +5,17 @@ const OFFICIAL_SITE = "https://omindos.ai";
 const BAILIAN_CONSOLE = "https://bailian.console.aliyun.com/";
 const OA_KNOWLEDGE_URL = "https://oa.omindos.ai/";
 const OA_CHAT_IMPORT_URL = "https://oa.omindos.ai/api/knowledge/import-chat";
+const MAX_IMPORTED_CHARACTERS = 120000;
+const MAX_DOCUMENT_PART_CHARACTERS = 30000;
+const IMPORT_FILE_TYPES = Object.freeze({
+  txt: { mimeType: "text/plain", maximum: 500000, text: true },
+  md: { mimeType: "text/markdown", maximum: 500000, text: true },
+  pdf: { mimeType: "application/pdf", maximum: 8 * 1024 * 1024 },
+  jpg: { mimeType: "image/jpeg", maximum: 5 * 1024 * 1024 },
+  jpeg: { mimeType: "image/jpeg", maximum: 5 * 1024 * 1024 },
+  png: { mimeType: "image/png", maximum: 5 * 1024 * 1024 },
+  webp: { mimeType: "image/webp", maximum: 5 * 1024 * 1024 },
+});
 
 const TOPICS = [
   {
@@ -122,7 +133,7 @@ const STATUS_LABELS = Object.freeze({
   closed: "已关闭",
 });
 
-const root = document.getElementById("app");
+const root = typeof document === "undefined" ? null : document.getElementById("app");
 
 function element(tagName, options = {}, children = []) {
   const node = document.createElement(tagName);
@@ -232,6 +243,60 @@ function jsonOptions(body, method = "POST") {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(body),
   };
+}
+
+function importedFileDescriptor(file) {
+  const extension = String(file?.name || "").split(".").at(-1)?.toLowerCase() || "";
+  const descriptor = IMPORT_FILE_TYPES[extension];
+  if (!descriptor) throw new Error("当前支持 TXT、Markdown、PDF、JPG、PNG 和 WebP 文件。");
+  if (file.size > descriptor.maximum) {
+    throw new Error(descriptor.text ? "文本文件过大。" : `文件过大，${extension === "pdf" ? "PDF 最大 8 MB" : "图片最大 5 MB"}。`);
+  }
+  return { ...descriptor, extension };
+}
+
+function truncateUtf16(value, maximum) {
+  let result = String(value || "").slice(0, maximum);
+  if (/[\uD800-\uDBFF]/u.test(result.at(-1) || "")) result = result.slice(0, -1);
+  return result;
+}
+
+function importedDocumentTitle(fileName) {
+  const basename = String(fileName || "").replace(/\.[^.]+$/u, "").trim();
+  const title = basename.length >= 2 ? basename : `${basename || "导入"}资料`;
+  return truncateUtf16(title, 120);
+}
+
+function splitDocumentBody(value, maximum = MAX_DOCUMENT_PART_CHARACTERS) {
+  let remaining = String(value || "").trim();
+  if (!remaining) return [];
+  const parts = [];
+  while (remaining) {
+    if (remaining.length <= maximum) {
+      parts.push(remaining);
+      break;
+    }
+    let cut = maximum;
+    const minimum = Math.floor(maximum * 0.6);
+    for (const separator of ["\n\n", "\n", "。", ". ", "；", "; "]) {
+      const candidate = remaining.lastIndexOf(separator, maximum - separator.length);
+      if (candidate >= minimum) {
+        cut = candidate + separator.length;
+        break;
+      }
+    }
+    if (/[\uD800-\uDBFF]/u.test(remaining[cut - 1] || "")) cut -= 1;
+    parts.push(remaining.slice(0, cut).trim());
+    remaining = remaining.slice(cut).trim();
+  }
+  return parts.filter(Boolean);
+}
+
+function partTitle(title, index, total) {
+  const normalized = String(title || "").trim();
+  if (total === 1) return truncateUtf16(normalized, 120);
+  const suffix = `（${index + 1}/${total}）`;
+  return `${truncateUtf16(normalized, 120 - suffix.length)}${suffix}`;
 }
 
 function makeRequestId() {
@@ -1140,6 +1205,7 @@ function createAdminApp() {
       encryptionReady: false,
       activeProvider: null,
       workersAiReady: false,
+      documentParsingReady: false,
     },
     documents: [],
     importReceipts: {},
@@ -1156,11 +1222,21 @@ function createAdminApp() {
       category: "research",
       updatedAt: new Date().toISOString().slice(0, 10),
       published: 0,
+      partIds: [],
     };
   }
 
   function adminRequest(endpoint, options) {
     return requestJson(`/api/admin/${endpoint}`, options);
+  }
+
+  function parseFile(file, mimeType) {
+    return adminRequest(`parse-file?name=${encodeURIComponent(file.name)}`, {
+      method: "POST",
+      headers: { "Content-Type": mimeType },
+      body: file,
+      signal: AbortSignal.timeout(120_000),
+    });
   }
 
   async function submitDocumentToOa(draft) {
@@ -1552,45 +1628,53 @@ function createAdminApp() {
     url.input.addEventListener("input", (event) => { state.draft.url = event.currentTarget.value; });
 
     const bodyLabel = element("label", { attributes: { for: "document-body" } });
-    bodyLabel.append(document.createTextNode("供助手引用的正文"));
+    bodyLabel.append(document.createTextNode("供助手引用的正文（请核对自动解析结果）"));
     const body = element("textarea", {
       id: "document-body",
       className: "admin-textarea",
-      attributes: { required: true, minlength: "10", maxlength: "30000" },
+      attributes: { required: true, minlength: "10", maxlength: String(MAX_IMPORTED_CHARACTERS) },
     });
     body.value = state.draft.body;
     body.addEventListener("input", (event) => { state.draft.body = event.currentTarget.value; });
     bodyLabel.append(body);
 
     const fileLabel = element("label", { attributes: { for: "document-file" } });
-    fileLabel.append(document.createTextNode("导入文本文件"));
+    fileLabel.append(document.createTextNode("导入资料文件"));
     const fileInput = element("input", {
       id: "document-file",
-      attributes: { type: "file", accept: ".txt,.md" },
+      attributes: { type: "file", accept: ".txt,.md,.pdf,.jpg,.jpeg,.png,.webp,application/pdf,image/jpeg,image/png,image/webp" },
     });
     fileInput.disabled = Boolean(state.busy);
     fileInput.addEventListener("change", async (event) => {
       const file = event.currentTarget.files?.[0];
       if (!file || state.busy) return;
-      if (!/\.(txt|md)$/i.test(file.name)) {
-        state.error = "当前版本支持 TXT、Markdown；PDF 或 Word 请先复制需要提交审核的正文。";
-        renderAdminShell();
-        return;
-      }
-      if (file.size > 120000) {
-        state.error = "文件过大，请分成更短的资料条目。";
+      let descriptor;
+      try {
+        descriptor = importedFileDescriptor(file);
+      } catch (error) {
+        state.error = error instanceof Error ? error.message : "文件格式不正确";
         renderAdminShell();
         return;
       }
       state.busy = "file";
       state.error = "";
+      state.notice = descriptor.text ? "正在读取文本…" : "正在自动解析文件，请稍候…";
       renderAdminShell();
       try {
-        const text = await file.text();
-        if (text.length > 30000) throw new Error("每条资料最多 30000 字");
-        if (!state.draft.title) state.draft.title = file.name.replace(/\.(txt|md)$/i, "");
-        state.draft.body = text;
-        state.notice = "文本已导入，请核对后保存草稿。";
+        const result = descriptor.text
+          ? { markdown: await file.text(), warnings: [] }
+          : await parseFile(file, descriptor.mimeType);
+        const markdown = String(result.markdown || "").trim();
+        if (markdown.length < 10) throw new Error("没有识别到足够内容，请换一份更清晰的文件。");
+        if (markdown.length > MAX_IMPORTED_CHARACTERS) throw new Error("解析结果超过 12 万字，请拆分文件后重试。");
+        if (!state.draft.title) state.draft.title = importedDocumentTitle(file.name);
+        state.draft.body = markdown;
+        state.draft.partIds = [];
+        const parts = splitDocumentBody(markdown);
+        const warning = Array.isArray(result.warnings) && result.warnings[0] ? ` ${result.warnings[0]}` : "";
+        state.notice = descriptor.text
+          ? `文本已导入${parts.length > 1 ? `，保存时将自动拆成 ${parts.length} 份` : ""}，请核对后提交。`
+          : `文件已自动解析${parts.length > 1 ? `，保存时将自动拆成 ${parts.length} 份` : ""}。${warning} 原文件不会保存。`;
       } catch (error) {
         state.error = error instanceof Error ? error.message : "读取失败";
       } finally {
@@ -1602,7 +1686,7 @@ function createAdminApp() {
       fileInput,
       element("span", {
         className: "small-note",
-        text: "支持 TXT、Markdown。PDF 或 Word 可先复制需要提交审核的正文。",
+        text: "支持 TXT、Markdown、PDF、JPG、PNG、WebP；PDF 最大 8 MB，图片最大 5 MB。PDF 和图片会自动解析为可编辑正文，原文件不会保存。",
       }),
     );
 
@@ -1636,20 +1720,36 @@ function createAdminApp() {
       event.preventDefault();
       void runAdminAction("document", async () => {
         const draft = { ...state.draft };
-        const saved = await adminRequest("documents", jsonOptions({
-          ...(state.draft.id ? { id: state.draft.id } : {}),
-          title: state.draft.title,
-          body: state.draft.body,
-          url: state.draft.url,
-          category: state.draft.category,
-          updatedAt: state.draft.updatedAt,
-          published: 0,
-        }));
-        delete state.importReceipts[saved.id];
+        const parts = splitDocumentBody(draft.body);
+        if (!parts.length) throw new Error("请填写资料正文。");
+        const previousPartIds = Array.isArray(state.draft.partIds) ? state.draft.partIds : [];
+        state.draft.partIds = parts.map((_, index) => previousPartIds[index]
+          || (index === 0 && draft.id ? draft.id : makeRequestId()));
+        const partIds = [...state.draft.partIds];
+        const savedDrafts = [];
+        for (const [index, part] of parts.entries()) {
+          const titleValue = partTitle(draft.title, index, parts.length);
+          const saved = await adminRequest("documents", jsonOptions({
+            ...(partIds[index] ? { id: partIds[index] } : {}),
+            title: titleValue,
+            body: part,
+            url: draft.url,
+            category: draft.category,
+            updatedAt: draft.updatedAt,
+            published: 0,
+          }));
+          partIds[index] = saved.id;
+          state.draft.partIds[index] = saved.id;
+          delete state.importReceipts[saved.id];
+          savedDrafts.push({ ...draft, id: saved.id, title: titleValue, body: part });
+        }
+        for (const savedDraft of savedDrafts) await submitDocumentToOa(savedDraft);
         const payload = await adminRequest("documents");
         state.documents = Array.isArray(payload.documents) ? payload.documents : [];
         state.draft = emptyDraft();
-        await submitDocumentToOa({ ...draft, id: saved.id });
+        state.notice = savedDrafts.length > 1
+          ? `已自动拆分并提交 OA 待审（${savedDrafts.length} 份）。在 OA“实验室 AI”中选择对内或公开。`
+          : "已提交 OA 待审。请在 OA“实验室 AI”中选择对内或公开。";
       });
     });
     editor.append(form);
@@ -1685,6 +1785,7 @@ function createAdminApp() {
             category: TOPIC_LABELS[document.category] ? document.category : "research",
             updatedAt: String(document.updatedAt || emptyDraft().updatedAt),
             published: 0,
+            partIds: [String(document.id || "")],
           };
           renderAdminShell();
           window.scrollTo({ top: 0, behavior: "smooth" });
@@ -1898,8 +1999,12 @@ function createAdminApp() {
   void initialize();
 }
 
-if (window.location.pathname === "/manage") {
-  createAdminApp();
-} else {
-  createPublicApp();
+if (typeof window !== "undefined") {
+  if (window.location.pathname === "/manage") {
+    createAdminApp();
+  } else {
+    createPublicApp();
+  }
 }
+
+export { importedDocumentTitle, partTitle, splitDocumentBody };

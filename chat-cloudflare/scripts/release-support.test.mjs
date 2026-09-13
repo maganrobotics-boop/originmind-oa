@@ -99,6 +99,7 @@ test("release entry redacts and removes the raw copied token before child proces
   assert.ok(releaseEntry.indexOf("validateReleaseEnvironment()") < releaseEntry.indexOf("delete process.env.PUBLIC_LAB_AI_SERVICE_TOKEN"));
   assert.ok(releaseEntry.indexOf("delete process.env.PUBLIC_LAB_AI_SERVICE_TOKEN") < releaseEntry.indexOf("const secretValues"));
   assert.match(releaseEntry, /rawPublicToken\.trim\(\)/u);
+  assert.ok(releaseEntry.indexOf("delete process.env.CHAT_ADMIN_PASSWORD") < releaseEntry.indexOf("const secretValues"));
 });
 
 test("production release waits past Cloudflare Auto TTL before live smoke", () => {

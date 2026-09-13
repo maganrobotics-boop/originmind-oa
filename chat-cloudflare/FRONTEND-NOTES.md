@@ -33,6 +33,9 @@ current source.
 - The public name is exactly `ARTS Robotics AI assistant`.
 - Chat-local document writes are always drafts with `published: 0`. Only the OA
   approved-public endpoint can provide public model knowledge.
+- The administrator importer accepts TXT, Markdown, PDF, JPEG, PNG, and WebP.
+  PDF and image binaries are sent only to the same-origin parsing endpoint,
+  converted to editable Markdown, and not retained after the request.
 - Untrusted answers, source metadata, inquiries, and transcripts are rendered
   as text. The frontend does not use `innerHTML`, dynamic code execution,
   remote scripts, or remote stylesheets.

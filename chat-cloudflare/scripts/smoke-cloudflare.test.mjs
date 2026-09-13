@@ -4,6 +4,8 @@ import test from "node:test";
 import {
   frontendAssetPaths,
   isTransientSmokeStatus,
+  releaseSmokePdf,
+  releaseSmokePng,
   smokeAdminAuthentication,
   smokeCloudflare,
   smokeSavedAdminAuthentication,
@@ -13,7 +15,7 @@ import {
 const releaseId = `${"a".repeat(40)}-1`;
 const evidence = {
   health: { app: "arts-robotics-ai-assistant", ready: true, releaseId },
-  status: { storageReady: true, modelReady: true, provider: "workers-ai", model: "test-model" },
+  status: { storageReady: true, modelReady: true, documentParsingReady: true, provider: "workers-ai", model: "test-model" },
   chat: {
     mode: "ai",
     answer: "经审核公开资料支持该回答。[1]",
@@ -115,6 +117,132 @@ test("administrator authentication runs once after retryable release checks sett
   assert.equal(authCalls, 1);
   assert.deepEqual(sleeps, [1_500, 3_000]);
   assert.deepEqual(result, { ...serviceEvidence, adminKdfCompatible: true });
+});
+
+test("release parser fixtures are valid bounded PDF and PNG payloads", () => {
+  const pdf = releaseSmokePdf();
+  const pdfText = pdf.toString("ascii");
+  assert.ok(pdfText.startsWith("%PDF-1.4\n"));
+  assert.ok(pdfText.endsWith("%%EOF\n"));
+  const xrefOffset = Number(/startxref\n(\d+)\n%%EOF\n$/u.exec(pdfText)?.[1]);
+  assert.equal(pdfText.slice(xrefOffset, xrefOffset + 5), "xref\n");
+  const offsets = [...pdfText.matchAll(/^(\d{10}) 00000 n $/gmu)].map((match) => Number(match[1]));
+  assert.equal(offsets.length, 5);
+  offsets.forEach((offset, index) => assert.ok(pdfText.startsWith(`${index + 1} 0 obj\n`, offset)));
+
+  const png = releaseSmokePng();
+  assert.ok(png.length < 10_000);
+  assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+  assert.equal(png.subarray(-12).toString("hex"), "0000000049454e44ae426082");
+});
+
+test("release smoke really parses PDF and PNG and revokes its administrator session", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const password = "saved-administrator-password";
+  const token = "9".repeat(64);
+  const uploads = [];
+  let logoutCalls = 0;
+  globalThis.fetch = async (url, options) => {
+    const headers = {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    };
+    if (url.endsWith("/api/auth/login")) {
+      return new Response(JSON.stringify({ signedIn: true }), {
+        status: 200,
+        headers: {
+          ...headers,
+          "Set-Cookie": `__Host-ma-session=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=28800`,
+        },
+      });
+    }
+    if (url.includes("/api/admin/parse-file")) {
+      uploads.push({ url, options });
+      const markdown = options.headers["Content-Type"] === "application/pdf"
+        ? "# PDF parser smoke passed"
+        : "# Image parser smoke passed";
+      return new Response(JSON.stringify({
+        markdown,
+        mimeType: options.headers["Content-Type"],
+        characterCount: markdown.length,
+        sourceStored: false,
+      }), { status: 200, headers });
+    }
+    logoutCalls += 1;
+    return new Response(JSON.stringify({ saved: true }), { status: 200, headers });
+  };
+
+  const serviceEvidence = {
+    app: "arts-robotics-ai-assistant",
+    ready: true,
+    releaseId,
+    oaPublicStatus: "connected",
+    provider: "workers-ai",
+    model: "test-model",
+    sources: 1,
+  };
+  const result = await smokeCloudflare("https://chat.omindos.ai", {
+    releaseId,
+    adminPassword: password,
+    smokeAttempt: async () => serviceEvidence,
+    verifyAdmin: async () => {},
+  });
+  assert.deepEqual(result, {
+    ...serviceEvidence,
+    adminKdfCompatible: true,
+    documentParsingVerified: true,
+  });
+  assert.deepEqual(uploads.map((upload) => upload.options.headers["Content-Type"]), ["application/pdf", "image/png"]);
+  assert.ok(uploads.every((upload) => upload.options.headers.Cookie === `__Host-ma-session=${token}`));
+  assert.ok(uploads[0].options.body.equals(releaseSmokePdf()));
+  assert.ok(uploads[1].options.body.equals(releaseSmokePng()));
+  assert.equal(logoutCalls, 1);
+  assert.equal(JSON.stringify(result).includes(password), false);
+  assert.equal(JSON.stringify(result).includes(token), false);
+});
+
+test("release parser failure still revokes the administrator session", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const token = "8".repeat(64);
+  let logoutCalls = 0;
+  globalThis.fetch = async (url) => {
+    const headers = {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-store",
+      "X-Content-Type-Options": "nosniff",
+    };
+    if (url.endsWith("/api/auth/login")) {
+      return new Response(JSON.stringify({ signedIn: true }), {
+        status: 200,
+        headers: {
+          ...headers,
+          "Set-Cookie": `__Host-ma-session=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=28800`,
+        },
+      });
+    }
+    if (url.includes("/api/admin/parse-file")) {
+      return new Response(JSON.stringify({ error: "fixture rejected" }), { status: 422, headers });
+    }
+    logoutCalls += 1;
+    return new Response(JSON.stringify({ saved: true }), { status: 200, headers });
+  };
+  await assert.rejects(
+    smokeCloudflare("https://chat.omindos.ai", {
+      releaseId,
+      adminPassword: "saved-administrator-password",
+      smokeAttempt: async () => ({ ready: true }),
+      verifyAdmin: async () => {},
+    }),
+    /live application\/pdf parser/u,
+  );
+  assert.equal(logoutCalls, 1);
 });
 
 test("the administrator-only production smoke validates the exact origin once", async () => {
