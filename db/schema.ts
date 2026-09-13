@@ -334,6 +334,24 @@ export const knowledgeRevisions = sqliteTable(
   ],
 );
 
+export const knowledgeRevisionParts = sqliteTable(
+  "knowledge_revision_parts",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id").notNull(),
+    revisionId: text("revision_id").notNull(),
+    partNo: integer("part_no").notNull(),
+    content: text("content").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    check("knowledge_revision_parts_number_check", sql`${table.partNo} > 0`),
+    check("knowledge_revision_parts_content_length_check", sql`length(${table.content}) BETWEEN 1 AND 20000`),
+    uniqueIndex("knowledge_revision_parts_revision_no_unique").on(table.revisionId, table.partNo),
+    index("knowledge_revision_parts_item_revision_idx").on(table.itemId, table.revisionId, table.partNo),
+  ],
+);
+
 export const knowledgeChunks = sqliteTable(
   "knowledge_chunks",
   {

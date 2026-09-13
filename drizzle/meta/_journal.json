@@ -211,6 +211,13 @@
       "when": 1789185310284,
       "tag": "0029_knowledge_visibility_reclassification",
       "breakpoints": true
+    },
+    {
+      "idx": 30,
+      "version": "6",
+      "when": 1789272000000,
+      "tag": "0030_large_knowledge_revision_parts",
+      "breakpoints": true
     }
   ]
 }

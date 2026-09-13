@@ -35,6 +35,7 @@ const migrationSqlByName = Object.fromEntries(await Promise.all([
   "0027_careless_winter_soldier.sql",
   "0028_needy_microchip.sql",
   "0029_knowledge_visibility_reclassification.sql",
+  "0030_large_knowledge_revision_parts.sql",
 ].map(async (name) => [name, await readFile(resolve(drizzleRoot, name), "utf8")])));
 const expectedMigrationNames = validateProductionMigrationManifest({
   migrationNames: sqlEntries.map((entry) => entry.name).sort(),
@@ -49,6 +50,12 @@ const migration28KnowledgeDefinitions = productionKnowledgeDefinitions(migration
   "0026_rich_jocasta.sql",
   "0027_careless_winter_soldier.sql",
   "0028_needy_microchip.sql",
+]);
+const migration29KnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName, [
+  "0026_rich_jocasta.sql",
+  "0027_careless_winter_soldier.sql",
+  "0028_needy_microchip.sql",
+  "0029_knowledge_visibility_reclassification.sql",
 ]);
 const expectedKnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName);
 const [ledgerPayload, freezePayload, schemaPayload] = await Promise.all([
@@ -73,5 +80,6 @@ const state = validateProductionMigrationState({
   migration26KnowledgeDefinitions,
   migration27KnowledgeDefinitions,
   migration28KnowledgeDefinitions,
+  migration29KnowledgeDefinitions,
 });
 process.stdout.write(`${state}\n`);

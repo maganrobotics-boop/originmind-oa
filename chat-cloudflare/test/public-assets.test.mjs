@@ -54,6 +54,56 @@ async function frontendAnswerFormatter() {
   return runInNewContext(`${script.slice(start, end)}\nuserFacingAnswer;`, Object.create(null));
 }
 
+async function frontendImportHelpers() {
+  const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
+  const start = script.indexOf("const MAX_TEXT_IMPORT_BYTES");
+  const end = script.indexOf("const TOPICS", start);
+  assert.ok(start >= 0 && end > start, "frontend import helpers must remain directly testable");
+  return runInNewContext(
+    `${script.slice(start, end)}\n({ MAX_TEXT_IMPORT_BYTES, MAX_CHAT_DRAFT_CHARACTERS, MAX_OA_STORAGE_FRAGMENT_CHARACTERS, normalizeImportedText, decodeImportedUtf8, utf8ByteLength, estimatedOaStorageFragmentCount, oaImportReceipt, returnedKnowledgeItemIdFromSearch, withoutReturnedKnowledgeItemQuery });`,
+    { TextDecoder, TextEncoder, URL, URLSearchParams },
+  );
+}
+
+async function frontendReturnedImportHarness({ ok, payload }) {
+  const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
+  const start = script.indexOf("function clearReturnedKnowledgeContext");
+  const end = script.indexOf("async function fetchAdminData", start);
+  assert.ok(start >= 0 && end > start, "returned-import lifecycle must remain directly testable");
+  const calls = { request: null, replacedUrl: "" };
+  const state = {
+    returnedKnowledgeItemId: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    importReceipts: {},
+    notice: "",
+  };
+  const api = runInNewContext(`${script.slice(start, end)}\n({ submitDocumentToOa });`, {
+    state,
+    OA_CHAT_IMPORT_URL: "https://oa.omindos.ai/api/knowledge/import-chat",
+    MAX_CHAT_DRAFT_CHARACTERS: 30_000,
+    SAFE_RETURNED_KNOWLEDGE_ITEM_ID: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
+    AbortSignal,
+    fetch: async (_url, options) => {
+      calls.request = JSON.parse(options.body);
+      return { ok, json: async () => payload };
+    },
+    oaImportReceipt: (result) => ({ items: result.item ? [result.item] : [], partCount: Number(result.partCount) || 1 }),
+    withoutReturnedKnowledgeItemQuery: (href) => {
+      const url = new URL(href);
+      url.searchParams.delete("returnedKnowledgeItem");
+      return `${url.pathname}${url.search}${url.hash}`;
+    },
+    window: {
+      location: { href: "https://chat.omindos.ai/manage?keep=1&returnedKnowledgeItem=aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee#upload" },
+      history: {
+        state: null,
+        replaceState: (_state, _title, url) => { calls.replacedUrl = url; },
+      },
+    },
+  });
+  const draft = { id: "11111111-2222-4333-8444-555555555555", title: "修订稿", body: "已按审核意见修改后的正文内容。", url: "", category: "research", updatedAt: "2026-09-13" };
+  return { api, calls, draft, state };
+}
+
 test("the deterministic build contains exactly the current content-hashed frontend", async () => {
   const expected = await expectedFrontend();
   assert.equal(expected.template.split("__APP_ASSET__").length - 1, 1);
@@ -128,6 +178,85 @@ test("frontend answer formatting hides citations without truncating ordinary sou
   assert.equal(format("回答。[1] 嵌套标记 [[1]]"), "暂时没有可显示的回答。");
 });
 
+test("text imports use normalized fatal UTF-8 decoding and a five MiB byte cap", async () => {
+  const helpers = await frontendImportHelpers();
+  assert.equal(helpers.MAX_TEXT_IMPORT_BYTES, 5 * 1024 * 1024);
+  assert.equal(helpers.MAX_CHAT_DRAFT_CHARACTERS, 30_000);
+  assert.equal(helpers.MAX_OA_STORAGE_FRAGMENT_CHARACTERS, 20_000);
+  assert.equal(helpers.normalizeImportedText("\uFEFFＡ\r\nB\rC\u0000\u0007"), "A\nB\nC");
+  assert.equal(helpers.decodeImportedUtf8(new TextEncoder().encode("\uFEFFＭＤ\r\n正文")), "MD\n正文");
+  assert.throws(
+    () => helpers.decodeImportedUtf8(Uint8Array.from([0xc3, 0x28])),
+    /必须使用有效的 UTF-8 编码/u,
+  );
+  assert.equal(helpers.utf8ByteLength("中"), 3);
+  assert.equal(helpers.estimatedOaStorageFragmentCount("a".repeat(40_001)), 3);
+
+  const current = helpers.oaImportReceipt({ item: { id: "one", status: "pending" }, partCount: 7 }, "short body");
+  assert.equal(current.items.length, 1);
+  assert.equal(current.items[0].id, "one");
+  assert.equal(current.partCount, 7);
+  const legacy = helpers.oaImportReceipt({ items: [{ contentPartCount: 2 }, { contentPartCount: 3 }] }, "short body");
+  assert.equal(legacy.items.length, 2);
+  assert.equal(legacy.partCount, 5);
+
+  const returnedId = "AAAAAAAA-BBBB-4CCC-8DDD-EEEEEEEEEEEE";
+  assert.equal(helpers.returnedKnowledgeItemIdFromSearch(`?returnedKnowledgeItem=${returnedId}`), returnedId.toLowerCase());
+  assert.equal(helpers.returnedKnowledgeItemIdFromSearch("?returnedKnowledgeItem=not-an-id"), "");
+  assert.equal(helpers.returnedKnowledgeItemIdFromSearch(`?returnedKnowledgeItem=${returnedId}&returnedKnowledgeItem=${returnedId}`), "");
+  assert.equal(
+    helpers.withoutReturnedKnowledgeItemQuery(`https://chat.omindos.ai/manage?keep=1&returnedKnowledgeItem=${returnedId}#upload`),
+    "/manage?keep=1#upload",
+  );
+});
+
+test("returned-import context survives failure and is cleared only after OA acknowledges the revision", async () => {
+  const failed = await frontendReturnedImportHarness({ ok: false, payload: { error: "暂时失败" } });
+  await assert.rejects(() => failed.api.submitDocumentToOa(failed.draft, {
+    retainedAsChatDraft: false,
+    submissionContext: { returnedKnowledgeItemId: failed.state.returnedKnowledgeItemId },
+  }), /暂时失败/u);
+  assert.equal(failed.state.returnedKnowledgeItemId, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+  assert.equal(failed.calls.replacedUrl, "");
+  assert.equal(failed.calls.request.returnedKnowledgeItemId, failed.state.returnedKnowledgeItemId);
+
+  const succeeded = await frontendReturnedImportHarness({
+    ok: true,
+    payload: { item: { id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee", status: "pending" }, partCount: 3 },
+  });
+  await succeeded.api.submitDocumentToOa(succeeded.draft, {
+    retainedAsChatDraft: false,
+    submissionContext: { returnedKnowledgeItemId: succeeded.state.returnedKnowledgeItemId },
+  });
+  assert.equal(succeeded.calls.request.returnedKnowledgeItemId, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+  assert.equal(succeeded.state.returnedKnowledgeItemId, "");
+  assert.equal(succeeded.calls.replacedUrl, "/manage?keep=1#upload");
+  assert.match(succeeded.state.notice, /更新原 OA 条目并重新进入待审核状态/u);
+});
+
+test("local drafts never inherit an unrelated returned-import context", async () => {
+  const local = await frontendReturnedImportHarness({
+    ok: true,
+    payload: { item: { id: "new-item", status: "pending" }, partCount: 1 },
+  });
+  await local.api.submitDocumentToOa(local.draft);
+  assert.equal(Object.hasOwn(local.calls.request, "returnedKnowledgeItemId"), false);
+  assert.equal(local.state.returnedKnowledgeItemId, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
+  assert.equal(local.calls.replacedUrl, "");
+
+  const invalid = await frontendReturnedImportHarness({
+    ok: true,
+    payload: { item: { id: "new-item", status: "pending" }, partCount: 1 },
+  });
+  await assert.rejects(
+    () => invalid.api.submitDocumentToOa(invalid.draft, {
+      submissionContext: { returnedKnowledgeItemId: "not-an-id" },
+    }),
+    /退回资料上下文无效/u,
+  );
+  assert.equal(invalid.calls.request, null);
+});
+
 test("vanilla frontend preserves every same-origin API and visibility contract", async () => {
   const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
   for (const route of [
@@ -178,7 +307,15 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.ok(script.includes("发送至 Cloudflare AI 临时解析"));
   assert.ok(script.includes("本站不保存原件"));
   assert.ok(script.includes("解析正文最多 30000 字"));
+  assert.ok(script.includes("TXT、Markdown 单个文件最多 5 MB"));
+  assert.ok(script.includes("1.6 MB 文件可以直接导入"));
+  assert.ok(script.includes("OA 作为 1 条资料审核"));
+  assert.ok(script.includes("每个不超过 20000 字"));
+  assert.ok(script.includes("OA 接收成功后才清空"));
   assert.ok(script.includes("导入新文件将替换当前正文"));
+  assert.ok(script.includes("请重新上传修改后的完整文件"));
+  assert.ok(script.includes("成功提交后会更新原条目并保留审计链"));
+  assert.ok(script.includes("本次仅替换正文，标题、分类、资料日期、来源链接和可见范围沿用原 OA 条目"));
   for (const control of ["title.input", "category", "date.input", "url.input", "body"]) {
     assert.match(script, new RegExp(`${control.replace(".", "\\.")}\\.disabled\\s*=\\s*Boolean\\(state\\.busy\\)`, "u"));
   }
@@ -186,6 +323,22 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.match(script, /focusImportedField\(imported\s*\?\s*["']document-body["']\s*:\s*["']document-file["']\)/u);
   assert.match(script, /adminRequest\(["']extract["'][\s\S]*?body:\s*file/u);
   assert.match(script, /"X-File-Name":\s*encodeURIComponent\(file\.name\)/u);
+  assert.match(script, /new TextDecoder\(["']utf-8["'],\s*\{\s*fatal:\s*true\s*\}\)/u);
+  assert.match(script, /decodeImportedUtf8\(await file\.arrayBuffer\(\)\)/u);
+  assert.doesNotMatch(script, /await file\.text\(\)/u);
+  assert.doesNotMatch(script, /id:\s*["']document-body["'][\s\S]{0,160}maxlength:\s*["']30000["']/u);
+  assert.match(script, /signal:\s*AbortSignal\.timeout\(120_000\)/u);
+  assert.match(script, /const id = state\.draft\.id \|\| makeRequestId\(\)/u);
+  assert.match(script, /await submitDocumentToOa\(\{ \.\.\.state\.draft, id \}, \{[\s\S]*?submissionContext: \{ returnedKnowledgeItemId \}[\s\S]*?\}\);[\s\S]*?state\.draft = emptyDraft\(\)/u);
+  assert.match(script, /if \(returnedKnowledgeItemId \|\| normalizedBody\.length > MAX_CHAT_DRAFT_CHARACTERS\)[\s\S]*?await submitDocumentToOa[\s\S]*?return;[\s\S]*?adminRequest\("documents"/u);
+  const submitToOa = script.slice(script.indexOf("async function submitDocumentToOa"), script.indexOf("async function fetchAdminData"));
+  assert.doesNotMatch(submitToOa, /state\.returnedKnowledgeItemId/u);
+  assert.match(submitToOa, /\.\.\.\(returnedKnowledgeItemId \? \{ returnedKnowledgeItemId \} : \{\}\)/u);
+  assert.equal(submitToOa.match(/clearReturnedKnowledgeContext\(returnedKnowledgeItemId\)/gu)?.length, 1);
+  assert.ok(submitToOa.indexOf("clearReturnedKnowledgeContext(returnedKnowledgeItemId)") > submitToOa.indexOf("if (!receipt.items.length) throw"));
+  assert.match(script, /state\.returnedKnowledgeItemId = "";[\s\S]*?history\.replaceState[\s\S]*?withoutReturnedKnowledgeItemQuery/u);
+  assert.match(script, /if \(state\.returnedKnowledgeItemId\) \{[\s\S]*?本地草稿已暂时隐藏，不能编辑或提交[\s\S]*?\} else if \(!state\.documents\.length\)/u);
+  assert.match(script, /submitDocumentToOa\(document\)\);/u);
   const externalApis = [...script.matchAll(/https?:\/\/[^\s"'`]+\/api\/[^\s"'`]+/giu)].map((match) => match[0]);
   assert.deepEqual(externalApis, ["https://oa.omindos.ai/api/knowledge/import-chat"]);
 

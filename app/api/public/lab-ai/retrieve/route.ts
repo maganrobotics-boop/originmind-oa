@@ -49,7 +49,7 @@ export async function POST(request: Request): Promise<Response> {
     if (!(await consumePublicLabAiRetrieveRateLimit(publicEnv.DB))) {
       return errorResponse("检索过于频繁，请稍后再试。", 429, { "retry-after": "60" });
     }
-    const candidates = await getPublicActiveKnowledgeChunks();
+    const candidates = await getPublicActiveKnowledgeChunks(question);
     const ranked = rankKnowledgeChunks(question, candidates, 6);
     return publicLabAiJson(buildPublicLabAiRetrieveResponse(ranked));
   } catch {

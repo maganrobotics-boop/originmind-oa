@@ -11,6 +11,7 @@ import {
   migrationImportD1QueryCount,
   migrationImportRowBatches,
   MIGRATION_IMPORT_MAX_JSON_BINDING_BYTES,
+  MIGRATION_IMPORT_MAX_KNOWLEDGE_PART_CHARACTERS,
 } from "../lib/migration-import-plan.mjs";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -18,6 +19,7 @@ const vite = await createServer({ appType: "custom", configFile: false, root, se
 const migration = await vite.ssrLoadModule("/lib/migration-import.ts");
 const revisions = await vite.ssrLoadModule("/lib/approval-revisions.ts");
 const knowledgePolicy = await vite.ssrLoadModule("/lib/knowledge-policy.ts");
+const chatImport = await vite.ssrLoadModule("/lib/chat-knowledge-import.ts");
 
 after(async () => vite.close());
 
@@ -145,6 +147,88 @@ test("a large pending knowledge queue stays within the Free-plan import budget",
     })),
   };
   assert.ok(migrationImportD1QueryCount(payload(rows)) <= 50);
+});
+
+test("three worst-escaped 5 MiB revisions omit derived chunks and rebuild the active index under D1 limits", async () => {
+  const content = "\\".repeat(chatImport.MAX_CHAT_KNOWLEDGE_IMPORT_BYTES);
+  const storageParts = knowledgePolicy.splitKnowledgeStorageParts(content);
+  const createdAt = "2026-09-13T00:00:00.000Z";
+  const activatedAt = "2026-09-13T03:00:00.000Z";
+  const revisions = Array.from({ length: 3 }, (_, index) => row("knowledge_revisions", {
+    id: `knowledge-revision-${index + 1}`,
+    item_id: "knowledge-large",
+    revision_no: index + 1,
+    previous_revision_id: index ? `knowledge-revision-${index}` : null,
+    title: "大型迁移文档",
+    category: "产品资料",
+    content: "",
+    summary: "容量回归",
+    source_label: "large.md",
+    source_url: "",
+    status: index === 2 ? "active" : "returned",
+    activated_at: index === 2 ? activatedAt : null,
+    created_at: createdAt,
+  }));
+  const parts = revisions.flatMap((revision, revisionIndex) => storageParts.map((part) => row("knowledge_revision_parts", {
+    id: `knowledge-part-${revisionIndex + 1}-${part.partNo}`,
+    item_id: "knowledge-large",
+    revision_id: `knowledge-revision-${revisionIndex + 1}`,
+    part_no: part.partNo,
+    content: part.content,
+    created_at: createdAt,
+  })));
+  const compactPayload = payload({
+    knowledge_items: [row("knowledge_items", {
+      id: "knowledge-large",
+      status: "active",
+      current_revision_no: 3,
+      current_revision_id: "knowledge-revision-3",
+      active_revision_id: "knowledge-revision-3",
+    })],
+    knowledge_revisions: revisions,
+    knowledge_revision_parts: parts,
+    knowledge_chunks: [],
+  });
+  compactPayload.derivedTables = ["knowledge_chunks"];
+  assert.ok(Buffer.byteLength(JSON.stringify(compactPayload)) < 48 * 1024 * 1024);
+
+  const materialized = await migration.materializeMigrationDerivedTables(compactPayload);
+  const chunkTable = materialized.tables.find((table) => table.name === "knowledge_chunks");
+  const chunks = chunkTable.rows.map((values) => record("knowledge_chunks", values));
+  const expected = knowledgePolicy.chunkKnowledgeSubmission({
+    title: "大型迁移文档",
+    category: "产品资料",
+    summary: "容量回归",
+    sourceLabel: "large.md",
+    sourceUrl: "",
+    content,
+  });
+  assert.equal(chunks.length, expected.length);
+  assert.deepEqual(chunks.map((chunk) => [
+    chunk.revision_id,
+    chunk.chunk_no,
+    chunk.section_title,
+    chunk.paragraph_ref,
+    chunk.content,
+    chunk.search_text,
+    chunk.is_active,
+    chunk.created_at,
+  ]), expected.map((chunk) => [
+    "knowledge-revision-3",
+    chunk.chunkNo,
+    chunk.sectionTitle,
+    chunk.paragraphRef,
+    chunk.content,
+    chunk.searchText,
+    1,
+    activatedAt,
+  ]));
+  assert.ok(migrationImportD1QueryCount(materialized) <= 50);
+  for (const table of materialized.tables) {
+    for (const batch of migrationImportRowBatches(table)) {
+      assert.ok(Buffer.byteLength(JSON.stringify(batch)) <= MIGRATION_IMPORT_MAX_JSON_BINDING_BYTES);
+    }
+  }
 });
 
 test("migration relationships validate provider subjects and same-approval archive revisions", async () => {
@@ -275,6 +359,282 @@ test("terminal approval projection must exactly match its immutable revision", a
 test("direct messages may retain configured privileged participants without member rows", async () => {
   const message = row("direct_messages", { id: "message-1", sender_email: "owner@example.com", recipient_email: "member@example.com" });
   assert.equal(await migration.assertMigrationPayloadRelationships(payload({ direct_messages: [message] })), true);
+});
+
+test("multipart knowledge migrations reconstruct hashes and canonical chunks without weakening legacy rows", async () => {
+  const createdAt = "2026-09-13T00:00:00.000Z";
+  const reviewedAt = "2026-09-13T01:00:00.000Z";
+  const title = "大型文档";
+  const category = "产品资料";
+  const summary = "跨分片迁移校验";
+  const sourceLabel = "large.md";
+  const sourceUrl = "";
+  const content = `${"甲".repeat(MIGRATION_IMPORT_MAX_KNOWLEDGE_PART_CHARACTERS)}乙丙丁戊己庚辛壬癸`;
+  const contentHash = await knowledgeHash({ title, category, summary, sourceLabel, sourceUrl, content });
+  const member = row("members", { id: "member-submit" });
+  const reviewer = row("members", {
+    id: "member-review",
+    chatgpt_account: "review@example.com",
+    account_user_id: "email:review@example.com",
+  });
+  const item = row("knowledge_items", {
+    id: "knowledge-large",
+    project: "OriginMind × ARTS Robotics 联合研发项目",
+    title,
+    category,
+    submitter_member_id: "member-submit",
+    submitter_name: "投稿人",
+    submitter_email: "member@example.com",
+    status: "active",
+    visibility: "internal",
+    current_revision_no: 1,
+    current_revision_id: "knowledge-revision-large",
+    active_revision_id: "knowledge-revision-large",
+    mutation_revision: "mutation-large",
+    created_at: createdAt,
+    updated_at: reviewedAt,
+    revoked_at: null,
+  });
+  const multipartRevision = row("knowledge_revisions", {
+    id: "knowledge-revision-large",
+    item_id: "knowledge-large",
+    revision_no: 1,
+    previous_revision_id: null,
+    title,
+    category,
+    content: "",
+    summary,
+    source_label: sourceLabel,
+    source_url: sourceUrl,
+    content_hash: contentHash,
+    status: "active",
+    created_by_member_id: "member-submit",
+    created_by_name: "投稿人",
+    created_by_email: "member@example.com",
+    reviewed_by_member_id: "member-review",
+    reviewed_by_name: "审核人",
+    reviewed_by_email: "review@example.com",
+    review_note: "",
+    created_at: createdAt,
+    reviewed_at: reviewedAt,
+    activated_at: reviewedAt,
+    retired_at: null,
+  });
+  const parts = [
+    row("knowledge_revision_parts", {
+      id: "knowledge-part-1",
+      item_id: "knowledge-large",
+      revision_id: "knowledge-revision-large",
+      part_no: 1,
+      content: content.slice(0, MIGRATION_IMPORT_MAX_KNOWLEDGE_PART_CHARACTERS),
+      created_at: createdAt,
+    }),
+    row("knowledge_revision_parts", {
+      id: "knowledge-part-2",
+      item_id: "knowledge-large",
+      revision_id: "knowledge-revision-large",
+      part_no: 2,
+      content: content.slice(MIGRATION_IMPORT_MAX_KNOWLEDGE_PART_CHARACTERS),
+      created_at: createdAt,
+    }),
+  ];
+  const chunks = knowledgePolicy.chunkKnowledgeSubmission({ title, category, summary, sourceLabel, sourceUrl, content })
+    .map((chunk) => row("knowledge_chunks", {
+      id: `knowledge-chunk-${chunk.chunkNo}`,
+      item_id: "knowledge-large",
+      revision_id: "knowledge-revision-large",
+      chunk_no: chunk.chunkNo,
+      section_title: chunk.sectionTitle,
+      paragraph_ref: chunk.paragraphRef,
+      content: chunk.content,
+      search_text: chunk.searchText,
+      is_active: 1,
+      created_at: reviewedAt,
+    }));
+  const submitted = row("knowledge_events", {
+    id: "knowledge-event-submit",
+    item_id: "knowledge-large",
+    revision_id: "knowledge-revision-large",
+    actor_member_id: "member-submit",
+    actor_name: "投稿人",
+    actor_email: "member@example.com",
+    action: "submitted",
+    note: "",
+    created_at: createdAt,
+  });
+  const approved = row("knowledge_events", {
+    id: "knowledge-event-approved",
+    item_id: "knowledge-large",
+    revision_id: "knowledge-revision-large",
+    actor_member_id: "member-review",
+    actor_name: "审核人",
+    actor_email: "review@example.com",
+    action: "approved_internal",
+    note: "",
+    created_at: reviewedAt,
+  });
+  const baseRows = {
+    members: [member, reviewer],
+    knowledge_items: [item],
+    knowledge_revisions: [multipartRevision],
+    knowledge_revision_parts: parts,
+    knowledge_chunks: chunks,
+    knowledge_events: [submitted, approved],
+  };
+  const legacyPayload = payload(baseRows);
+  assert.equal(await migration.assertMigrationPayloadRelationships(legacyPayload), true);
+  assert.equal(await migration.materializeMigrationDerivedTables(legacyPayload), legacyPayload);
+
+  const legacyInlineRevision = row("knowledge_revisions", {
+    ...record("knowledge_revisions", multipartRevision),
+    content,
+  });
+  assert.equal(await migration.assertMigrationPayloadRelationships(payload({
+    ...baseRows,
+    knowledge_revisions: [legacyInlineRevision],
+    knowledge_revision_parts: [],
+  })), true);
+
+  const inlineAndParts = row("knowledge_revisions", {
+    ...record("knowledge_revisions", multipartRevision),
+    content,
+  });
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    ...baseRows,
+    knowledge_revisions: [inlineAndParts],
+  })), /retains inline content/u);
+
+  const gapPart = row("knowledge_revision_parts", {
+    ...record("knowledge_revision_parts", parts[1]),
+    part_no: 3,
+  });
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    ...baseRows,
+    knowledge_revision_parts: [parts[0], gapPart],
+  })), /part-number gap/u);
+
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    ...baseRows,
+    knowledge_revision_parts: [parts[1], parts[0]],
+  })), /not in deterministic order/u);
+
+  const corruptPart = row("knowledge_revision_parts", {
+    ...record("knowledge_revision_parts", parts[1]),
+    content: `${record("knowledge_revision_parts", parts[1]).content}错`,
+  });
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    ...baseRows,
+    knowledge_revision_parts: [parts[0], corruptPart],
+  })), /invalid content hash/u);
+
+  const secondItem = row("knowledge_items", {
+    ...record("knowledge_items", item),
+    id: "knowledge-other",
+  });
+  const crossItemPart = row("knowledge_revision_parts", {
+    ...record("knowledge_revision_parts", parts[0]),
+    item_id: "knowledge-other",
+  });
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    ...baseRows,
+    knowledge_items: [item, secondItem],
+    knowledge_revision_parts: [crossItemPart, parts[1]],
+  })), /crosses item boundaries/u);
+});
+
+test("migration reconstruction accepts exactly 5 MiB of UTF-8 knowledge and rejects one extra byte", async () => {
+  const createdAt = "2026-09-13T00:00:00.000Z";
+  const title = "迁移边界文档";
+  const category = "产品资料";
+  const summary = "精确验证大型正文迁移边界";
+  const sourceLabel = "boundary.md";
+  const sourceUrl = "";
+  const content = "a".repeat(chatImport.MAX_CHAT_KNOWLEDGE_IMPORT_BYTES);
+  const contentHash = await knowledgeHash({ title, category, summary, sourceLabel, sourceUrl, content });
+  const item = row("knowledge_items", {
+    id: "knowledge-boundary",
+    project: "OriginMind × ARTS Robotics 联合研发项目",
+    title,
+    category,
+    submitter_member_id: "member-1",
+    submitter_name: "成员",
+    submitter_email: "member@example.com",
+    status: "pending",
+    visibility: "internal",
+    current_revision_no: 1,
+    current_revision_id: "knowledge-revision-boundary",
+    active_revision_id: null,
+    mutation_revision: "mutation-boundary",
+    created_at: createdAt,
+    updated_at: createdAt,
+    revoked_at: null,
+  });
+  const revision = row("knowledge_revisions", {
+    id: "knowledge-revision-boundary",
+    item_id: "knowledge-boundary",
+    revision_no: 1,
+    previous_revision_id: null,
+    title,
+    category,
+    content: "",
+    summary,
+    source_label: sourceLabel,
+    source_url: sourceUrl,
+    content_hash: contentHash,
+    status: "pending",
+    created_by_member_id: "member-1",
+    created_by_name: "成员",
+    created_by_email: "member@example.com",
+    reviewed_by_member_id: null,
+    reviewed_by_name: null,
+    reviewed_by_email: null,
+    review_note: "",
+    created_at: createdAt,
+    reviewed_at: null,
+    activated_at: null,
+    retired_at: null,
+  });
+  const parts = [];
+  for (let offset = 0, partNo = 1; offset < content.length; partNo += 1) {
+    const partContent = content.slice(offset, offset + MIGRATION_IMPORT_MAX_KNOWLEDGE_PART_CHARACTERS);
+    parts.push(row("knowledge_revision_parts", {
+      id: `knowledge-boundary-part-${String(partNo).padStart(3, "0")}`,
+      item_id: "knowledge-boundary",
+      revision_id: "knowledge-revision-boundary",
+      part_no: partNo,
+      content: partContent,
+      created_at: createdAt,
+    }));
+    offset += partContent.length;
+  }
+  const submitted = row("knowledge_events", {
+    id: "knowledge-boundary-submitted",
+    item_id: "knowledge-boundary",
+    revision_id: "knowledge-revision-boundary",
+    actor_member_id: "member-1",
+    actor_name: "成员",
+    actor_email: "member@example.com",
+    action: "submitted",
+    note: "",
+    created_at: createdAt,
+  });
+  const baseRows = {
+    members: [row("members", { id: "member-1" })],
+    knowledge_items: [item],
+    knowledge_revisions: [revision],
+    knowledge_revision_parts: parts,
+    knowledge_events: [submitted],
+  };
+  assert.equal(await migration.assertMigrationPayloadRelationships(payload(baseRows)), true);
+
+  const oversizedLastPart = row("knowledge_revision_parts", {
+    ...record("knowledge_revision_parts", parts.at(-1)),
+    content: `${record("knowledge_revision_parts", parts.at(-1)).content}b`,
+  });
+  await assert.rejects(migration.assertMigrationPayloadRelationships(payload({
+    ...baseRows,
+    knowledge_revision_parts: [...parts.slice(0, -1), oversizedLastPart],
+  })), /exceeds the 5 MiB UTF-8 content limit/u);
 });
 
 test("deleted members retain their audit trail only with a final deletion event", async () => {

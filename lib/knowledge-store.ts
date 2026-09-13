@@ -1,10 +1,14 @@
 import { getD1Database } from "../db";
 import {
   KNOWLEDGE_PROJECT,
+  MAX_KNOWLEDGE_CONTENT_LENGTH,
   MAX_KNOWLEDGE_CHUNKS,
   chunkKnowledgeSubmission,
+  hashKnowledgeSubmission,
+  isWellFormedUnicode,
   isPublicKnowledgeConfirmation,
   knowledgeAdminSelfAuditNote,
+  knowledgeSearchTerms,
   type KnowledgeReviewAction,
   type KnowledgeStatus,
   type KnowledgeSubmission,
@@ -13,7 +17,50 @@ import {
 } from "./knowledge-policy";
 
 const KNOWLEDGE_LIST_LIMIT = 100;
-const KNOWLEDGE_SEARCH_CANDIDATE_LIMIT = 1_500;
+const KNOWLEDGE_SEARCH_CANDIDATE_LIMIT = MAX_KNOWLEDGE_CHUNKS;
+const KNOWLEDGE_SQL_SEARCH_TERM_LIMIT = 16;
+// D1 allows at most 2 MiB of bound data and 50 queries per free-plan Worker
+// invocation. Packing at most 1.5 MB/256 rows leaves headroom for JSON and
+// keeps a worst-case 5 MiB Markdown approval comfortably below that budget.
+const JSON_BULK_MAX_ROWS = 256;
+const JSON_BULK_MAX_BYTES = 1_500_000;
+
+function searchTermRowsSql(termCount: number): string {
+  if (!Number.isSafeInteger(termCount) || termCount < 1 || termCount > KNOWLEDGE_SQL_SEARCH_TERM_LIMIT) {
+    throw new RangeError("invalid knowledge search term count");
+  }
+  const baseQuota = Math.floor(KNOWLEDGE_SEARCH_CANDIDATE_LIMIT / termCount);
+  const remainder = KNOWLEDGE_SEARCH_CANDIDATE_LIMIT % termCount;
+  return Array.from({ length: termCount }, (_, index) => (
+    `(${index + 1}, ?, ${baseQuota + (index < remainder ? 1 : 0)})`
+  )).join(", ");
+}
+
+function sqlKnowledgeSearchTerms(question: string): string[] {
+  const terms = knowledgeSearchTerms(question);
+  if (terms.length <= KNOWLEDGE_SQL_SEARCH_TERM_LIMIT) return terms;
+
+  // Keep the longest terms (the policy orders them first), then sample the
+  // entire bounded list so late question concepts are still represented. The
+  // application ranker continues to use all policy terms after this SQL pass.
+  const selected: string[] = [];
+  const seen = new Set<string>();
+  const add = (term: string) => {
+    if (!seen.has(term) && selected.length < KNOWLEDGE_SQL_SEARCH_TERM_LIMIT) {
+      seen.add(term);
+      selected.push(term);
+    }
+  };
+  for (const term of terms.slice(0, KNOWLEDGE_SQL_SEARCH_TERM_LIMIT / 2)) add(term);
+  for (let index = 1; index <= KNOWLEDGE_SQL_SEARCH_TERM_LIMIT / 2; index += 1) {
+    add(terms[Math.round(index * (terms.length - 1) / (KNOWLEDGE_SQL_SEARCH_TERM_LIMIT / 2))]);
+  }
+  for (const term of terms) add(term);
+  if (selected.some((term) => !term || term.length > 64 || !isWellFormedUnicode(term))) {
+    throw new RangeError("invalid knowledge search term");
+  }
+  return selected;
+}
 
 export type KnowledgeActor = {
   memberId: string;
@@ -70,7 +117,16 @@ type KnowledgeRevisionRow = {
   reviewed_at: string | null;
   activated_at: string | null;
   retired_at: string | null;
+  content_part_count: number | string | null;
 };
+
+type KnowledgeRevisionPartRow = {
+  revision_id: string;
+  part_no: number;
+  content: string;
+};
+
+export type KnowledgeContentPartInput = string | { content: string };
 
 type KnowledgeEventRow = {
   id: string;
@@ -98,6 +154,7 @@ export type KnowledgeItemWithRevisionRow = KnowledgeItemRow & {
   reviewed_at: string | null;
   activated_at: string | null;
   retired_at: string | null;
+  content_part_count: number | string | null;
 };
 
 type KnowledgeItemListRow = Omit<KnowledgeItemWithRevisionRow, "content" | "content_hash">;
@@ -127,6 +184,15 @@ function resultRows<T>(result: D1Result<T> | undefined): T[] {
   return result?.results ?? [];
 }
 
+function contentPartCount(row: Pick<KnowledgeItemWithRevisionRow, "current_revision_id" | "content_part_count">): number {
+  if (!row.current_revision_id) return 0;
+  return Math.max(1, Number(row.content_part_count ?? 0));
+}
+
+function revisionContentPartCount(row: Pick<KnowledgeRevisionRow, "content_part_count">): number {
+  return Math.max(1, Number(row.content_part_count ?? 0));
+}
+
 function actorGuard(actor: KnowledgeActor, requireReviewer = false): { sql: string; values: unknown[] } {
   return {
     sql: `EXISTS (
@@ -149,6 +215,141 @@ function actorGuard(actor: KnowledgeActor, requireReviewer = false): { sql: stri
     )`,
     values: [actor.memberId, actor.accountUserId, actor.memberMutationRevision, ...(requireReviewer ? [(actor.isAdmin || actor.configuredReviewer) ? 1 : 0] : [])],
   };
+}
+
+function normalizedStorageParts(submission: KnowledgeSubmission, contentParts?: readonly KnowledgeContentPartInput[]): string[] {
+  if (!contentParts?.length) {
+    if (submission.content.length > MAX_KNOWLEDGE_CONTENT_LENGTH) {
+      throw new Error("large knowledge content requires storage parts");
+    }
+    return [];
+  }
+  const parts = contentParts.map((part) => typeof part === "string" ? part : part.content);
+  if (parts.some((part) => !part || part.length > MAX_KNOWLEDGE_CONTENT_LENGTH || !isWellFormedUnicode(part))) {
+    throw new Error("invalid knowledge storage parts");
+  }
+  if (parts.join("") !== submission.content) throw new Error("knowledge storage parts do not reconstruct content");
+  return submission.content.length > MAX_KNOWLEDGE_CONTENT_LENGTH ? parts : [];
+}
+
+function jsonBulkPayloads(rows: Record<string, unknown>[]): string[] {
+  const encoder = new TextEncoder();
+  const payloads: string[] = [];
+  let encodedRows: string[] = [];
+  let byteLength = 2;
+  const flush = () => {
+    if (!encodedRows.length) return;
+    payloads.push(`[${encodedRows.join(",")}]`);
+    encodedRows = [];
+    byteLength = 2;
+  };
+  for (const row of rows) {
+    const encoded = JSON.stringify(row);
+    const encodedBytes = encoder.encode(encoded).byteLength;
+    if (encodedBytes + 2 > JSON_BULK_MAX_BYTES) throw new Error("knowledge bulk row is too large");
+    if (encodedRows.length >= JSON_BULK_MAX_ROWS || byteLength + encodedBytes + (encodedRows.length ? 1 : 0) > JSON_BULK_MAX_BYTES) flush();
+    encodedRows.push(encoded);
+    byteLength += encodedBytes + (encodedRows.length > 1 ? 1 : 0);
+  }
+  flush();
+  return payloads;
+}
+
+function knowledgePartInsertStatements(
+  database: D1Database,
+  itemId: string,
+  revisionId: string,
+  mutationRevision: string,
+  now: string,
+  parts: readonly string[],
+): D1PreparedStatement[] {
+  const rows = parts.map((content, index) => ({ id: crypto.randomUUID(), partNo: index + 1, content }));
+  return jsonBulkPayloads(rows).map((payload) => database.prepare(`
+    INSERT INTO knowledge_revision_parts (id, item_id, revision_id, part_no, content, created_at)
+    SELECT
+      json_extract(part.value, '$.id'), ?, ?, CAST(json_extract(part.value, '$.partNo') AS INTEGER),
+      json_extract(part.value, '$.content'), ?
+    FROM json_each(?) AS part
+    WHERE EXISTS (
+      SELECT 1 FROM knowledge_items
+      WHERE id = ? AND current_revision_id = ? AND mutation_revision = ? AND status = 'pending'
+    )
+  `).bind(itemId, revisionId, now, payload, itemId, revisionId, mutationRevision));
+}
+
+function knowledgeChunkInsertStatements(
+  database: D1Database,
+  itemId: string,
+  revisionId: string,
+  mutationRevision: string,
+  now: string,
+  chunks: ReturnType<typeof chunkKnowledgeSubmission>,
+): D1PreparedStatement[] {
+  const rows = chunks.map((chunk) => ({
+    id: crypto.randomUUID(),
+    chunkNo: chunk.chunkNo,
+    sectionTitle: chunk.sectionTitle,
+    paragraphRef: chunk.paragraphRef,
+    content: chunk.content,
+    searchText: chunk.searchText,
+  }));
+  return jsonBulkPayloads(rows).map((payload) => database.prepare(`
+    INSERT INTO knowledge_chunks (
+      id, item_id, revision_id, chunk_no, section_title, paragraph_ref, content, search_text, is_active, created_at
+    )
+    SELECT
+      json_extract(chunk.value, '$.id'), ?, ?, CAST(json_extract(chunk.value, '$.chunkNo') AS INTEGER),
+      json_extract(chunk.value, '$.sectionTitle'), json_extract(chunk.value, '$.paragraphRef'),
+      json_extract(chunk.value, '$.content'), json_extract(chunk.value, '$.searchText'), 1, ?
+    FROM json_each(?) AS chunk
+    WHERE EXISTS (
+      SELECT 1 FROM knowledge_items
+      WHERE id = ? AND active_revision_id = ? AND mutation_revision = ? AND status = 'active'
+    )
+  `).bind(itemId, revisionId, now, payload, itemId, revisionId, mutationRevision));
+}
+
+function reassembleRevisionContent<T extends { content: string | null; content_part_count: number | string | null }>(
+  row: T,
+  parts: readonly KnowledgeRevisionPartRow[],
+): T {
+  const expectedCount = Number(row.content_part_count ?? 0);
+  if (!expectedCount) return row;
+  if (row.content) throw new Error("knowledge revision has conflicting inline and multipart content");
+  if (parts.length !== expectedCount || parts.some((part, index) => Number(part.part_no) !== index + 1)) {
+    throw new Error("knowledge revision parts are incomplete");
+  }
+  return { ...row, content: parts.map((part) => part.content).join("") };
+}
+
+async function assertMultipartContentHash(row: KnowledgeRevisionRow | KnowledgeItemWithRevisionRow): Promise<void> {
+  if (!Number(row.content_part_count ?? 0) || !row.content || !row.content_hash) return;
+  const actual = await hashKnowledgeSubmission({
+    title: row.title,
+    category: row.category,
+    summary: row.summary || "",
+    sourceLabel: row.source_label || "",
+    sourceUrl: row.source_url || "",
+    content: row.content,
+  });
+  if (actual !== row.content_hash) throw new Error("knowledge revision parts do not match content hash");
+}
+
+async function hydrateCurrentRevisionContent(
+  database: D1Database,
+  row: KnowledgeItemWithRevisionRow,
+): Promise<KnowledgeItemWithRevisionRow> {
+  const storedPartCount = Number(row.content_part_count ?? 0);
+  if (!row.current_revision_id || !storedPartCount) return row;
+  const result = await database.prepare(`
+    SELECT revision_id, part_no, content
+    FROM knowledge_revision_parts
+    WHERE item_id = ? AND revision_id = ?
+    ORDER BY part_no ASC
+  `).bind(row.id, row.current_revision_id).all<KnowledgeRevisionPartRow>();
+  const hydrated = reassembleRevisionContent(row, result.results);
+  await assertMultipartContentHash(hydrated);
+  return hydrated;
 }
 
 function serializeItem(row: KnowledgeItemWithRevisionRow | KnowledgeItemListRow | KnowledgeItemRow) {
@@ -174,6 +375,7 @@ function serializeItem(row: KnowledgeItemWithRevisionRow | KnowledgeItemListRow 
       summary: revision.summary || "",
       sourceLabel: revision.source_label || "",
       sourceUrl: revision.source_url || "",
+      contentPartCount: contentPartCount(revision),
       ...(Object.hasOwn(revision, "content") ? { content: revision.content || "", contentHash: revision.content_hash || "" } : {}),
       revisionStatus: revision.revision_status || undefined,
       reviewedByMemberId: revision.reviewed_by_member_id || undefined,
@@ -200,6 +402,7 @@ function serializeRevision(row: KnowledgeRevisionRow) {
     sourceLabel: row.source_label,
     sourceUrl: row.source_url,
     contentHash: row.content_hash,
+    contentPartCount: revisionContentPartCount(row),
     status: row.status,
     createdByMemberId: row.created_by_member_id,
     createdByName: row.created_by_name,
@@ -229,6 +432,7 @@ function serializePublicItem(row: KnowledgeItemWithRevisionRow | KnowledgeItemLi
     summary: row.summary || "",
     sourceLabel: row.source_label || "",
     sourceUrl: row.source_url || "",
+    contentPartCount: contentPartCount(row),
   };
 }
 
@@ -268,6 +472,7 @@ const ITEM_WITH_REVISION_SELECT = `
     r.source_url,
     r.content,
     r.content_hash,
+    (SELECT COUNT(*) FROM knowledge_revision_parts AS rp WHERE rp.revision_id = r.id AND rp.item_id = i.id) AS content_part_count,
     r.status AS revision_status,
     r.reviewed_by_member_id,
     r.reviewed_by_name,
@@ -286,6 +491,7 @@ const LIST_ITEM_WITH_REVISION_SELECT = `
     r.summary,
     r.source_label,
     r.source_url,
+    (SELECT COUNT(*) FROM knowledge_revision_parts AS rp WHERE rp.revision_id = r.id AND rp.item_id = i.id) AS content_part_count,
     r.status AS revision_status,
     r.reviewed_by_member_id,
     r.reviewed_by_name,
@@ -357,8 +563,9 @@ export async function countPendingKnowledgeItems(actor: KnowledgeActor): Promise
 export async function findKnowledgeItem(id: string, actor: KnowledgeActor, requireReviewer = false): Promise<KnowledgeItemWithRevisionRow | null> {
   const database = await getD1Database();
   const guard = actorGuard(actor, requireReviewer);
-  return database.prepare(`${ITEM_WITH_REVISION_SELECT} WHERE i.id = ? AND ${guard.sql} LIMIT 1`)
+  const item = await database.prepare(`${ITEM_WITH_REVISION_SELECT} WHERE i.id = ? AND ${guard.sql} LIMIT 1`)
     .bind(id, ...guard.values).first<KnowledgeItemWithRevisionRow>();
+  return item ? hydrateCurrentRevisionContent(database, item) : null;
 }
 
 export async function knowledgeRevisionHashExists(itemId: string, contentHash: string): Promise<boolean> {
@@ -369,9 +576,10 @@ export async function knowledgeRevisionHashExists(itemId: string, contentHash: s
 export async function getKnowledgeItemDetail(id: string, actor: KnowledgeActor, canReview: boolean) {
   const database = await getD1Database();
   const guard = actorGuard(actor, canReview);
-  const item = await database.prepare(`${ITEM_WITH_REVISION_SELECT} WHERE i.id = ? AND ${guard.sql} LIMIT 1`)
+  const storedItem = await database.prepare(`${ITEM_WITH_REVISION_SELECT} WHERE i.id = ? AND ${guard.sql} LIMIT 1`)
     .bind(id, ...guard.values).first<KnowledgeItemWithRevisionRow>();
-  if (!item) return null;
+  if (!storedItem) return null;
+  const item = await hydrateCurrentRevisionContent(database, storedItem);
   const isOwner = submitterIdentity(item, actor).exact;
   if (item.status !== "active" && !isOwner && !canReview) return null;
 
@@ -386,30 +594,61 @@ export async function getKnowledgeItemDetail(id: string, actor: KnowledgeActor, 
       summary: item.summary || "",
       sourceLabel: item.source_label || "",
       sourceUrl: item.source_url || "",
+      contentPartCount: contentPartCount(item),
       status: item.revision_status,
       createdAt: item.updated_at,
     }], events: [] };
   }
 
-  const [revisionsResult, eventsResult] = await database.batch([
-    database.prepare("SELECT * FROM knowledge_revisions WHERE item_id = ? ORDER BY revision_no DESC, id DESC").bind(id),
+  const [revisionsResult, partsResult, eventsResult] = await database.batch([
+    database.prepare(`
+      SELECT r.*,
+        (SELECT COUNT(*) FROM knowledge_revision_parts AS rp WHERE rp.revision_id = r.id AND rp.item_id = r.item_id) AS content_part_count
+      FROM knowledge_revisions AS r
+      WHERE r.item_id = ?
+      ORDER BY r.revision_no DESC, r.id DESC
+    `).bind(id),
+    database.prepare(`
+      SELECT revision_id, part_no, content
+      FROM knowledge_revision_parts
+      WHERE item_id = ?
+      ORDER BY revision_id ASC, part_no ASC
+    `).bind(id),
     database.prepare("SELECT * FROM knowledge_events WHERE item_id = ? ORDER BY created_at ASC, id ASC").bind(id),
   ]);
+  const partsByRevision = new Map<string, KnowledgeRevisionPartRow[]>();
+  for (const part of resultRows(partsResult as D1Result<KnowledgeRevisionPartRow>)) {
+    const parts = partsByRevision.get(part.revision_id) || [];
+    parts.push(part);
+    partsByRevision.set(part.revision_id, parts);
+  }
+  const revisions = await Promise.all(resultRows(revisionsResult as D1Result<KnowledgeRevisionRow>).map(async (revision) => {
+    const hydrated = reassembleRevisionContent(revision, partsByRevision.get(revision.id) || []);
+    await assertMultipartContentHash(hydrated);
+    return serializeRevision(hydrated);
+  }));
   return {
     item: { ...serializeItem(item), ...itemCapabilities(item, actor, canReview) },
-    revisions: resultRows(revisionsResult as D1Result<KnowledgeRevisionRow>).map(serializeRevision),
+    revisions,
     events: resultRows(eventsResult as D1Result<KnowledgeEventRow>).map(serializeEvent),
   };
 }
 
-export async function createKnowledgeItem(actor: KnowledgeActor, submission: KnowledgeSubmission, contentHash: string, itemId = crypto.randomUUID()) {
+export async function createKnowledgeItem(
+  actor: KnowledgeActor,
+  submission: KnowledgeSubmission,
+  contentHash: string,
+  itemId = crypto.randomUUID(),
+  contentParts?: readonly KnowledgeContentPartInput[],
+) {
+  const storageParts = normalizedStorageParts(submission, contentParts);
   const database = await getD1Database();
   const now = new Date().toISOString();
   const revisionId = crypto.randomUUID();
   const mutationRevision = crypto.randomUUID();
   const eventId = crypto.randomUUID();
   const guard = actorGuard(actor);
-  const [itemResult] = await database.batch([
+  const statements: D1PreparedStatement[] = [
     database.prepare(`
       INSERT INTO knowledge_items (
         id, project, title, category, submitter_member_id, submitter_name, submitter_email,
@@ -431,16 +670,20 @@ export async function createKnowledgeItem(actor: KnowledgeActor, submission: Kno
       )
       SELECT ?, ?, 1, NULL, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, NULL, NULL, NULL, '', ?, NULL, NULL, NULL
       WHERE EXISTS (SELECT 1 FROM knowledge_items WHERE id = ? AND current_revision_id = ? AND mutation_revision = ? AND status = 'pending')
-    `).bind(revisionId, itemId, submission.title, submission.category, submission.content, submission.summary,
+    `).bind(revisionId, itemId, submission.title, submission.category, storageParts.length ? "" : submission.content, submission.summary,
       submission.sourceLabel, submission.sourceUrl, contentHash, actor.memberId, actor.name, normalizeEmail(actor.email), now,
       itemId, revisionId, mutationRevision),
+  ];
+  statements.push(...knowledgePartInsertStatements(database, itemId, revisionId, mutationRevision, now, storageParts));
+  statements.push(
     database.prepare(`
       INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note, created_at)
       SELECT ?, ?, ?, ?, ?, ?, 'submitted', '', ?
       WHERE EXISTS (SELECT 1 FROM knowledge_items WHERE id = ? AND current_revision_id = ? AND mutation_revision = ? AND status = 'pending')
     `).bind(eventId, itemId, revisionId, actor.memberId, actor.name, normalizeEmail(actor.email), now,
       itemId, revisionId, mutationRevision),
-  ]);
+  );
+  const [itemResult] = await database.batch(statements);
   const created = resultRows(itemResult as D1Result<KnowledgeItemRow>)[0];
   return created ? serializeItem({
     ...created,
@@ -449,6 +692,7 @@ export async function createKnowledgeItem(actor: KnowledgeActor, submission: Kno
     source_url: submission.sourceUrl,
     content: submission.content,
     content_hash: contentHash,
+    content_part_count: storageParts.length,
     revision_status: "pending",
     reviewed_by_member_id: null,
     reviewed_by_name: null,
@@ -460,8 +704,14 @@ export async function createKnowledgeItem(actor: KnowledgeActor, submission: Kno
   }) : null;
 }
 
-export async function createChatImportedKnowledgeItem(actor: KnowledgeActor, submission: KnowledgeSubmission, contentHash: string, itemId: string) {
-  const created = await createKnowledgeItem(actor, submission, contentHash, itemId);
+export async function createChatImportedKnowledgeItem(
+  actor: KnowledgeActor,
+  submission: KnowledgeSubmission,
+  contentHash: string,
+  itemId: string,
+  contentParts?: readonly KnowledgeContentPartInput[],
+) {
+  const created = await createKnowledgeItem(actor, submission, contentHash, itemId, contentParts);
   if (created) return created;
   // The deterministic ID makes retries and concurrent submissions idempotent.
   // Re-reading uses the live member/NDA guard and exact submitter identity.
@@ -477,7 +727,9 @@ export async function resubmitKnowledgeItem(
   actor: KnowledgeActor,
   submission: KnowledgeSubmission,
   contentHash: string,
+  contentParts?: readonly KnowledgeContentPartInput[],
 ) {
+  const storageParts = normalizedStorageParts(submission, contentParts);
   const database = await getD1Database();
   const now = timestampAfter(existing.updated_at);
   const revisionId = crypto.randomUUID();
@@ -485,7 +737,7 @@ export async function resubmitKnowledgeItem(
   const eventId = crypto.randomUUID();
   const revisionNo = Number(existing.current_revision_no) + 1;
   const guard = actorGuard(actor);
-  const [itemResult] = await database.batch([
+  const statements: D1PreparedStatement[] = [
     database.prepare(`
       UPDATE knowledge_items SET
         title = ?, category = ?, status = 'pending', current_revision_no = ?, current_revision_id = ?,
@@ -505,15 +757,19 @@ export async function resubmitKnowledgeItem(
       SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, NULL, NULL, NULL, '', ?, NULL, NULL, NULL
       WHERE EXISTS (SELECT 1 FROM knowledge_items WHERE id = ? AND current_revision_id = ? AND mutation_revision = ? AND status = 'pending')
     `).bind(revisionId, existing.id, revisionNo, existing.current_revision_id, submission.title, submission.category,
-      submission.content, submission.summary, submission.sourceLabel, submission.sourceUrl, contentHash,
+      storageParts.length ? "" : submission.content, submission.summary, submission.sourceLabel, submission.sourceUrl, contentHash,
       actor.memberId, actor.name, normalizeEmail(actor.email), now, existing.id, revisionId, mutationRevision),
+  ];
+  statements.push(...knowledgePartInsertStatements(database, existing.id, revisionId, mutationRevision, now, storageParts));
+  statements.push(
     database.prepare(`
       INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note, created_at)
       SELECT ?, ?, ?, ?, ?, ?, 'resubmitted', '', ?
       WHERE EXISTS (SELECT 1 FROM knowledge_items WHERE id = ? AND current_revision_id = ? AND mutation_revision = ? AND status = 'pending')
     `).bind(eventId, existing.id, revisionId, actor.memberId, actor.name, normalizeEmail(actor.email), now,
       existing.id, revisionId, mutationRevision),
-  ]);
+  );
+  const [itemResult] = await database.batch(statements);
   const updated = resultRows(itemResult as D1Result<KnowledgeItemRow>)[0];
   return updated ? serializeItem({
     ...updated,
@@ -522,6 +778,7 @@ export async function resubmitKnowledgeItem(
     source_url: submission.sourceUrl,
     content: submission.content,
     content_hash: contentHash,
+    content_part_count: storageParts.length,
     revision_status: "pending",
     reviewed_by_member_id: null,
     reviewed_by_name: null,
@@ -565,7 +822,7 @@ export async function reviewKnowledgeItem(
     sourceLabel: existing.source_label || "",
     sourceUrl: existing.source_url || "",
     content: existing.content || "",
-  }) : [];
+  }, existing.content && existing.content.length > MAX_KNOWLEDGE_CONTENT_LENGTH ? 2_000 : 900) : [];
   if (chunks.length > MAX_KNOWLEDGE_CHUNKS) throw new Error("knowledge chunk limit exceeded");
   const statements: D1PreparedStatement[] = [
     database.prepare(`
@@ -602,19 +859,14 @@ export async function reviewKnowledgeItem(
       AND EXISTS (SELECT 1 FROM knowledge_items WHERE id = ? AND mutation_revision = ? AND status = ?)
   `).bind(existing.id, existing.id, mutationRevision, nextStatus));
   if (action === "approve") {
-    for (const chunk of chunks) {
-      statements.push(database.prepare(`
-        INSERT INTO knowledge_chunks (
-          id, item_id, revision_id, chunk_no, section_title, paragraph_ref, content, search_text, is_active, created_at
-        )
-        SELECT ?, ?, ?, ?, ?, ?, ?, ?, 1, ?
-        WHERE EXISTS (
-          SELECT 1 FROM knowledge_items
-          WHERE id = ? AND active_revision_id = ? AND mutation_revision = ? AND status = 'active'
-        )
-      `).bind(crypto.randomUUID(), existing.id, existing.current_revision_id, chunk.chunkNo, chunk.sectionTitle,
-        chunk.paragraphRef, chunk.content, chunk.searchText, now, existing.id, existing.current_revision_id, mutationRevision));
-    }
+    statements.push(...knowledgeChunkInsertStatements(
+      database,
+      existing.id,
+      existing.current_revision_id || "",
+      mutationRevision,
+      now,
+      chunks,
+    ));
   }
   statements.push(database.prepare(`
     INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note, created_at)
@@ -635,6 +887,7 @@ export async function reviewKnowledgeItem(
     source_url: existing.source_url,
     content: existing.content,
     content_hash: existing.content_hash,
+    content_part_count: existing.content_part_count,
     revision_status: nextStatus,
     reviewed_by_member_id: action === "revoke" ? existing.reviewed_by_member_id : actor.memberId,
     reviewed_by_name: action === "revoke" ? existing.reviewed_by_name : actor.name,
@@ -701,6 +954,7 @@ export async function setKnowledgeItemVisibility(
     source_url: existing.source_url,
     content: existing.content,
     content_hash: existing.content_hash,
+    content_part_count: existing.content_part_count,
     revision_status: existing.revision_status,
     reviewed_by_member_id: existing.reviewed_by_member_id,
     reviewed_by_name: existing.reviewed_by_name,
@@ -712,10 +966,77 @@ export async function setKnowledgeItemVisibility(
   });
 }
 
-export async function getActiveKnowledgeChunks(actor: KnowledgeActor): Promise<SearchableKnowledgeChunk[]> {
+export async function getActiveKnowledgeChunks(actor: KnowledgeActor, question?: string): Promise<SearchableKnowledgeChunk[]> {
+  const terms = question === undefined ? undefined : sqlKnowledgeSearchTerms(question);
+  if (terms && !terms.length) return [];
   const database = await getD1Database();
   const guard = actorGuard(actor);
-  const result = await database.prepare(`
+  const result = terms ? await database.prepare(`
+    WITH search_terms(term_no, term, quota) AS (
+      VALUES ${searchTermRowsSql(terms.length)}
+    ), item_term_candidates AS (
+      SELECT
+        c.id, c.item_id, c.revision_id, c.chunk_no,
+        r.title, r.category, r.source_label, r.source_url, c.section_title, c.paragraph_ref,
+        c.content, c.search_text, i.updated_at, search_terms.term_no, search_terms.term, search_terms.quota,
+        COUNT(*) OVER (PARTITION BY search_terms.term_no) AS term_frequency,
+        ROW_NUMBER() OVER (
+          PARTITION BY search_terms.term_no, c.item_id
+          ORDER BY c.chunk_no ASC
+        ) AS item_term_rank
+      FROM knowledge_chunks AS c
+      INNER JOIN knowledge_items AS i ON i.id = c.item_id
+      INNER JOIN knowledge_revisions AS r ON r.id = c.revision_id AND r.item_id = i.id
+      INNER JOIN search_terms ON instr(c.search_text, search_terms.term) > 0
+      WHERE c.is_active = 1
+        AND i.status = 'active'
+        AND i.visibility IN ('internal', 'public')
+        AND r.status = 'active'
+        AND i.active_revision_id = c.revision_id
+        AND ${guard.sql}
+    ), term_candidates AS (
+      SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY term_no
+        ORDER BY item_term_rank ASC, updated_at DESC, item_id ASC, chunk_no ASC
+      ) AS term_rank
+      FROM item_term_candidates
+    ), scored_candidates AS (
+      SELECT *,
+        MAX(CASE WHEN term_rank <= quota THEN 1 ELSE 0 END) OVER (PARTITION BY id) AS quota_selected,
+        MIN(term_frequency) OVER (PARTITION BY id) AS rarest_term_frequency,
+        MAX(length(term)) OVER (PARTITION BY id) AS best_term_length,
+        ROW_NUMBER() OVER (PARTITION BY id ORDER BY term_no ASC) AS duplicate_rank
+      FROM term_candidates
+    ), unique_candidates AS (
+      SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY item_id
+        ORDER BY quota_selected DESC, rarest_term_frequency ASC, best_term_length DESC, chunk_no ASC
+      ) AS item_candidate_rank
+      FROM scored_candidates
+      WHERE duplicate_rank = 1
+    )
+    SELECT
+      id, item_id, revision_id, title, category, source_label, source_url, section_title, paragraph_ref,
+      content, search_text, updated_at
+    FROM unique_candidates
+    ORDER BY
+      quota_selected DESC, rarest_term_frequency ASC, best_term_length DESC,
+      item_candidate_rank ASC, updated_at DESC, item_id ASC, chunk_no ASC
+    LIMIT ?
+  `).bind(...terms, ...guard.values, KNOWLEDGE_SEARCH_CANDIDATE_LIMIT).all<{
+    id: string;
+    item_id: string;
+    revision_id: string;
+    title: string;
+    category: string;
+    source_label: string;
+    source_url: string;
+    section_title: string;
+    paragraph_ref: string;
+    content: string;
+    search_text: string;
+    updated_at: string;
+  }>() : await database.prepare(`
     SELECT
       c.id, c.item_id, c.revision_id, r.title, r.category, r.source_label, r.source_url, c.section_title, c.paragraph_ref,
       c.content, c.search_text, i.updated_at
@@ -760,9 +1081,74 @@ export async function getActiveKnowledgeChunks(actor: KnowledgeActor): Promise<S
   }));
 }
 
-export async function getPublicActiveKnowledgeChunks(): Promise<SearchableKnowledgeChunk[]> {
+export async function getPublicActiveKnowledgeChunks(question?: string): Promise<SearchableKnowledgeChunk[]> {
+  const terms = question === undefined ? undefined : sqlKnowledgeSearchTerms(question);
+  if (terms && !terms.length) return [];
   const database = await getD1Database();
-  const result = await database.prepare(`
+  const result = terms ? await database.prepare(`
+    WITH search_terms(term_no, term, quota) AS (
+      VALUES ${searchTermRowsSql(terms.length)}
+    ), item_term_candidates AS (
+      SELECT
+        c.id, c.item_id, c.revision_id, c.chunk_no,
+        r.title, r.category, r.source_label, c.section_title, c.paragraph_ref,
+        c.content, c.search_text, i.updated_at, search_terms.term_no, search_terms.term, search_terms.quota,
+        COUNT(*) OVER (PARTITION BY search_terms.term_no) AS term_frequency,
+        ROW_NUMBER() OVER (
+          PARTITION BY search_terms.term_no, c.item_id
+          ORDER BY c.chunk_no ASC
+        ) AS item_term_rank
+      FROM knowledge_chunks AS c
+      INNER JOIN knowledge_items AS i ON i.id = c.item_id
+      INNER JOIN knowledge_revisions AS r ON r.id = c.revision_id AND r.item_id = i.id
+      INNER JOIN search_terms ON instr(c.search_text, search_terms.term) > 0
+      WHERE c.is_active = 1
+        AND i.status = 'active'
+        AND i.visibility = 'public'
+        AND r.status = 'active'
+        AND i.active_revision_id = c.revision_id
+    ), term_candidates AS (
+      SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY term_no
+        ORDER BY item_term_rank ASC, updated_at DESC, item_id ASC, chunk_no ASC
+      ) AS term_rank
+      FROM item_term_candidates
+    ), scored_candidates AS (
+      SELECT *,
+        MAX(CASE WHEN term_rank <= quota THEN 1 ELSE 0 END) OVER (PARTITION BY id) AS quota_selected,
+        MIN(term_frequency) OVER (PARTITION BY id) AS rarest_term_frequency,
+        MAX(length(term)) OVER (PARTITION BY id) AS best_term_length,
+        ROW_NUMBER() OVER (PARTITION BY id ORDER BY term_no ASC) AS duplicate_rank
+      FROM term_candidates
+    ), unique_candidates AS (
+      SELECT *, ROW_NUMBER() OVER (
+        PARTITION BY item_id
+        ORDER BY quota_selected DESC, rarest_term_frequency ASC, best_term_length DESC, chunk_no ASC
+      ) AS item_candidate_rank
+      FROM scored_candidates
+      WHERE duplicate_rank = 1
+    )
+    SELECT
+      ROW_NUMBER() OVER (ORDER BY updated_at DESC, item_id ASC, chunk_no ASC) AS public_chunk_no,
+      DENSE_RANK() OVER (ORDER BY item_id ASC) AS public_item_no,
+      title, category, source_label, section_title, paragraph_ref, content, search_text, updated_at
+    FROM unique_candidates
+    ORDER BY
+      quota_selected DESC, rarest_term_frequency ASC, best_term_length DESC,
+      item_candidate_rank ASC, updated_at DESC, item_id ASC, chunk_no ASC
+    LIMIT ?
+  `).bind(...terms, KNOWLEDGE_SEARCH_CANDIDATE_LIMIT).all<{
+    public_chunk_no: number;
+    public_item_no: number;
+    title: string;
+    category: string;
+    source_label: string;
+    section_title: string;
+    paragraph_ref: string;
+    content: string;
+    search_text: string;
+    updated_at: string;
+  }>() : await database.prepare(`
     SELECT
       ROW_NUMBER() OVER (ORDER BY i.updated_at DESC, i.id ASC, c.chunk_no ASC) AS public_chunk_no,
       DENSE_RANK() OVER (ORDER BY i.id ASC) AS public_item_no,

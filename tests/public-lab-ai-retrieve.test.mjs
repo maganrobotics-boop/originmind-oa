@@ -45,8 +45,9 @@ const vite = await createServer({
     load(id) {
       if (id === "\0public-lab-ai-env") return `export const env = new Proxy({}, { get: (_, key) => globalThis.${stateKey}.env[key] });`;
       if (id === "\0public-lab-ai-store") return `
-        export async function getPublicActiveKnowledgeChunks() {
+        export async function getPublicActiveKnowledgeChunks(question) {
           globalThis.${stateKey}.storeCalls += 1;
+          globalThis.${stateKey}.storeQuestions.push(question);
           return globalThis.${stateKey}.candidates;
         }
       `;
@@ -94,6 +95,7 @@ beforeEach(() => {
     buckets: new Map(),
     d1Calls: 0,
     storeCalls: 0,
+    storeQuestions: [],
     candidates: Array.from({ length: 6 }, (_, index) => candidate(index + 1)),
   };
 });
@@ -154,6 +156,7 @@ test("success returns only strict sequential bounded excerpts with no internal m
   const body = JSON.parse(raw);
   assert.deepEqual(Object.keys(body), ["chunks"]);
   assert.equal(body.chunks.length, 6);
+  assert.deepEqual(globalThis[stateKey].storeQuestions, ["机械臂如何急停复位?"]);
   assert.deepEqual(body.chunks.map((chunk) => chunk.id), ["1", "2", "3", "4", "5", "6"]);
   const allowed = ["id", "title", "category", "sectionTitle", "paragraphRef", "excerpt", "sourceLabel", "updatedAt"].sort();
   for (const chunk of body.chunks) {

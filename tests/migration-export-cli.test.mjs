@@ -87,7 +87,7 @@ test("credential generator and decryptor keep secrets private and reject expired
   await writeFile(archivePath, canonicalJson(await encryptMigrationPayload(payload, publicKey)), { mode: 0o600 });
   const outputPath = join(parent, "migration.json");
   const decrypted = await runDecrypt({ input: archivePath, privateKey: privateKeyPath, authKey: authKeyPath, output: outputPath });
-  assert.match(decrypted.stdout, /14 tables \(0 rows\)/u);
+  assert.match(decrypted.stdout, /15 tables \(0 rows\)/u);
   if (process.platform !== "win32") assert.equal((await stat(outputPath)).mode & 0o777, 0o600);
   assert.equal((await readFile(outputPath, "utf8")).endsWith("\n"), false);
 

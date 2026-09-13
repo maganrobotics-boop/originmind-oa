@@ -11,6 +11,7 @@ export type KnowledgeItem = {
   content?: string;
   sourceLabel?: string;
   sourceUrl?: string;
+  contentPartCount?: number;
   submitterMemberId?: string;
   submitterName?: string;
   submitterEmail?: string;
@@ -46,6 +47,7 @@ export type KnowledgeRevision = {
   sourceLabel?: string;
   sourceUrl?: string;
   contentHash?: string;
+  contentPartCount?: number;
   status?: KnowledgeRevisionStatus;
   createdByMemberId?: string;
   createdByName?: string;

@@ -2,7 +2,7 @@ import { lstat, readFile, realpath, writeFile } from "node:fs/promises";
 import { basename, dirname, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { canonicalJson, decryptMigrationEnvelope, verifyFreshMigrationPayload } from "../lib/migration-export.mjs";
+import { canonicalJson, decryptMigrationEnvelope, MIGRATION_EXPORT_MAX_ENCRYPTED_BYTES, verifyFreshMigrationPayload } from "../lib/migration-export.mjs";
 
 function parseArguments(values) {
   const options = {};
@@ -58,7 +58,7 @@ if (options) {
     assertResolvedOutsideWorktree(resolve(outputParent, basename(outputPath)), "Decrypted output");
     if (inputPath === outputPath) throw new Error("Encrypted input and decrypted output must be different files");
     await Promise.all([
-      assertRegularFile(inputPath, "Encrypted input", 9 * 1024 * 1024),
+      assertRegularFile(inputPath, "Encrypted input", MIGRATION_EXPORT_MAX_ENCRYPTED_BYTES),
       assertRegularFile(privateKeyPath, "Private key", 16 * 1024, true),
       assertRegularFile(authKeyPath, "Authentication key", 256, true),
     ]);
