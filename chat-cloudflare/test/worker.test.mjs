@@ -44,7 +44,9 @@ function makeEnvironment(overrides = {}) {
   };
 }
 
-function runtime(fetch = async () => oaResponse()) {
+function runtime(fetch = async (url) => String(url).endsWith("/api/public/lab-ai/status")
+  ? Response.json({ oaReady: true, publicKnowledgeReady: true, retrievalReady: true })
+  : oaResponse()) {
   return { fetch };
 }
 
@@ -98,18 +100,44 @@ test("health reports D1 service readiness without leaking or requiring an admin 
 });
 
 test("status marks Workers AI as the default ready provider without a Bailian key", async (t) => {
-  const env = makeEnvironment();
+  let aiCalls = 0;
+  let oaCalls = 0;
+  const env = makeEnvironment({
+    AI: { run: async () => {
+      aiCalls += 1;
+      return { choices: [{ message: { role: "assistant", content: "连接成功" } }] };
+    } },
+  });
   t.after(() => env.DB.close());
-  const result = await responseJson(await handleRequest(apiRequest("/api/status"), env, {}, runtime()));
+  const statusRuntime = runtime(async (url) => {
+    if (String(url).endsWith("/api/public/lab-ai/status")) {
+      oaCalls += 1;
+      return Response.json({ oaReady: true, publicKnowledgeReady: true, retrievalReady: true });
+    }
+    return oaResponse();
+  });
+  const result = await responseJson(await handleRequest(apiRequest("/api/status"), env, {}, statusRuntime));
   assert.deepEqual(result, {
     status: 200,
     body: {
       storageReady: true,
       modelReady: true,
+      qwenReady: true,
+      modelPending: false,
+      oaReady: true,
+      knowledgeReady: true,
+      retrievalReady: true,
+      oaPending: false,
+      budgetReady: true,
+      systemReady: true,
       provider: "workers-ai",
       model: WORKERS_AI_MODEL,
     },
   });
+  const cached = await responseJson(await handleRequest(apiRequest("/api/status"), env, {}, statusRuntime));
+  assert.deepEqual(cached, result);
+  assert.equal(aiCalls, 1);
+  assert.equal(oaCalls, 1);
 });
 
 test("auth preserves public error status without exposing unknown failures", async (t) => {
