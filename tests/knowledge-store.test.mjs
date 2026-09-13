@@ -618,6 +618,132 @@ test("退回后只能由投稿人创建不可变的新版本并再次进入待�
   assert.deepEqual(events, ["submitted", "returned", "resubmitted"]);
 });
 
+test("multipart 退回重提在真实 SQLite 中保留旧分片并原子创建新版本", async () => {
+  const sqlite = globalThis[stateKey].sqlite;
+  const itemId = "22222222-3333-4444-8555-666666666666";
+  const storedParts = (revisionId) => sqlite
+    .prepare("SELECT part_no, content FROM knowledge_revision_parts WHERE revision_id = ? ORDER BY part_no")
+    .all(revisionId)
+    .map((part) => ({ part_no: Number(part.part_no), content: part.content }));
+  const firstContent = `# 第一版大文档\n\n${"第一版正文。".repeat(7_000)}`;
+  const first = submission({ title: "第一版大文档", content: firstContent });
+  const firstParts = policy.splitKnowledgeStorageParts(firstContent);
+  assert.ok(firstParts.length > 1);
+  assert.equal(firstParts.map((part) => part.content).join(""), firstContent);
+
+  const created = await store.createChatImportedKnowledgeItem(
+    actor("submitter"),
+    first,
+    await policy.hashKnowledgeSubmission(first),
+    itemId,
+    firstParts,
+  );
+  const firstRevisionId = created.currentRevisionId;
+  const pending = await store.findKnowledgeItem(itemId, actor("submitter"));
+  await store.reviewKnowledgeItem(pending, actor("reviewer"), "return", "请补充新版正文");
+  const returnedBeforeFailure = await store.findKnowledgeItem(itemId, actor("submitter"));
+  const returnedMutationRevision = returnedBeforeFailure.mutation_revision;
+
+  const secondContent = `# 第二版大文档\n\n${"第二版补充正文。".repeat(6_000)}`;
+  const second = submission({ title: "第二版大文档", content: secondContent });
+  const secondParts = policy.splitKnowledgeStorageParts(secondContent);
+  assert.ok(secondParts.length > 1);
+  assert.equal(secondParts.map((part) => part.content).join(""), secondContent);
+
+  sqlite.exec(`
+    CREATE TRIGGER fail_multipart_resubmit_part
+    BEFORE INSERT ON knowledge_revision_parts
+    WHEN NEW.item_id = '${itemId}'
+    BEGIN
+      SELECT RAISE(ABORT, 'forced multipart resubmit part failure');
+    END;
+  `);
+  await assert.rejects(
+    store.resubmitKnowledgeItem(
+      returnedBeforeFailure,
+      actor("submitter"),
+      second,
+      await policy.hashKnowledgeSubmission(second),
+      secondParts,
+    ),
+    /forced multipart resubmit part failure/u,
+  );
+
+  const rolledBackItem = sqlite.prepare(`
+    SELECT status, current_revision_no, current_revision_id, mutation_revision
+    FROM knowledge_items WHERE id = ?
+  `).get(itemId);
+  assert.equal(rolledBackItem.status, "returned");
+  assert.equal(rolledBackItem.current_revision_no, 1);
+  assert.equal(rolledBackItem.current_revision_id, firstRevisionId);
+  assert.equal(rolledBackItem.mutation_revision, returnedMutationRevision);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM knowledge_revisions WHERE item_id = ?").get(itemId).total, 1);
+  assert.deepEqual(
+    storedParts(firstRevisionId),
+    firstParts.map((part) => ({ part_no: part.partNo, content: part.content })),
+  );
+  assert.deepEqual(
+    sqlite.prepare("SELECT action FROM knowledge_events WHERE item_id = ? ORDER BY created_at, rowid").all(itemId).map((event) => event.action),
+    ["submitted", "returned"],
+  );
+  sqlite.exec("DROP TRIGGER fail_multipart_resubmit_part");
+
+  const returned = await store.findKnowledgeItem(itemId, actor("submitter"));
+  const resubmitted = await store.resubmitKnowledgeItem(
+    returned,
+    actor("submitter"),
+    second,
+    await policy.hashKnowledgeSubmission(second),
+    secondParts,
+  );
+  const resubmitBatchSize = globalThis[stateKey].database.batchStatementCounts.at(-1);
+  assert.equal(resubmitted.id, itemId);
+  assert.equal(resubmitted.status, "pending");
+  assert.equal(resubmitted.currentRevisionNo, 2);
+  assert.equal(resubmitted.contentPartCount, secondParts.length);
+  assert.ok(resubmitBatchSize < 50, "multipart resubmission must stay within D1's 50-query request limit");
+
+  const revisions = sqlite.prepare(`
+    SELECT id, revision_no, previous_revision_id, content, content_hash, status
+    FROM knowledge_revisions WHERE item_id = ? ORDER BY revision_no
+  `).all(itemId);
+  assert.equal(revisions.length, 2);
+  assert.deepEqual(revisions.map((revision) => revision.status), ["returned", "pending"]);
+  assert.deepEqual(revisions.map((revision) => revision.content), ["", ""]);
+  assert.equal(revisions[0].id, firstRevisionId);
+  assert.equal(revisions[1].previous_revision_id, firstRevisionId);
+  assert.notEqual(revisions[1].content_hash, revisions[0].content_hash);
+  assert.deepEqual(
+    storedParts(firstRevisionId),
+    firstParts.map((part) => ({ part_no: part.partNo, content: part.content })),
+  );
+  assert.deepEqual(
+    storedParts(revisions[1].id),
+    secondParts.map((part) => ({ part_no: part.partNo, content: part.content })),
+  );
+  assert.throws(
+    () => sqlite.prepare("UPDATE knowledge_revision_parts SET content = 'tampered' WHERE revision_id = ? AND part_no = 1").run(firstRevisionId),
+    /knowledge revision part content is immutable/u,
+  );
+
+  const detail = await store.getKnowledgeItemDetail(itemId, actor("reviewer"), true);
+  assert.equal(detail.item.content, secondContent);
+  assert.deepEqual(detail.revisions.map((revision) => revision.content), [secondContent, firstContent]);
+  assert.deepEqual(detail.revisions.map((revision) => revision.contentPartCount), [secondParts.length, firstParts.length]);
+  assert.deepEqual(detail.events.map((event) => event.action), ["submitted", "returned", "resubmitted"]);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM knowledge_chunks WHERE item_id = ?").get(itemId).total, 0);
+
+  const secondPending = await store.findKnowledgeItem(itemId, actor("reviewer"));
+  const approved = await store.reviewKnowledgeItem(secondPending, actor("reviewer"), "approve", "新版大文档审核通过", "internal");
+  assert.equal(approved.status, "active");
+  const activeRevisionIds = sqlite.prepare("SELECT DISTINCT revision_id FROM knowledge_chunks WHERE item_id = ? AND is_active = 1").all(itemId).map((chunk) => chunk.revision_id);
+  assert.deepEqual(activeRevisionIds, [revisions[1].id]);
+  assert.deepEqual(
+    storedParts(firstRevisionId),
+    firstParts.map((part) => ({ part_no: part.partNo, content: part.content })),
+  );
+});
+
 test("SQL-time 成员快照失效会原子拒绝投稿", async () => {
   const staleActor = { ...actor("submitter"), memberMutationRevision: "stale-member-revision" };
   const draft = submission();

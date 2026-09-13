@@ -315,6 +315,7 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.ok(script.includes("导入新文件将替换当前正文"));
   assert.ok(script.includes("请重新上传修改后的完整文件"));
   assert.ok(script.includes("成功提交后会更新原条目并保留审计链"));
+  assert.ok(script.includes("本次仅替换正文，标题、分类、资料日期、来源链接和可见范围沿用原 OA 条目"));
   for (const control of ["title.input", "category", "date.input", "url.input", "body"]) {
     assert.match(script, new RegExp(`${control.replace(".", "\\.")}\\.disabled\\s*=\\s*Boolean\\(state\\.busy\\)`, "u"));
   }

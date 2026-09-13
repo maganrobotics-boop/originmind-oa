@@ -35,6 +35,42 @@ function allowedOrigin(request: Request) {
   return request.headers.get("origin") === CHAT_ORIGIN;
 }
 
+function exactOwner(item: KnowledgeItemWithRevisionRow, actor: KnowledgeActor) {
+  return item.submitter_member_id === actor.memberId
+    && item.submitter_email.trim().toLowerCase() === actor.email.trim().toLowerCase();
+}
+
+function isAcknowledgedResubmission(
+  item: KnowledgeItemWithRevisionRow,
+  actor: KnowledgeActor,
+  contentHash: string,
+  expectedRevisionNo?: number,
+) {
+  const revisionNo = Number(item.current_revision_no);
+  return exactOwner(item, actor)
+    && item.status === "pending"
+    && item.revision_status === "pending"
+    && revisionNo >= 2
+    && (expectedRevisionNo === undefined || revisionNo === expectedRevisionNo)
+    && Boolean(item.current_revision_id)
+    && !item.active_revision_id
+    && item.content_hash === contentHash;
+}
+
+function acknowledgedReply(item: KnowledgeItemWithRevisionRow, partCount: number) {
+  return reply({
+    received: true,
+    item: {
+      id: item.id,
+      title: item.title,
+      status: item.status,
+      visibility: item.visibility,
+      currentRevisionNo: Number(item.current_revision_no),
+    },
+    partCount,
+  });
+}
+
 export async function OPTIONS(request: Request) {
   const requestedHeaders = (request.headers.get("access-control-request-headers") || "").toLowerCase().split(",").map((value) => value.trim()).filter(Boolean);
   if (!allowedOrigin(request) || request.headers.get("access-control-request-method") !== "POST" || requestedHeaders.some((value) => value !== "content-type")) return new Response(null, { status: 403 });
@@ -81,25 +117,45 @@ export async function POST(request: Request) {
   try {
     const db = await getDb();
     if (!(await consumeWriteRateLimit(db, { actorSubject: actor.accountUserId, scope: "knowledge_submit", limit: 10 }))) return reply({ error: "导入过于频繁，请稍后再试。" }, 429);
-    const submission = imported.submissions[0];
-    const identity = await chatImportIdentity(actor.accountUserId, imported.documentId, submission, 0);
+    let submission = imported.submissions[0];
+    let identity: Awaited<ReturnType<typeof chatImportIdentity>>;
     let existing: KnowledgeItemWithRevisionRow | null = null;
     if (returnedKnowledgeItemId) {
       existing = await findKnowledgeItem(returnedKnowledgeItemId, actor);
       if (!existing) return reply({ error: "退回知识条目不存在或当前账号不可操作。" }, 404);
-      const exactOwner = existing.submitter_member_id === actor.memberId
-        && existing.submitter_email.trim().toLowerCase() === actor.email.trim().toLowerCase();
-      if (!exactOwner) return reply({ error: "退回知识条目不存在或当前账号不可操作。" }, 404);
+      if (!exactOwner(existing, actor)) return reply({ error: "退回知识条目不存在或当前账号不可操作。" }, 404);
+      // The returned-item URL carries only the opaque item ID. Keep the OA
+      // metadata authoritative so a new filename/default Chat fields cannot
+      // silently overwrite the original title, category, date label or URL.
+      submission = {
+        ...submission,
+        title: existing.title,
+        category: existing.category,
+        sourceLabel: existing.source_label || "",
+        sourceUrl: existing.source_url || "",
+      };
+      identity = await chatImportIdentity(actor.accountUserId, imported.documentId, submission, 0);
+      if (isAcknowledgedResubmission(existing, actor, identity.contentHash)) {
+        return acknowledgedReply(existing, imported.partCount);
+      }
       if (existing.status !== "returned") return reply({ error: "只有已退回的知识可以重新导入。" }, 409);
       if (Number(existing.content_part_count ?? 0) <= 1) return reply({ error: "该知识不是从 Chat 导入的大文档，请在 OA 中修改并重提。" }, 409);
       if (await knowledgeRevisionHashExists(existing.id, identity.contentHash)) {
         return reply({ error: "请先修改文件内容；不能提交与旧版本相同的知识。" }, 409);
       }
+    } else {
+      identity = await chatImportIdentity(actor.accountUserId, imported.documentId, submission, 0);
     }
     const contentParts = imported.parts.map((part) => part.content);
     const item = existing
       ? await resubmitKnowledgeItem(existing, actor, submission, identity.contentHash, contentParts)
       : await createChatImportedKnowledgeItem(actor, submission, identity.contentHash, identity.itemId, contentParts);
+    if (!item && existing) {
+      const current = await findKnowledgeItem(existing.id, actor);
+      if (current && isAcknowledgedResubmission(current, actor, identity.contentHash, Number(existing.current_revision_no) + 1)) {
+        return acknowledgedReply(current, imported.partCount);
+      }
+    }
     if (!item) return reply({ error: existing ? "知识条目已更新，请从 OA 重新打开退回链接后再试。" : "成员或资料状态已变化，请刷新后重试；已接收的文件不会重复创建。" }, 409);
     return reply({
       received: true,

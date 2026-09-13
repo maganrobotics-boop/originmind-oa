@@ -1705,7 +1705,7 @@ function createAdminApp() {
     if (initial && !state.initialized) {
       state.activeTab = state.returnedKnowledgeItemId ? "documents" : state.config.keyConfigured ? "inquiries" : "model";
       if (state.returnedKnowledgeItemId) {
-        state.notice = "OA 大文档已退回。请重新上传修改后的完整文件；成功提交后会更新原条目并保留审计链。Chat 不保存原文件或正文。";
+        state.notice = "OA 大文档已退回。请重新上传修改后的完整文件；本次仅替换正文，标题、分类、资料日期、来源链接和可见范围沿用原 OA 条目。成功提交后会更新原条目并保留审计链；Chat 不保存原文件或正文。";
       }
       state.initialized = true;
     }
@@ -2158,7 +2158,7 @@ function createAdminApp() {
         state.draft.body = text;
         imported = true;
         state.notice = state.returnedKnowledgeItemId
-          ? `修改后的${isText ? "文本" : extension === "pdf" ? "PDF" : "图片"}已导入。Chat 不保存原文件或正文；核对后将直接更新原 OA 条目。`
+          ? `修改后的${isText ? "文本" : extension === "pdf" ? "PDF" : "图片"}已导入。Chat 不保存原文件或正文；本次仅替换正文，标题、分类、资料日期、来源链接和可见范围沿用原 OA 条目。`
           : isText
           ? text.length > MAX_CHAT_DRAFT_CHARACTERS
             ? `文本已导入（${text.length} 字）。Chat 不保存原文件；提交时将直接发送 OA，作为 1 条资料审核，并存为预计至少 ${estimatedOaStorageFragmentCount(text)} 个片段（每个不超过 20000 字）。`
@@ -2209,7 +2209,7 @@ function createAdminApp() {
       element("p", {
         className: "small-note",
         text: state.returnedKnowledgeItemId
-          ? "退回大文档会直接更新原 OA 条目：Chat 不保存正文草稿；失败时在当前页面保留正文和条目编号，OA 接收成功后才清空。"
+          ? "退回大文档会直接更新原 OA 条目：本次仅替换正文，标题、分类、资料日期、来源链接和可见范围沿用原 OA 条目；Chat 不保存正文草稿，失败时在当前页面保留正文和条目编号，OA 接收成功后才清空。"
           : directOaImport
             ? "正文超过 30000 字：Chat 不保存正文草稿；提交失败时会在当前页面保留正文和导入编号，OA 接收成功后才清空。"
           : "提交失败时保留 Chat 草稿，可从下方列表重试；重复提交同一版本不会重复建单。",

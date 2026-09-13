@@ -39,8 +39,25 @@ const vite = await createServer({
       }
       export async function resubmitKnowledgeItem(existing, actor, submission, hash, parts) {
         globalThis.${stateKey}.resubmits.push({existing,actor,submission,hash,parts});
+        if (globalThis.${stateKey}.resubmitFailsAsCommitted) {
+          globalThis.${stateKey}.existing = {
+            ...existing,
+            title: submission.title,
+            category: submission.category,
+            source_label: submission.sourceLabel,
+            source_url: submission.sourceUrl,
+            status: 'pending',
+            revision_status: 'pending',
+            current_revision_no: Number(existing.current_revision_no) + 1,
+            current_revision_id: 'committed-revision-id',
+            active_revision_id: null,
+            content_hash: hash,
+            content_part_count: parts?.length || 1,
+          };
+          return null;
+        }
         if (globalThis.${stateKey}.resubmitFails) return null;
-        return {id:existing.id,title:submission.title,status:'pending',visibility:'internal',currentRevisionNo:Number(existing.current_revision_no) + 1,contentPartCount:parts?.length || 1};
+        return {id:existing.id,title:submission.title,status:'pending',visibility:existing.visibility,currentRevisionNo:Number(existing.current_revision_no) + 1,contentPartCount:parts?.length || 1};
       }`;
       return null;
     },
@@ -52,8 +69,29 @@ const document = { id: "11111111-2222-4333-8444-555555555555", title: "机器人
 function request(body = { document }, requestOrigin = origin) {
   return new Request("https://oa.omindos.ai/api/knowledge/import-chat", { method: "POST", headers: { origin: requestOrigin, "content-type": "application/json", "x-originmind-public-lab-ai-service-token": "A".repeat(43) }, body: JSON.stringify(body) });
 }
+function returnedItem(overrides = {}) {
+  return {
+    id: "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee",
+    title: "原标题",
+    category: "课题参与",
+    summary: "旧摘要",
+    source_label: "Chat 管理导入 · 2026-08-01 · 原标题",
+    source_url: "https://example.com/original",
+    status: "returned",
+    revision_status: "returned",
+    visibility: "public",
+    current_revision_no: 4,
+    current_revision_id: "returned-revision-id",
+    active_revision_id: null,
+    content_hash: "old-hash",
+    content_part_count: 3,
+    submitter_member_id: "member-id",
+    submitter_email: "MEMBER@example.com",
+    ...overrides,
+  };
+}
 beforeEach(() => {
-  globalThis[stateKey] = { allowed: true, rateCalls: 0, events: [], writes: [], finds: [], hashChecks: [], hashExists: false, resubmits: [], resubmitFails: false, existing: null, authorized: {
+  globalThis[stateKey] = { allowed: true, rateCalls: 0, events: [], writes: [], finds: [], hashChecks: [], hashExists: false, resubmits: [], resubmitFails: false, resubmitFailsAsCommitted: false, existing: null, authorized: {
     user: { displayName: "OA 成员", email: "member@example.com" }, memberId: "member-id", accountUserId: "oa-account-id", memberMutationRevision: "member-revision", ndaCompleted: true, isAdmin: false,
   } };
 });
@@ -123,26 +161,37 @@ test("client approval and identity injection and rate-limited imports cannot cre
 
 test("a returned multipart import updates the same item to revision +1 with one rate-limit use", async () => {
   const returnedKnowledgeItemId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
-  globalThis[stateKey].existing = {
-    id: returnedKnowledgeItemId,
-    title: "旧标题",
-    status: "returned",
-    visibility: "internal",
-    current_revision_no: 4,
-    content_part_count: 3,
-    submitter_member_id: "member-id",
-    submitter_email: "MEMBER@example.com",
+  globalThis[stateKey].existing = returnedItem();
+  const changedDocument = {
+    ...document,
+    title: "新文件名",
+    category: "business",
+    updatedAt: "2026-09-13",
+    url: "",
+    body: `${document.body}\n${"补充了审核要求的验证结果。".repeat(2_000)}`,
   };
-  const changedDocument = { ...document, body: `${document.body}\n补充了审核要求的验证结果。` };
   const response = await route.POST(request({ document: changedDocument, returnedKnowledgeItemId }));
   assert.equal(response.status, 201);
   const result = await response.json();
   assert.equal(result.item.id, returnedKnowledgeItemId);
   assert.equal(result.item.status, "pending");
+  assert.equal(result.item.visibility, "public");
   assert.equal(result.item.currentRevisionNo, 5);
   assert.equal(globalThis[stateKey].resubmits.length, 1);
   assert.equal(globalThis[stateKey].resubmits[0].existing, globalThis[stateKey].existing);
   assert.equal(globalThis[stateKey].resubmits[0].parts.join(""), globalThis[stateKey].resubmits[0].submission.content);
+  assert.deepEqual({
+    title: globalThis[stateKey].resubmits[0].submission.title,
+    category: globalThis[stateKey].resubmits[0].submission.category,
+    sourceLabel: globalThis[stateKey].resubmits[0].submission.sourceLabel,
+    sourceUrl: globalThis[stateKey].resubmits[0].submission.sourceUrl,
+  }, {
+    title: "原标题",
+    category: "课题参与",
+    sourceLabel: "Chat 管理导入 · 2026-08-01 · 原标题",
+    sourceUrl: "https://example.com/original",
+  });
+  assert.match(globalThis[stateKey].resubmits[0].submission.summary, /本资料由 Chat 管理导入/u);
   assert.equal(globalThis[stateKey].writes.length, 0);
   assert.equal(globalThis[stateKey].rateCalls, 1);
   assert.deepEqual(globalThis[stateKey].events.slice(0, 3), ["rate", "find", "hash-query"]);
@@ -153,14 +202,7 @@ test("returned imports reject unknown fields and IDs before storage, then rate-l
   assert.equal((await route.POST(request({ document, returnedKnowledgeItemId, action: "approve" }))).status, 400);
   assert.equal((await route.POST(request({ document, returnedKnowledgeItemId: "not-an-id" }))).status, 400);
 
-  const base = {
-    id: returnedKnowledgeItemId,
-    status: "returned",
-    current_revision_no: 1,
-    content_part_count: 2,
-    submitter_member_id: "another-member",
-    submitter_email: "other@example.com",
-  };
+  const base = returnedItem({ current_revision_no: 1, content_part_count: 2, submitter_member_id: "another-member", submitter_email: "other@example.com" });
   globalThis[stateKey].existing = base;
   assert.equal((await route.POST(request({ document, returnedKnowledgeItemId }))).status, 404);
   globalThis[stateKey].existing = { ...base, submitter_member_id: "member-id", submitter_email: "member@example.com", status: "pending" };
@@ -174,20 +216,53 @@ test("returned imports reject unknown fields and IDs before storage, then rate-l
 
 test("a returned import with an unchanged historical hash gets an explicit conflict", async () => {
   const returnedKnowledgeItemId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
-  globalThis[stateKey].existing = {
-    id: returnedKnowledgeItemId,
-    status: "returned",
-    current_revision_no: 2,
-    content_part_count: 2,
-    submitter_member_id: "member-id",
-    submitter_email: "member@example.com",
-  };
+  globalThis[stateKey].existing = returnedItem({ current_revision_no: 2, content_part_count: 2, submitter_email: "member@example.com" });
   globalThis[stateKey].hashExists = true;
   const response = await route.POST(request({ document, returnedKnowledgeItemId }));
   assert.equal(response.status, 409);
   assert.match((await response.json()).error, /不能提交与旧版本相同/u);
   assert.equal(globalThis[stateKey].hashChecks.length, 1);
   assert.equal(globalThis[stateKey].rateCalls, 1);
+  assert.equal(globalThis[stateKey].resubmits.length, 0);
+});
+
+test("returned-import retries acknowledge the committed pending revision without duplicating audit work", async () => {
+  const returnedKnowledgeItemId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  globalThis[stateKey].existing = returnedItem();
+  globalThis[stateKey].resubmitFailsAsCommitted = true;
+  const changedDocument = { ...document, body: `${document.body}\n${"完整修订正文。".repeat(4_000)}` };
+
+  const raced = await route.POST(request({ document: changedDocument, returnedKnowledgeItemId }));
+  assert.equal(raced.status, 200);
+  assert.equal((await raced.json()).item.currentRevisionNo, 5);
+  assert.equal(globalThis[stateKey].resubmits.length, 1);
+  assert.equal(globalThis[stateKey].finds.length, 2, "CAS loss must re-read the committed revision exactly once");
+
+  globalThis[stateKey].resubmitFailsAsCommitted = false;
+  const retried = await route.POST(request({ document: changedDocument, returnedKnowledgeItemId }));
+  assert.equal(retried.status, 200);
+  assert.equal((await retried.json()).item.currentRevisionNo, 5);
+  assert.equal(globalThis[stateKey].resubmits.length, 1, "an acknowledged retry must not create another revision");
+  assert.equal(globalThis[stateKey].hashChecks.length, 1, "the current-hash acknowledgement must precede historical-hash rejection");
+});
+
+test("returned imports cannot manufacture a new revision by changing only Chat metadata", async () => {
+  const returnedKnowledgeItemId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  globalThis[stateKey].existing = returnedItem();
+  globalThis[stateKey].hashExists = true;
+  const first = await route.POST(request({
+    document: { ...document, title: "伪造标题一", category: "business", updatedAt: "2026-09-13", url: "" },
+    returnedKnowledgeItemId,
+  }));
+  assert.equal(first.status, 409);
+  const firstHash = globalThis[stateKey].hashChecks.at(-1).hash;
+
+  const second = await route.POST(request({
+    document: { ...document, title: "伪造标题二", category: "student", updatedAt: "2026-09-14", url: "https://evil.example/replacement" },
+    returnedKnowledgeItemId,
+  }));
+  assert.equal(second.status, 409);
+  assert.equal(globalThis[stateKey].hashChecks.at(-1).hash, firstHash);
   assert.equal(globalThis[stateKey].resubmits.length, 0);
 });
 
