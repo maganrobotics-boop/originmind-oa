@@ -23,6 +23,7 @@ import { inspectOaPublicKnowledge, probeOaPublicKnowledge, retrieveOa } from "./
 import {
   parseChatPayload,
   parseDocumentPayload,
+  parseDocumentSubmissionPayload,
   parseInquiryPayload,
   parseInquiryStatusPayload,
   parseLoginPayload,
@@ -689,10 +690,19 @@ function visibleAiAnswer(answer, sourceCount) {
 async function localDrafts(context) {
   const result = await database(context)
     .prepare(
-      "SELECT id,title,body,url,category,updated_at AS updatedAt,published FROM documents ORDER BY updated_at DESC",
+      "SELECT id,title,body,url,category,updated_at AS updatedAt,published,oa_submission_state AS oaSubmissionState,oa_item_id AS oaItemId,oa_submitted_at AS oaSubmittedAt,draft_revision AS draftRevision FROM documents ORDER BY updated_at DESC",
     )
     .all();
   return (result.results || []).map((document) => ({ ...document, origin: "chat_draft" }));
+}
+
+async function localDraftSubmissionState(context, id) {
+  return database(context)
+    .prepare(
+      "SELECT id,oa_submission_state AS oaSubmissionState,oa_item_id AS oaItemId,oa_submitted_at AS oaSubmittedAt,draft_revision AS draftRevision FROM documents WHERE id=?",
+    )
+    .bind(id)
+    .first();
 }
 
 function releaseId(context) {
@@ -1068,17 +1078,103 @@ async function api(context) {
       }
       const id = payload.id || crypto.randomUUID();
       const url = safeSourceUrl(payload.url);
-      const count = await database(context).prepare("SELECT COUNT(*) AS n FROM documents").first();
-      if (!payload.id && Number(count?.n || 0) >= 200) {
-        throw new PublicError("资料数量已达到当前上限，请整理现有资料后再添加");
+      if (!payload.id) {
+        const created = await database(context)
+          .prepare(
+            "INSERT INTO documents (id,title,body,url,category,updated_at,published,oa_submission_state,draft_revision) SELECT ?,?,?,?,?,?,?,'unsubmitted',1 WHERE (SELECT COUNT(*) FROM documents) < 200",
+          )
+          .bind(id, payload.title, payload.body, url, payload.category, payload.updatedAt, 0)
+          .run();
+        if (!created.meta?.changes) {
+          throw new PublicError("资料数量已达到当前上限，请整理现有资料后再添加");
+        }
+        return json({ saved: true, id, draftRevision: 1, oaSubmissionState: "unsubmitted" });
       }
-      await database(context)
+      if (!payload.draftRevision) throw new PublicError("资料版本已变化，请刷新后重试。", 409);
+      const updated = await database(context)
         .prepare(
-          "INSERT INTO documents (id,title,body,url,category,updated_at,published) VALUES (?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET title=excluded.title,body=excluded.body,url=excluded.url,category=excluded.category,updated_at=excluded.updated_at,published=excluded.published",
+          "UPDATE documents SET title=?,body=?,url=?,category=?,updated_at=?,published=0,draft_revision=draft_revision+1 WHERE id=? AND draft_revision=? AND oa_submission_state='unsubmitted'",
         )
-        .bind(id, payload.title, payload.body, url, payload.category, payload.updatedAt, 0)
+        .bind(payload.title, payload.body, url, payload.category, payload.updatedAt, id, payload.draftRevision)
         .run();
-      return json({ saved: true, id });
+      if (!updated.meta?.changes) {
+        const current = await localDraftSubmissionState(context, id);
+        if (!current) throw new PublicError("资料不存在", 404);
+        if (current.oaSubmissionState === "submitted") throw new PublicError("资料已提交 OA，待审核期间不能在 Chat 修改。", 409);
+        if (current.oaSubmissionState === "unknown") throw new PublicError("请先登录 OA 核对该资料的提交状态。", 409);
+        throw new PublicError("资料版本已变化，请刷新后重试。", 409);
+      }
+      return json({ saved: true, id, draftRevision: payload.draftRevision + 1, oaSubmissionState: "unsubmitted" });
+    }
+    if (path === "admin/documents" && method === "PATCH") {
+      const payload = parseDocumentSubmissionPayload(await readJson(request, 2_000));
+      let current = await localDraftSubmissionState(context, payload.id);
+      if (!current) throw new PublicError("资料不存在", 404);
+      if (Number(current.draftRevision) !== payload.draftRevision) {
+        throw new PublicError("资料版本已变化，请刷新后重试。", 409);
+      }
+      if (payload.submissionState === "unknown") {
+        if (current.oaSubmissionState === "unsubmitted") {
+          await database(context)
+            .prepare("UPDATE documents SET oa_submission_state='unknown',oa_item_id=NULL,oa_submitted_at=NULL WHERE id=? AND draft_revision=? AND oa_submission_state='unsubmitted'")
+            .bind(payload.id, payload.draftRevision)
+            .run();
+          current = await localDraftSubmissionState(context, payload.id);
+          if (!current) throw new PublicError("资料不存在", 404);
+          if (Number(current.draftRevision) !== payload.draftRevision) {
+            throw new PublicError("资料版本已变化，请刷新后重试。", 409);
+          }
+          if (!["unknown", "submitted"].includes(current.oaSubmissionState)) {
+            throw new PublicError("资料状态已变化，请刷新后重试。", 409);
+          }
+        }
+      } else if (payload.submissionState === "unsubmitted") {
+        if (current.oaSubmissionState === "submitted") {
+          throw new PublicError("已提交资料不能改回未提交状态。", 409);
+        }
+        if (current.oaSubmissionState === "unknown") {
+          await database(context)
+            .prepare("UPDATE documents SET oa_submission_state='unsubmitted',oa_item_id=NULL,oa_submitted_at=NULL WHERE id=? AND draft_revision=? AND oa_submission_state='unknown'")
+            .bind(payload.id, payload.draftRevision)
+            .run();
+          current = await localDraftSubmissionState(context, payload.id);
+          if (!current) throw new PublicError("资料不存在", 404);
+          if (Number(current.draftRevision) !== payload.draftRevision) {
+            throw new PublicError("资料版本已变化，请刷新后重试。", 409);
+          }
+          if (current.oaSubmissionState === "submitted") {
+            throw new PublicError("已提交资料不能改回未提交状态。", 409);
+          }
+          if (current.oaSubmissionState !== "unsubmitted") {
+            throw new PublicError("资料状态已变化，请刷新后重试。", 409);
+          }
+        }
+      } else if (current.oaSubmissionState === "submitted") {
+        if (String(current.oaItemId || "").toLowerCase() !== payload.oaItemId) {
+          throw new PublicError("OA 条目编号与已保存记录不一致。", 409);
+        }
+      } else {
+        const submittedAt = new Date().toISOString();
+        const saved = await database(context)
+          .prepare("UPDATE documents SET oa_submission_state='submitted',oa_item_id=?,oa_submitted_at=? WHERE id=? AND draft_revision=? AND oa_submission_state IN ('unknown','unsubmitted')")
+          .bind(payload.oaItemId, submittedAt, payload.id, payload.draftRevision)
+          .run();
+        current = await localDraftSubmissionState(context, payload.id);
+        if (!current) throw new PublicError("资料不存在", 404);
+        if (!saved.meta?.changes) {
+          if (Number(current.draftRevision) !== payload.draftRevision) {
+            throw new PublicError("资料版本已变化，请刷新后重试。", 409);
+          }
+          if (current.oaSubmissionState === "submitted") {
+            if (String(current.oaItemId || "").toLowerCase() !== payload.oaItemId) {
+              throw new PublicError("OA 条目编号与已保存记录不一致。", 409);
+            }
+          } else {
+            throw new PublicError("资料状态已变化，请刷新后重试。", 409);
+          }
+        }
+      }
+      return json({ saved: true, document: current });
     }
     if (path === "admin/inquiries" && method === "GET") {
       const result = await database(context)

@@ -124,8 +124,26 @@ export class MockD1 {
           category: document.category,
           updatedAt: document.updatedAt ?? document.updated_at,
           published: document.published,
+          oaSubmissionState: document.oaSubmissionState ?? document.oa_submission_state ?? "unknown",
+          oaItemId: document.oaItemId ?? document.oa_item_id ?? null,
+          oaSubmittedAt: document.oaSubmittedAt ?? document.oa_submitted_at ?? null,
+          draftRevision: document.draftRevision ?? document.draft_revision ?? 1,
         }));
       return { rows, changes: 0 };
+    }
+
+    if (query.startsWith("select id,oa_submission_state as oasubmissionstate")) {
+      const document = this.documents.get(args[0]);
+      return {
+        rows: document ? [{
+          id: document.id,
+          oaSubmissionState: document.oaSubmissionState ?? document.oa_submission_state ?? "unknown",
+          oaItemId: document.oaItemId ?? document.oa_item_id ?? null,
+          oaSubmittedAt: document.oaSubmittedAt ?? document.oa_submitted_at ?? null,
+          draftRevision: document.draftRevision ?? document.draft_revision ?? 1,
+        }] : [],
+        changes: 0,
+      };
     }
 
     if (query.startsWith("select id from documents where id")) {
@@ -136,9 +154,81 @@ export class MockD1 {
       return { rows: [{ n: this.documents.size }], changes: 0 };
     }
 
-    if (query.startsWith("insert into documents")) {
+    if (query.startsWith("insert into documents (id,title,body,url,category,updated_at,published,oa_submission_state,draft_revision) select")) {
       const [id, title, body, url, category, updatedAt, published] = args;
-      this.documents.set(id, { id, title, body, url, category, updatedAt, published });
+      if (query.includes("where (select count(*) from documents) < 200") && this.documents.size >= 200) {
+        return { rows: [], changes: 0 };
+      }
+      if (this.documents.has(id)) throw new Error("UNIQUE constraint failed: documents.id");
+      this.documents.set(id, {
+        id,
+        title,
+        body,
+        url,
+        category,
+        updatedAt,
+        published,
+        oaSubmissionState: "unsubmitted",
+        oaItemId: null,
+        oaSubmittedAt: null,
+        draftRevision: 1,
+      });
+      return { rows: [], changes: 1 };
+    }
+
+    if (query.startsWith("update documents set title=")) {
+      const [title, body, url, category, updatedAt, id, draftRevision] = args;
+      const document = this.documents.get(id);
+      const currentRevision = document?.draftRevision ?? document?.draft_revision ?? 1;
+      const currentState = document?.oaSubmissionState ?? document?.oa_submission_state ?? "unknown";
+      if (!document || currentRevision !== draftRevision || currentState !== "unsubmitted") {
+        return { rows: [], changes: 0 };
+      }
+      Object.assign(document, {
+        title,
+        body,
+        url,
+        category,
+        updatedAt,
+        published: 0,
+        draftRevision: currentRevision + 1,
+      });
+      return { rows: [], changes: 1 };
+    }
+
+    if (query.startsWith("update documents set oa_submission_state='unknown'")) {
+      const [id, draftRevision] = args;
+      const document = this.documents.get(id);
+      const currentRevision = document?.draftRevision ?? document?.draft_revision ?? 1;
+      const currentState = document?.oaSubmissionState ?? document?.oa_submission_state ?? "unknown";
+      if (!document || currentRevision !== draftRevision || currentState !== "unsubmitted") {
+        return { rows: [], changes: 0 };
+      }
+      Object.assign(document, { oaSubmissionState: "unknown", oaItemId: null, oaSubmittedAt: null });
+      return { rows: [], changes: 1 };
+    }
+
+    if (query.startsWith("update documents set oa_submission_state='unsubmitted'")) {
+      const [id, draftRevision] = args;
+      const document = this.documents.get(id);
+      const currentRevision = document?.draftRevision ?? document?.draft_revision ?? 1;
+      const currentState = document?.oaSubmissionState ?? document?.oa_submission_state ?? "unknown";
+      if (!document || currentRevision !== draftRevision || currentState !== "unknown") {
+        return { rows: [], changes: 0 };
+      }
+      Object.assign(document, { oaSubmissionState: "unsubmitted", oaItemId: null, oaSubmittedAt: null });
+      return { rows: [], changes: 1 };
+    }
+
+    if (query.startsWith("update documents set oa_submission_state='submitted'")) {
+      const [oaItemId, oaSubmittedAt, id, draftRevision] = args;
+      const document = this.documents.get(id);
+      const currentRevision = document?.draftRevision ?? document?.draft_revision ?? 1;
+      const currentState = document?.oaSubmissionState ?? document?.oa_submission_state ?? "unknown";
+      if (!document || currentRevision !== draftRevision || !["unknown", "unsubmitted"].includes(currentState)) {
+        return { rows: [], changes: 0 };
+      }
+      Object.assign(document, { oaSubmissionState: "submitted", oaItemId, oaSubmittedAt });
       return { rows: [], changes: 1 };
     }
 

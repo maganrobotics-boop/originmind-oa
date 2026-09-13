@@ -103,15 +103,29 @@ export function parseModelConfigPayload(value) {
 
 export function parseDocumentPayload(value) {
   const input = object(value);
-  exactKeys(input, ["title", "body", "url", "category", "updatedAt", "published"], ["id"]);
+  exactKeys(input, ["title", "body", "url", "category", "updatedAt", "published"], ["id", "draftRevision"]);
   return {
     id: input.id === undefined ? undefined : text(input.id, { max: 100 }),
+    draftRevision: input.draftRevision === undefined ? undefined : integer(input.draftRevision, 1, 2_147_483_647),
     title: text(input.title, { trim: true, min: 2, max: 120 }),
     body: text(input.body, { trim: true, min: 10, max: 30_000 }),
     url: text(input.url, { max: 1_500 }),
     category: oneOf(input.category, TOPICS),
     updatedAt: text(input.updatedAt, { pattern: /^\d{4}-\d{2}-\d{2}$/u }),
     published: integer(input.published, 0, 1),
+  };
+}
+
+export function parseDocumentSubmissionPayload(value) {
+  const input = object(value);
+  exactKeys(input, ["id", "draftRevision", "submissionState"], ["oaItemId"]);
+  const submissionState = oneOf(input.submissionState, ["unknown", "unsubmitted", "submitted"]);
+  if ((submissionState === "submitted") !== Object.hasOwn(input, "oaItemId")) throw new ValidationError();
+  return {
+    id: text(input.id, { max: 100 }),
+    draftRevision: integer(input.draftRevision, 1, 2_147_483_647),
+    submissionState,
+    oaItemId: submissionState === "submitted" ? text(input.oaItemId, { pattern: UUID_PATTERN }).toLowerCase() : null,
   };
 }
 

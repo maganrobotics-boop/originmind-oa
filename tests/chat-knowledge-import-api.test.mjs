@@ -20,7 +20,10 @@ const vite = await createServer({
       return null;
     },
     load(id) {
-      if (id === "\0chat-import-auth") return `export async function getAuthorizedUser() { return globalThis.${stateKey}.authorized; }`;
+      if (id === "\0chat-import-auth") return `export async function getAuthorizedUser(options) {
+        globalThis.${stateKey}.authOptions.push(options);
+        return globalThis.${stateKey}.authorized;
+      }`;
       if (id === "\0chat-import-db") return "export async function getDb() { return {}; }";
       if (id === "\0chat-import-rate") return `export async function consumeWriteRateLimit() { globalThis.${stateKey}.events.push('rate'); globalThis.${stateKey}.rateCalls += 1; return globalThis.${stateKey}.allowed; }`;
       if (id === "\0chat-import-store") return `export async function createChatImportedKnowledgeItem(actor, submission, hash, id, parts) {
@@ -30,6 +33,7 @@ const vite = await createServer({
       export async function findKnowledgeItem(id, actor) {
         globalThis.${stateKey}.events.push('find');
         globalThis.${stateKey}.finds.push({id,actor});
+        if (globalThis.${stateKey}.findFails) throw new Error('lookup failed');
         return globalThis.${stateKey}.existing;
       }
       export async function knowledgeRevisionHashExists(id, hash) {
@@ -64,10 +68,18 @@ const vite = await createServer({
   }],
 });
 const route = await vite.ssrLoadModule("/app/api/knowledge/import-chat/route.ts");
+const statusRoute = await vite.ssrLoadModule("/app/api/knowledge/import-chat/status/route.ts");
 const origin = "https://chat.omindos.ai";
 const document = { id: "11111111-2222-4333-8444-555555555555", title: "机器人技术资料", body: "本资料由 Chat 管理导入，需经 OA 审核后方可进入知识库。", url: "", category: "research", updatedAt: "2026-09-12" };
 function request(body = { document }, requestOrigin = origin) {
   return new Request("https://oa.omindos.ai/api/knowledge/import-chat", { method: "POST", headers: { origin: requestOrigin, "content-type": "application/json", "x-originmind-public-lab-ai-service-token": "A".repeat(43) }, body: JSON.stringify(body) });
+}
+function statusRequest(body = { document }, requestOrigin = origin, contentType = "application/json") {
+  return new Request("https://oa.omindos.ai/api/knowledge/import-chat/status", {
+    method: "POST",
+    headers: { origin: requestOrigin, "content-type": contentType, "x-originmind-public-lab-ai-service-token": "A".repeat(43) },
+    body: JSON.stringify(body),
+  });
 }
 function returnedItem(overrides = {}) {
   return {
@@ -91,7 +103,7 @@ function returnedItem(overrides = {}) {
   };
 }
 beforeEach(() => {
-  globalThis[stateKey] = { allowed: true, rateCalls: 0, events: [], writes: [], finds: [], hashChecks: [], hashExists: false, resubmits: [], resubmitFails: false, resubmitFailsAsCommitted: false, existing: null, authorized: {
+  globalThis[stateKey] = { allowed: true, rateCalls: 0, events: [], writes: [], finds: [], findFails: false, authOptions: [], hashChecks: [], hashExists: false, resubmits: [], resubmitFails: false, resubmitFailsAsCommitted: false, existing: null, authorized: {
     user: { displayName: "OA 成员", email: "member@example.com" }, memberId: "member-id", accountUserId: "oa-account-id", memberMutationRevision: "member-revision", ndaCompleted: true, isAdmin: false,
   } };
 });
@@ -277,4 +289,123 @@ test("a rate-limited returned import never reaches item or revision lookups", as
   assert.equal(globalThis[stateKey].finds.length, 0);
   assert.equal(globalThis[stateKey].hashChecks.length, 0);
   assert.equal(globalThis[stateKey].resubmits.length, 0);
+});
+
+test("status verification exposes credentialed CORS only to the exact Chat origin", async () => {
+  for (const requestOrigin of [origin, "https://evil.example", "null", "https://chat.omindos.ai.evil.example"]) {
+    const response = await statusRoute.OPTIONS(new Request("https://oa.omindos.ai/api/knowledge/import-chat/status", {
+      method: "OPTIONS",
+      headers: { origin: requestOrigin, "access-control-request-method": "POST", "access-control-request-headers": "content-type" },
+    }));
+    assert.equal(response.status, requestOrigin === origin ? 204 : 403);
+    assert.equal(response.headers.get("access-control-allow-origin"), requestOrigin === origin ? origin : null);
+  }
+  const disallowedHeader = await statusRoute.OPTIONS(new Request("https://oa.omindos.ai/api/knowledge/import-chat/status", {
+    method: "OPTIONS",
+    headers: { origin, "access-control-request-method": "POST", "access-control-request-headers": "content-type, authorization" },
+  }));
+  assert.equal(disallowedHeader.status, 403);
+});
+
+test("status verification is read-only and reports an unsubmitted valid document without leaking identity", async () => {
+  const response = await statusRoute.POST(statusRequest());
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("access-control-allow-origin"), origin);
+  assert.equal(response.headers.get("access-control-allow-credentials"), "true");
+  assert.equal(response.headers.get("cache-control"), "private, no-store, max-age=0");
+  assert.deepEqual(await response.json(), { documentId: document.id, submitted: false, item: null });
+  assert.deepEqual(globalThis[stateKey].authOptions, [{ readOnly: true, noTouch: true }]);
+  assert.equal(globalThis[stateKey].finds.length, 1);
+  assert.equal(globalThis[stateKey].finds[0].actor.memberId, "member-id");
+  assert.equal(globalThis[stateKey].finds[0].actor.accountUserId, "oa-account-id");
+  assert.equal(globalThis[stateKey].rateCalls, 0);
+  assert.equal(globalThis[stateKey].writes.length, 0);
+});
+
+test("status verification recognizes only the exact OA item owner and content revision", async () => {
+  const imported = await route.POST(request());
+  assert.equal(imported.status, 201);
+  const write = globalThis[stateKey].writes[0];
+  const exactItem = {
+    id: write.id,
+    status: "pending",
+    content_hash: write.hash,
+    submitter_member_id: "member-id",
+    submitter_email: "MEMBER@example.com",
+  };
+  globalThis[stateKey].authOptions = [];
+  globalThis[stateKey].finds = [];
+  globalThis[stateKey].existing = exactItem;
+
+  const submitted = await statusRoute.POST(statusRequest());
+  assert.equal(submitted.status, 200);
+  assert.deepEqual(await submitted.json(), {
+    documentId: document.id,
+    submitted: true,
+    item: { id: write.id, status: "pending" },
+  });
+  assert.equal(globalThis[stateKey].finds[0].id, write.id);
+  assert.deepEqual(globalThis[stateKey].authOptions, [{ readOnly: true, noTouch: true }]);
+
+  for (const [reason, existing] of [
+    ["member mismatch", { ...exactItem, submitter_member_id: "other-member" }],
+    ["email mismatch", { ...exactItem, submitter_email: "other@example.com" }],
+    ["content mismatch", { ...exactItem, content_hash: "different-content-hash" }],
+  ]) {
+    globalThis[stateKey].existing = existing;
+    const conflict = await statusRoute.POST(statusRequest());
+    assert.equal(conflict.status, 409, reason);
+    const conflictBody = await conflict.json();
+    assert.deepEqual(conflictBody, { error: "OA 中存在同编号但版本不一致的资料，请在 OA 中核对。" }, reason);
+    assert.equal(Object.hasOwn(conflictBody, "submitted"), false, `${reason} must not be downgraded to unsubmitted`);
+    assert.equal(Object.hasOwn(conflictBody, "item"), false, `${reason} must not expose the conflicting OA item`);
+  }
+});
+
+test("status verification accepts documents above the former 512 KiB limit and rejects oversized envelopes", async () => {
+  const largeDocument = { ...document, body: "x".repeat(600_000) };
+  const imported = await route.POST(request({ document: largeDocument }));
+  assert.equal(imported.status, 201);
+  const write = globalThis[stateKey].writes[0];
+  globalThis[stateKey].existing = {
+    id: write.id,
+    status: "pending",
+    content_hash: write.hash,
+    submitter_member_id: "member-id",
+    submitter_email: "member@example.com",
+  };
+  const verified = await statusRoute.POST(statusRequest({ document: largeDocument }));
+  assert.equal(verified.status, 200);
+  assert.equal((await verified.json()).submitted, true);
+
+  globalThis[stateKey].finds = [];
+  const oversized = await statusRoute.POST(statusRequest({ document: { ...document, body: "x".repeat(12 * 1024 * 1024) } }));
+  assert.equal(oversized.status, 413);
+  assert.equal(globalThis[stateKey].finds.length, 0);
+});
+
+test("status verification fails closed before lookup and masks storage failures", async () => {
+  globalThis[stateKey].authorized = null;
+  assert.equal((await statusRoute.POST(statusRequest())).status, 401);
+  globalThis[stateKey].authorized = { ndaCompleted: false };
+  assert.equal((await statusRoute.POST(statusRequest())).status, 403);
+  assert.equal((await statusRoute.POST(statusRequest({ document }, "https://evil.example"))).status, 403);
+
+  globalThis[stateKey].authorized = {
+    user: { displayName: "OA 成员", email: "member@example.com" },
+    memberId: "member-id",
+    accountUserId: "oa-account-id",
+    memberMutationRevision: "member-revision",
+    ndaCompleted: true,
+    isAdmin: false,
+  };
+  assert.equal((await statusRoute.POST(statusRequest({ document }, origin, "text/plain"))).status, 415);
+  assert.equal((await statusRoute.POST(statusRequest({ document, action: "approve" }))).status, 400);
+  assert.equal((await statusRoute.POST(statusRequest({ document: { ...document, status: "active" } }))).status, 400);
+  assert.equal(globalThis[stateKey].finds.length, 0);
+
+  globalThis[stateKey].findFails = true;
+  const failed = await statusRoute.POST(statusRequest());
+  assert.equal(failed.status, 503);
+  assert.deepEqual(await failed.json(), { error: "暂时无法核对 OA 提交状态，请稍后重试。" });
 });
