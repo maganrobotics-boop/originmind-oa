@@ -9,6 +9,7 @@ import { promisify } from "node:util";
 import {
   canonicalJson,
   decryptMigrationEnvelope,
+  MIGRATION_EXPORT_MAX_ENCRYPTED_BYTES,
   MIGRATION_EXPORT_MAX_PLAINTEXT_BYTES,
   verifyFreshMigrationPayload,
 } from "../lib/migration-export.mjs";
@@ -141,7 +142,7 @@ if (options) {
   } else if (process.env.OA_PRODUCTION_IMPORT_CONFIRM !== expectedWorkerName) {
     throw new Error(`Set OA_PRODUCTION_IMPORT_CONFIRM=${expectedWorkerName} for an intentional production import`);
   } else {
-    const inputPath = await assertRegularFile(resolve(options.input), "Encrypted input", 9 * 1024 * 1024);
+    const inputPath = await assertRegularFile(resolve(options.input), "Encrypted input", MIGRATION_EXPORT_MAX_ENCRYPTED_BYTES);
     const privateKeyPath = await assertRegularFile(resolve(options["private-key"]), "Private key", 16 * 1024, true);
     const authKeyPath = await assertRegularFile(resolve(options["auth-key-file"]), "Authentication key", 256, true);
     const freezeIdPath = await assertRegularFile(resolve(options["freeze-id-file"]), "Freeze generation", 256, true);

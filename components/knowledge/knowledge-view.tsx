@@ -127,6 +127,11 @@ function KnowledgeVisibilityBadge({ item }: { item: KnowledgeItem }) {
   return <Badge variant="outline" className={`knowledge-visibility knowledge-visibility-${visibility}`}>{visibility === "public" ? <Globe2 className="size-3" /> : <ShieldCheck className="size-3" />}{visibility === "public" ? "对外公开" : "仅 OA 内部"}</Badge>;
 }
 
+function KnowledgeMultipartReviewMeta({ item }: { item: KnowledgeItem }) {
+  if (!item.contentPartCount || item.contentPartCount <= 1) return null;
+  return <span>1 个文件 · {item.contentPartCount} 个正文分片 · 统一审核</span>;
+}
+
 function EmptyPanel({ icon: Icon, title, description, action }: { icon: typeof BookOpen; title: string; description: string; action?: React.ReactNode }) {
   return <div className="knowledge-empty"><div className="knowledge-empty-icon"><Icon className="size-5" /></div><strong>{title}</strong><p>{description}</p>{action}</div>;
 }
@@ -258,13 +263,14 @@ function KnowledgeSubmitPanel({
 
 function KnowledgeItemCard({ item, onEdit }: { item: KnowledgeItem; onEdit?: (item: KnowledgeItem) => void }) {
   const meta = statusMeta[item.status] || statusMeta.pending;
+  const isMultipartImport = Boolean(item.contentPartCount && item.contentPartCount > 1);
   return <article className="knowledge-item-card">
     <div className="knowledge-item-topline"><span className="knowledge-category">{item.category}</span><div className="knowledge-item-badges"><KnowledgeVisibilityBadge item={item} /><KnowledgeStatusBadge status={item.status} /></div></div>
     <h3>{item.title}</h3>
     {item.summary && <p className="knowledge-item-summary">{item.summary}</p>}
     <div className="knowledge-item-state"><span>{meta.detail}</span>{item.currentRevisionNo && <small>第 {item.currentRevisionNo} 版</small>}</div>
     {item.reviewNote && <div className="knowledge-review-note"><MessageCircle className="size-3.5" /><div><strong>审核意见</strong><p>{item.reviewNote}</p></div></div>}
-    <footer><time dateTime={item.updatedAt}>更新于 {formatDate(item.updatedAt)}</time>{item.status === "returned" && onEdit && <Button type="button" variant="outline" size="sm" onClick={() => onEdit(item)}><Pencil className="size-3.5" />修改并重提</Button>}</footer>
+    <footer><time dateTime={item.updatedAt}>更新于 {formatDate(item.updatedAt)}</time>{item.status === "returned" && isMultipartImport ? <small>大文档请从 <a href={`https://chat.omindos.ai/manage?returnedKnowledgeItem=${encodeURIComponent(item.id)}`} target="_blank" rel="noreferrer">Chat 管理页面</a>重新导入；成功后会更新当前条目和审计记录</small> : item.status === "returned" && onEdit && <Button type="button" variant="outline" size="sm" onClick={() => onEdit(item)}><Pencil className="size-3.5" />修改并重提</Button>}</footer>
   </article>;
 }
 
@@ -279,7 +285,7 @@ function KnowledgeReviewPanel({ items, pendingCount, loading, error, onRetry, on
   if (loading) return <LoadingPanel label="正在加载待审核知识…" />;
   if (error) return <ErrorPanel message={error} onRetry={onRetry} />;
   if (!items.length) return <EmptyPanel icon={Check} title="当前没有待审核知识" description="新的成员投稿会出现在这里；批准时必须选择仅在 OA 内部使用，或二次确认后对外公开。" />;
-  return <div className="knowledge-list"><div className="knowledge-list-summary"><span>待审核 {pendingCount || items.length} 条{pendingCount > items.length ? `，当前显示前 ${items.length} 条` : ""}</span><small>请核对准确性、敏感信息，并为每条知识选择“对内”或“对外公开”</small></div><div className="knowledge-review-list">{items.map((item) => <article className="knowledge-review-row" key={item.id}><div className="knowledge-review-row-main"><div><span className="knowledge-category">{item.category}</span><time>{formatDate(item.createdAt)}</time></div><h3>{item.title}</h3>{item.summary && <p>{item.summary}</p>}<small>提交人：{item.submitterName || item.submitterEmail || "项目成员"}</small></div><Button type="button" variant="outline" onClick={() => onOpen(item)}>查看并选择范围</Button></article>)}</div></div>;
+  return <div className="knowledge-list"><div className="knowledge-list-summary"><span>待审核 {pendingCount || items.length} 条{pendingCount > items.length ? `，当前显示前 ${items.length} 条` : ""}</span><small>请核对准确性、敏感信息，并为每条知识选择“对内”或“对外公开”</small></div><div className="knowledge-review-list">{items.map((item) => <article className="knowledge-review-row" key={item.id}><div className="knowledge-review-row-main"><div><span className="knowledge-category">{item.category}</span><time>{formatDate(item.createdAt)}</time></div><h3>{item.title}</h3>{item.summary && <p>{item.summary}</p>}{item.contentPartCount && item.contentPartCount > 1 && <small><KnowledgeMultipartReviewMeta item={item} /></small>}<small>提交人：{item.submitterName || item.submitterEmail || "项目成员"}</small></div><Button type="button" variant="outline" onClick={() => onOpen(item)}>查看并选择范围</Button></article>)}</div></div>;
 }
 
 function KnowledgeManagePanel({ items, loading, error, onRetry, onOpen, onRevoke }: { items: KnowledgeItem[]; loading: boolean; error: string; onRetry: () => void; onOpen: (item: KnowledgeItem) => void; onRevoke: (item: KnowledgeItem) => void }) {
@@ -348,6 +354,7 @@ function KnowledgeReviewDialog({ detail, open, loading, error, note, setNote, vi
     <DialogHeader><div className="knowledge-dialog-icon"><ShieldCheck className="size-5" /></div><DialogTitle>{detail?.item.title || "知识投稿审核"}</DialogTitle><DialogDescription>{detail ? `${detail.item.submitterName || detail.item.submitterEmail || "项目成员"} · ${detail.item.category} · 第 ${detail.item.currentRevisionNo || revision?.revisionNo || 1} 版` : "核对投稿内容，并在批准时选择仅对内或对外公开。"}</DialogDescription></DialogHeader>
     {loading ? <LoadingPanel label="正在加载投稿正文…" /> : error ? <ErrorPanel message={error} onRetry={onRetry} /> : detail ? <div className="knowledge-review-detail">
       {(revision?.summary || detail.item.summary) && <section><h3>摘要</h3><p>{revision?.summary || detail.item.summary}</p></section>}
+      {detail.item.contentPartCount && detail.item.contentPartCount > 1 && <section><h3>导入方式</h3><p><KnowledgeMultipartReviewMeta item={detail.item} /></p></section>}
       <section><h3>知识正文</h3><div className="knowledge-review-content">{reviewContent || "当前版本没有可显示的正文。"}</div>{!reviewContent && <p className="knowledge-review-blocked"><AlertTriangle className="size-4" />正文未完整加载，不能执行审核。请重新加载。</p>}</section>
       {(revision?.sourceLabel || detail.item.sourceLabel || sourceUrl) && <section><h3>来源</h3><p>{revision?.sourceLabel || detail.item.sourceLabel || "投稿人提供的参考链接"}</p>{sourceUrl && <a className="knowledge-source-link" href={sourceUrl} target="_blank" rel="noreferrer">打开来源链接</a>}</section>}
       {!actionable && savedVisibility && <section><h3>当前可见范围</h3><p><KnowledgeVisibilityBadge item={detail.item} />{savedVisibility === "public" ? " 已供 chat.omindos.ai 的 ARTS Robotics AI assistant 检索使用。" : " 仅已登录并完成准入与保密签署的成员可在 OA 内检索。"}</p></section>}

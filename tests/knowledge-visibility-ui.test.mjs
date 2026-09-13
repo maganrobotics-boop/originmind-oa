@@ -18,6 +18,27 @@ test("requires reviewers to choose internal or public before approving knowledge
   assert.match(source, /visibility === "public" && knowledgeVisibility\(reviewDetail\.item\) !== "public" \? \{ publicConfirmation: confirmation \} : \{\}/u);
 });
 
+test("presents multipart Chat imports as one file with one review action", async () => {
+  const source = await readFile(path.join(root, "components/knowledge/knowledge-view.tsx"), "utf8");
+
+  assert.match(source, /if \(!item\.contentPartCount \|\| item\.contentPartCount <= 1\) return null/u);
+  assert.match(source, /1 个文件 · \{item\.contentPartCount\} 个正文分片 · 统一审核/u);
+  assert.match(source, /<KnowledgeMultipartReviewMeta item=\{item\} \/>/u);
+  assert.match(source, /<KnowledgeMultipartReviewMeta item=\{detail\.item\} \/>/u);
+
+  const reviewFunction = source.slice(source.indexOf("const performReview"), source.indexOf("const performRevoke"));
+  assert.equal(reviewFunction.match(/method: "PATCH"/gu)?.length, 1);
+});
+
+test("sends returned multipart imports back to Chat instead of the 20k OA editor", async () => {
+  const source = await readFile(path.join(root, "components/knowledge/knowledge-view.tsx"), "utf8");
+  const card = source.slice(source.indexOf("function KnowledgeItemCard"), source.indexOf("function KnowledgeMinePanel"));
+
+  assert.match(card, /const isMultipartImport = Boolean\(item\.contentPartCount && item\.contentPartCount > 1\)/u);
+  assert.match(card, /item\.status === "returned" && isMultipartImport \? [\s\S]*?https:\/\/chat\.omindos\.ai\/manage\?returnedKnowledgeItem=\$\{encodeURIComponent\(item\.id\)\}[\s\S]*?重新导入[\s\S]*?更新当前条目和审计记录[\s\S]*?: item\.status === "returned" && onEdit/u);
+  assert.match(card, />修改并重提<\/Button>/u);
+});
+
 test("requires the exact second confirmation before publishing knowledge", async () => {
   const source = await readFile(path.join(root, "components/knowledge/knowledge-view.tsx"), "utf8");
 

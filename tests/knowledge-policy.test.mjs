@@ -107,6 +107,84 @@ test("知识切分产生稳定、有限且可引用的段落", () => {
   assert.ok(emojiChunks.every((chunk) => !/[\uD800-\uDBFF]$/u.test(chunk.content)));
 });
 
+test("普通投稿仍限制为 20000 字，大型导入按 2000 字扩展检索切分", () => {
+  assert.equal(policy.parseKnowledgeSubmission(submission({ content: "a".repeat(20_000) })).ok, true);
+  const rejected = policy.parseKnowledgeSubmission(submission({ content: "a".repeat(20_001) }));
+  assert.equal(rejected.ok, false);
+  assert.match(rejected.error, /20000/u);
+
+  const content = [
+    "# 第一章",
+    "a".repeat(36_000),
+    "# 第二章",
+    `${"机器人。".repeat(9_000)}😀`,
+  ].join("\n\n");
+  const chunks = policy.chunkKnowledgeSubmission(submission({ content }));
+  assert.ok(chunks.length > 32);
+  assert.ok(chunks.length <= policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.ok(chunks.every((chunk) => chunk.content.length <= 2_000));
+  assert.equal(chunks.map((chunk) => chunk.content).join(""), content);
+  assert.ok(chunks.every((chunk) => policy.isWellFormedUnicode(chunk.content)));
+});
+
+test("存储分片优先 Markdown 边界并可逐字重组", () => {
+  const content = `# 第一章\n${"a".repeat(15_980)}\n# 第二章\n${"b".repeat(22_000)}😀`;
+  const parts = policy.splitKnowledgeStorageParts(content);
+  assert.equal(parts.map((part) => part.content).join(""), content);
+  assert.deepEqual(parts.map((part) => part.partNo), parts.map((_, index) => index + 1));
+  assert.ok(parts.every((part) => part.content.length <= policy.MAX_KNOWLEDGE_CONTENT_LENGTH));
+  assert.ok(parts.every((part) => policy.isWellFormedUnicode(part.content)));
+  assert.equal(parts[0].sectionTitle, "第一章");
+  assert.equal(parts[1].content.startsWith("# 第二章"), true);
+  assert.equal(parts[1].sectionTitle, "第二章");
+
+  const boundary = policy.splitKnowledgeStorageParts(`${"x".repeat(19_999)}😀${"y".repeat(10)}`);
+  assert.equal(boundary.map((part) => part.content).join(""), `${"x".repeat(19_999)}😀${"y".repeat(10)}`);
+  assert.ok(boundary.every((part) => policy.isWellFormedUnicode(part.content)));
+});
+
+test("Markdown 围栏内的伪标题不参与分片或章节命名", () => {
+  for (const fence of ["```", "~~~"]) {
+    const content = [
+      "# 外部标题",
+      "a".repeat(15_900),
+      `${fence}md`,
+      "# 围栏内伪标题",
+      "b".repeat(24_000),
+      fence,
+      "# 真实标题",
+      "c".repeat(25_000),
+    ].join("\n");
+    const parts = policy.splitKnowledgeStorageParts(content);
+    assert.equal(parts.map((part) => part.content).join(""), content);
+    assert.ok(parts.every((part) => part.content.length <= policy.MAX_KNOWLEDGE_CONTENT_LENGTH));
+    assert.ok(parts.every((part) => !part.sectionTitle.includes("伪标题")));
+    assert.ok(parts.some((part) => part.sectionTitle === "真实标题"));
+  }
+});
+
+test("跨 20000 与 2000 字边界的围栏关闭行仍能恢复标题识别", () => {
+  for (const fence of ["```", "~~~"]) {
+    for (const maxLength of [20_000, 2_000]) {
+      const content = [
+        "# 围栏前标题",
+        `${fence}md`,
+        "# 围栏内伪标题",
+        "const value = 1;",
+        `${fence}${" ".repeat(maxLength + 123)}`,
+        "# 围栏后标题",
+        "恢复后的正文。",
+        "d".repeat(maxLength * 2),
+      ].join("\n");
+      const parts = policy.splitKnowledgeStorageParts(content, maxLength);
+      assert.equal(parts.map((part) => part.content).join(""), content);
+      assert.ok(parts.every((part) => part.content.length <= maxLength));
+      assert.ok(parts.every((part) => !part.sectionTitle.includes("伪标题")));
+      assert.ok(parts.some((part) => part.sectionTitle === "围栏后标题"), `${fence} / ${maxLength}`);
+    }
+  }
+});
+
 test("应用层检索同时支持中文短语和英文 token，并过滤无关内容", () => {
   const base = {
     itemId: "item-1",
@@ -134,7 +212,17 @@ test("应用层检索同时支持中文短语和英文 token，并过滤无关�
   const longQuestion = Array.from({ length: 500 }, (_, index) => String.fromCodePoint(0x4e00 + index)).join("");
   const boundedTerms = policy.__knowledgeTesting.searchTerms(longQuestion);
   assert.equal(boundedTerms.length, 64);
+  assert.deepEqual(policy.knowledgeSearchTerms(longQuestion), boundedTerms);
+  assert.ok(boundedTerms.every((term) => term.length <= 64));
   assert.ok(boundedTerms.some((term) => longQuestion.slice(-3).includes(term)), "term cap should sample the end of a long question");
+  assert.deepEqual(policy.knowledgeSearchTerms("RESET Robot"), ["reset", "robot"]);
+  assert.deepEqual(policy.knowledgeSearchTerms("如何？"), []);
+
+  const extensionHan = String.fromCodePoint(0x20000, 0x20001, 0x20002, 0x20003);
+  const extensionTerms = policy.knowledgeSearchTerms(extensionHan);
+  assert.ok(extensionTerms.includes(String.fromCodePoint(0x20000, 0x20001)));
+  assert.ok(extensionTerms.includes(String.fromCodePoint(0x20001, 0x20002, 0x20003)));
+  assert.ok(extensionTerms.every((term) => policy.isWellFormedUnicode(term)), "Han n-grams must never split surrogate pairs");
 });
 
 test("知识状态机只开放审核矩阵中的流转", () => {

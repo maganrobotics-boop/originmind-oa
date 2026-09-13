@@ -12,6 +12,7 @@ import {
 } from "../lib/migration-export.mjs";
 import {
   assertMigrationPayloadRelationships,
+  materializeMigrationDerivedTables,
   type MigrationPayload,
 } from "../lib/migration-import";
 import {
@@ -184,6 +185,7 @@ async function importPayload(request: Request, env: Env) {
   await assertMigrationPayloadRelationships(payload, {
     administratorEmails: migrationAdministratorEmails(env.MIGRATION_IMPORT_ADMIN_EMAILS),
   });
+  const materializedPayload = await materializeMigrationDerivedTables(payload);
 
   const preflight = await env.DB.batch([
     env.DB.prepare(migrationLedgerSelectSql()),
@@ -197,7 +199,7 @@ async function importPayload(request: Request, env: Env) {
   const actorSubject = `migration:${payload.manifestSha256}`;
   if (!targetIsEmpty(preflight[2])) {
     try {
-      const existingState = await verifyTargetTables(env, payload, guardKey, actorSubject);
+      const existingState = await verifyTargetTables(env, materializedPayload, guardKey, actorSubject);
       if (existingState === "empty") return json(successBody(payload, "already_imported_verified"));
       if (existingState === "guard") {
         try {
@@ -217,8 +219,8 @@ async function importPayload(request: Request, env: Env) {
   const emptyConditions = MIGRATION_APPLICATION_TABLES.map((table) => `NOT EXISTS (SELECT 1 FROM ${quoteIdentifier(table)} LIMIT 1)`).join(" AND ");
   const guardInsert = env.DB.prepare(`INSERT INTO write_rate_buckets (bucket_key, actor_subject, scope, window_started_at, used, updated_at) SELECT ?, ?, 'migration_import', ?, 1, ? WHERE ${emptyConditions}`).bind(guardKey, actorSubject, now, now);
   const guardSelect = env.DB.prepare("SELECT bucket_key FROM write_rate_buckets WHERE bucket_key = ? AND actor_subject = ? AND scope = 'migration_import'").bind(guardKey, actorSubject);
-  const inserts = buildInsertStatements(env.DB, payload, guardKey, actorSubject);
-  const queryCount = migrationImportD1QueryCount(payload);
+  const inserts = buildInsertStatements(env.DB, materializedPayload, guardKey, actorSubject);
+  const queryCount = migrationImportD1QueryCount(materializedPayload);
   if (queryCount > MIGRATION_IMPORT_MAX_D1_QUERIES || queryCount !== MIGRATION_IMPORT_FIXED_D1_QUERIES + inserts.statements.length) throw new Error("Migration payload requires too many D1 statements for an atomic free-plan import");
 
   let results: D1Result[];
@@ -236,7 +238,7 @@ async function importPayload(request: Request, env: Env) {
   }
   let verifiedState: "empty" | "guard" | "conflict";
   try {
-    verifiedState = await verifyTargetTables(env, payload, guardKey, actorSubject);
+    verifiedState = await verifyTargetTables(env, materializedPayload, guardKey, actorSubject);
   } catch {
     throw new MigrationImportStateError("committed_unverified");
   }

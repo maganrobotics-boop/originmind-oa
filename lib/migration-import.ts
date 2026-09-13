@@ -1,7 +1,9 @@
 import { inspectRevisionChain, type ApprovalRevision } from "./approval-revisions";
 import { canonicalJson } from "./canonical-json";
+import { MAX_CHAT_KNOWLEDGE_IMPORT_BYTES } from "./chat-knowledge-import";
 import {
   KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER,
+  MAX_KNOWLEDGE_CONTENT_LENGTH,
   chunkKnowledgeSubmission,
   knowledgeAdminSelfAuditNote,
 } from "./knowledge-policy";
@@ -19,6 +21,7 @@ export type MigrationPayload = {
   manifestSha256: string;
   schemaSha256: string;
   freezeId: string;
+  derivedTables?: string[];
 };
 
 export {
@@ -90,14 +93,14 @@ function parseJsonObject(value: string, label: string) {
   }
 }
 
-async function knowledgeContentHash(row: Record<string, string | number | null>) {
+async function knowledgeContentHash(row: Record<string, string | number | null>, content: string) {
   const encoded = new TextEncoder().encode(JSON.stringify([
     requiredText(row, "title"),
     requiredText(row, "category"),
     typeof row.summary === "string" ? row.summary : "",
     typeof row.source_label === "string" ? row.source_label : "",
     typeof row.source_url === "string" ? row.source_url : "",
-    requiredText(row, "content"),
+    content,
   ]));
   const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", encoded));
   return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -152,6 +155,11 @@ export async function assertMigrationPayloadRelationships(
   payload: MigrationPayload,
   options: MigrationRelationshipOptions = {},
 ) {
+  const knowledgeChunksAreDerived = payload.derivedTables !== undefined;
+  if (knowledgeChunksAreDerived
+    && (payload.derivedTables?.length !== 1 || payload.derivedTables[0] !== "knowledge_chunks")) {
+    throw new Error("Migration derived table declaration is unsupported");
+  }
   const administratorEmails = configuredAdministratorEmails(options.administratorEmails);
   const approvals = tableRecord(payload, "approvals").rows;
   const approvalEvents = tableRecord(payload, "approval_events").rows;
@@ -164,8 +172,12 @@ export async function assertMigrationPayloadRelationships(
   const messages = tableRecord(payload, "direct_messages").rows;
   const knowledgeItems = tableRecord(payload, "knowledge_items").rows;
   const knowledgeRevisions = tableRecord(payload, "knowledge_revisions").rows;
+  const knowledgeRevisionParts = tableRecord(payload, "knowledge_revision_parts").rows;
   const knowledgeChunks = tableRecord(payload, "knowledge_chunks").rows;
   const knowledgeEvents = tableRecord(payload, "knowledge_events").rows;
+  if (knowledgeChunksAreDerived && knowledgeChunks.length) {
+    throw new Error("Migration derived knowledge chunks must be omitted");
+  }
 
   const approvalIds = uniqueIds(approvals, "id", "approvals");
   const memberIds = uniqueIds(members, "id", "members");
@@ -188,6 +200,7 @@ export async function assertMigrationPayloadRelationships(
   uniqueIds(messages, "id", "direct_messages");
   const knowledgeItemIds = uniqueIds(knowledgeItems, "id", "knowledge_items");
   const knowledgeRevisionIds = uniqueIds(knowledgeRevisions, "id", "knowledge_revisions");
+  uniqueIds(knowledgeRevisionParts, "id", "knowledge_revision_parts");
   uniqueIds(knowledgeChunks, "id", "knowledge_chunks");
   uniqueIds(knowledgeEvents, "id", "knowledge_events");
 
@@ -216,6 +229,8 @@ export async function assertMigrationPayloadRelationships(
   assertReferences(knowledgeRevisions, "item_id", knowledgeItemIds, "knowledge revision item");
   assertReferences(knowledgeRevisions, "created_by_member_id", memberIds, "knowledge revision author");
   assertOptionalReferences(knowledgeRevisions, "reviewed_by_member_id", memberIds, "knowledge revision reviewer");
+  assertReferences(knowledgeRevisionParts, "item_id", knowledgeItemIds, "knowledge revision part item");
+  assertReferences(knowledgeRevisionParts, "revision_id", knowledgeRevisionIds, "knowledge revision part revision");
   assertReferences(knowledgeChunks, "item_id", knowledgeItemIds, "knowledge chunk item");
   assertReferences(knowledgeChunks, "revision_id", knowledgeRevisionIds, "knowledge chunk revision");
   assertReferences(knowledgeEvents, "item_id", knowledgeItemIds, "knowledge event item");
@@ -330,6 +345,64 @@ export async function assertMigrationPayloadRelationships(
     knowledgeItemById.set(id, item);
   }
 
+  const sourceKnowledgeRevisionById = new Map(knowledgeRevisions.map((revision) => [requiredText(revision, "id"), revision]));
+  const knowledgeRevisionPartsByRevision = new Map<string, Array<Record<string, string | number | null>>>();
+  for (const part of knowledgeRevisionParts) {
+    const id = requiredText(part, "id");
+    const itemId = requiredText(part, "item_id");
+    const revisionId = requiredText(part, "revision_id");
+    const revision = sourceKnowledgeRevisionById.get(revisionId);
+    if (!revision || requiredText(revision, "item_id") !== itemId) {
+      throw new Error(`Migration knowledge revision part ${id} crosses item boundaries`);
+    }
+    const partNo = requiredInteger(part, "part_no");
+    if (partNo <= 0) throw new Error(`Migration knowledge revision part ${id} has an invalid part number`);
+    const content = requiredText(part, "content");
+    if (content.length > MAX_KNOWLEDGE_CONTENT_LENGTH) {
+      throw new Error(`Migration knowledge revision part ${id} exceeds the safe content size`);
+    }
+    const createdAt = requiredText(part, "created_at");
+    if (createdAt !== requiredText(revision, "created_at")) {
+      throw new Error(`Migration knowledge revision part ${id} has an inconsistent creation time`);
+    }
+    const revisionParts = knowledgeRevisionPartsByRevision.get(revisionId) ?? [];
+    revisionParts.push(part);
+    knowledgeRevisionPartsByRevision.set(revisionId, revisionParts);
+  }
+  const sortedKnowledgeRevisionParts = [...knowledgeRevisionParts].sort((left, right) => {
+    const leftRevision = requiredText(left, "revision_id");
+    const rightRevision = requiredText(right, "revision_id");
+    if (leftRevision < rightRevision) return -1;
+    if (leftRevision > rightRevision) return 1;
+    const partDifference = requiredInteger(left, "part_no") - requiredInteger(right, "part_no");
+    return partDifference || requiredText(left, "id").localeCompare(requiredText(right, "id"));
+  });
+  if (sortedKnowledgeRevisionParts.some((row, index) => row !== knowledgeRevisionParts[index])) {
+    throw new Error("Migration knowledge revision parts are not in deterministic order");
+  }
+  const knowledgeContentByRevision = new Map<string, string>();
+  for (const revision of knowledgeRevisions) {
+    const revisionId = requiredText(revision, "id");
+    if (typeof revision.content !== "string") throw new Error(`Migration knowledge revision ${revisionId} has malformed content`);
+    const parts = knowledgeRevisionPartsByRevision.get(revisionId) ?? [];
+    if (parts.some((part, index) => requiredInteger(part, "part_no") !== index + 1)) {
+      throw new Error(`Migration knowledge revision ${revisionId} has a part-number gap`);
+    }
+    if (parts.length && revision.content !== "") {
+      throw new Error(`Migration multipart knowledge revision ${revisionId} retains inline content`);
+    }
+    if (!parts.length && revision.content === "") {
+      throw new Error(`Migration knowledge revision ${revisionId} has no content parts`);
+    }
+    const content = parts.length
+      ? parts.map((part) => requiredText(part, "content")).join("")
+      : revision.content;
+    if (new TextEncoder().encode(content).byteLength > MAX_CHAT_KNOWLEDGE_IMPORT_BYTES) {
+      throw new Error(`Migration knowledge revision ${revisionId} exceeds the 5 MiB UTF-8 content limit`);
+    }
+    knowledgeContentByRevision.set(revisionId, content);
+  }
+
   const knowledgeRevisionById = new Map<string, Record<string, string | number | null>>();
   const knowledgeRevisionsByItem = new Map<string, Array<Record<string, string | number | null>>>();
   for (const revision of knowledgeRevisions) {
@@ -339,7 +412,8 @@ export async function assertMigrationPayloadRelationships(
     if (revisionNo <= 0) throw new Error(`Migration knowledge revision ${id} has an invalid revision number`);
     requiredText(revision, "title");
     requiredText(revision, "category");
-    requiredText(revision, "content");
+    const content = knowledgeContentByRevision.get(id);
+    if (!content) throw new Error(`Migration knowledge revision ${id} has no content`);
     if (typeof revision.summary !== "string" || typeof revision.source_label !== "string" || typeof revision.source_url !== "string" || typeof revision.review_note !== "string") {
       throw new Error(`Migration knowledge revision ${id} has malformed text metadata`);
     }
@@ -347,7 +421,7 @@ export async function assertMigrationPayloadRelationships(
     requiredText(revision, "created_by_email");
     requiredText(revision, "created_at");
     const contentHash = requiredText(revision, "content_hash");
-    if (!/^[0-9a-f]{64}$/u.test(contentHash) || contentHash !== await knowledgeContentHash(revision)) {
+    if (!/^[0-9a-f]{64}$/u.test(contentHash) || contentHash !== await knowledgeContentHash(revision, content)) {
       throw new Error(`Migration knowledge revision ${id} has an invalid content hash`);
     }
     const status = requiredText(revision, "status");
@@ -600,7 +674,7 @@ export async function assertMigrationPayloadRelationships(
     const revisionId = requiredText(revision, "id");
     const chunks = chunksByRevision.get(revisionId) ?? [];
     const status = requiredText(revision, "status");
-    if (["active", "superseded", "revoked"].includes(status) && !chunks.length) throw new Error(`Migration knowledge revision ${revisionId} has no indexed chunks`);
+    if (!knowledgeChunksAreDerived && ["active", "superseded", "revoked"].includes(status) && !chunks.length) throw new Error(`Migration knowledge revision ${revisionId} has no indexed chunks`);
     if (["pending", "returned", "rejected"].includes(status) && chunks.length) throw new Error(`Migration unapproved knowledge revision ${revisionId} has indexed chunks`);
     const sortedChunks = [...chunks].sort((left, right) => requiredInteger(left, "chunk_no") - requiredInteger(right, "chunk_no"));
     if (sortedChunks.some((chunk, index) => requiredInteger(chunk, "chunk_no") !== index + 1)) throw new Error(`Migration knowledge revision ${revisionId} has a chunk-number gap`);
@@ -611,7 +685,7 @@ export async function assertMigrationPayloadRelationships(
         summary: typeof revision.summary === "string" ? revision.summary : "",
         sourceLabel: typeof revision.source_label === "string" ? revision.source_label : "",
         sourceUrl: typeof revision.source_url === "string" ? revision.source_url : "",
-        content: requiredText(revision, "content"),
+        content: knowledgeContentByRevision.get(revisionId) as string,
       });
       const matchesCanonicalChunks = sortedChunks.length === expectedChunks.length && sortedChunks.every((chunk, index) => {
         const expected = expectedChunks[index];
@@ -674,4 +748,93 @@ export async function assertMigrationPayloadRelationships(
   }
 
   return true;
+}
+
+async function migrationTableHash(table: MigrationTable) {
+  const body = { name: table.name, columns: table.columns, rows: table.rows };
+  const digest = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(canonicalJson(body))));
+  return Array.from(digest, (byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+/**
+ * Rebuild authenticated search-index rows for new snapshots. Legacy snapshots
+ * already contain their original chunk rows (and IDs), so they pass through.
+ */
+export async function materializeMigrationDerivedTables(payload: MigrationPayload): Promise<MigrationPayload> {
+  if (payload.derivedTables === undefined) return payload;
+  if (payload.derivedTables.length !== 1 || payload.derivedTables[0] !== "knowledge_chunks") {
+    throw new Error("Migration derived table declaration is unsupported");
+  }
+  const chunkTable = payload.tables.find((table) => table.name === "knowledge_chunks");
+  if (!chunkTable || chunkTable.rows.length) throw new Error("Migration derived knowledge chunks must be omitted");
+
+  const items = tableRecord(payload, "knowledge_items").rows;
+  const revisions = tableRecord(payload, "knowledge_revisions").rows;
+  const parts = tableRecord(payload, "knowledge_revision_parts").rows;
+  const itemById = new Map(items.map((item) => [requiredText(item, "id"), item]));
+  const partsByRevision = new Map<string, Array<Record<string, string | number | null>>>();
+  for (const part of parts) {
+    const revisionId = requiredText(part, "revision_id");
+    const revisionParts = partsByRevision.get(revisionId) ?? [];
+    revisionParts.push(part);
+    partsByRevision.set(revisionId, revisionParts);
+  }
+
+  const rows: MigrationTable["rows"] = [];
+  for (const revision of revisions) {
+    const status = requiredText(revision, "status");
+    const revisionId = requiredText(revision, "id");
+    const itemId = requiredText(revision, "item_id");
+    const item = itemById.get(itemId);
+    // Inactive historical chunks are only a disposable search index. Rebuild
+    // the one currently searchable revision; revision content and audit history
+    // remain fully preserved by revisions and parts.
+    if (status !== "active" || item?.active_revision_id !== revisionId) continue;
+    const revisionParts = partsByRevision.get(revisionId) ?? [];
+    const content = revisionParts.length
+      ? [...revisionParts]
+        .sort((left, right) => requiredInteger(left, "part_no") - requiredInteger(right, "part_no"))
+        .map((part) => requiredText(part, "content"))
+        .join("")
+      : String(revision.content ?? "");
+    const createdAt = requiredText(revision, "activated_at");
+    for (const chunk of chunkKnowledgeSubmission({
+      title: requiredText(revision, "title"),
+      category: requiredText(revision, "category"),
+      summary: String(revision.summary ?? ""),
+      sourceLabel: String(revision.source_label ?? ""),
+      sourceUrl: String(revision.source_url ?? ""),
+      content,
+    })) {
+      const values: Record<string, string | number> = {
+        id: `derived:${revisionId}:${chunk.chunkNo}`,
+        item_id: itemId,
+        revision_id: revisionId,
+        chunk_no: chunk.chunkNo,
+        section_title: chunk.sectionTitle,
+        paragraph_ref: chunk.paragraphRef,
+        content: chunk.content,
+        search_text: chunk.searchText,
+        is_active: 1,
+        created_at: createdAt,
+      };
+      rows.push(chunkTable.columns.map((column) => {
+        const value = values[column];
+        if (value === undefined) throw new Error(`Migration derived knowledge chunk omitted ${column}`);
+        return value;
+      }));
+    }
+  }
+
+  const materializedTable: MigrationTable = {
+    ...chunkTable,
+    rows,
+    rowCount: rows.length,
+    sha256: "",
+  };
+  materializedTable.sha256 = await migrationTableHash(materializedTable);
+  return {
+    ...payload,
+    tables: payload.tables.map((table) => table.name === "knowledge_chunks" ? materializedTable : table),
+  };
 }

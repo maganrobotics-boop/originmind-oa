@@ -5,8 +5,11 @@ const OFFICIAL_SITE = "https://omindos.ai";
 const BAILIAN_CONSOLE = "https://bailian.console.aliyun.com/";
 const OA_KNOWLEDGE_URL = "https://oa.omindos.ai/";
 const OA_CHAT_IMPORT_URL = "https://oa.omindos.ai/api/knowledge/import-chat";
-const MAX_TEXT_IMPORT_BYTES = 120_000;
+const MAX_TEXT_IMPORT_BYTES = 5 * 1024 * 1024;
 const MAX_BINARY_IMPORT_BYTES = 10 * 1024 * 1024;
+const MAX_CHAT_DRAFT_CHARACTERS = 30_000;
+const MAX_OA_STORAGE_FRAGMENT_CHARACTERS = 20_000;
+const SAFE_RETURNED_KNOWLEDGE_ITEM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const IMPORT_MIME_BY_EXTENSION = Object.freeze({
   pdf: "application/pdf",
   jpg: "image/jpeg",
@@ -14,6 +17,61 @@ const IMPORT_MIME_BY_EXTENSION = Object.freeze({
   png: "image/png",
   webp: "image/webp",
 });
+
+function normalizeImportedText(value) {
+  return String(value)
+    .replace(/^\uFEFF/u, "")
+    .replace(/\r\n?/gu, "\n")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F-\u009F]/gu, "")
+    .normalize("NFKC");
+}
+
+function decodeImportedUtf8(bytes) {
+  try {
+    return normalizeImportedText(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  } catch {
+    throw new Error("TXT、Markdown 文件必须使用有效的 UTF-8 编码。");
+  }
+}
+
+function utf8ByteLength(value) {
+  return new TextEncoder().encode(value).byteLength;
+}
+
+function estimatedOaStorageFragmentCount(value) {
+  return Math.max(1, Math.ceil(String(value).trim().length / MAX_OA_STORAGE_FRAGMENT_CHARACTERS));
+}
+
+function oaImportReceipt(payload, body) {
+  const items = Array.isArray(payload?.items)
+    ? payload.items
+    : payload?.item && typeof payload.item === "object"
+      ? [payload.item]
+      : [];
+  const topLevelCount = Number(payload?.partCount);
+  const itemCount = items.reduce((total, item) => {
+    const count = Number(item?.contentPartCount);
+    return total + (Number.isSafeInteger(count) && count > 0 ? count : 0);
+  }, 0);
+  return {
+    items,
+    partCount: Number.isSafeInteger(topLevelCount) && topLevelCount > 0
+      ? topLevelCount
+      : itemCount || estimatedOaStorageFragmentCount(body),
+  };
+}
+
+function returnedKnowledgeItemIdFromSearch(search) {
+  const params = new URLSearchParams(String(search || ""));
+  const values = params.getAll("returnedKnowledgeItem");
+  return values.length === 1 && SAFE_RETURNED_KNOWLEDGE_ITEM_ID.test(values[0]) ? values[0].toLowerCase() : "";
+}
+
+function withoutReturnedKnowledgeItemQuery(href) {
+  const url = new URL(String(href));
+  url.searchParams.delete("returnedKnowledgeItem");
+  return `${url.pathname}${url.search}${url.hash}`;
+}
 
 const TOPICS = [
   {
@@ -1560,6 +1618,7 @@ function createAdminApp() {
     importReceipts: {},
     inquiries: [],
     draft: emptyDraft(),
+    returnedKnowledgeItemId: returnedKnowledgeItemIdFromSearch(window.location.search),
   };
 
   function emptyDraft() {
@@ -1578,28 +1637,55 @@ function createAdminApp() {
     return requestJson(`/api/admin/${endpoint}`, options);
   }
 
-  async function submitDocumentToOa(draft) {
+  function clearReturnedKnowledgeContext(expectedItemId) {
+    if (state.returnedKnowledgeItemId !== expectedItemId) return;
+    state.returnedKnowledgeItemId = "";
+    try {
+      window.history.replaceState(window.history.state, "", withoutReturnedKnowledgeItemQuery(window.location.href));
+    } catch {
+      // The OA update has already succeeded; URL cleanup must not turn it into a false failure.
+    }
+  }
+
+  async function submitDocumentToOa(draft, { retainedAsChatDraft = true, submissionContext = null } = {}) {
+    const returnedKnowledgeItemId = submissionContext?.returnedKnowledgeItemId || "";
+    if (submissionContext && !SAFE_RETURNED_KNOWLEDGE_ITEM_ID.test(returnedKnowledgeItemId)) {
+      throw new Error("退回资料上下文无效，请从 OA 待审核列表重新进入。");
+    }
+    const retryCopy = retainedAsChatDraft
+      ? "Chat 草稿已保留"
+      : "正文和导入编号仍保留在当前页面";
     let response;
     try {
       response = await fetch(OA_CHAT_IMPORT_URL, {
         method: "POST",
         credentials: "include",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ document: {
-          id: draft.id, title: draft.title, body: draft.body, url: draft.url || "",
-          category: draft.category, updatedAt: draft.updatedAt,
-        } }),
-        signal: AbortSignal.timeout(30_000),
+        body: JSON.stringify({
+          document: {
+            id: draft.id, title: draft.title, body: draft.body, url: draft.url || "",
+            category: draft.category, updatedAt: draft.updatedAt,
+          },
+          ...(returnedKnowledgeItemId ? { returnedKnowledgeItemId } : {}),
+        }),
+        signal: AbortSignal.timeout(120_000),
       });
     } catch {
-      throw new Error("Chat 草稿已保留，暂未确认进入 OA。请确认已登录 OA 后点击“提交 OA 待审”重试；重复提交不会重复建单。");
+      throw new Error(`${retryCopy}，暂未确认进入 OA。请确认已登录 OA 后重试；重复提交不会重复建单。`);
     }
     const result = await response.json().catch(() => ({}));
-    if (!response.ok) throw new Error(result.error || "Chat 草稿已保留，OA 暂未接收，请稍后重试。");
-    if (!Array.isArray(result.items) || !result.items.length) throw new Error("OA 未返回接收记录，草稿仍保留，请重试。");
-    state.importReceipts[draft.id] = result.items;
-    state.notice = result.items.every((item) => item.status === "pending")
-      ? `已提交 OA 待审（${result.items.length} 条）。在 OA“实验室 AI”的待审核列表中处理，对内或公开由审核时选择。`
+    if (!response.ok) throw new Error(result.error || `${retryCopy}，OA 暂未接收，请稍后重试。`);
+    const receipt = oaImportReceipt(result, draft.body);
+    if (!receipt.items.length) throw new Error(`OA 未返回接收记录，${retryCopy}，请重试。`);
+    state.importReceipts[draft.id] = receipt.items;
+    if (returnedKnowledgeItemId) clearReturnedKnowledgeContext(returnedKnowledgeItemId);
+    const isLargeDocument = draft.body.length > MAX_CHAT_DRAFT_CHARACTERS;
+    state.notice = returnedKnowledgeItemId
+      ? `已更新原 OA 条目并重新进入待审核状态（正文存为 ${receipt.partCount} 个片段）。Chat 未保留原文件或正文草稿。`
+      : receipt.items.every((item) => item.status === "pending")
+      ? isLargeDocument
+        ? `已提交 OA，作为 1 条资料待审，并存为 ${receipt.partCount} 个片段（每个不超过 20000 字）。Chat 未保留原文件或正文草稿。`
+        : `已提交 OA 待审（${receipt.items.length} 条）。在 OA“实验室 AI”的待审核列表中处理，对内或公开由审核时选择。`
       : "OA 已接收过该版本资料，重复提交不会新增条目。请打开 OA 查看当前审核状态。";
   }
 
@@ -1617,7 +1703,10 @@ function createAdminApp() {
     state.documents = Array.isArray(documentPayload.documents) ? documentPayload.documents : [];
     state.inquiries = Array.isArray(inquiryPayload.inquiries) ? inquiryPayload.inquiries : [];
     if (initial && !state.initialized) {
-      state.activeTab = state.config.keyConfigured ? "inquiries" : "model";
+      state.activeTab = state.returnedKnowledgeItemId ? "documents" : state.config.keyConfigured ? "inquiries" : "model";
+      if (state.returnedKnowledgeItemId) {
+        state.notice = "OA 大文档已退回。请重新上传修改后的完整文件；成功提交后会更新原条目并保留审计链。Chat 不保存原文件或正文。";
+      }
       state.initialized = true;
     }
   }
@@ -1650,6 +1739,9 @@ function createAdminApp() {
       element("p", { className: "eyebrow", text: "SECURE ACCESS" }),
       element("h1", { text: `${APP_NAME} · 管理` }),
     );
+    if (state.returnedKnowledgeItemId) {
+      card.append(element("p", { className: "admin-notice", text: "登录后请重新上传 OA 退回的大文档；退回条目编号会保留到提交成功。" }));
+    }
 
     if (!state.authChecked && !state.authError) {
       card.append(
@@ -1930,10 +2022,16 @@ function createAdminApp() {
     const editor = element("section", { className: "admin-card document-editor" });
     editor.append(
       element("p", { className: "eyebrow", text: "DRAFT WORKSPACE" }),
-      element("h2", { text: state.draft.id ? "编辑资料" : "添加待审核草稿" }),
+      element("h2", {
+        text: state.returnedKnowledgeItemId
+          ? "重提 OA 退回资料"
+          : state.draft.id ? "编辑资料" : "添加待审核草稿",
+      }),
       element("p", {
         className: "small-note",
-        text: "保存后提交至 OA 待审。请在同一浏览器登录 OA；审核时选择对内或公开，未经审核的资料不会用于回答。",
+        text: state.returnedKnowledgeItemId
+          ? "请重新上传修改后的完整文件。Chat 不保存原文件或正文；OA 接收成功后会更新原条目并新增修订记录。"
+          : "保存后提交至 OA 待审。请在同一浏览器登录 OA；审核时选择对内或公开，未经审核的资料不会用于回答。",
       }),
     );
     const form = element("form", { className: "stack-form document-form" });
@@ -1975,7 +2073,7 @@ function createAdminApp() {
     const body = element("textarea", {
       id: "document-body",
       className: "admin-textarea",
-      attributes: { required: true, minlength: "10", maxlength: "30000" },
+      attributes: { required: true, minlength: "10" },
     });
     body.value = state.draft.body;
     body.disabled = Boolean(state.busy);
@@ -2015,7 +2113,7 @@ function createAdminApp() {
       const maximum = isText ? MAX_TEXT_IMPORT_BYTES : MAX_BINARY_IMPORT_BYTES;
       if (file.size > maximum) {
         state.error = isText
-          ? "文本文件过大，请分成更短的资料条目。"
+          ? "TXT、Markdown 文件不能超过 5 MB。"
           : "PDF 或图片不能超过 10 MB，请压缩或拆分后重试。";
         renderAdminShell();
         focusImportedField("document-file");
@@ -2032,7 +2130,10 @@ function createAdminApp() {
       try {
         let text;
         if (isText) {
-          text = await file.text();
+          text = decodeImportedUtf8(await file.arrayBuffer());
+          if (utf8ByteLength(text) > MAX_TEXT_IMPORT_BYTES) {
+            throw new Error("规范化后的 TXT、Markdown 正文不能超过 5 MB（按 UTF-8 计算）。");
+          }
         } else {
           const result = await adminRequest("extract", {
             method: "POST",
@@ -2046,7 +2147,7 @@ function createAdminApp() {
           if (typeof result.text !== "string") throw new Error("文件解析结果异常，请稍后重试。");
           text = result.text;
         }
-        if (text.length > 30000) throw new Error("每条资料最多 30000 字");
+        if (!isText && text.length > MAX_CHAT_DRAFT_CHARACTERS) throw new Error("每条资料最多 30000 字");
         if (text.trim().length < 10) throw new Error("未识别到足够内容，请手动填写正文。");
         if (!state.draft.title) {
           state.draft.title = file.name
@@ -2056,8 +2157,12 @@ function createAdminApp() {
         }
         state.draft.body = text;
         imported = true;
-        state.notice = isText
-          ? "文本已导入，请核对后保存草稿。"
+        state.notice = state.returnedKnowledgeItemId
+          ? `修改后的${isText ? "文本" : extension === "pdf" ? "PDF" : "图片"}已导入。Chat 不保存原文件或正文；核对后将直接更新原 OA 条目。`
+          : isText
+          ? text.length > MAX_CHAT_DRAFT_CHARACTERS
+            ? `文本已导入（${text.length} 字）。Chat 不保存原文件；提交时将直接发送 OA，作为 1 条资料审核，并存为预计至少 ${estimatedOaStorageFragmentCount(text)} 个片段（每个不超过 20000 字）。`
+            : "文本已导入。Chat 不保存原文件，请核对后保存草稿。"
           : `${extension === "pdf" ? "PDF" : "图片"}已由 Cloudflare AI 临时解析（${text.length} 字），本站未保存原件。请核对识别结果后提交。`;
       } catch (error) {
         state.error = error instanceof Error ? error.message : "读取失败";
@@ -2071,16 +2176,22 @@ function createAdminApp() {
       fileInput,
       element("span", {
         className: "small-note",
-        text: "支持 TXT、Markdown、PDF、JPG、PNG、WebP。PDF、扫描件和图片会发送至 Cloudflare AI 临时解析，本站不保存原件；识别可能有误，请提交前核对。单个文件不超过 10 MB，解析正文最多 30000 字。",
+        text: "TXT、Markdown 单个文件最多 5 MB，1.6 MB 文件可以直接导入；Chat 不保存原文件。超过 30000 字时不保存为 Chat 正文草稿，而是直接提交 OA，OA 作为 1 条资料审核，并拆成每个不超过 20000 字的存储片段。PDF、扫描件和图片会发送至 Cloudflare AI 临时解析，本站不保存原件；单个文件不超过 10 MB，解析正文最多 30000 字，识别可能有误，请提交前核对。",
       }),
     );
 
     const actions = element("div", { className: "admin-buttons" });
-    const save = textButton(state.busy === "document" ? "正在保存并提交…" : "保存并提交 OA 待审", "primary-button");
+    const directOaImport = Boolean(state.returnedKnowledgeItemId) || state.draft.body.length > MAX_CHAT_DRAFT_CHARACTERS;
+    const save = textButton(
+      state.busy === "document"
+        ? directOaImport ? "正在直接提交…" : "正在保存并提交…"
+        : directOaImport ? "直接提交 OA 待审" : "保存并提交 OA 待审",
+      "primary-button",
+    );
     save.type = "submit";
     save.disabled = Boolean(state.busy);
     actions.append(save);
-    if (state.draft.id) {
+    if (state.draft.id && !state.returnedKnowledgeItemId) {
       const cancel = textButton("取消编辑", "secondary-button");
       cancel.disabled = Boolean(state.busy);
       cancel.addEventListener("click", () => {
@@ -2097,18 +2208,39 @@ function createAdminApp() {
       fileLabel,
       element("p", {
         className: "small-note",
-        text: "提交失败时保留 Chat 草稿，可从下方列表重试；重复提交同一版本不会重复建单。",
+        text: state.returnedKnowledgeItemId
+          ? "退回大文档会直接更新原 OA 条目：Chat 不保存正文草稿；失败时在当前页面保留正文和条目编号，OA 接收成功后才清空。"
+          : directOaImport
+            ? "正文超过 30000 字：Chat 不保存正文草稿；提交失败时会在当前页面保留正文和导入编号，OA 接收成功后才清空。"
+          : "提交失败时保留 Chat 草稿，可从下方列表重试；重复提交同一版本不会重复建单。",
       }),
       actions,
     );
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       void runAdminAction("document", async () => {
+        const normalizedBody = normalizeImportedText(state.draft.body);
+        if (utf8ByteLength(normalizedBody) > MAX_TEXT_IMPORT_BYTES) {
+          throw new Error("正文不能超过 5 MB（按 UTF-8 计算）。");
+        }
+        if (normalizedBody.trim().length < 10) throw new Error("正文至少需要 10 个字符。");
+        state.draft.body = normalizedBody;
+        const returnedKnowledgeItemId = state.returnedKnowledgeItemId;
+        if (returnedKnowledgeItemId || normalizedBody.length > MAX_CHAT_DRAFT_CHARACTERS) {
+          const id = state.draft.id || makeRequestId();
+          state.draft.id = id;
+          await submitDocumentToOa({ ...state.draft, id }, {
+            retainedAsChatDraft: false,
+            ...(returnedKnowledgeItemId ? { submissionContext: { returnedKnowledgeItemId } } : {}),
+          });
+          state.draft = emptyDraft();
+          return;
+        }
         const draft = { ...state.draft };
         const saved = await adminRequest("documents", jsonOptions({
           ...(state.draft.id ? { id: state.draft.id } : {}),
           title: state.draft.title,
-          body: state.draft.body,
+          body: normalizedBody,
           url: state.draft.url,
           category: state.draft.category,
           updatedAt: state.draft.updatedAt,
@@ -2129,7 +2261,12 @@ function createAdminApp() {
       element("h2", { text: `资料列表 · ${state.documents.length}` }),
       externalLink("打开 OA 登录／查看待审核", OA_KNOWLEDGE_URL, "primary-link"),
     );
-    if (!state.documents.length) {
+    if (state.returnedKnowledgeItemId) {
+      list.append(element("div", {
+        className: "admin-empty",
+        text: "当前正在重提 OA 退回资料。为避免把本地旧草稿误写入原条目，本地草稿已暂时隐藏，不能编辑或提交；本次重提完成后会自动恢复。",
+      }));
+    } else if (!state.documents.length) {
       list.append(element("div", { className: "admin-empty", text: "暂时没有待审核草稿。" }));
     } else {
       for (const document of state.documents) {

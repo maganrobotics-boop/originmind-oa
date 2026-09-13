@@ -91,6 +91,7 @@ if (target === "production") {
   await access(resolve(dirname(outputPath), database.migrations_dir, "0027_careless_winter_soldier.sql"));
   await access(resolve(dirname(outputPath), database.migrations_dir, "0028_needy_microchip.sql"));
   await access(resolve(dirname(outputPath), database.migrations_dir, "0029_knowledge_visibility_reclassification.sql"));
+  await access(resolve(dirname(outputPath), database.migrations_dir, "0030_large_knowledge_revision_parts.sql"));
 }
 
 process.stdout.write(`Verified ${target} standalone Worker output.\n`);

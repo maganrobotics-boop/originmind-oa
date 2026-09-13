@@ -33,6 +33,7 @@ const vite = await createServer({
 });
 const migrationWorker = (await vite.ssrLoadModule("/scripts/migration-import-worker.ts")).default;
 const { buildApprovalRevision } = await vite.ssrLoadModule("/lib/approval-revisions.ts");
+const { chunkKnowledgeSubmission, hashKnowledgeSubmission } = await vite.ssrLoadModule("/lib/knowledge-policy.ts");
 
 after(async () => vite.close());
 
@@ -106,11 +107,142 @@ async function seedRevisionChains(database) {
   }
 }
 
-async function makePayload({ displayName, duplicateProviderSubject = false, revisionChains = false } = {}) {
+async function seedMultipartKnowledge(database) {
+  const createdAt = "2026-09-13T00:00:00.000Z";
+  const reviewedAt = "2026-09-13T01:00:00.000Z";
+  const submission = {
+    title: "大型迁移文档",
+    category: "产品资料",
+    summary: "验证迁移导入保持分片正文",
+    sourceLabel: "large.md",
+    sourceUrl: "",
+    content: `${"甲".repeat(20_000)}乙丙丁戊己庚辛壬癸`,
+  };
+  const contentHash = await hashKnowledgeSubmission(submission);
+  database.prepare(`
+    INSERT INTO members (
+      id, full_name, identity_number, school_email, chatgpt_account,
+      account_user_id, role, permissions_json, department_code, status,
+      mutation_revision, created_at, last_seen_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'member', '[]', '', 'active', ?, ?, ?)
+  `).run(
+    "member-review",
+    "迁移审核人",
+    "OM-REVIEW",
+    "review@school.example",
+    "review@example.com",
+    "email:review@example.com",
+    "fedcba9876543210fedcba9876543210",
+    createdAt,
+    createdAt,
+  );
+  database.prepare(`
+    INSERT INTO knowledge_items (
+      id, project, title, category, submitter_member_id, submitter_name, submitter_email,
+      status, visibility, current_revision_no, current_revision_id, active_revision_id,
+      mutation_revision, created_at, updated_at, revoked_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', 'internal', 1, ?, NULL, ?, ?, ?, NULL)
+  `).run(
+    "knowledge-large",
+    "OriginMind × ARTS Robotics 联合研发项目",
+    submission.title,
+    submission.category,
+    "member-admin",
+    "迁移管理员",
+    "admin@example.com",
+    "knowledge-revision-large",
+    "mutation-large",
+    createdAt,
+    createdAt,
+  );
+  database.prepare(`
+    INSERT INTO knowledge_revisions (
+      id, item_id, revision_no, previous_revision_id, title, category, content, summary,
+      source_label, source_url, content_hash, status, created_by_member_id,
+      created_by_name, created_by_email, review_note, created_at
+    ) VALUES (?, ?, 1, NULL, ?, ?, '', ?, ?, ?, ?, 'pending', ?, ?, ?, '', ?)
+  `).run(
+    "knowledge-revision-large",
+    "knowledge-large",
+    submission.title,
+    submission.category,
+    submission.summary,
+    submission.sourceLabel,
+    submission.sourceUrl,
+    contentHash,
+    "member-admin",
+    "迁移管理员",
+    "admin@example.com",
+    createdAt,
+  );
+  const insertPart = database.prepare(`
+    INSERT INTO knowledge_revision_parts (id, item_id, revision_id, part_no, content, created_at)
+    VALUES (?, 'knowledge-large', 'knowledge-revision-large', ?, ?, ?)
+  `);
+  insertPart.run("knowledge-part-1", 1, submission.content.slice(0, 20_000), createdAt);
+  insertPart.run("knowledge-part-2", 2, submission.content.slice(20_000), createdAt);
+  database.prepare(`
+    UPDATE knowledge_revisions
+    SET status = 'active', reviewed_by_member_id = 'member-review', reviewed_by_name = '迁移审核人',
+        reviewed_by_email = 'review@example.com', reviewed_at = ?, activated_at = ?
+    WHERE id = 'knowledge-revision-large'
+  `).run(reviewedAt, reviewedAt);
+  database.prepare(`
+    UPDATE knowledge_items
+    SET status = 'active', active_revision_id = 'knowledge-revision-large', updated_at = ?
+    WHERE id = 'knowledge-large'
+  `).run(reviewedAt);
+  const insertChunk = database.prepare(`
+    INSERT INTO knowledge_chunks (
+      id, item_id, revision_id, chunk_no, section_title, paragraph_ref,
+      content, search_text, is_active, created_at
+    ) VALUES (?, 'knowledge-large', 'knowledge-revision-large', ?, ?, ?, ?, ?, 1, ?)
+  `);
+  for (const chunk of chunkKnowledgeSubmission(submission)) {
+    insertChunk.run(
+      `knowledge-chunk-${chunk.chunkNo}`,
+      chunk.chunkNo,
+      chunk.sectionTitle,
+      chunk.paragraphRef,
+      chunk.content,
+      chunk.searchText,
+      reviewedAt,
+    );
+  }
+  database.prepare(`
+    INSERT INTO knowledge_events (
+      id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'submitted', '', ?)
+  `).run(
+    "knowledge-event-large",
+    "knowledge-large",
+    "knowledge-revision-large",
+    "member-admin",
+    "迁移管理员",
+    "admin@example.com",
+    createdAt,
+  );
+  database.prepare(`
+    INSERT INTO knowledge_events (
+      id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, 'approved_internal', '', ?)
+  `).run(
+    "knowledge-event-approved",
+    "knowledge-large",
+    "knowledge-revision-large",
+    "member-review",
+    "迁移审核人",
+    "review@example.com",
+    reviewedAt,
+  );
+}
+
+async function makePayload({ displayName, duplicateProviderSubject = false, revisionChains = false, multipartKnowledge = false } = {}) {
   const source = createApplicationDatabase();
   try {
     seedSource(source, displayName);
     if (revisionChains) await seedRevisionChains(source);
+    if (multipartKnowledge) await seedMultipartKnowledge(source);
     const ledger = { success: true, results: plainRows(source.prepare(migrationLedgerSelectSql()).all()) };
     const schema = { success: true, results: plainRows(source.prepare(migrationSchemaSelectSql()).all()) };
     const tableResults = MIGRATION_EXPORT_TABLES.map((table) => ({
@@ -267,6 +399,34 @@ test("local importer commits, verifies, cleans its guard, and makes same-package
     assert.equal(response.status, 409);
     assert.equal((await response.json()).state, "target_conflict");
     assert.deepEqual(targetCounts(target), { identities: 1, members: 1, guards: 0 });
+  } finally {
+    target.close();
+  }
+});
+
+test("local importer atomically restores multipart knowledge revisions", async () => {
+  const payload = await makePayload({ multipartKnowledge: true });
+  const target = createApplicationDatabase();
+  try {
+    const d1 = new TransactionalD1(target);
+    const response = await importRequest(d1, payload);
+    const receipt = await response.json();
+    assert.equal(response.status, 200, JSON.stringify(receipt));
+    assert.equal(receipt.state, "imported_verified");
+    assert.deepEqual(
+      target.prepare(`
+        SELECT part_no, content
+        FROM knowledge_revision_parts
+        WHERE revision_id = 'knowledge-revision-large'
+        ORDER BY part_no
+      `).all().map((part) => [part.part_no, part.content.length]),
+      [[1, 20_000], [2, 9]],
+    );
+    const restoredRevision = target.prepare("SELECT content, status FROM knowledge_revisions WHERE id = 'knowledge-revision-large'").get();
+    assert.equal(restoredRevision.content, "");
+    assert.equal(restoredRevision.status, "active");
+    assert.ok(target.prepare("SELECT COUNT(*) AS count FROM knowledge_chunks WHERE revision_id = 'knowledge-revision-large' AND is_active = 1").get().count > 1);
+    assert.ok(d1.queryCount <= 50);
   } finally {
     target.close();
   }

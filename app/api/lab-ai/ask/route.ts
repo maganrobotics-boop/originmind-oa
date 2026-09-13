@@ -54,7 +54,7 @@ export async function POST(request: Request) {
       email: authorized.user.email,
       isAdmin: authorized.isAdmin,
     };
-    const candidates = await getActiveKnowledgeChunks(actor);
+    const candidates = await getActiveKnowledgeChunks(actor, question);
     const ranked = rankKnowledgeChunks(question, candidates, 6);
     return privateJson(await answerLabQuestion(question, ranked));
   } catch {

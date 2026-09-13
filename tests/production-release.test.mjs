@@ -53,6 +53,12 @@ const migration28KnowledgeDefinitions = productionKnowledgeDefinitions(migration
   "0027_careless_winter_soldier.sql",
   "0028_needy_microchip.sql",
 ]);
+const migration29KnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName, [
+  "0026_rich_jocasta.sql",
+  "0027_careless_winter_soldier.sql",
+  "0028_needy_microchip.sql",
+  "0029_knowledge_visibility_reclassification.sql",
+]);
 const notificationObjects = [
   "index:notification_outbox_due",
   "table:notification_control",
@@ -62,6 +68,7 @@ const expectedSchemaObjects = [...notificationObjects, ...Object.keys(expectedKn
 const migration26SchemaObjects = [...notificationObjects, ...Object.keys(migration26KnowledgeDefinitions)].sort();
 const migration27SchemaObjects = [...notificationObjects, ...Object.keys(migration27KnowledgeDefinitions)].sort();
 const migration28SchemaObjects = [...notificationObjects, ...Object.keys(migration28KnowledgeDefinitions)].sort();
+const migration29SchemaObjects = [...notificationObjects, ...Object.keys(migration29KnowledgeDefinitions)].sort();
 
 
 test("OA service token normalization matches the Chat release contract", () => {
@@ -141,30 +148,36 @@ function migrationSnapshot(appliedNames, schemaNames, activeFreezes = 0, definit
     migration26KnowledgeDefinitions,
     migration27KnowledgeDefinitions,
     migration28KnowledgeDefinitions,
+    migration29KnowledgeDefinitions,
   };
 }
 
-test("production migration gate supports exact 0025 through 0029 states", () => {
-  assert.equal(migrationNames.length, 30);
+test("production migration gate supports exact 0025 through 0030 states", () => {
+  assert.equal(migrationNames.length, 31);
   assert.equal(migrationNames.at(-1), PRODUCTION_MIGRATION_NAME);
-  assert.equal(PRODUCTION_MIGRATION_SHA256, "073905ec576c407cb91b09f633201f7846facd5b1bf5256ed9737ef4459313be");
+  assert.equal(PRODUCTION_MIGRATION_SHA256, "7780dc59ced3b6bc07cc8f7c07e6d20af52ddd88fc61e3e76d8ac6e0c3f8c113");
+  assert.equal(Object.keys(expectedKnowledgeDefinitions).length, 51);
   assert.deepEqual(validateProductionMigrationManifest({ migrationNames, migrationSqlByName }), migrationNames);
   assert.equal(validateProductionMigrationState({
     phase: "before",
-    ...migrationSnapshot(migrationNames.slice(0, -4), notificationObjects),
-  }), "pending-0026-0027-0028-0029");
+    ...migrationSnapshot(migrationNames.slice(0, -5), notificationObjects),
+  }), "pending-0026-0027-0028-0029-0030");
   assert.equal(validateProductionMigrationState({
     phase: "before",
-    ...migrationSnapshot(migrationNames.slice(0, -3), migration26SchemaObjects, 0, migration26KnowledgeDefinitions),
-  }), "pending-0027-0028-0029");
+    ...migrationSnapshot(migrationNames.slice(0, -4), migration26SchemaObjects, 0, migration26KnowledgeDefinitions),
+  }), "pending-0027-0028-0029-0030");
   assert.equal(validateProductionMigrationState({
     phase: "before",
-    ...migrationSnapshot(migrationNames.slice(0, -2), migration27SchemaObjects, 0, migration27KnowledgeDefinitions),
-  }), "pending-0028-0029");
+    ...migrationSnapshot(migrationNames.slice(0, -3), migration27SchemaObjects, 0, migration27KnowledgeDefinitions),
+  }), "pending-0028-0029-0030");
   assert.equal(validateProductionMigrationState({
     phase: "before",
-    ...migrationSnapshot(migrationNames.slice(0, -1), migration28SchemaObjects, 0, migration28KnowledgeDefinitions),
-  }), "pending-0029");
+    ...migrationSnapshot(migrationNames.slice(0, -2), migration28SchemaObjects, 0, migration28KnowledgeDefinitions),
+  }), "pending-0029-0030");
+  assert.equal(validateProductionMigrationState({
+    phase: "before",
+    ...migrationSnapshot(migrationNames.slice(0, -1), migration29SchemaObjects, 0, migration29KnowledgeDefinitions),
+  }), "pending-0030");
   assert.equal(validateProductionMigrationState({
     phase: "before",
     ...migrationSnapshot(migrationNames, expectedSchemaObjects),
@@ -175,7 +188,7 @@ test("production migration gate supports exact 0025 through 0029 states", () => 
   }), "applied");
 });
 
-test("reviewed 0029 definitions match SQLite's forward migration result", async () => {
+test("reviewed 0030 definitions match SQLite's forward migration result", async () => {
   const database = new DatabaseSync(":memory:");
   try {
     for (const name of Object.keys(REVIEWED_KNOWLEDGE_MIGRATIONS)) {
@@ -207,9 +220,9 @@ test("reviewed 0029 definitions match SQLite's forward migration result", async 
 test("production migration gate rejects drift, partial ledgers, and freezes", () => {
   const pending = migrationSnapshot(
     migrationNames.slice(0, -1),
-    migration28SchemaObjects,
+    migration29SchemaObjects,
     0,
-    migration28KnowledgeDefinitions,
+    migration29KnowledgeDefinitions,
   );
   assert.throws(() => validateProductionMigrationState({
     phase: "before",
@@ -218,12 +231,19 @@ test("production migration gate rejects drift, partial ledgers, and freezes", ()
   }), /active migration freeze/u);
   assert.throws(() => validateProductionMigrationState({ phase: "after", ...pending }), /must end exactly/u);
   assert.throws(() => validateProductionMigrationState({
+    phase: "after",
+    ...migrationSnapshot(
+      migrationNames,
+      expectedSchemaObjects.filter((name) => name !== "table:knowledge_revision_parts"),
+    ),
+  }), /does not match/u);
+  assert.throws(() => validateProductionMigrationState({
     phase: "before",
-    ...migrationSnapshot(migrationNames.slice(0, -1), migration28SchemaObjects.slice(1), 0, migration28KnowledgeDefinitions),
+    ...migrationSnapshot(migrationNames.slice(0, -1), migration29SchemaObjects.slice(1), 0, migration29KnowledgeDefinitions),
   }), /does not match|missing/u);
   assert.throws(() => validateProductionMigrationState({
     phase: "before",
-    ...migrationSnapshot(migrationNames.slice(0, -4), [...notificationObjects, "table:knowledge_items"]),
+    ...migrationSnapshot(migrationNames.slice(0, -5), [...notificationObjects, "table:knowledge_items"]),
   }), /unexpected or missing/u);
   assert.throws(() => validateProductionMigrationManifest({
     migrationNames,
@@ -231,16 +251,16 @@ test("production migration gate rejects drift, partial ledgers, and freezes", ()
   }), /reviewed SHA-256/u);
 });
 
-test("migration CLI validates the immutable 0026 through 0029 files", async () => {
+test("migration CLI validates the immutable 0026 through 0030 files", async () => {
   const directory = await mkdtemp(join(tmpdir(), "originmind-oa-production-migrations-"));
   try {
     const migrationsDirectory = join(directory, "drizzle");
     await cp(join(projectRoot, "drizzle"), migrationsDirectory, { recursive: true });
     const pending = migrationSnapshot(
       migrationNames.slice(0, -1),
-      migration28SchemaObjects,
+      migration29SchemaObjects,
       0,
-      migration28KnowledgeDefinitions,
+      migration29KnowledgeDefinitions,
     );
     const paths = {
       ledger: join(directory, "ledger.json"),
@@ -252,9 +272,9 @@ test("migration CLI validates the immutable 0026 through 0029 files", async () =
       writeFile(paths.freeze, JSON.stringify(pending.freezePayload)),
       writeFile(paths.schema, JSON.stringify(pending.schemaPayload)),
     ]);
-    const run = () => spawnSync(process.execPath, [
+    const run = (phase = "before") => spawnSync(process.execPath, [
       join(projectRoot, "scripts", "check-production-migration-state.mjs"),
-      "before",
+      phase,
       "--ledger", paths.ledger,
       "--freeze", paths.freeze,
       "--schema", paths.schema,
@@ -262,7 +282,14 @@ test("migration CLI validates the immutable 0026 through 0029 files", async () =
     ], { encoding: "utf8" });
     const good = run();
     assert.equal(good.status, 0, good.stderr);
-    assert.equal(good.stdout.trim(), "pending-0029");
+    assert.equal(good.stdout.trim(), "pending-0030");
+    await Promise.all([
+      writeFile(paths.ledger, JSON.stringify(migrationSnapshot(migrationNames, expectedSchemaObjects).ledgerPayload)),
+      writeFile(paths.schema, JSON.stringify(migrationSnapshot(migrationNames, expectedSchemaObjects).schemaPayload)),
+    ]);
+    const after = run("after");
+    assert.equal(after.status, 0, after.stderr);
+    assert.equal(after.stdout.trim(), "applied");
     await writeFile(join(migrationsDirectory, PRODUCTION_MIGRATION_NAME), `${migrationSqlByName[PRODUCTION_MIGRATION_NAME]}\n-- drift\n`);
     const changed = run();
     assert.notEqual(changed.status, 0);
@@ -363,6 +390,11 @@ test("compiled production config preserves provider-managed state", async () => 
     };
     const good = await run(base);
     assert.equal(good.status, 0, good.stderr);
+    await rm(join(drizzleRoot, PRODUCTION_MIGRATION_NAME));
+    const missingLatestMigration = await run(base);
+    assert.notEqual(missingLatestMigration.status, 0);
+    assert.match(missingLatestMigration.stderr, /0030_large_knowledge_revision_parts\.sql/u);
+    await writeFile(join(drizzleRoot, PRODUCTION_MIGRATION_NAME), migrationSqlByName[PRODUCTION_MIGRATION_NAME]);
     for (const mutate of [
       (config) => { config.account_id = "ffffffffffffffffffffffffffffffff"; },
       (config) => { config.d1_databases[0].database_id = "00000000-0000-4000-8000-000000000000"; },

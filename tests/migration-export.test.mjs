@@ -8,6 +8,7 @@ import {
   decryptMigrationEnvelope,
   encryptMigrationPayload,
   MIGRATION_APPLICATION_TABLES,
+  MIGRATION_EXPORT_MAX_PLAINTEXT_BYTES,
   MIGRATION_EXPORT_TABLES,
   MIGRATION_EXPORT_EXPECTED_MIGRATIONS,
   migrationArchiveActivitySelectSql,
@@ -58,7 +59,7 @@ function valueFor(tableName, column, index) {
   if (tableName === "auth_identities" && column === "provider") return "github";
   if (tableName === "auth_identities" && column === "provider_subject") return "583231";
   if (tableName === "auth_identities" && column === "unlinked_at") return null;
-  if (column === "current_revision_no" || column === "revision_no") return index + 1;
+  if (column === "current_revision_no" || column === "revision_no" || column === "part_no") return index + 1;
   if (column === "id" && (tableName === "approval_events" || tableName === "member_events")) return index + 1;
   if (column === "payload_json") return JSON.stringify({ exactLongText: "迁移长文本".repeat(2_500) });
   if (column === "state_json") return JSON.stringify({ signedState: "签名状态".repeat(2_200) });
@@ -73,8 +74,10 @@ function successfulBatchResults() {
     { success: true, results: [{ write_frozen_at: new Date(Date.now() - 20 * 60 * 1000).toISOString(), ready: 1 }] },
     { success: true, results: [{ active_count: 0 }] },
     ...MIGRATION_EXPORT_TABLES.map((table, tableIndex) => ({
-    success: true,
-    results: [Object.fromEntries(table.columns.map((column) => [column, valueFor(table.name, column, tableIndex)]))],
+      success: true,
+      results: table.name === "knowledge_chunks"
+        ? []
+        : [Object.fromEntries(table.columns.map((column) => [column, valueFor(table.name, column, tableIndex)]))],
     })),
   ];
 }
@@ -276,6 +279,12 @@ test("admin receives an authenticated encrypted snapshot with exact long values"
   const revisions = payload.tables.find((table) => table.name === "approval_revisions");
   const stateIndex = revisions.columns.indexOf("state_json");
   assert.equal(revisions.rows[0][stateIndex], valueFor("approval_revisions", "state_json", 2));
+  const knowledgeParts = payload.tables.find((table) => table.name === "knowledge_revision_parts");
+  assert.deepEqual(knowledgeParts.columns, ["id", "item_id", "revision_id", "part_no", "content", "created_at"]);
+  assert.equal(knowledgeParts.rows[0][knowledgeParts.columns.indexOf("content")], valueFor("knowledge_revision_parts", "content", 12));
+  assert.deepEqual(payload.derivedTables, ["knowledge_chunks"]);
+  assert.equal(payload.tables.find((table) => table.name === "knowledge_chunks").rowCount, 0);
+  assert.equal(MIGRATION_EXPORT_MAX_PLAINTEXT_BYTES, 48 * 1024 * 1024);
   assert.equal("challenge" in payload, false);
 });
 

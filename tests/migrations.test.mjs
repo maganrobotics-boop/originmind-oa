@@ -4,7 +4,17 @@ import { test } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 
 import { MIGRATION_FREEZE_ACTIVATE_SQL } from "../lib/migration-freeze.ts";
-import { MIGRATION_SCHEMA_EXPECTED_OBJECT_COUNTS, migrationSchemaSelectSql } from "../lib/migration-export.mjs";
+import {
+  MIGRATION_EXPORT_MAX_PLAINTEXT_BYTES,
+  MIGRATION_EXPORT_TABLES,
+  MIGRATION_SCHEMA_EXPECTED_OBJECT_COUNTS,
+  migrationSchemaSelectSql,
+} from "../lib/migration-export.mjs";
+import {
+  MIGRATION_IMPORT_MAX_JSON_BINDING_BYTES,
+  MIGRATION_IMPORT_MAX_KNOWLEDGE_PART_CHARACTERS,
+  migrationImportRowBatches,
+} from "../lib/migration-import-plan.mjs";
 
 const migrationDirectory = new URL("../drizzle/", import.meta.url);
 const migrationFiles = readdirSync(migrationDirectory)
@@ -38,6 +48,38 @@ test("verified schema projection counts include every retirement fence", () => {
   db.close();
 });
 
+test("migration snapshots and D1 batches safely preserve large revision parts", () => {
+  const partTable = MIGRATION_EXPORT_TABLES.find((table) => table.name === "knowledge_revision_parts");
+  assert.deepEqual(partTable, {
+    name: "knowledge_revision_parts",
+    columns: ["id", "item_id", "revision_id", "part_no", "content", "created_at"],
+    orderBy: ["revision_id", "part_no", "id"],
+  });
+  assert.equal(MIGRATION_EXPORT_MAX_PLAINTEXT_BYTES, 48 * 1024 * 1024);
+  assert.equal(MIGRATION_IMPORT_MAX_KNOWLEDGE_PART_CHARACTERS, 20_000);
+
+  const content = "x".repeat(MIGRATION_IMPORT_MAX_KNOWLEDGE_PART_CHARACTERS);
+  const table = {
+    ...partTable,
+    rows: Array.from({ length: 120 }, (_, index) => [
+      `part-${String(index + 1).padStart(3, "0")}`,
+      "item-1",
+      "revision-1",
+      index + 1,
+      content,
+      "2026-09-13T00:00:00.000Z",
+    ]),
+  };
+  const batches = [...migrationImportRowBatches(table)];
+  assert.ok(batches.length > 1);
+  assert.deepEqual(batches.flat(), table.rows);
+  assert.ok(batches.every((batch) => new TextEncoder().encode(JSON.stringify(batch)).byteLength <= MIGRATION_IMPORT_MAX_JSON_BINDING_BYTES));
+  assert.throws(() => [...migrationImportRowBatches({
+    ...table,
+    rows: [["part-too-large", "item-1", "revision-1", 1, `${content}x`, "2026-09-13T00:00:00.000Z"]],
+  })], /exceeds the safe content size/u);
+});
+
 test("migration journal keeps one continuous snapshot chain", () => {
   const journal = JSON.parse(readFileSync(new URL("_journal.json", migrationMetaDirectory), "utf8"));
   assert.equal(journal.entries.length, migrationFiles.length);
@@ -52,7 +94,7 @@ test("migration journal keeps one continuous snapshot chain", () => {
 });
 
 test("production-shaped v32 data safely migrates through the GitHub identity migration", () => {
-  assert.equal(migrationFiles.at(-1), "0029_knowledge_visibility_reclassification.sql");
+  assert.equal(migrationFiles.at(-1), "0030_large_knowledge_revision_parts.sql");
   const db = new DatabaseSync(":memory:");
   applyMigrationRange(db, 0, 7);
 
@@ -156,7 +198,7 @@ test("production-shaped v32 data safely migrates through the GitHub identity mig
 
 test("knowledge visibility migration defaults legacy approvals to internal without dropping security triggers", () => {
   const visibilityMigrationIndex = migrationFiles.indexOf("0028_needy_microchip.sql");
-  assert.equal(visibilityMigrationIndex, migrationFiles.length - 2);
+  assert.equal(visibilityMigrationIndex, migrationFiles.length - 3);
   const db = new DatabaseSync(":memory:");
   applyMigrationRange(db, 0, visibilityMigrationIndex);
 
@@ -229,7 +271,7 @@ test("knowledge visibility migration defaults legacy approvals to internal witho
 
 test("knowledge visibility reclassification migration preserves content and permits only guarded active scope changes", () => {
   const reclassificationMigrationIndex = migrationFiles.indexOf("0029_knowledge_visibility_reclassification.sql");
-  assert.equal(reclassificationMigrationIndex, migrationFiles.length - 1);
+  assert.equal(reclassificationMigrationIndex, migrationFiles.length - 2);
   const db = new DatabaseSync(":memory:");
   applyMigrationRange(db, 0, reclassificationMigrationIndex);
   const createdAt = "2026-09-10T00:00:00.000Z";
@@ -316,6 +358,7 @@ test("database migration gate fences every persistent business table at commit t
     "direct_messages",
     "knowledge_items",
     "knowledge_revisions",
+    "knowledge_revision_parts",
     "knowledge_chunks",
     "knowledge_events",
   ];
@@ -341,7 +384,7 @@ test("database migration gate fences every persistent business table at commit t
   db.close();
 });
 
-test("knowledge revisions, chunks, and audit evidence stay immutable outside migration freezes", () => {
+test("knowledge revisions, parts, chunks, and audit evidence stay immutable outside migration freezes", () => {
   const db = new DatabaseSync(":memory:");
   applyMigrationRange(db, 0, migrationFiles.length);
   const createdAt = "2026-09-10T00:00:00.000Z";
@@ -358,9 +401,23 @@ test("knowledge revisions, chunks, and audit evidence stay immutable outside mig
     INSERT INTO knowledge_revisions (
       id, item_id, revision_no, previous_revision_id, title, category, content, summary, source_label,
       source_url, content_hash, status, created_by_member_id, created_by_name, created_by_email, created_at
-    ) VALUES (?, ?, 1, NULL, '安全流程', '安全规范', '确认安全区无人后执行复位。', '复位流程',
+    ) VALUES (?, ?, 1, NULL, '安全流程', '安全规范', '', '复位流程',
       '安全手册', '', ?, 'pending', ?, '投稿成员', 'member@example.com', ?)
   `).run("revision-1", "knowledge-1", "a".repeat(64), "member-1", createdAt);
+  assert.equal(db.prepare(`
+    INSERT INTO knowledge_revision_parts (id, item_id, revision_id, part_no, content, created_at)
+    VALUES ('part-1', 'knowledge-1', 'revision-1', 1, '确认安全区无人后执行复位。', ?)
+  `).run(createdAt).changes, 1);
+  assert.throws(() => db.prepare(`
+    INSERT INTO knowledge_revision_parts (id, item_id, revision_id, part_no, content, created_at)
+    VALUES ('part-cross-item', 'knowledge-other', 'revision-1', 2, '越界内容', ?)
+  `).run(createdAt), /relationship is invalid/u);
+  for (const [id, content] of [["part-empty", ""], ["part-too-long", "x".repeat(20_001)]]) {
+    assert.throws(() => db.prepare(`
+      INSERT INTO knowledge_revision_parts (id, item_id, revision_id, part_no, content, created_at)
+      VALUES (?, 'knowledge-1', 'revision-1', 2, ?, ?)
+    `).run(id, content, createdAt), /knowledge_revision_parts_content_length_check/u);
+  }
   db.prepare(`
     INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note, created_at)
     VALUES ('event-1', 'knowledge-1', 'revision-1', 'member-1', '投稿成员', 'member@example.com', 'submitted', '', ?)
@@ -368,6 +425,8 @@ test("knowledge revisions, chunks, and audit evidence stay immutable outside mig
 
   assert.throws(() => db.prepare("UPDATE knowledge_items SET submitter_name = '篡改' WHERE id = 'knowledge-1'").run(), /identity is immutable/u);
   assert.throws(() => db.prepare("UPDATE knowledge_revisions SET content = '篡改' WHERE id = 'revision-1'").run(), /content is immutable/u);
+  assert.throws(() => db.prepare("UPDATE knowledge_revision_parts SET content = '篡改' WHERE id = 'part-1'").run(), /content is immutable/u);
+  assert.throws(() => db.prepare("DELETE FROM knowledge_revision_parts WHERE id = 'part-1'").run(), /cannot be deleted/u);
   assert.throws(() => db.prepare("UPDATE knowledge_events SET note = '篡改' WHERE id = 'event-1'").run(), /append-only/u);
   assert.throws(() => db.prepare("DELETE FROM knowledge_events WHERE id = 'event-1'").run(), /append-only/u);
 

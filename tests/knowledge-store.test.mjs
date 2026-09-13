@@ -38,13 +38,17 @@ class D1StatementAdapter {
 class D1DatabaseAdapter {
   constructor(database) {
     this.database = database;
+    this.batchStatementCounts = [];
+    this.preparedSql = [];
   }
 
   prepare(sql) {
+    this.preparedSql.push(sql);
     return new D1StatementAdapter(this.database, sql);
   }
 
   async batch(statements) {
+    this.batchStatementCounts.push(statements.length);
     this.database.exec("BEGIN IMMEDIATE");
     try {
       const results = statements.map((statement) => statement.execute());
@@ -86,11 +90,12 @@ const vite = await createServer({
 const policy = await vite.ssrLoadModule("/lib/knowledge-policy.ts");
 const store = await vite.ssrLoadModule("/lib/knowledge-store.ts");
 const chatImport = await vite.ssrLoadModule("/lib/chat-knowledge-import.ts");
-const [migration, hardeningMigration, visibilityMigration, reclassificationMigration] = await Promise.all([
+const [migration, hardeningMigration, visibilityMigration, reclassificationMigration, revisionPartsMigration] = await Promise.all([
   readFile(new URL("../drizzle/0026_rich_jocasta.sql", import.meta.url), "utf8"),
   readFile(new URL("../drizzle/0027_careless_winter_soldier.sql", import.meta.url), "utf8"),
   readFile(new URL("../drizzle/0028_needy_microchip.sql", import.meta.url), "utf8"),
   readFile(new URL("../drizzle/0029_knowledge_visibility_reclassification.sql", import.meta.url), "utf8"),
+  readFile(new URL("../drizzle/0030_large_knowledge_revision_parts.sql", import.meta.url), "utf8"),
 ]);
 
 function createDatabase() {
@@ -112,6 +117,7 @@ function createDatabase() {
   database.exec(hardeningMigration);
   database.exec(visibilityMigration);
   database.exec(reclassificationMigration);
+  database.exec(revisionPartsMigration);
   for (const member of [
     ["member-submit", "account-submit", "member-revision-submit", "member"],
     ["member-review", "account-review", "member-revision-review", "project_owner"],
@@ -183,17 +189,156 @@ test("Chat imports enter review exactly once and cannot enter either retrieval i
   assert.equal(await store.createChatImportedKnowledgeItem(submitter, draft, identity.contentHash, identity.itemId), null);
 });
 
-test("Chat import splits long drafts without losing Unicode and rejects injected approval or identity fields", async () => {
+test("large Chat imports remain one item, reassemble exactly, and bulk-index on one review", async () => {
+  const content = `# 大型 Markdown\n\n${"A".repeat(1_600_000)}`;
+  const draft = submission({ title: "1.6 MB Markdown 导入", content });
+  const parts = policy.splitKnowledgeStorageParts(content);
+  const contentHash = await policy.hashKnowledgeSubmission(draft);
+  const itemId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+  const submitter = actor("submitter");
+
+  assert.ok(parts.length > 32);
+  assert.equal(parts.map((part) => part.content).join(""), content);
+  const created = await store.createChatImportedKnowledgeItem(submitter, draft, contentHash, itemId, parts);
+  assert.equal(created.id, itemId);
+  assert.equal(created.contentPartCount, parts.length);
+
+  const sqlite = globalThis[stateKey].sqlite;
+  const revision = sqlite.prepare("SELECT id, content, created_at FROM knowledge_revisions WHERE item_id = ?").get(itemId);
+  assert.equal(revision.content, "", "multipart revisions must not duplicate the whole body inline");
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM knowledge_revision_parts WHERE revision_id = ?").get(revision.id).total, parts.length);
+  assert.equal(sqlite.prepare("SELECT COUNT(DISTINCT created_at) AS total FROM knowledge_revision_parts WHERE revision_id = ?").get(revision.id).total, 1);
+  assert.equal(sqlite.prepare("SELECT MIN(created_at) AS created_at FROM knowledge_revision_parts WHERE revision_id = ?").get(revision.id).created_at, revision.created_at);
+
+  const reviewList = await store.listKnowledgeItems("review", actor("reviewer"), true);
+  assert.equal(reviewList.length, 1);
+  assert.equal(reviewList[0].contentPartCount, parts.length);
+  assert.equal((await store.findKnowledgeItem(itemId, actor("reviewer"))).content, content);
+  const detail = await store.getKnowledgeItemDetail(itemId, actor("reviewer"), true);
+  assert.equal(detail.item.content, content);
+  assert.equal(detail.revisions[0].content, content);
+  assert.equal(detail.revisions[0].contentPartCount, parts.length);
+
+  assert.throws(
+    () => sqlite.prepare("UPDATE knowledge_revision_parts SET content = 'tampered' WHERE revision_id = ? AND part_no = 1").run(revision.id),
+    /knowledge revision part content is immutable/u,
+  );
+  assert.throws(
+    () => sqlite.prepare("INSERT INTO knowledge_revision_parts (id, item_id, revision_id, part_no, content, created_at) VALUES ('bad-part', ?, 'missing-revision', 1, 'bad', ?)").run(itemId, revision.created_at),
+    /knowledge revision part relationship is invalid/u,
+  );
+  for (const [id, invalidContent] of [["empty-part", ""], ["oversized-part", "x".repeat(20_001)]]) {
+    assert.throws(
+      () => sqlite.prepare("INSERT INTO knowledge_revision_parts (id, item_id, revision_id, part_no, content, created_at) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(id, itemId, revision.id, parts.length + 1, invalidContent, revision.created_at),
+      /knowledge_revision_parts_content_length_check/u,
+    );
+  }
+
+  const pending = await store.findKnowledgeItem(itemId, actor("reviewer"));
+  const approved = await store.reviewKnowledgeItem(pending, actor("reviewer"), "approve", "大文件审核通过", "internal");
+  assert.equal(approved.status, "active");
+  assert.ok(globalThis[stateKey].database.batchStatementCounts.at(-1) < 40, "review batch must leave room under D1's 50-query request limit");
+  const indexed = sqlite.prepare("SELECT chunk_no, length(content) AS content_length FROM knowledge_chunks WHERE item_id = ? ORDER BY chunk_no").all(itemId);
+  assert.ok(indexed.length > 32);
+  assert.ok(indexed.length <= policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.ok(indexed.every((chunk, index) => chunk.chunk_no === index + 1 && chunk.content_length <= 2_000));
+
+  const retry = await store.createChatImportedKnowledgeItem(submitter, draft, contentHash, itemId, parts);
+  assert.equal(retry.status, "active");
+  assert.equal(retry.contentPartCount, parts.length);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS total FROM knowledge_events WHERE item_id = ?").get(itemId).total, 2);
+});
+
+test("worst-case escaped 5 MiB content keeps multipart writes below the D1 query budget", async () => {
+  const prefix = "# JSON 转义压力测试\n\n";
+  const pair = '\\"';
+  const targetLength = 5 * 1024 * 1024;
+  const content = `${prefix}${pair.repeat(Math.floor((targetLength - prefix.length) / pair.length))}${"x".repeat((targetLength - prefix.length) % pair.length)}`;
+  const draft = submission({ title: "5 MiB 转义字符文档", content });
+  const parts = policy.splitKnowledgeStorageParts(content);
+  const itemId = "ffffffff-eeee-4ddd-8ccc-bbbbbbbbbbbb";
+
+  const created = await store.createChatImportedKnowledgeItem(
+    actor("submitter"),
+    draft,
+    await policy.hashKnowledgeSubmission(draft),
+    itemId,
+    parts,
+  );
+  assert.equal(created.contentPartCount, parts.length);
+  assert.ok(globalThis[stateKey].database.batchStatementCounts.at(-1) < 20, "multipart creation must use JSON1 bulk inserts");
+
+  const pending = await store.findKnowledgeItem(itemId, actor("reviewer"));
+  await store.reviewKnowledgeItem(pending, actor("reviewer"), "approve", "边界审核", "internal");
+  assert.ok(globalThis[stateKey].database.batchStatementCounts.at(-1) < 40, "worst-case review must leave room under D1's 50-query request limit");
+  const chunkCount = globalThis[stateKey].sqlite.prepare("SELECT COUNT(*) AS total FROM knowledge_chunks WHERE item_id = ?").get(itemId).total;
+  assert.ok(chunkCount > 2_000 && chunkCount <= policy.MAX_KNOWLEDGE_CHUNKS);
+});
+
+test("multipart hydration fails closed when stored parts do not match the immutable revision hash", async () => {
+  const content = "A".repeat(20_001);
+  const draft = submission({ title: "分片哈希校验", content });
+  const parts = policy.splitKnowledgeStorageParts(content);
+  const itemId = "12345678-aaaa-4bbb-8ccc-123456789abc";
+  await store.createChatImportedKnowledgeItem(
+    actor("submitter"),
+    draft,
+    await policy.hashKnowledgeSubmission(draft),
+    itemId,
+    parts,
+  );
+
+  const sqlite = globalThis[stateKey].sqlite;
+  sqlite.exec("DROP TRIGGER knowledge_revision_parts_content_immutable");
+  sqlite.prepare("UPDATE knowledge_revision_parts SET content = ? WHERE item_id = ? AND part_no = 1")
+    .run(`B${parts[0].content.slice(1)}`, itemId);
+  await assert.rejects(
+    store.findKnowledgeItem(itemId, actor("reviewer")),
+    /knowledge revision parts do not match content hash/u,
+  );
+});
+
+test("Chat import keeps one item, exposes lossless storage parts, and enforces a 5 MiB UTF-8 boundary", async () => {
   const document = { id: "11111111-2222-4333-8444-555555555555", title: "导入资料", body: "机器人技术。".repeat(4_000), url: "", category: "research", updatedAt: "2026-09-12" };
   const parsed = chatImport.parseChatKnowledgeImport({ document });
-  assert.equal(parsed.submissions.length, 2);
-  assert.equal(parsed.submissions.map((part) => part.content).join(""), document.body);
+  assert.equal(parsed.submissions.length, 1);
+  assert.equal(parsed.submissions[0].content, document.body);
+  assert.equal(parsed.partCount, parsed.parts.length);
+  assert.equal(parsed.parts.map((part) => part.content).join(""), parsed.submissions[0].content);
+  assert.ok(parsed.parts.every((part) => part.content.length <= policy.MAX_KNOWLEDGE_CONTENT_LENGTH));
   for (const length of [18001, 20000, 20001, 29999]) {
     const content = "a".repeat(length - 2) + "😀";
     const result = chatImport.parseChatKnowledgeImport({ document: { ...document, body: content } });
-    assert.equal(result.submissions.map((part) => part.content).join(""), content);
-    assert.ok(result.submissions.every((part) => part.content.length >= 10 && part.content.length <= 20_000));
+    assert.equal(result.submissions.length, 1);
+    assert.equal(result.submissions[0].content, content);
+    assert.equal(result.parts.map((part) => part.content).join(""), content);
+    assert.ok(result.parts.every((part) => part.content.length <= 20_000 && policy.isWellFormedUnicode(part.content)));
   }
+
+  const onePointSixMiB = "a".repeat(Math.floor(1.6 * 1024 * 1024));
+  const onePointSixResult = chatImport.parseChatKnowledgeImport({ document: { ...document, body: onePointSixMiB } });
+  assert.equal(onePointSixResult.submissions.length, 1);
+  assert.equal(onePointSixResult.parts.map((part) => part.content).join(""), onePointSixMiB);
+
+  const exactLimitAscii = "a".repeat(chatImport.MAX_CHAT_KNOWLEDGE_IMPORT_BYTES);
+  const exactAsciiResult = chatImport.parseChatKnowledgeImport({ document: { ...document, body: exactLimitAscii } });
+  assert.equal(new TextEncoder().encode(exactAsciiResult.submissions[0].content).byteLength, chatImport.MAX_CHAT_KNOWLEDGE_IMPORT_BYTES);
+  assert.equal(exactAsciiResult.parts.map((part) => part.content).join(""), exactLimitAscii);
+  assert.ok(exactAsciiResult.parts.every((part) => part.content.length <= 20_000));
+  assert.throws(() => chatImport.parseChatKnowledgeImport({
+    document: { ...document, body: `${exactLimitAscii}a` },
+  }), /UTF-8/u);
+
+  const exactLimitEmoji = "😀".repeat(chatImport.MAX_CHAT_KNOWLEDGE_IMPORT_BYTES / 4);
+  const exactEmojiResult = chatImport.parseChatKnowledgeImport({ document: { ...document, body: exactLimitEmoji } });
+  assert.equal(new TextEncoder().encode(exactEmojiResult.submissions[0].content).byteLength, chatImport.MAX_CHAT_KNOWLEDGE_IMPORT_BYTES);
+  assert.equal(exactEmojiResult.parts.map((part) => part.content).join(""), exactLimitEmoji);
+  assert.ok(exactEmojiResult.parts.every((part) => policy.isWellFormedUnicode(part.content)));
+  assert.throws(() => chatImport.parseChatKnowledgeImport({
+    document: { ...document, body: `${exactLimitEmoji}😀` },
+  }), /UTF-8/u);
+
   assert.throws(() => chatImport.parseChatKnowledgeImport({ document: { ...document, visibility: "public" } }));
   assert.throws(() => chatImport.parseChatKnowledgeImport({ document, submitterEmail: "other@example.com" }));
   assert.throws(() => chatImport.parseChatKnowledgeImport({ document: { ...document, updatedAt: "2026-02-30" } }));
@@ -501,4 +646,146 @@ test("审核写入在 SQL 时间复核项目负责人角色，配置型负责人
   const adminPending = await store.findKnowledgeItem(adminItem.id, actor("submitter"));
   const adminApproved = await store.reviewKnowledgeItem(adminPending, adminReviewer, "approve", "管理员审核通过", "internal");
   assert.equal(adminApproved.status, "active");
+});
+
+test("问题预筛选不会让超过候选上限的旧文档尾部在内部或公共检索中饿死", async () => {
+  const sqlite = globalThis[stateKey].sqlite;
+  const insertItem = sqlite.prepare(`
+    INSERT INTO knowledge_items (
+      id, project, title, category, submitter_member_id, submitter_name, submitter_email,
+      status, visibility, current_revision_no, current_revision_id, active_revision_id,
+      mutation_revision, created_at, updated_at, revoked_at
+    ) VALUES (?, ?, ?, '测试', 'member-submit', '投稿成员', 'submit@example.com',
+      'active', 'public', 1, ?, ?, ?, ?, ?, NULL)
+  `);
+  const insertRevision = sqlite.prepare(`
+    INSERT INTO knowledge_revisions (
+      id, item_id, revision_no, previous_revision_id, title, category, content, summary,
+      source_label, source_url, content_hash, status, created_by_member_id, created_by_name,
+      created_by_email, reviewed_by_member_id, reviewed_by_name, reviewed_by_email,
+      review_note, created_at, reviewed_at, activated_at, retired_at
+    ) VALUES (?, ?, 1, NULL, ?, '测试', '固定夹具正文', '', '测试夹具', '', ?, 'active',
+      'member-submit', '投稿成员', 'submit@example.com', 'member-review', '项目管理员',
+      'review@example.com', '夹具审核', ?, ?, ?, NULL)
+  `);
+  const insertChunk = sqlite.prepare(`
+    INSERT INTO knowledge_chunks (
+      id, item_id, revision_id, chunk_no, section_title, paragraph_ref,
+      content, search_text, is_active, created_at
+    ) VALUES (?, ?, ?, ?, '', ?, ?, ?, 1, ?)
+  `);
+  const fixtures = [
+    { itemId: "fixture-old-item", revisionId: "fixture-old-revision", title: "旧版长文", updatedAt: "2026-01-01T00:00:00.000Z", hash: "a".repeat(64) },
+    { itemId: "fixture-middle-item", revisionId: "fixture-middle-revision", title: "中间长文", updatedAt: "2026-05-01T00:00:00.000Z", hash: "c".repeat(64) },
+    { itemId: "fixture-new-item", revisionId: "fixture-new-revision", title: "新版长文", updatedAt: "2026-09-01T00:00:00.000Z", hash: "b".repeat(64) },
+  ];
+
+  sqlite.exec("BEGIN IMMEDIATE");
+  try {
+    for (const fixture of fixtures) {
+      insertItem.run(
+        fixture.itemId,
+        policy.KNOWLEDGE_PROJECT,
+        fixture.title,
+        fixture.revisionId,
+        fixture.revisionId,
+        `${fixture.itemId}-mutation`,
+        fixture.updatedAt,
+        fixture.updatedAt,
+      );
+      insertRevision.run(
+        fixture.revisionId,
+        fixture.itemId,
+        fixture.title,
+        fixture.hash,
+        fixture.updatedAt,
+        fixture.updatedAt,
+        fixture.updatedAt,
+      );
+      for (let chunkNo = 1; chunkNo <= policy.MAX_KNOWLEDGE_CHUNKS; chunkNo += 1) {
+        const hasRareTailTerm = fixture.itemId === "fixture-old-item" && chunkNo === policy.MAX_KNOWLEDGE_CHUNKS;
+        const content = hasRareTailTerm
+          ? "冷门尾段校验词只出现在旧文档最后一块"
+          : `${fixture.itemId === "fixture-new-item" ? "commonroboticskeyword 机械臂" : ""}${fixture.title}普通内容 ${chunkNo}`;
+        insertChunk.run(
+          `${fixture.itemId}-chunk-${chunkNo}`,
+          fixture.itemId,
+          fixture.revisionId,
+          chunkNo,
+          `第 ${chunkNo} 段`,
+          content,
+          content.toLocaleLowerCase("zh-CN"),
+          fixture.updatedAt,
+        );
+      }
+    }
+    sqlite.exec("COMMIT");
+  } catch (error) {
+    sqlite.exec("ROLLBACK");
+    throw error;
+  }
+
+  const unfilteredInternal = await store.getActiveKnowledgeChunks(actor("submitter"));
+  assert.equal(unfilteredInternal.length, policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.deepEqual(new Set(unfilteredInternal.map((chunk) => chunk.itemId)), new Set(["fixture-new-item"]));
+  const unfilteredPublic = await store.getPublicActiveKnowledgeChunks();
+  assert.equal(unfilteredPublic.length, policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.ok(unfilteredPublic.every((chunk) => !chunk.content.includes("冷门尾段校验词")));
+
+  const question = "机械臂 冷门尾段校验词在哪里？";
+  const internal = await store.getActiveKnowledgeChunks(actor("submitter"), question);
+  assert.ok(internal.length > 1 && internal.length <= policy.MAX_KNOWLEDGE_CHUNKS);
+  const rareInternal = internal.find((chunk) => chunk.content.includes("冷门尾段校验词"));
+  assert.equal(rareInternal?.itemId, "fixture-old-item");
+  assert.ok(policy.rankKnowledgeChunks(question, internal, 6).some((chunk) => chunk.content.includes("冷门尾段校验词")));
+
+  const publicChunks = await store.getPublicActiveKnowledgeChunks(question);
+  assert.ok(publicChunks.length > 1 && publicChunks.length <= policy.MAX_KNOWLEDGE_CHUNKS);
+  const rarePublic = publicChunks.find((chunk) => chunk.content.includes("冷门尾段校验词"));
+  assert.ok(rarePublic?.itemId.startsWith("public-item-"));
+  assert.ok(policy.rankKnowledgeChunks(question, publicChunks, 6).some((chunk) => chunk.content.includes("冷门尾段校验词")));
+
+  const maximumTermQuestion = [
+    "commonroboticskeyword",
+    "冷门尾段校验词",
+    ...Array.from({ length: 51 }, (_, index) => `q${String(index).padStart(2, "0")}`),
+  ].join(" ");
+  assert.equal(policy.knowledgeSearchTerms(maximumTermQuestion).length, 64);
+
+  let statementCount = globalThis[stateKey].database.preparedSql.length;
+  let startedAt = performance.now();
+  const maximumInternal = await store.getActiveKnowledgeChunks(actor("submitter"), maximumTermQuestion);
+  const internalElapsed = performance.now() - startedAt;
+  assert.equal(globalThis[stateKey].database.preparedSql.length - statementCount, 1, "internal prefilter must remain one D1 query");
+  assert.equal(globalThis[stateKey].database.preparedSql.at(-1).match(/\(\d+, \?, \d+\)/gu)?.length, 16);
+  assert.ok(maximumInternal.length <= policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.ok(maximumInternal.some((chunk) => chunk.content.includes("冷门尾段校验词")));
+  assert.ok(internalElapsed < 8_000, `64-term internal prefilter took ${internalElapsed.toFixed(0)} ms`);
+
+  statementCount = globalThis[stateKey].database.preparedSql.length;
+  startedAt = performance.now();
+  const maximumPublic = await store.getPublicActiveKnowledgeChunks(maximumTermQuestion);
+  const publicElapsed = performance.now() - startedAt;
+  assert.equal(globalThis[stateKey].database.preparedSql.length - statementCount, 1, "public prefilter must remain one D1 query");
+  assert.equal(globalThis[stateKey].database.preparedSql.at(-1).match(/\(\d+, \?, \d+\)/gu)?.length, 16);
+  assert.ok(maximumPublic.length <= policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.ok(maximumPublic.some((chunk) => chunk.content.includes("冷门尾段校验词")));
+  assert.ok(publicElapsed < 8_000, `64-term public prefilter took ${publicElapsed.toFixed(0)} ms`);
+
+  const sharedInternalCandidates = await store.getActiveKnowledgeChunks(actor("submitter"), "普通内容");
+  assert.equal(sharedInternalCandidates.length, policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.deepEqual(new Set(sharedInternalCandidates.map((chunk) => chunk.itemId)), new Set(fixtures.map((fixture) => fixture.itemId)));
+  const sharedInternalResults = policy.rankKnowledgeChunks("普通内容", sharedInternalCandidates, 6);
+  assert.equal(sharedInternalResults.length, 6);
+  assert.deepEqual(new Set(sharedInternalResults.map((chunk) => chunk.itemId)), new Set(fixtures.map((fixture) => fixture.itemId)));
+
+  const sharedPublicCandidates = await store.getPublicActiveKnowledgeChunks("普通内容");
+  assert.equal(sharedPublicCandidates.length, policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.equal(new Set(sharedPublicCandidates.map((chunk) => chunk.itemId)).size, fixtures.length);
+  const sharedPublicResults = policy.rankKnowledgeChunks("普通内容", sharedPublicCandidates, 6);
+  assert.equal(sharedPublicResults.length, 6);
+  assert.equal(new Set(sharedPublicResults.map((chunk) => chunk.itemId)).size, fixtures.length);
+
+  assert.deepEqual(await store.getActiveKnowledgeChunks(actor("submitter"), "如何？"), []);
+  assert.deepEqual(await store.getPublicActiveKnowledgeChunks("如何？"), []);
 });

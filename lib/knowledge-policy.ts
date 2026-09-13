@@ -30,7 +30,8 @@ export function isKnowledgeAdminSelfAuditNote(value: unknown): value is string {
     && (value === KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER || value.startsWith(`${KNOWLEDGE_ADMIN_SELF_AUDIT_MARKER} `));
 }
 export const MAX_KNOWLEDGE_QUESTION_LENGTH = 500;
-export const MAX_KNOWLEDGE_CHUNKS = 32;
+export const MAX_KNOWLEDGE_CHUNKS = 4_096;
+const MAX_LEGACY_KNOWLEDGE_CHUNKS = 32;
 const MAX_KNOWLEDGE_SEARCH_TERMS = 64;
 
 export type KnowledgeSubmission = {
@@ -48,6 +49,12 @@ export type KnowledgeChunkDraft = {
   paragraphRef: string;
   content: string;
   searchText: string;
+};
+
+export type KnowledgeStoragePart = {
+  partNo: number;
+  sectionTitle: string;
+  content: string;
 };
 
 export type SearchableKnowledgeChunk = {
@@ -115,7 +122,11 @@ function sourceUrl(value: unknown): { ok: true; value: string } | { ok: false; e
   }
 }
 
-export function parseKnowledgeSubmission(value: Record<string, unknown>):
+type KnowledgeContentPolicy =
+  | { maximumCharacters: number; maximumUtf8Bytes?: never }
+  | { maximumCharacters?: never; maximumUtf8Bytes: number };
+
+function parseKnowledgeSubmissionWithContentPolicy(value: Record<string, unknown>, contentPolicy: KnowledgeContentPolicy):
   | { ok: true; value: KnowledgeSubmission }
   | { ok: false; error: string } {
   const allowed = new Set(["title", "category", "summary", "sourceLabel", "sourceUrl", "content"]);
@@ -138,7 +149,17 @@ export function parseKnowledgeSubmission(value: Record<string, unknown>):
   if (value.sourceLabel !== undefined && typeof value.sourceLabel !== "string") return { ok: false, error: "来源名称格式不正确。" };
   if (title.length < 2 || title.length > MAX_KNOWLEDGE_TITLE_LENGTH) return { ok: false, error: `标题需为 2–${MAX_KNOWLEDGE_TITLE_LENGTH} 个字符。` };
   if (!category || category.length > MAX_KNOWLEDGE_CATEGORY_LENGTH) return { ok: false, error: `分类需为 1–${MAX_KNOWLEDGE_CATEGORY_LENGTH} 个字符。` };
-  if (content.length < 10 || content.length > MAX_KNOWLEDGE_CONTENT_LENGTH) return { ok: false, error: `正文需为 10–${MAX_KNOWLEDGE_CONTENT_LENGTH} 个字符。` };
+  if (content.length < 10) {
+    return contentPolicy.maximumCharacters !== undefined
+      ? { ok: false, error: `正文需为 10–${contentPolicy.maximumCharacters} 个字符。` }
+      : { ok: false, error: "正文至少需要 10 个字符。" };
+  }
+  if (contentPolicy.maximumCharacters !== undefined && content.length > contentPolicy.maximumCharacters) {
+    return { ok: false, error: `正文需为 10–${contentPolicy.maximumCharacters} 个字符。` };
+  }
+  if (contentPolicy.maximumUtf8Bytes !== undefined && new TextEncoder().encode(content).byteLength > contentPolicy.maximumUtf8Bytes) {
+    return { ok: false, error: `导入正文按 UTF-8 计算不能超过 ${contentPolicy.maximumUtf8Bytes} 字节。` };
+  }
   if (suppliedSummary.length > MAX_KNOWLEDGE_SUMMARY_LENGTH) return { ok: false, error: `摘要不能超过 ${MAX_KNOWLEDGE_SUMMARY_LENGTH} 个字符。` };
   if (sourceLabel.length > MAX_KNOWLEDGE_SOURCE_LABEL_LENGTH) return { ok: false, error: `来源名称不能超过 ${MAX_KNOWLEDGE_SOURCE_LABEL_LENGTH} 个字符。` };
   if (!parsedSourceUrl.ok) return parsedSourceUrl;
@@ -146,6 +167,19 @@ export function parseKnowledgeSubmission(value: Record<string, unknown>):
   const normalizedSummary = content.replace(/\s+/gu, " ");
   const summary = suppliedSummary || safePrefix(normalizedSummary, 180);
   return { ok: true, value: { title, category, summary, sourceLabel, sourceUrl: parsedSourceUrl.value, content } };
+}
+
+export function parseKnowledgeSubmission(value: Record<string, unknown>):
+  | { ok: true; value: KnowledgeSubmission }
+  | { ok: false; error: string } {
+  return parseKnowledgeSubmissionWithContentPolicy(value, { maximumCharacters: MAX_KNOWLEDGE_CONTENT_LENGTH });
+}
+
+export function parseImportedKnowledgeSubmission(value: Record<string, unknown>, maximumUtf8Bytes: number):
+  | { ok: true; value: KnowledgeSubmission }
+  | { ok: false; error: string } {
+  if (!Number.isSafeInteger(maximumUtf8Bytes) || maximumUtf8Bytes < 10) throw new RangeError("invalid imported knowledge byte limit");
+  return parseKnowledgeSubmissionWithContentPolicy(value, { maximumUtf8Bytes });
 }
 
 export function parseKnowledgeReviewAction(value: unknown): KnowledgeReviewAction | null {
@@ -199,6 +233,207 @@ function safePrefix(value: string, maxLength: number): string {
   return value.slice(0, safeChunkEnd(value, 0, maxLength));
 }
 
+type MarkdownScanState = {
+  fenceMarker: "`" | "~" | "";
+  fenceLength: number;
+  atLineStart: boolean;
+  fenceClosePhase: "none" | "indent" | "marker" | "trailing" | "invalid";
+  fenceCloseIndent: number;
+  fenceCloseRun: number;
+};
+
+type MarkdownHeading = { index: number; title: string };
+
+type MarkdownRangeScan = {
+  state: MarkdownScanState;
+  headingBoundary: number;
+  paragraphBoundary: number;
+  lineBoundary: number;
+  firstHeading?: MarkdownHeading;
+  lastHeading?: MarkdownHeading;
+};
+
+function fenceRun(line: string): { marker: "`" | "~"; length: number } | null {
+  const match = line.match(/^ {0,3}(`{3,}|~{3,})/u)?.[1];
+  if (!match) return null;
+  return { marker: match[0] as "`" | "~", length: match.length };
+}
+
+function beginFenceCloseCandidate(state: MarkdownScanState): void {
+  state.fenceClosePhase = "indent";
+  state.fenceCloseIndent = 0;
+  state.fenceCloseRun = 0;
+}
+
+function advanceFenceCloseCandidate(state: MarkdownScanState, value: string): void {
+  if (!state.fenceMarker || state.fenceClosePhase === "none" || state.fenceClosePhase === "invalid") return;
+  for (const character of value) {
+    if (state.fenceClosePhase === "indent") {
+      if (character === " " && state.fenceCloseIndent < 3) {
+        state.fenceCloseIndent += 1;
+      } else if (character === state.fenceMarker) {
+        state.fenceClosePhase = "marker";
+        state.fenceCloseRun = 1;
+      } else {
+        state.fenceClosePhase = "invalid";
+      }
+    } else if (state.fenceClosePhase === "marker") {
+      if (character === state.fenceMarker) {
+        state.fenceCloseRun += 1;
+      } else if ((character === " " || character === "\t") && state.fenceCloseRun >= state.fenceLength) {
+        state.fenceClosePhase = "trailing";
+      } else {
+        state.fenceClosePhase = "invalid";
+      }
+    } else if (state.fenceClosePhase === "trailing" && character !== " " && character !== "\t") {
+      state.fenceClosePhase = "invalid";
+    }
+  }
+}
+
+function finishesFenceClose(state: MarkdownScanState): boolean {
+  return state.fenceClosePhase === "trailing"
+    || (state.fenceClosePhase === "marker" && state.fenceCloseRun >= state.fenceLength);
+}
+
+function clearFenceCloseCandidate(state: MarkdownScanState): void {
+  state.fenceClosePhase = "none";
+  state.fenceCloseIndent = 0;
+  state.fenceCloseRun = 0;
+}
+
+function markdownHeading(line: string): string {
+  const match = line.match(/^ {0,3}#{1,6}[ \t]+(.+)$/u)?.[1];
+  if (!match) return "";
+  return safePrefix(match.replace(/[ \t]+#+[ \t]*$/u, "").trim(), 80);
+}
+
+function scanMarkdownRange(value: string, start: number, end: number, initialState: MarkdownScanState): MarkdownRangeScan {
+  const state = { ...initialState };
+  let headingBoundary = -1;
+  let paragraphBoundary = -1;
+  let lineBoundary = -1;
+  let firstHeading: MarkdownHeading | undefined;
+  let lastHeading: MarkdownHeading | undefined;
+
+  for (let cursor = start; cursor < end;) {
+    let foundNewline = cursor;
+    while (foundNewline < end && value.charCodeAt(foundNewline) !== 0x0A) foundNewline += 1;
+    const hasCompleteLine = foundNewline < end;
+    const lineEnd = hasCompleteLine ? foundNewline : end;
+    const line = value.slice(cursor, lineEnd);
+    const beganAtLineStart = state.atLineStart;
+    const wasInFence = Boolean(state.fenceMarker);
+
+    if (state.fenceMarker) {
+      if (beganAtLineStart) beginFenceCloseCandidate(state);
+      advanceFenceCloseCandidate(state, line);
+    } else if (beganAtLineStart) {
+      const openingFence = fenceRun(line);
+      if (openingFence) {
+        state.fenceMarker = openingFence.marker;
+        state.fenceLength = openingFence.length;
+        clearFenceCloseCandidate(state);
+      } else {
+        const title = markdownHeading(line);
+        if (title) {
+          const heading = { index: cursor, title };
+          firstHeading ??= heading;
+          lastHeading = heading;
+          if (cursor > start) headingBoundary = cursor;
+        }
+      }
+    }
+
+    if (hasCompleteLine) {
+      if (wasInFence && finishesFenceClose(state)) {
+        state.fenceMarker = "";
+        state.fenceLength = 0;
+      }
+      clearFenceCloseCandidate(state);
+      lineBoundary = foundNewline + 1;
+      if (!wasInFence && !state.fenceMarker && line.trim() === "") paragraphBoundary = foundNewline + 1;
+      state.atLineStart = true;
+      cursor = foundNewline + 1;
+    } else {
+      state.atLineStart = false;
+      cursor = end;
+    }
+  }
+
+  return { state, headingBoundary, paragraphBoundary, lineBoundary, firstHeading, lastHeading };
+}
+
+function preferredMarkdownSplitEnd(
+  value: string,
+  start: number,
+  hardEnd: number,
+  maxLength: number,
+  state: MarkdownScanState,
+): number {
+  if (hardEnd >= value.length) return value.length;
+  // Keep parts reasonably full. At the 2,000-character import chunk size this
+  // also guarantees that any accepted 5 MiB UTF-8 document stays below the
+  // global 4,096-chunk safety cap, even if it contains very frequent headings.
+  const minimumUsefulEnd = start + Math.floor(maxLength * 3 / 4);
+  const markdown = scanMarkdownRange(value, start, hardEnd, state);
+  if (markdown.headingBoundary >= minimumUsefulEnd) return markdown.headingBoundary;
+  if (markdown.paragraphBoundary >= minimumUsefulEnd) return markdown.paragraphBoundary;
+  if (markdown.lineBoundary >= minimumUsefulEnd) return markdown.lineBoundary;
+
+  const window = value.slice(start, hardEnd);
+  let candidate = -1;
+  for (const match of window.matchAll(/[。！？!?；;]/gu)) candidate = start + (match.index ?? 0) + match[0].length;
+  if (candidate >= minimumUsefulEnd) return candidate;
+
+  candidate = -1;
+  for (const match of window.matchAll(/[ \t]+/gu)) candidate = start + (match.index ?? 0) + match[0].length;
+  return candidate >= minimumUsefulEnd ? candidate : hardEnd;
+}
+
+/**
+ * Splits an already-normalized knowledge document into storage-safe, contiguous
+ * parts. Boundaries prefer Markdown headings and paragraphs, but every code unit
+ * remains in exactly one part so the original content can be reconstructed with
+ * `parts.map((part) => part.content).join("")`.
+ */
+export function splitKnowledgeStorageParts(
+  content: string,
+  maxLength = MAX_KNOWLEDGE_CONTENT_LENGTH,
+): KnowledgeStoragePart[] {
+  if (!Number.isSafeInteger(maxLength) || maxLength < 2 || maxLength > MAX_KNOWLEDGE_CONTENT_LENGTH) {
+    throw new RangeError("invalid knowledge storage part length");
+  }
+  if (!isWellFormedUnicode(content)) throw new TypeError("knowledge content contains malformed Unicode");
+  if (!content) return [];
+
+  const parts: KnowledgeStoragePart[] = [];
+  let currentSectionTitle = "";
+  let markdownState: MarkdownScanState = {
+    fenceMarker: "",
+    fenceLength: 0,
+    atLineStart: true,
+    fenceClosePhase: "none",
+    fenceCloseIndent: 0,
+    fenceCloseRun: 0,
+  };
+  for (let offset = 0; offset < content.length;) {
+    const hardEnd = safeChunkEnd(content, offset, maxLength);
+    const end = preferredMarkdownSplitEnd(content, offset, hardEnd, maxLength, markdownState);
+    const partContent = content.slice(offset, end);
+    const scanned = scanMarkdownRange(content, offset, end, markdownState);
+    const firstHeading = scanned.firstHeading;
+    const sectionTitle = firstHeading && content.slice(offset, firstHeading.index).trim() === ""
+      ? firstHeading.title
+      : currentSectionTitle;
+    if (scanned.lastHeading) currentSectionTitle = scanned.lastHeading.title;
+    parts.push({ partNo: parts.length + 1, sectionTitle, content: partContent });
+    markdownState = scanned.state;
+    offset = end;
+  }
+  return parts;
+}
+
 function splitLongParagraph(paragraph: string, maxLength: number): string[] {
   if (paragraph.length <= maxLength) return [paragraph];
   const segments = paragraph.split(/(?<=[。！？!?；;])\s*/u).filter(Boolean);
@@ -229,11 +464,42 @@ function splitLongParagraph(paragraph: string, maxLength: number): string[] {
   return pieces;
 }
 
-export function chunkKnowledgeSubmission(submission: KnowledgeSubmission, maxLength = 900): KnowledgeChunkDraft[] {
-  if (!Number.isSafeInteger(maxLength) || maxLength < 200 || maxLength > 2_000) throw new RangeError("invalid knowledge chunk length");
+export function chunkKnowledgeSubmission(submission: KnowledgeSubmission, maxLength?: number): KnowledgeChunkDraft[] {
+  const resolvedMaxLength = maxLength ?? (submission.content.length <= MAX_KNOWLEDGE_CONTENT_LENGTH ? 900 : 2_000);
+  if (!Number.isSafeInteger(resolvedMaxLength) || resolvedMaxLength < 200 || resolvedMaxLength > 2_000) throw new RangeError("invalid knowledge chunk length");
+
+  // Imported documents can be much larger than a regular OA submission. Avoid
+  // materializing an array per source paragraph for those documents; the
+  // storage splitter walks bounded windows and therefore scales linearly.
+  if (submission.content.length > MAX_KNOWLEDGE_CONTENT_LENGTH) {
+    const parts = splitKnowledgeStorageParts(submission.content, resolvedMaxLength);
+    if (parts.length > MAX_KNOWLEDGE_CHUNKS) throw new RangeError("knowledge content cannot be chunked within the safe limit");
+    let paragraphNo = 1;
+    return parts.map((part) => {
+      const firstParagraph = paragraphNo;
+      const paragraphBreaks = Array.from(part.content.matchAll(/\n{2,}/gu));
+      const internalBreaks = paragraphBreaks.filter((match) => (match.index ?? 0) + match[0].length < part.content.length).length;
+      const lastParagraph = firstParagraph + internalBreaks;
+      paragraphNo += paragraphBreaks.length;
+      return {
+        chunkNo: part.partNo,
+        sectionTitle: part.sectionTitle,
+        paragraphRef: firstParagraph === lastParagraph ? `第 ${firstParagraph} 段` : `第 ${firstParagraph}–${lastParagraph} 段`,
+        content: part.content,
+        searchText: normalizedSearchText([
+          submission.title,
+          submission.category,
+          submission.summary,
+          part.sectionTitle,
+          part.content,
+        ].filter(Boolean).join("\n")),
+      };
+    });
+  }
+
   const rawParagraphs = submission.content.split(/\n{2,}/u).map((part) => part.trim()).filter(Boolean);
   const paragraphs = rawParagraphs.flatMap((paragraph, sourceIndex) =>
-    splitLongParagraph(paragraph, maxLength).map((content) => ({ content, sourceIndex: sourceIndex + 1 })),
+    splitLongParagraph(paragraph, resolvedMaxLength).map((content) => ({ content, sourceIndex: sourceIndex + 1 })),
   );
   const chunks: KnowledgeChunkDraft[] = [];
   let sectionTitle = "";
@@ -263,12 +529,12 @@ export function chunkKnowledgeSubmission(submission: KnowledgeSubmission, maxLen
       sectionTitle = heading;
     }
     const additional = paragraph.content.length + (current.length ? 2 : 0);
-    if (current.length && currentLength + additional > maxLength) flush();
+    if (current.length && currentLength + additional > resolvedMaxLength) flush();
     current.push(paragraph);
     currentLength += paragraph.content.length + (current.length > 1 ? 2 : 0);
   }
   flush();
-  if (chunks.length <= MAX_KNOWLEDGE_CHUNKS) return chunks;
+  if (chunks.length <= MAX_LEGACY_KNOWLEDGE_CHUNKS) return chunks;
 
   // Highly fragmented Markdown (for example thousands of tiny headings) must
   // not turn one accepted submission into thousands of D1 statements. Re-slice
@@ -278,7 +544,7 @@ export function chunkKnowledgeSubmission(submission: KnowledgeSubmission, maxLen
   const paragraphBreaks = Array.from(submission.content.matchAll(/\n{2,}/gu), (match) => match.index);
   const paragraphAt = (offset: number) => 1 + paragraphBreaks.filter((index) => index < offset).length;
   for (let offset = 0; offset < submission.content.length;) {
-    const end = safeChunkEnd(submission.content, offset, maxLength);
+    const end = safeChunkEnd(submission.content, offset, resolvedMaxLength);
     const content = submission.content.slice(offset, end);
     const firstParagraph = paragraphAt(offset);
     const lastParagraph = paragraphAt(Math.max(offset, end - 1));
@@ -292,21 +558,25 @@ export function chunkKnowledgeSubmission(submission: KnowledgeSubmission, maxLen
     });
     offset = end;
   }
-  if (bounded.length > MAX_KNOWLEDGE_CHUNKS) throw new RangeError("knowledge content cannot be chunked within the safe limit");
+  if (bounded.length > MAX_LEGACY_KNOWLEDGE_CHUNKS) throw new RangeError("knowledge content cannot be chunked within the safe limit");
   return bounded;
 }
 
-function searchTerms(question: string): string[] {
+export function knowledgeSearchTerms(question: string): string[] {
   const normalized = normalizedSearchText(question).replace(/[\p{P}\p{S}]+/gu, " ");
   const terms = new Set<string>();
   for (const token of normalized.match(/[a-z0-9][a-z0-9._+-]{1,31}/gu) ?? []) terms.add(token);
   for (const run of normalized.match(/[\p{Script=Han}]{2,}/gu) ?? []) {
-    if (run.length <= 16) terms.add(run);
-    for (let index = 0; index < run.length - 1; index += 1) terms.add(run.slice(index, index + 2));
-    if (run.length >= 3) for (let index = 0; index < run.length - 2; index += 1) terms.add(run.slice(index, index + 3));
+    const characters = Array.from(run);
+    if (characters.length <= 16) terms.add(run);
+    for (let index = 0; index < characters.length - 1; index += 1) terms.add(characters.slice(index, index + 2).join(""));
+    if (characters.length >= 3) {
+      for (let index = 0; index < characters.length - 2; index += 1) terms.add(characters.slice(index, index + 3).join(""));
+    }
   }
   const useful = Array.from(terms)
     .filter((term) => !["什么", "怎么", "如何", "是否", "可以", "关于", "请问", "一下"].includes(term))
+    .map((term) => safePrefix(term, 64))
     .sort((left, right) => right.length - left.length);
   if (useful.length <= MAX_KNOWLEDGE_SEARCH_TERMS) return useful;
   return Array.from({ length: MAX_KNOWLEDGE_SEARCH_TERMS }, (_, index) => useful[Math.round(index * (useful.length - 1) / (MAX_KNOWLEDGE_SEARCH_TERMS - 1))]);
@@ -328,7 +598,7 @@ function occurrenceScore(haystack: string, needle: string, weight: number): numb
 export function rankKnowledgeChunks(question: string, candidates: SearchableKnowledgeChunk[], limit = 6): RankedKnowledgeChunk[] {
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) throw new RangeError("invalid knowledge result limit");
   const normalizedQuestion = normalizedSearchText(question).replace(/[\p{P}\p{S}\s]+/gu, "");
-  const terms = searchTerms(question);
+  const terms = knowledgeSearchTerms(question);
   if (!normalizedQuestion || !terms.length) return [];
 
   const ranked = candidates.map((candidate) => {
@@ -370,4 +640,4 @@ export function knowledgeExcerpt(value: string, maxLength = 260): string {
   return normalized.length <= maxLength ? normalized : `${safePrefix(normalized, maxLength - 1).trimEnd()}…`;
 }
 
-export const __knowledgeTesting = { searchTerms };
+export const __knowledgeTesting = { searchTerms: knowledgeSearchTerms };
