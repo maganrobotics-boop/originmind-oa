@@ -10,6 +10,11 @@ The dependency-free browser source is maintained under `frontend/`. A small
 deterministic builder writes content-hashed JavaScript and CSS plus the resolved
 HTML shell under `public/`; those generated release assets are checked in.
 
+Answers remain grounded in OA-approved public knowledge. Numbered citations are
+required and checked inside the Worker, then removed before the answer is
+returned or stored in signed conversation context. OA-public source records stay
+in the API response as release evidence but are not part of the visible answer.
+
 ## Isolation and visibility
 
 - This Worker and its D1 database are separate from the internal OA Worker and

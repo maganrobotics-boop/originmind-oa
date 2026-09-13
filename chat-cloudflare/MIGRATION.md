@@ -74,7 +74,7 @@ The public chat path does not require an `admin_account` row. Management login d
 
 - `GET /_health` → `{app:"arts-robotics-ai-assistant",ready:true,releaseId:"<expected release>"}`
 - `GET /api/status` → `storageReady:true`, `modelReady:true`, provider `workers-ai` or `bailian`
-- Same-origin `POST /api/chat` with a question matching approved knowledge → HTTP 200, `mode:"ai"`, `oaPublicStatus:"connected"`, the expected `releaseId`, nonempty answer, valid `[n]`, and sources whose `origin` is exclusively `oa_public`
+- Same-origin `POST /api/chat` with a question matching approved knowledge → HTTP 200, `mode:"ai"`, `oaPublicStatus:"connected"`, the expected `releaseId`, a nonempty citation-free answer, and sources whose `origin` is exclusively `oa_public`
 - A no-match question → `mode:"retrieval"` and zero model calls
 - OA admin probe → `connected` after the matching public token is configured on both services
 

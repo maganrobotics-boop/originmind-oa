@@ -29,7 +29,7 @@ const evidence = {
   },
   chat: {
     mode: "ai",
-    answer: "经审核公开资料支持该回答。[1]",
+    answer: "团队主要研究机器人灵巧操作。",
     provider: "workers-ai",
     oaPublicStatus: "connected",
     releaseId,
@@ -75,6 +75,57 @@ test("release evidence rejects unavailable OA and retrieval-only fallback", () =
     }, releaseId),
     /OA-backed AI answer/u,
   );
+});
+
+test("release evidence rejects visible citation markers and reference sections", () => {
+  for (const answer of [
+    "团队主要研究机器人灵巧操作。[1]",
+    "团队主要研究机器人灵巧操作[1]。",
+    "团队主要研究机器人灵巧操作。[1,2]",
+    "团队主要研究机器人灵巧操作。［1，2］",
+    "团队主要研究机器人灵巧操作。［１，２］",
+    "团队主要研究机器人灵巧操作。【1—2】",
+    "团队主要研究机器人灵巧操作。【1】",
+    "团队主要研究机器人灵巧操作。[[1]]",
+    "团队主要研究机器人灵巧操作。\n\n参考资料：内部列表",
+    "团队主要研究机器人灵巧操作。\n\n**参考资料**\n内部列表",
+    "团队主要研究机器人灵巧操作。\n\n### 参考来源\n内部列表",
+    "团队主要研究机器人灵巧操作。 参考资料：内部列表",
+    "团队主要研究机器人灵巧操作。\n\n- **参考资料**\n内部列表",
+    "团队主要研究机器人灵巧操作。\n\n1. 参考资料：\n内部列表",
+    "团队主要研究机器人灵巧操作。\n\n参考资料列表：\n内部列表",
+    "团队主要研究机器人灵巧操作。\n\n参考资料如下所示：\n内部列表",
+    "团队主要研究机器人灵巧操作。\n\n> 参考资料\n内部列表",
+    "团队主要研究机器人灵巧操作。 可参考资料：内部列表",
+    "团队主要研究机器人灵巧操作。\n\n参考：内部列表",
+    "团队主要研究机器人灵巧操作。\n\n出处：内部列表",
+    "Team focus.\n\nReferences:\nInternal list",
+    "Team focus.\n\nSources:\nInternal list",
+    "Team focus.\n\nCitation:\nInternal list",
+    "Team focus.\n\nBibliography:\nInternal list",
+    "Team focus.\n\nWorks Cited\nInternal list",
+  ]) {
+    assert.throws(
+      () => validateReleaseEvidence({
+        ...evidence,
+        chat: { ...evidence.chat, answer },
+      }, releaseId),
+      /citation-free OA-backed AI answer/u,
+    );
+  }
+});
+
+test("release evidence preserves ordinary English words containing source-like substrings", () => {
+  for (const answer of [
+    "Available Resources: robotics lab and test platform.",
+    "Preference: concise answers.",
+    "The project is open-source: selected components are public.",
+  ]) {
+    assert.doesNotThrow(() => validateReleaseEvidence({
+      ...evidence,
+      chat: { ...evidence.chat, answer },
+    }, releaseId));
+  }
 });
 
 test("release evidence rejects any unready homepage service light", () => {
