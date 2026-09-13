@@ -867,6 +867,36 @@ test("Chat admin can transiently extract a PDF without storing the original file
   assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM documents").first()).n, 0);
 });
 
+test("PDF extraction returns text beyond 30000 characters intact for direct OA submission", async (t) => {
+  const longText = "文".repeat(30_001);
+  const env = makeEnvironment({
+    AI: {
+      async toMarkdown() {
+        return { format: "markdown", tokens: 30_001, data: longText };
+      },
+    },
+  });
+  t.after(() => env.DB.close());
+  const token = "e".repeat(64);
+  await env.DB.prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+    .bind(await sha256Hex(token), Date.now() + 60_000)
+    .run();
+
+  const result = await responseJson(await handleRequest(
+    uploadRequest("长报告.pdf", "application/pdf", pdfBytes(), {
+      cookie: `__Host-ma-session=${token}`,
+    }),
+    env,
+    {},
+    runtime(),
+  ));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.text, longText);
+  assert.equal(result.body.characters, 30_001);
+  assert.equal(result.body.originalStored, false);
+  assert.equal((await env.DB.prepare("SELECT COUNT(*) AS n FROM documents").first()).n, 0);
+});
+
 test("file extraction accepts a valid long Chinese filename after header decoding", async (t) => {
   const env = makeEnvironment({
     AI: {
