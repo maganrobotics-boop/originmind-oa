@@ -14,7 +14,7 @@ import {
   fallbackAnswer,
   safeSourceUrl,
 } from "./knowledge.mjs";
-import { probeOaPublicKnowledge, retrieveOa } from "./oa-public.mjs";
+import { inspectOaPublicKnowledge, probeOaPublicKnowledge, retrieveOa } from "./oa-public.mjs";
 import {
   parseChatPayload,
   parseDocumentPayload,
@@ -26,6 +26,14 @@ import {
 
 const SESSION_COOKIE = "__Host-ma-session";
 const SESSION_SECONDS = 43_200;
+const STATUS_PROBE_LEASE_MS = 15_000;
+const MODEL_STATUS_READY_TTL_MS = 5 * 60_000;
+const MODEL_STATUS_RETRY_MS = 30_000;
+const OA_STATUS_TTL_MS = 30_000;
+const MODEL_DAILY_LIMIT = 300;
+const MODEL_STATUS_PROBE_DAILY_LIMIT = 300;
+const MODEL_STATUS_PROBE_BUDGET_MESSAGE = "MODEL_STATUS_PROBE_BUDGET_EXHAUSTED";
+const statusProbeFlights = new WeakMap();
 
 function json(data, status = 200, headers = {}) {
   return Response.json(data, {
@@ -174,9 +182,30 @@ async function globalBudget(context) {
   await consumeCounter(
     context,
     `model-day:${day}`,
-    300,
+    MODEL_DAILY_LIMIT,
     now + 172_800,
     "今日 AI 咨询额度已用完，请稍后再试。",
+  );
+}
+
+async function modelBudgetReady(context) {
+  const day = new Date().toISOString().slice(0, 10);
+  const row = await database(context)
+    .prepare("SELECT count FROM limits WHERE key = ?")
+    .bind(`model-day:${day}`)
+    .first();
+  return Number(row?.count ?? 0) < MODEL_DAILY_LIMIT;
+}
+
+async function consumeModelStatusProbeBudget(context) {
+  const day = new Date().toISOString().slice(0, 10);
+  const now = Math.floor(Date.now() / 1_000);
+  await consumeCounter(
+    context,
+    `model-status-day:${day}`,
+    MODEL_STATUS_PROBE_DAILY_LIMIT,
+    now + 172_800,
+    MODEL_STATUS_PROBE_BUDGET_MESSAGE,
   );
 }
 
@@ -239,7 +268,7 @@ function bailianAnswer(value) {
   return content;
 }
 
-async function modelCall(context, config, messages, maxTokens = 1_400) {
+async function modelCall(context, config, messages, maxTokens = 1_400, timeoutMs = 40_000) {
   const url = `${aliyunEndpoint(config.baseUrl)}/chat/completions`;
   const response = await context.runtime.fetch(url, {
     method: "POST",
@@ -258,7 +287,7 @@ async function modelCall(context, config, messages, maxTokens = 1_400) {
     redirect: "manual",
     cache: "no-store",
     credentials: "omit",
-    signal: AbortSignal.timeout(40_000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
     throw new PublicError(
@@ -306,6 +335,255 @@ async function workersAiCall(context, messages, maxTokens = 1_400) {
     throw new PublicError("模型暂未返回回答，请稍后重试。", 502);
   }
   return answer.slice(0, 12_000);
+}
+
+async function withTimeout(promise, milliseconds) {
+  let timer;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise((_, reject) => {
+        timer = setTimeout(() => reject(new Error("MODEL_PROBE_TIMEOUT")), milliseconds);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+function parsedStatusCache(value, identity, validateResult) {
+  try {
+    const record = JSON.parse(value);
+    if (
+      !record ||
+      typeof record !== "object" ||
+      Array.isArray(record) ||
+      record.version !== 1 ||
+      record.identity !== identity ||
+      !Number.isSafeInteger(record.checkedAt) ||
+      record.checkedAt < 0 ||
+      !Number.isSafeInteger(record.leaseUntil) ||
+      record.leaseUntil < 0
+    ) {
+      return null;
+    }
+    const result = validateResult(record.result);
+    return result ? { checkedAt: record.checkedAt, leaseUntil: record.leaseUntil, result } : null;
+  } catch {
+    return null;
+  }
+}
+
+async function cachedStatusProbe(
+  context,
+  { id, identity, fallback, validateResult, ttlForResult },
+  probe,
+) {
+  const read = async () => {
+    const row = await database(context).prepare("SELECT value FROM settings WHERE id = ?").bind(id).first();
+    return row ? parsedStatusCache(row.value, identity, validateResult) : null;
+  };
+  const now = Date.now();
+  const cached = await read();
+  if (cached && now - cached.checkedAt < ttlForResult(cached.result)) return cached.result;
+
+  let databaseFlights = statusProbeFlights.get(context.env.DB);
+  if (!databaseFlights) {
+    databaseFlights = new Map();
+    statusProbeFlights.set(context.env.DB, databaseFlights);
+  }
+  const flightKey = `${id}:${identity}`;
+  if (databaseFlights.has(flightKey)) return databaseFlights.get(flightKey);
+  const flight = (async () => {
+    const leaseId = randomHex(16);
+    const leaseValue = JSON.stringify({
+      version: 1,
+      identity,
+      leaseId,
+      checkedAt: cached?.checkedAt ?? 0,
+      leaseUntil: now + STATUS_PROBE_LEASE_MS,
+      result: cached?.result ?? fallback,
+    });
+    const acquired = await database(context).prepare(`
+      INSERT INTO settings (id,value) VALUES (?,?)
+      ON CONFLICT(id) DO UPDATE SET value=excluded.value
+      WHERE json_valid(settings.value) = 0
+        OR json_extract(
+          CASE WHEN json_valid(settings.value) THEN settings.value ELSE '{}' END,
+          '$.identity'
+        ) IS NOT ?
+        OR COALESCE(CAST(json_extract(
+          CASE WHEN json_valid(settings.value) THEN settings.value ELSE '{}' END,
+          '$.leaseUntil'
+        ) AS INTEGER), 0) <= ?
+    `).bind(id, leaseValue, identity, now).run();
+    if (!acquired.meta?.changes) {
+      const current = await read();
+      return current && current.leaseUntil > Date.now()
+        ? { ...current.result, probePending: true }
+        : current?.result ?? fallback;
+    }
+
+    let result = fallback;
+    try {
+      result = validateResult(await probe()) ?? fallback;
+    } catch {
+      // Status probes fail closed and never prevent the rest of the status response.
+    }
+    const finalized = await database(context)
+      .prepare("UPDATE settings SET value=? WHERE id=? AND value=?")
+      .bind(JSON.stringify({
+        version: 1,
+        identity,
+        leaseId: null,
+        checkedAt: Date.now(),
+        leaseUntil: 0,
+        result,
+      }), id, leaseValue)
+      .run();
+    return finalized.meta?.changes ? result : (await read())?.result ?? fallback;
+  })();
+  databaseFlights.set(flightKey, flight);
+  try {
+    return await flight;
+  } finally {
+    if (databaseFlights.get(flightKey) === flight) databaseFlights.delete(flightKey);
+  }
+}
+
+function validatedModelStatus(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    typeof value.ready !== "boolean" ||
+    ![null, "bailian", "workers-ai"].includes(value.provider) ||
+    !(value.model === null || typeof value.model === "string") ||
+    (value.ready && (!value.provider || !value.model || !/qwen/iu.test(value.model))) ||
+    (!value.ready && (value.provider !== null || value.model !== null))
+  ) {
+    return null;
+  }
+  return { ready: value.ready, provider: value.provider, model: value.model };
+}
+
+function validatedOaStatus(value) {
+  if (
+    !value ||
+    typeof value !== "object" ||
+    Array.isArray(value) ||
+    typeof value.oaReady !== "boolean" ||
+    typeof value.knowledgeReady !== "boolean" ||
+    typeof value.retrievalReady !== "boolean"
+  ) {
+    return null;
+  }
+  return {
+    oaReady: value.oaReady,
+    knowledgeReady: value.oaReady && value.knowledgeReady,
+    retrievalReady: value.oaReady && value.retrievalReady,
+  };
+}
+
+async function probeWorkersQwen(context) {
+  const prompt = [{ role: "user", content: "请只回复：连接成功" }];
+  if (typeof context.env.AI?.run !== "function" || !/qwen/iu.test(WORKERS_AI_MODEL)) {
+    return { ready: false, provider: null, model: null };
+  }
+  try {
+    await consumeModelStatusProbeBudget(context);
+    await withTimeout(workersAiCall(context, prompt, 8), 5_000);
+    return { ready: true, provider: "workers-ai", model: WORKERS_AI_MODEL };
+  } catch {
+    return { ready: false, provider: null, model: null };
+  }
+}
+
+async function probeQwen(context, active, config) {
+  const prompt = [{ role: "user", content: "请只回复：连接成功" }];
+  if (active.provider === "bailian" && /qwen/iu.test(active.model || "")) {
+    try {
+      await consumeModelStatusProbeBudget(context);
+      await modelCall(context, config, prompt, 8, 5_000);
+      return { ready: true, provider: "bailian", model: active.model };
+    } catch (error) {
+      if (error instanceof PublicError && error.message === MODEL_STATUS_PROBE_BUDGET_MESSAGE) throw error;
+      // The normal chat path can fall back to Workers AI, so probe it below too.
+    }
+  }
+  return probeWorkersQwen(context);
+}
+
+async function modelStatusIdentity(context, config, active) {
+  return sha256Hex(JSON.stringify([
+    releaseId(context),
+    active.provider,
+    active.model,
+    active.provider === "bailian" ? config?.baseUrl ?? null : null,
+    active.provider === "bailian" ? config?.encryptedKey ?? null : null,
+    active.provider === "bailian" ? config?.verifiedAt ?? null : null,
+    typeof context.env.AI?.run === "function",
+  ]));
+}
+
+async function recordModelStatus(context, config, active, result) {
+  const normalized = validatedModelStatus(result);
+  if (!normalized) return;
+  const identity = await modelStatusIdentity(context, config, active);
+  await database(context)
+    .prepare("INSERT INTO settings (id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value")
+    .bind(`system-status-model-v1:${identity}`, JSON.stringify({
+      version: 1,
+      identity,
+      leaseId: null,
+      checkedAt: Date.now(),
+      leaseUntil: 0,
+      result: normalized,
+    }))
+    .run();
+}
+
+async function currentModelStatus(context, config, active) {
+  const identity = await modelStatusIdentity(context, config, active);
+  return cachedStatusProbe(
+    context,
+    {
+      id: `system-status-model-v1:${identity}`,
+      identity,
+      fallback: { ready: false, provider: null, model: null },
+      validateResult: validatedModelStatus,
+      ttlForResult: (result) => result.ready ? MODEL_STATUS_READY_TTL_MS : MODEL_STATUS_RETRY_MS,
+    },
+    () => probeQwen(context, active, config),
+  );
+}
+
+async function currentOaStatus(context) {
+  const identity = await sha256Hex(JSON.stringify([
+    releaseId(context),
+    "oa-public-status-v1",
+    context.env.PUBLIC_LAB_AI_SERVICE_TOKEN || null,
+    typeof context.env.OA_SERVICE?.fetch === "function",
+  ]));
+  return cachedStatusProbe(
+    context,
+    {
+      id: `system-status-oa-v1:${identity}`,
+      identity,
+      fallback: { oaReady: false, knowledgeReady: false, retrievalReady: false },
+      validateResult: validatedOaStatus,
+      ttlForResult: () => OA_STATUS_TTL_MS,
+    },
+    async () => {
+      const result = await inspectOaPublicKnowledge(context);
+      const oaReady = result.status === "connected";
+      return {
+        oaReady,
+        knowledgeReady: oaReady && result.documentCount > 0,
+        retrievalReady: oaReady && result.retrievalReady === true,
+      };
+    },
+  );
 }
 
 function boundedUserMessages(messages, maximum = 3_000) {
@@ -404,16 +682,52 @@ async function api(context) {
     if (method === "POST" || method === "PATCH") sameOrigin(context);
     if (path === "status" && method === "GET") {
       try {
+        if (new URL(request.url).search) throw new PublicError("请求格式错误", 400);
+        await limit(context, "status", 600);
         const config = await getModelConfig(context);
         const active = modelProvider(context, config);
+        const [model, oa, budgetReady] = await Promise.all([
+          currentModelStatus(context, config, active),
+          currentOaStatus(context),
+          modelBudgetReady(context),
+        ]);
+        const modelPending = model.probePending === true;
+        const oaPending = oa.probePending === true;
+        const modelReady = !modelPending && model.ready;
+        const qwenReady = modelReady && typeof model.model === "string" && /qwen/iu.test(model.model);
+        const oaReady = !oaPending && oa.oaReady;
+        const knowledgeReady = !oaPending && oa.knowledgeReady;
+        const retrievalReady = !oaPending && oa.retrievalReady;
         return json({
           storageReady: true,
-          modelReady: Boolean(active.provider),
-          provider: active.provider,
-          model: active.model,
+          modelReady,
+          qwenReady,
+          modelPending,
+          oaReady,
+          knowledgeReady,
+          retrievalReady,
+          oaPending,
+          budgetReady,
+          systemReady: modelReady && qwenReady && oaReady && knowledgeReady && retrievalReady && budgetReady,
+          provider: modelPending ? null : model.provider,
+          model: modelPending ? null : model.model,
         });
-      } catch {
-        return json({ storageReady: false, modelReady: false, provider: null, model: null }, 503);
+      } catch (error) {
+        if (error instanceof PublicError) throw error;
+        return json({
+          storageReady: false,
+          modelReady: false,
+          qwenReady: false,
+          modelPending: false,
+          oaReady: false,
+          knowledgeReady: false,
+          retrievalReady: false,
+          oaPending: false,
+          budgetReady: false,
+          systemReady: false,
+          provider: null,
+          model: null,
+        }, 503);
       }
     }
     if (path.startsWith("admin/")) await requireOwner(context);
@@ -478,16 +792,34 @@ async function api(context) {
       ];
       let provider = active.provider;
       let answer;
-      if (active.provider === "bailian") {
-        try {
-          answer = await modelCall(context, config, messages);
-        } catch (error) {
-          if (typeof context.env.AI?.run !== "function") throw error;
-          provider = "workers-ai";
+      try {
+        if (active.provider === "bailian") {
+          try {
+            answer = await modelCall(context, config, messages);
+          } catch (error) {
+            if (typeof context.env.AI?.run !== "function") throw error;
+            provider = "workers-ai";
+            answer = await workersAiCall(context, messages);
+          }
+        } else {
           answer = await workersAiCall(context, messages);
         }
-      } else {
-        answer = await workersAiCall(context, messages);
+        try {
+          await recordModelStatus(context, config, active, {
+            ready: true,
+            provider,
+            model: provider === "bailian" ? config.model : WORKERS_AI_MODEL,
+          });
+        } catch {
+          // Status evidence is best effort and must not discard a valid answer.
+        }
+      } catch (error) {
+        try {
+          await recordModelStatus(context, config, active, { ready: false, provider: null, model: null });
+        } catch {
+          // Preserve the model error even if recording its status also fails.
+        }
+        throw error;
       }
       if (!safeAiAnswer(answer, sources.length)) {
         return chatResult({
@@ -576,18 +908,47 @@ async function api(context) {
         .prepare("INSERT INTO settings (id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value")
         .bind("model", JSON.stringify(value))
         .run();
+      try {
+        await recordModelStatus(context, value, modelProvider(context, value), {
+          ready: true,
+          provider: "bailian",
+          model: value.model,
+        });
+      } catch {
+        // Saving a verified configuration must not depend on status-cache writes.
+      }
       return json({ saved: true, connected: true, activeProvider: "bailian", verifiedAt: value.verifiedAt });
     }
     if (path === "admin/test" && method === "POST") {
       await limit(context, "test", 10);
       const config = await getModelConfig(context);
       if (!config) throw new PublicError("请先保存模型配置");
-      await modelCall(context, config, [{ role: "user", content: "请只回复：连接成功" }], 20);
+      const active = modelProvider(context, config);
+      try {
+        await modelCall(context, config, [{ role: "user", content: "请只回复：连接成功" }], 20);
+      } catch (error) {
+        try {
+          await recordModelStatus(context, config, active, await probeWorkersQwen(context));
+        } catch {
+          // Preserve the model-test error if status recording is unavailable.
+        }
+        throw error;
+      }
+      const verifiedConfig = { ...config, verifiedAt: new Date().toISOString() };
       const result = await database(context)
         .prepare("UPDATE settings SET value=? WHERE id=? AND value=?")
-        .bind(JSON.stringify({ ...config, verifiedAt: new Date().toISOString() }), "model", JSON.stringify(config))
+        .bind(JSON.stringify(verifiedConfig), "model", JSON.stringify(config))
         .run();
       if (!result.meta.changes) throw new PublicError("配置已发生变化，请刷新后重新检测。", 409);
+      try {
+        await recordModelStatus(context, verifiedConfig, modelProvider(context, verifiedConfig), {
+          ready: true,
+          provider: "bailian",
+          model: verifiedConfig.model,
+        });
+      } catch {
+        // A verified configuration remains valid even if status recording fails.
+      }
       return json({ connected: true });
     }
     if (path === "admin/oa-test" && method === "POST") {
