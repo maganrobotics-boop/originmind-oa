@@ -128,10 +128,6 @@ export class MockD1 {
       return { rows, changes: 0 };
     }
 
-    if (query.startsWith("select id from documents where id")) {
-      return { rows: this.documents.has(args[0]) ? [{ id: args[0] }] : [], changes: 0 };
-    }
-
     if (query.startsWith("select count(*) as n from documents")) {
       return { rows: [{ n: this.documents.size }], changes: 0 };
     }

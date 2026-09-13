@@ -18,6 +18,14 @@ HTML shell under `public/`; those generated release assets are checked in.
   knowledge.
 - Chat-local document writes remain drafts and never reach the public model.
   Only knowledge returned by the OA approved-public endpoint may reach a model.
+- The authenticated management page accepts TXT, Markdown, PDF, JPEG, PNG and
+  WebP. PDF and image files (up to 10 MiB) are sent to Cloudflare Workers AI and
+  converted transiently through its `toMarkdown` binding. The site does not
+  retain the original binary; the returned text is capped at 30,000 characters
+  and must be reviewed by a human. Saving still creates a private Chat draft,
+  and OA approval remains mandatory before internal or public retrieval.
+- Public Chat responses remain text-only. File ingestion does not add PDF or
+  image generation to visitor-facing answers.
 - The public path works before an administrator password is provisioned.
   Management login is deliberately fail-closed until a controlled password
   record is inserted into D1.
@@ -27,19 +35,11 @@ HTML shell under `public/`; those generated release assets are checked in.
 | Kind | Name | Purpose |
 | --- | --- | --- |
 | D1 | `DB` | Inquiries, sessions, drafts, settings, exact budgets |
-| Workers AI | `AI` | Default `@cf/qwen/qwen3-30b-a3b-fp8` provider |
+| Workers AI | `AI` | Default answer model plus transient PDF/image conversion |
 | Static Assets | `ASSETS` | Public and management frontend |
 | Secret | `APP_ENCRYPTION_KEY` | Optional Bailian credential encryption |
 | Secret | `RATE_LIMIT_HMAC_KEY` | Pseudonymous abuse-control identifiers |
 | Secret | `PUBLIC_LAB_AI_SERVICE_TOKEN` | OA public retrieval authentication |
-
-The same Workers AI binding also converts administrator-selected PDF, JPEG,
-PNG, and WebP files to editable Markdown. The parsing route is administrator-
-only, same-origin, size-bounded, rate-limited, and validates both the declared
-type and file signature. Original binary files are not retained. Parsed text
-remains a Chat draft until the administrator reviews it and submits it to the
-existing OA internal/public approval flow; long results are split into bounded
-parts before submission.
 
 `APP_ORIGIN` is strict: preview and production deployments must generate their
 own configuration with the exact public origin. Production disables both

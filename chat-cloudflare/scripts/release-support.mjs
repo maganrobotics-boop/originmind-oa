@@ -354,10 +354,12 @@ export async function cloudflareApi({ accountId, apiToken }, path, { method = "G
 }
 
 export async function workersDevSubdomain(credentials, supplied) {
-  if (supplied) return supplied;
   const result = await cloudflareApi(credentials, `/accounts/${credentials.accountId}/workers/subdomain`);
   const value = String(result?.subdomain || "").toLowerCase();
   if (!SUBDOMAIN_PATTERN.test(value)) throw new Error("Cloudflare returned an invalid workers.dev subdomain");
+  if (supplied && supplied !== value) {
+    throw new Error("CHAT_WORKERS_DEV_SUBDOMAIN does not match the authorized Cloudflare account");
+  }
   return value;
 }
 

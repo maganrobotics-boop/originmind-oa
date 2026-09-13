@@ -14,6 +14,7 @@ import {
   parseWorkerSecretNames,
   selectExactDatabase,
   validateReleaseEnvironment,
+  workersDevSubdomain,
 } from "./release-support.mjs";
 import { PASSWORD_ITERATIONS as RUNTIME_PASSWORD_ITERATIONS } from "../src/crypto.mjs";
 
@@ -59,6 +60,36 @@ test("optional generated and administrator credentials may be absent", () => {
   );
 });
 
+test("production release requires real PDF and image extraction smoke checks", () => {
+  assert.match(releaseEntry, /CHAT_ADMIN_PASSWORD is required for the production PDF\/image extraction smoke check/u);
+  assert.match(releaseEntry, /smoke-staging-file-extraction\.json/u);
+  assert.match(releaseEntry, /smoke-production-file-extraction\.json/u);
+  assert.match(releaseEntry, /smokeSavedAdminAuthentication\(stagingOrigin/u);
+  assert.match(releaseEntry, /smokeSavedAdminAuthentication\(PRODUCTION_ORIGIN/u);
+});
+
+test("workers.dev subdomain is always verified against the authorized Cloudflare account", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const calls = [];
+  globalThis.fetch = async (url, options) => {
+    calls.push({ url, options });
+    return Response.json({ success: true, result: { subdomain: "verified-team" } });
+  };
+  const credentials = { accountId, apiToken: "cloudflare-api-token-long-enough" };
+  assert.equal(await workersDevSubdomain(credentials, ""), "verified-team");
+  assert.equal(await workersDevSubdomain(credentials, "verified-team"), "verified-team");
+  await assert.rejects(
+    workersDevSubdomain(credentials, "attacker-team"),
+    /does not match the authorized Cloudflare account/u,
+  );
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every((call) => call.url === `https://api.cloudflare.com/client/v4/accounts/${accountId}/workers/subdomain`));
+  assert.ok(calls.every((call) => call.options.headers.Authorization === "Bearer cloudflare-api-token-long-enough"));
+});
+
 test("service token accepts exact values and normalizes copied values deterministically", () => {
   const token = "A".repeat(43);
   const environment = validateReleaseEnvironment(validEnvironment({
@@ -99,7 +130,10 @@ test("release entry redacts and removes the raw copied token before child proces
   assert.ok(releaseEntry.indexOf("validateReleaseEnvironment()") < releaseEntry.indexOf("delete process.env.PUBLIC_LAB_AI_SERVICE_TOKEN"));
   assert.ok(releaseEntry.indexOf("delete process.env.PUBLIC_LAB_AI_SERVICE_TOKEN") < releaseEntry.indexOf("const secretValues"));
   assert.match(releaseEntry, /rawPublicToken\.trim\(\)/u);
-  assert.ok(releaseEntry.indexOf("delete process.env.CHAT_ADMIN_PASSWORD") < releaseEntry.indexOf("const secretValues"));
+  for (const name of ["CHAT_ADMIN_PASSWORD", "CHAT_APP_ENCRYPTION_KEY", "CHAT_RATE_LIMIT_HMAC_KEY"]) {
+    assert.ok(releaseEntry.indexOf(`delete process.env.${name}`) > releaseEntry.indexOf("validateReleaseEnvironment()"));
+    assert.ok(releaseEntry.indexOf(`delete process.env.${name}`) < releaseEntry.indexOf("const secretValues"));
+  }
 });
 
 test("production release waits past Cloudflare Auto TTL before live smoke", () => {

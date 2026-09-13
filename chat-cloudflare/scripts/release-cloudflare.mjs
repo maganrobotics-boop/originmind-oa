@@ -24,15 +24,17 @@ import {
   writeJson,
 } from "./release-support.mjs";
 import { checkOaPublicRetrieve } from "./check-oa-public.mjs";
-import { smokeCloudflare } from "./smoke-cloudflare.mjs";
+import { smokeCloudflare, smokeSavedAdminAuthentication } from "./smoke-cloudflare.mjs";
 
 const rawPublicToken = process.env.PUBLIC_LAB_AI_SERVICE_TOKEN || "";
 const environment = validateReleaseEnvironment();
+if (!environment.adminPassword) {
+  throw new Error("CHAT_ADMIN_PASSWORD is required for the production PDF/image extraction smoke check");
+}
 delete process.env.PUBLIC_LAB_AI_SERVICE_TOKEN;
 delete process.env.CHAT_ADMIN_PASSWORD;
-if (!environment.adminPassword) {
-  throw new Error("CHAT_ADMIN_PASSWORD is required for production document parser verification");
-}
+delete process.env.CHAT_APP_ENCRYPTION_KEY;
+delete process.env.CHAT_RATE_LIMIT_HMAC_KEY;
 const secretValues = [
   rawPublicToken,
   rawPublicToken.trim(),
@@ -225,11 +227,12 @@ try {
   await withSecretJson(workerSecrets, async (secretPath) => {
     progress("Deploying the same Worker to workers.dev for staging verification.");
     await deploy(stagingConfigPath, secretPath, "staging");
-    const stagingSmoke = await smokeCloudflare(stagingOrigin, {
-      releaseId: environment.releaseId,
-      adminPassword: environment.adminPassword,
-    });
+    const stagingSmoke = await smokeCloudflare(stagingOrigin, { releaseId: environment.releaseId });
     await writeJson(join(evidenceRoot, "smoke-staging.json"), stagingSmoke);
+    const stagingExtraction = await smokeSavedAdminAuthentication(stagingOrigin, {
+      environment: { CHAT_ADMIN_PASSWORD: environment.adminPassword },
+    });
+    await writeJson(join(evidenceRoot, "smoke-staging-file-extraction.json"), stagingExtraction);
 
     progress("Staging passed. Deploying the production route while DNS is still unproxied.");
     await deploy(productionConfigPath, secretPath, "production-route");
@@ -241,11 +244,12 @@ try {
 
     await writeJson(join(evidenceRoot, "dns-settle.json"), await settleProductionDns());
 
-    const liveSmoke = await smokeCloudflare(PRODUCTION_ORIGIN, {
-      releaseId: environment.releaseId,
-      adminPassword: environment.adminPassword,
-    });
+    const liveSmoke = await smokeCloudflare(PRODUCTION_ORIGIN, { releaseId: environment.releaseId });
     await writeJson(join(evidenceRoot, "smoke-production.json"), liveSmoke);
+    const liveExtraction = await smokeSavedAdminAuthentication(PRODUCTION_ORIGIN, {
+      environment: { CHAT_ADMIN_PASSWORD: environment.adminPassword },
+    });
+    await writeJson(join(evidenceRoot, "smoke-production-file-extraction.json"), liveExtraction);
   });
 
   const deployments = await runWrangler(["deployments", "list", "--json", "--config", productionConfigPath], { secrets: secretValues });

@@ -1,8 +1,21 @@
 import { createHash, randomBytes } from "node:crypto";
+import { Buffer } from "node:buffer";
 import { pathToFileURL } from "node:url";
 
 // A newly published Worker or route can briefly return 404/421 while edge state converges.
 const TRANSIENT_STATUSES = new Set([404, 408, 421, 425, 500, 502, 503, 504]);
+const DOCUMENT_SMOKE_FIXTURES = Object.freeze([
+  Object.freeze({
+    name: "originmind-release-smoke.pdf",
+    mimeType: "application/pdf",
+    bytes: Buffer.from("JVBERi0xLjMKJZOMi54gUmVwb3J0TGFiIEdlbmVyYXRlZCBQREYgZG9jdW1lbnQgKG9wZW5zb3VyY2UpCjEgMCBvYmoKPDwKL0YxIDIgMCBSCj4+CmVuZG9iagoyIDAgb2JqCjw8Ci9CYXNlRm9udCAvSGVsdmV0aWNhIC9FbmNvZGluZyAvV2luQW5zaUVuY29kaW5nIC9OYW1lIC9GMSAvU3VidHlwZSAvVHlwZTEgL1R5cGUgL0ZvbnQKPj4KZW5kb2JqCjMgMCBvYmoKPDwKL0NvbnRlbnRzIDcgMCBSIC9NZWRpYUJveCBbIDAgMCA1OTUuMjc1NiA4NDEuODg5OCBdIC9QYXJlbnQgNiAwIFIgL1Jlc291cmNlcyA8PAovRm9udCAxIDAgUiAvUHJvY1NldCBbIC9QREYgL1RleHQgL0ltYWdlQiAvSW1hZ2VDIC9JbWFnZUkgXQo+PiAvUm90YXRlIDAgL1RyYW5zIDw8Cgo+PiAKICAvVHlwZSAvUGFnZQo+PgplbmRvYmoKNCAwIG9iago8PAovUGFnZU1vZGUgL1VzZU5vbmUgL1BhZ2VzIDYgMCBSIC9UeXBlIC9DYXRhbG9nCj4+CmVuZG9iago1IDAgb2JqCjw8Ci9BdXRob3IgKGFub255bW91cykgL0NyZWF0aW9uRGF0ZSAoRDoyMDAwMDEwMTAwMDAwMCswMCcwMCcpIC9DcmVhdG9yIChhbm9ueW1vdXMpIC9LZXl3b3JkcyAoKSAvTW9kRGF0ZSAoRDoyMDAwMDEwMTAwMDAwMCswMCcwMCcpIC9Qcm9kdWNlciAoUmVwb3J0TGFiIFBERiBMaWJyYXJ5IC0gXChvcGVuc291cmNlXCkpIAogIC9TdWJqZWN0ICh1bnNwZWNpZmllZCkgL1RpdGxlIChPcmlnaW5NaW5kIHVwbG9hZCBzbW9rZSkgL1RyYXBwZWQgL0ZhbHNlCj4+CmVuZG9iago2IDAgb2JqCjw8Ci9Db3VudCAxIC9LaWRzIFsgMyAwIFIgXSAvVHlwZSAvUGFnZXMKPj4KZW5kb2JqCjcgMCBvYmoKPDwKL0xlbmd0aCAyMDQKPj4Kc3RyZWFtCjEgMCAwIDEgMCAwIGNtICBCVCAvRjEgMTIgVGYgMTQuNCBUTCBFVApCVCAvRjEgMTQgVGYgMTYuOCBUTCBFVApCVCAxIDAgMCAxIDcyIDc3MCBUbSAoT3JpZ2luTWluZCBQREYgdXBsb2FkIHNtb2tlIHRlc3QuKSBUaiBUKiBFVApCVCAxIDAgMCAxIDcyIDc0NSBUbSAoQ2xvdWRmbGFyZSBBSSBzaG91bGQgZXh0cmFjdCB0aGlzIHRleHQuKSBUaiBUKiBFVAogCmVuZHN0cmVhbQplbmRvYmoKeHJlZgowIDgKMDAwMDAwMDAwMCA2NTUzNSBmIAowMDAwMDAwMDYxIDAwMDAwIG4gCjAwMDAwMDAwOTIgMDAwMDAgbiAKMDAwMDAwMDE5OSAwMDAwMCBuIAowMDAwMDAwNDAyIDAwMDAwIG4gCjAwMDAwMDA0NzAgMDAwMDAgbiAKMDAwMDAwMDc0NiAwMDAwMCBuIAowMDAwMDAwODA1IDAwMDAwIG4gCnRyYWlsZXIKPDwKL0lEIApbPDJkNjE0MzM2MWQxM2Y2NDM0NjI1Y2VlMmU3ZTQxMGUwPjwyZDYxNDMzNjFkMTNmNjQzNDYyNWNlZTJlN2U0MTBlMD5dCiUgUmVwb3J0TGFiIGdlbmVyYXRlZCBQREYgZG9jdW1lbnQgLS0gZGlnZXN0IChvcGVuc291cmNlKQoKL0luZm8gNSAwIFIKL1Jvb3QgNCAwIFIKL1NpemUgOAo+PgpzdGFydHhyZWYKMTA1OQolJUVPRgo=", "base64"),
+  }),
+  Object.freeze({
+    name: "originmind-release-smoke.png",
+    mimeType: "image/png",
+    bytes: Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAoAAAACgAQAAAAC0heCRAAAEJklEQVR42u3YT08bRwCH4XfXK7yVXDrNyUhETFCulUzaQw6R2LQ99Cv0VIMq9dTE1zQ0jFGkcqTHSFHwx6jUJgwRBy4plnqtwpigsie0Dm61RvunB9uQkGCcwKXVzGl2ZvbRjDTj9W+cnIstLha0oAUtaEELWtCCFrSgBS14bjAVpBCC2AmBIH1tRBPgsP8QDurBMLDTueAZHuxfMLhbpABlKIdlgMJ5Qd/rXE4/Cx8EED6TG6SHy8vtYKfR4jDtCFrKyyXt2fmd3GezxZ683728cRroAfqTH0mahMaHTvQY8rvO181t1cp/II0xa2kWEpmnUwsJm+18Lr/3fTR0hsLFdDXFWqlJ4ZeHwK1bH+nfWdXAn2yZJDHs6cmHC/usrOqJ53cPXtwYvg8dXkr8APCmpoHlZVH+GVkFZxxRd+8IfDk97fi5lFVYui8YtmRw8UodAeBzU+MAyG9agDtGYwXXBwL+LmSzDqTuqCdlrHFU7Uqoq/7DEtAGIFF1Re521TsfvfCVeq6AinylpbwyFIyywZvH7XsGFk2vnt0DxiMATy0anPyneCgY0F+Bd3xC/VcHKcDRAK7utZihYJxAcrSz1vqvmLqGJIsxzSzrzShLnZY+4yS5wGQXxg1QUOA8ByDWtzEmj/OX1NRCMcJoKMbUjAFVM70foVPADy9B8Wi13wIwoa4xF3iCq8xML3uS1gp4l7g+F+TT9fZXG8NmWCqBVxm0fAGAqF5RVemWCj7y5phbRkpwPSar0nPUijh93+T9cpCfLKtvbz6jHO3DN4+7Otc3Jdk92bMtzwWmb3wkds731fPKJ3ukfi/QsbdzFrSgBS1oQQta8H+X6HupfZCQdlOgAdAZ/JU+JOwQQodB1yiJPrnoRO/048xf5070pdHGlkdO9C7ruZqVe0FLXWsrgFR0g6XDlDZcaysvlzxQfrjOs8DffDF/FtgErchCMI1mU/MHJHFoFoEooNlcS7MQ0gStSJPJ3VG2zSNNYib0lBrfqgJ0o+LtGwr2YHyrmiSG79Q+q3z62z/ig0cjgFegK0BWhKigFK7vB58DmwohZtw7AhwfqXAKY80RZpgH1V5qRzZgGkBkdQ0iQDbA9QcjD3vpedST0g5YD06mjPVgqV/bgNTz5DuAzV4M15Q2TyZ6gMdq6LXXW8AtzWzEUygsHDfO7t/r165rCjn6TPAoiHJ8e1J7W+orAqTmTDDO0I08iwFNlSyvArAYJEQaqgwSPTBGXDsTnOw42zwpRhApogggjnCf5DHXFUTRQrGXVRchz93gtSuTUxL9/M0NT8IMzEiA7lWcjfuCCegn+q6CpSD90u3EQ2Ol10v0waz3axmkrlVEWqjg+1B3SwgNlY9jt4wA1GK34JjJwIZHC1rQgha0oAUtaEELWtCCFrSgBS34nwf/BTF4225LfaIKAAAAAElFTkSuQmCC", "base64"),
+  }),
+]);
 
 export function isTransientSmokeStatus(status) {
   return TRANSIENT_STATUSES.has(status);
@@ -21,18 +34,18 @@ function exactOrigin(value) {
 }
 
 async function request(origin, pathname, init = {}) {
-  const { timeoutMilliseconds = 45_000, ...fetchOptions } = init;
+  const { timeoutMilliseconds = 45_000, ...requestInit } = init;
   try {
     return await fetch(`${origin}${pathname}`, {
-      ...fetchOptions,
+      ...requestInit,
       headers: {
         Accept: "application/json, text/html;q=0.9",
         "Cache-Control": "no-cache",
         "User-Agent": "OriginMind-Chat-Release-Smoke/1.0",
-        ...(fetchOptions.headers || {}),
+        ...(requestInit.headers || {}),
       },
       redirect: "error",
-      signal: AbortSignal.timeout(timeoutMilliseconds),
+      signal: requestInit.signal || AbortSignal.timeout(timeoutMilliseconds),
     });
   } catch {
     throw Object.assign(new Error("Smoke request failed"), { retryable: true });
@@ -128,10 +141,9 @@ export function validateServiceEvidence({ health, status, chat }, releaseIdValue
   if (
     status?.storageReady !== true ||
     status?.modelReady !== true ||
-    status?.documentParsingReady !== true ||
     !["workers-ai", "bailian"].includes(status?.provider)
   ) {
-    throw new Error("/api/status is not storage/model/document-parser ready");
+    throw new Error("/api/status is not storage/model ready");
   }
   if (
     chat?.mode !== "ai" ||
@@ -164,35 +176,6 @@ function validateAdminAuth(adminAuth) {
   if (adminAuth?.status !== 401 || adminAuth?.error !== "密码不正确") {
     throw new Error("/api/auth/login did not execute a compatible administrator password check");
   }
-}
-
-export function releaseSmokePdf() {
-  const stream = "BT\n/F1 18 Tf\n72 720 Td\n(OriginMind document parser smoke 2026) Tj\nET";
-  const objects = [
-    "<< /Type /Catalog /Pages 2 0 R >>",
-    "<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-    "<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
-    "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-    `<< /Length ${Buffer.byteLength(stream, "ascii")} >>\nstream\n${stream}\nendstream`,
-  ];
-  let source = "%PDF-1.4\n";
-  const offsets = [0];
-  for (const [index, object] of objects.entries()) {
-    offsets.push(Buffer.byteLength(source, "ascii"));
-    source += `${index + 1} 0 obj\n${object}\nendobj\n`;
-  }
-  const xrefOffset = Buffer.byteLength(source, "ascii");
-  source += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`;
-  source += offsets.slice(1).map((offset) => `${String(offset).padStart(10, "0")} 00000 n \n`).join("");
-  source += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefOffset}\n%%EOF\n`;
-  return Buffer.from(source, "ascii");
-}
-
-export function releaseSmokePng() {
-  return Buffer.from(
-    "iVBORw0KGgoAAAANSUhEUgAAAPAAAABAAQAAAAAM5MdKAAAAsUlEQVR42mP8z4AXNOCTZGTCr5lFHp/pvwjoHpUelR4a0iwMDCcOfCx5++VcyRZtA6mX9zB0fzH518DAwJAh9eD84rOYhh9i+Akxh4NBAbvdjY0PBBgYHjBiddqZvw0MDAwMzy4YyhZjOo1B58U/BgYGBhkTTx5BTN12HOwMDgc4/jAwyGH4k4mBgYfhNwMjA8MMhgOMsQ7ols//jwf8HE0to9Kj0gwsDxkpqEMZ8VfQADQ7RHGKtQ37AAAAAElFTkSuQmCC",
-    "base64",
-  );
 }
 
 export function validateReleaseEvidence({ health, status, chat, adminAuth }, releaseIdValue) {
@@ -346,6 +329,57 @@ async function revokeSmokeSession(origin, token, { attempts = 3, sleepImpl = sle
   throw lastError || new Error("Administrator smoke session was not revoked");
 }
 
+export function validateDocumentExtractionEvidence(payload, fixture) {
+  if (
+    !payload ||
+    payload.fileName !== fixture.name ||
+    payload.mimeType !== fixture.mimeType ||
+    payload.originalStored !== false ||
+    typeof payload.text !== "string" ||
+    !/Origin\s*Mind/iu.test(payload.text) ||
+    payload.characters !== payload.text.length ||
+    payload.characters < 10 ||
+    (payload.tokens !== null && (!Number.isInteger(payload.tokens) || payload.tokens < 0))
+  ) {
+    throw new Error(`${fixture.mimeType} did not return verified transient extraction evidence`);
+  }
+  return {
+    fileName: fixture.name,
+    mimeType: fixture.mimeType,
+    characters: payload.characters,
+    originalStored: false,
+  };
+}
+
+async function verifyDocumentExtractionRuntime(origin, token) {
+  const evidence = [];
+  for (const fixture of DOCUMENT_SMOKE_FIXTURES) {
+    const response = await request(origin, "/api/admin/extract", {
+      method: "POST",
+      headers: {
+        Origin: origin,
+        Cookie: `__Host-ma-session=${token}`,
+        "Content-Type": fixture.mimeType,
+        "X-File-Name": encodeURIComponent(fixture.name),
+      },
+      body: fixture.bytes,
+      timeoutMilliseconds: 120_000,
+    });
+    if (response.status !== 200) {
+      throw Object.assign(new Error(`${fixture.mimeType} extraction returned ${response.status}`), {
+        status: response.status,
+        retryable: isTransientSmokeStatus(response.status),
+      });
+    }
+    apiHeaders(response, "/api/admin/extract");
+    evidence.push(validateDocumentExtractionEvidence(
+      await json(response, "/api/admin/extract"),
+      fixture,
+    ));
+  }
+  return { documentExtractionVerified: true, files: evidence };
+}
+
 async function verifySavedAdminPasswordRuntime(origin, password, { logoutAttempts = 3, sleepImpl = sleep } = {}) {
   const loginResponse = await request(origin, "/api/auth/login", {
     method: "POST",
@@ -355,6 +389,7 @@ async function verifySavedAdminPasswordRuntime(origin, password, { logoutAttempt
   const cookie = loginResponse.headers.get("set-cookie") || "";
   const tokenMatch = /^__Host-ma-session=([a-f0-9]{64})(?:;|$)/u.exec(cookie);
   const validCookie = /^__Host-ma-session=[a-f0-9]{64}; Path=\/; Secure; HttpOnly; SameSite=Strict; Max-Age=[1-9][0-9]*$/u.test(cookie);
+  let documentExtraction;
   try {
     if (loginResponse.status !== 200 && isTransientSmokeStatus(loginResponse.status)) {
       throw Object.assign(new Error("Administrator login returned a transient response"), {
@@ -371,68 +406,13 @@ async function verifySavedAdminPasswordRuntime(origin, password, { logoutAttempt
       });
     }
     if (!validCookie) throw new Error("Administrator login did not return the expected session cookie");
+    documentExtraction = await verifyDocumentExtractionRuntime(origin, tokenMatch[1]);
   } finally {
     if (tokenMatch) {
       await revokeSmokeSession(origin, tokenMatch[1], { attempts: logoutAttempts, sleepImpl });
     }
   }
-}
-
-async function verifyDocumentParsingRuntime(origin, password, { logoutAttempts = 3, sleepImpl = sleep } = {}) {
-  const loginResponse = await request(origin, "/api/auth/login", {
-    method: "POST",
-    headers: { "Content-Type": "application/json", Origin: origin },
-    body: JSON.stringify({ password }),
-  });
-  const cookie = loginResponse.headers.get("set-cookie") || "";
-  const tokenMatch = /^__Host-ma-session=([a-f0-9]{64})(?:;|$)/u.exec(cookie);
-  const validCookie = /^__Host-ma-session=[a-f0-9]{64}; Path=\/; Secure; HttpOnly; SameSite=Strict; Max-Age=[1-9][0-9]*$/u.test(cookie);
-  try {
-    apiHeaders(loginResponse, "/api/auth/login");
-    const login = await json(loginResponse, "/api/auth/login");
-    if (loginResponse.status !== 200 || login?.signedIn !== true || !validCookie || !tokenMatch) {
-      throw Object.assign(new Error("The saved administrator password could not start the parser smoke session"), {
-        status: loginResponse.status,
-        retryable: isTransientSmokeStatus(loginResponse.status),
-      });
-    }
-
-    const fixtures = [
-      { name: "originmind-release-smoke.pdf", mimeType: "application/pdf", body: releaseSmokePdf() },
-      { name: "originmind-release-smoke.png", mimeType: "image/png", body: releaseSmokePng() },
-    ];
-    for (const fixture of fixtures) {
-      const parseResponse = await request(origin, `/api/admin/parse-file?name=${fixture.name}`, {
-        method: "POST",
-        timeoutMilliseconds: 120_000,
-        headers: {
-          "Content-Type": fixture.mimeType,
-          Origin: origin,
-          Cookie: `__Host-ma-session=${tokenMatch[1]}`,
-        },
-        body: fixture.body,
-      });
-      apiHeaders(parseResponse, "/api/admin/parse-file");
-      const parsed = await json(parseResponse, "/api/admin/parse-file");
-      if (
-        parseResponse.status !== 200 ||
-        typeof parsed?.markdown !== "string" ||
-        parsed.markdown.trim().length < 10 ||
-        parsed.mimeType !== fixture.mimeType ||
-        parsed.sourceStored !== false ||
-        parsed.characterCount !== parsed.markdown.length
-      ) {
-        throw Object.assign(new Error(`The live ${fixture.mimeType} parser did not return valid Markdown`), {
-          status: parseResponse.status,
-          retryable: isTransientSmokeStatus(parseResponse.status),
-        });
-      }
-    }
-  } finally {
-    if (tokenMatch) {
-      await revokeSmokeSession(origin, tokenMatch[1], { attempts: logoutAttempts, sleepImpl });
-    }
-  }
+  return documentExtraction;
 }
 
 export async function smokeAdminAuthentication(originValue, {
@@ -457,30 +437,19 @@ export async function smokeSavedAdminAuthentication(originValue, {
   if (typeof password !== "string" || password.length < 12 || password.length > 256) {
     throw new Error("A valid saved administrator password is required");
   }
-  await verifyAdmin(origin, password, { logoutAttempts, sleepImpl });
-  return { adminPasswordVerified: true, smokeSessionRevoked: true };
-}
-
-export async function smokeDocumentParsing(originValue, password, {
-  verifyParser = verifyDocumentParsingRuntime,
-  logoutAttempts = 3,
-  sleepImpl = sleep,
-} = {}) {
-  const origin = exactOrigin(originValue);
-  if (typeof password !== "string" || password.length < 12 || password.length > 256) {
-    throw new Error("A valid saved administrator password is required for parser smoke");
-  }
-  await verifyParser(origin, password, { logoutAttempts, sleepImpl });
-  return { documentParsingVerified: true, smokeSessionRevoked: true };
+  const extraction = await verifyAdmin(origin, password, { logoutAttempts, sleepImpl });
+  return {
+    adminPasswordVerified: true,
+    smokeSessionRevoked: true,
+    ...(extraction && typeof extraction === "object" ? extraction : {}),
+  };
 }
 
 export async function smokeCloudflare(originValue, {
   attempts = 12,
   releaseId,
-  adminPassword = "",
   smokeAttempt = smokeOnce,
   verifyAdmin = verifyAdminPasswordRuntime,
-  verifyParser = verifyDocumentParsingRuntime,
   sleepImpl = sleep,
 } = {}) {
   const origin = exactOrigin(originValue);
@@ -500,9 +469,7 @@ export async function smokeCloudflare(originValue, {
   }
   if (!evidence) throw lastError || new Error("Cloudflare smoke check failed");
   await runAdminProbe(origin, verifyAdmin, { sleepImpl });
-  if (!adminPassword) return { ...evidence, adminKdfCompatible: true };
-  await verifyParser(origin, adminPassword, { sleepImpl });
-  return { ...evidence, adminKdfCompatible: true, documentParsingVerified: true };
+  return { ...evidence, adminKdfCompatible: true };
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
