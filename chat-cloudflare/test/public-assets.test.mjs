@@ -60,7 +60,7 @@ async function frontendImportHelpers() {
   const end = script.indexOf("const TOPICS", start);
   assert.ok(start >= 0 && end > start, "frontend import helpers must remain directly testable");
   return runInNewContext(
-    `${script.slice(start, end)}\n({ MAX_TEXT_IMPORT_BYTES, MAX_CHAT_DRAFT_CHARACTERS, MAX_OA_STORAGE_FRAGMENT_CHARACTERS, normalizeImportedText, decodeImportedUtf8, utf8ByteLength, estimatedOaStorageFragmentCount, oaImportReceipt, returnedKnowledgeItemIdFromSearch, withoutReturnedKnowledgeItemQuery });`,
+    `${script.slice(start, end)}\n({ MAX_TEXT_IMPORT_BYTES, CHAT_DIRECT_OA_THRESHOLD_CHARACTERS, MAX_OA_STORAGE_FRAGMENT_CHARACTERS, normalizeImportedText, decodeImportedUtf8, utf8ByteLength, estimatedOaStorageFragmentCount, oaImportReceipt, returnedKnowledgeItemIdFromSearch, withoutReturnedKnowledgeItemQuery });`,
     { TextDecoder, TextEncoder, URL, URLSearchParams },
   );
 }
@@ -115,7 +115,7 @@ async function frontendReturnedImportHarness({
     state,
     OA_CHAT_IMPORT_URL: "https://oa.omindos.ai/api/knowledge/import-chat",
     OA_CHAT_IMPORT_STATUS_URL: "https://oa.omindos.ai/api/knowledge/import-chat/status",
-    MAX_CHAT_DRAFT_CHARACTERS: 30_000,
+    CHAT_DIRECT_OA_THRESHOLD_CHARACTERS: 30_000,
     SAFE_RETURNED_KNOWLEDGE_ITEM_ID: /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i,
     AbortSignal,
     fetch: async (url, options) => {
@@ -263,7 +263,7 @@ test("frontend answer formatting hides citations without truncating ordinary sou
 test("text imports use normalized fatal UTF-8 decoding and a five MiB byte cap", async () => {
   const helpers = await frontendImportHelpers();
   assert.equal(helpers.MAX_TEXT_IMPORT_BYTES, 5 * 1024 * 1024);
-  assert.equal(helpers.MAX_CHAT_DRAFT_CHARACTERS, 30_000);
+  assert.equal(helpers.CHAT_DIRECT_OA_THRESHOLD_CHARACTERS, 30_000);
   assert.equal(helpers.MAX_OA_STORAGE_FRAGMENT_CHARACTERS, 20_000);
   assert.equal(helpers.normalizeImportedText("\uFEFFＡ\r\nB\rC\u0000\u0007"), "A\nB\nC");
   assert.equal(helpers.decodeImportedUtf8(new TextEncoder().encode("\uFEFFＭＤ\r\n正文")), "MD\n正文");
@@ -465,10 +465,10 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.ok(script.includes("PDF、扫描件和图片"));
   assert.ok(script.includes("发送至 Cloudflare AI 临时解析"));
   assert.ok(script.includes("本站不保存原件"));
-  assert.ok(script.includes("解析正文最多 30000 字"));
+  assert.ok(script.includes("解析正文不设 30000 字上限"));
   assert.ok(script.includes("TXT、Markdown 单个文件最多 5 MB"));
   assert.ok(script.includes("1.6 MB 文件可以直接导入"));
-  assert.ok(script.includes("OA 作为 1 条资料审核"));
+  assert.ok(script.includes("OA 作为 1 条资料统一审核"));
   assert.ok(script.includes("每个不超过 20000 字"));
   assert.ok(script.includes("OA 接收成功后才清空"));
   assert.ok(script.includes("导入新文件将替换当前正文"));
@@ -485,15 +485,17 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.match(script, /new TextDecoder\(["']utf-8["'],\s*\{\s*fatal:\s*true\s*\}\)/u);
   assert.match(script, /decodeImportedUtf8\(await file\.arrayBuffer\(\)\)/u);
   assert.doesNotMatch(script, /await file\.text\(\)/u);
+  assert.doesNotMatch(script, /!isText\s*&&\s*text\.length\s*>\s*CHAT_DIRECT_OA_THRESHOLD_CHARACTERS/u);
   assert.doesNotMatch(script, /id:\s*["']document-body["'][\s\S]{0,160}maxlength:\s*["']30000["']/u);
   assert.match(script, /signal:\s*AbortSignal\.timeout\(120_000\)/u);
   assert.match(script, /submissionRequestId:\s*["']["']/u);
-  assert.match(script, /if \(!returnedKnowledgeItemId && state\.draft\.id && normalizedBody\.length > MAX_CHAT_DRAFT_CHARACTERS\)[\s\S]*?已有 Chat 草稿不能直接改为超过 30000 字/u);
+  assert.doesNotMatch(script, /每条资料最多 30000 字/u);
+  assert.match(script, /if \(!returnedKnowledgeItemId && state\.draft\.id && normalizedBody\.length > CHAT_DIRECT_OA_THRESHOLD_CHARACTERS\)[\s\S]*?已有 Chat 草稿不能直接改为大型正文/u);
   assert.match(script, /const id = state\.draft\.id \|\| state\.draft\.submissionRequestId \|\| makeRequestId\(\)/u);
   assert.match(script, /state\.draft\.submissionRequestId = id/u);
   assert.match(script, /await submitDocumentToOa\(\{ \.\.\.state\.draft, id \}, \{[\s\S]*?submissionContext: \{ returnedKnowledgeItemId \}[\s\S]*?\}\);[\s\S]*?state\.draft = emptyDraft\(\)/u);
-  assert.match(script, /if \(returnedKnowledgeItemId \|\| normalizedBody\.length > MAX_CHAT_DRAFT_CHARACTERS\)[\s\S]*?await submitDocumentToOa[\s\S]*?return;[\s\S]*?adminRequest\("documents"/u);
-  const directSubmitStart = script.indexOf("if (returnedKnowledgeItemId || normalizedBody.length > MAX_CHAT_DRAFT_CHARACTERS)");
+  assert.match(script, /if \(returnedKnowledgeItemId \|\| normalizedBody\.length > CHAT_DIRECT_OA_THRESHOLD_CHARACTERS\)[\s\S]*?await submitDocumentToOa[\s\S]*?return;[\s\S]*?adminRequest\("documents"/u);
+  const directSubmitStart = script.indexOf("if (returnedKnowledgeItemId || normalizedBody.length > CHAT_DIRECT_OA_THRESHOLD_CHARACTERS)");
   const directSubmitEnd = script.indexOf("const draft = { ...state.draft }", directSubmitStart);
   assert.ok(directSubmitStart >= 0 && directSubmitEnd > directSubmitStart);
   assert.doesNotMatch(script.slice(directSubmitStart, directSubmitEnd), /state\.draft\.id\s*=\s*id/u);
