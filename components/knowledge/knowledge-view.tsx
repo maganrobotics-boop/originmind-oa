@@ -15,6 +15,7 @@ import {
   MessageCircle,
   Pencil,
   RotateCcw,
+  Search,
   Send,
   ShieldCheck,
   Sparkles,
@@ -36,6 +37,7 @@ import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
+import { KNOWLEDGE_LIST_QUERY_MAX_LENGTH } from "@/lib/knowledge-types";
 import { PUBLIC_KNOWLEDGE_CONFIRMATION } from "@/lib/knowledge-policy";
 import type {
   KnowledgeAction,
@@ -45,6 +47,7 @@ import type {
   KnowledgeEvent,
   KnowledgeItem,
   KnowledgeListResponse,
+  KnowledgeListSort,
   KnowledgeRevision,
   KnowledgeStatus,
   KnowledgeVisibility,
@@ -54,6 +57,13 @@ type KnowledgeTab = "ask" | "submit" | "mine" | "review" | "manage";
 type KnowledgeDraft = { title: string; category: string; summary: string; content: string; sourceLabel: string; sourceUrl: string };
 type AskTurn = { id: string; question: string; answer: string; citations: KnowledgeCitation[]; mode?: string };
 type ReviewDetail = Required<Pick<KnowledgeDetailResponse, "revisions" | "events">> & { item: KnowledgeItem };
+
+const knowledgeManageSortOptions: ReadonlyArray<{ value: KnowledgeListSort; label: string }> = [
+  { value: "updated_desc", label: "最近更新" },
+  { value: "updated_asc", label: "最早更新" },
+  { value: "title_asc", label: "标题 A-Z" },
+  { value: "title_desc", label: "标题 Z-A" },
+];
 
 const categories = ["技术方案", "实验记录", "设备与操作", "软件与代码", "项目规范", "常见问题", "其他"];
 const emptyDraft = (): KnowledgeDraft => ({ title: "", category: categories[0], summary: "", content: "", sourceLabel: "", sourceUrl: "" });
@@ -92,6 +102,10 @@ function formatDate(value?: string) {
     minute: "2-digit",
     hour12: false,
   }).format(date).replaceAll("/", "-");
+}
+
+function normalizeKnowledgeListQuery(value: string) {
+  return Array.from(value.trim()).slice(0, KNOWLEDGE_LIST_QUERY_MAX_LENGTH).join("");
 }
 
 function safeHttpUrl(value?: string) {
@@ -288,14 +302,37 @@ function KnowledgeReviewPanel({ items, pendingCount, loading, error, onRetry, on
   return <div className="knowledge-list"><div className="knowledge-list-summary"><span>待审核 {pendingCount || items.length} 条{pendingCount > items.length ? `，当前显示前 ${items.length} 条` : ""}</span><small>请核对准确性、敏感信息，并为每条知识选择“对内”或“对外公开”</small></div><div className="knowledge-review-list">{items.map((item) => <article className="knowledge-review-row" key={item.id}><div className="knowledge-review-row-main"><div><span className="knowledge-category">{item.category}</span><time>{formatDate(item.createdAt)}</time></div><h3>{item.title}</h3>{item.summary && <p>{item.summary}</p>}{item.contentPartCount && item.contentPartCount > 1 && <small><KnowledgeMultipartReviewMeta item={item} /></small>}<small>提交人：{item.submitterName || item.submitterEmail || "项目成员"}</small></div><Button type="button" variant="outline" onClick={() => onOpen(item)}>查看并选择范围</Button></article>)}</div></div>;
 }
 
-function KnowledgeManagePanel({ items, loading, error, onRetry, onOpen, onRevoke }: { items: KnowledgeItem[]; loading: boolean; error: string; onRetry: () => void; onOpen: (item: KnowledgeItem) => void; onRevoke: (item: KnowledgeItem) => void }) {
-  if (loading) return <LoadingPanel label="正在加载知识库条目…" />;
-  if (error) return <ErrorPanel message={error} onRetry={onRetry} />;
-  if (!items.length) return <EmptyPanel icon={LibraryBig} title="知识库还是空的" description="审核通过的投稿会成为有效知识；其他状态的历史记录也会保留在这里。" />;
-  return <div className="knowledge-list"><div className="knowledge-list-summary"><span>当前显示 {items.length} 条知识记录</span><small>已入库知识可调整对内/公开；所有调整和撤销都会保留审核轨迹</small></div><div className="knowledge-manage-list">{items.map((item) => <article className="knowledge-manage-row" key={item.id}>
-    <div className="knowledge-manage-main"><div><span className="knowledge-category">{item.category}</span><KnowledgeVisibilityBadge item={item} /><KnowledgeStatusBadge status={item.status} /></div><h3>{item.title}</h3>{item.summary && <p>{item.summary}</p>}<small>{item.submitterName || item.submitterEmail || "项目成员"} · 更新于 {formatDate(item.updatedAt)}</small></div>
-    <div className="knowledge-manage-actions"><Button type="button" variant="outline" onClick={() => onOpen(item)}>{item.status === "active" && item.canSetVisibility ? "查看并调整范围" : "查看详情"}</Button>{item.status === "active" && item.canRevoke ? <Button type="button" variant="outline" className="knowledge-revoke-button" onClick={() => onRevoke(item)}>停止用于问答</Button> : item.status === "active" && !item.canSetVisibility ? <span className="knowledge-manage-state">本人投稿需由其他负责人处理</span> : item.status !== "active" ? <span className="knowledge-manage-state">{statusMeta[item.status]?.detail || "状态已记录"}</span> : null}</div>
-  </article>)}</div></div>;
+function KnowledgeManagePanel({ items, loading, error, query, appliedQuery, sort, onQueryChange, onSortChange, onClearQuery, onRetry, onOpen, onRevoke }: { items: KnowledgeItem[]; loading: boolean; error: string; query: string; appliedQuery: string; sort: KnowledgeListSort; onQueryChange: (value: string) => void; onSortChange: (value: KnowledgeListSort) => void; onClearQuery: () => void; onRetry: () => void; onOpen: (item: KnowledgeItem) => void; onRevoke: (item: KnowledgeItem) => void }) {
+  const hasAppliedQuery = Boolean(appliedQuery);
+
+  return <section className="knowledge-manage-panel">
+    <div className="knowledge-manage-toolbar" role="search" aria-label="搜索和排序知识库">
+      <label className="knowledge-manage-search">
+        <span className="sr-only">搜索知识库</span>
+        <Search className="size-4" aria-hidden="true" />
+        <Input
+          type="search"
+          value={query}
+          onChange={(event) => onQueryChange(Array.from(event.target.value).slice(0, KNOWLEDGE_LIST_QUERY_MAX_LENGTH).join(""))}
+          placeholder="搜索标题、摘要、正文、分类或来源"
+          maxLength={KNOWLEDGE_LIST_QUERY_MAX_LENGTH}
+          autoComplete="off"
+          enterKeyHint="search"
+        />
+        {query && <button type="button" className="knowledge-manage-search-clear" onClick={onClearQuery} aria-label="清空搜索关键词" title="清空搜索"><X className="size-4" /></button>}
+      </label>
+      <label className="knowledge-manage-sort">
+        <span className="sr-only">知识库排序方式</span>
+        <NativeSelect value={sort} onChange={(event) => onSortChange(event.target.value as KnowledgeListSort)} aria-label="知识库排序方式">
+          {knowledgeManageSortOptions.map((option) => <NativeSelectOption value={option.value} key={option.value}>{option.label}</NativeSelectOption>)}
+        </NativeSelect>
+      </label>
+    </div>
+    {loading ? <LoadingPanel label={query.trim() ? "正在搜索知识库…" : "正在加载知识库条目…"} /> : error ? <ErrorPanel message={error} onRetry={onRetry} /> : !items.length ? <EmptyPanel icon={LibraryBig} title={hasAppliedQuery ? "没有找到匹配的知识" : "知识库还是空的"} description={hasAppliedQuery ? "请更换关键词，或清空搜索后查看全部知识记录。" : "审核通过的投稿会成为有效知识；其他状态的历史记录也会保留在这里。"} action={hasAppliedQuery ? <Button type="button" variant="outline" onClick={onClearQuery}>清空搜索</Button> : undefined} /> : <div className="knowledge-list"><div className="knowledge-list-summary"><span>{hasAppliedQuery ? `当前显示 ${items.length} 条匹配记录` : `当前显示 ${items.length} 条知识记录`}</span><small>{items.length === 100 ? "最多显示前 100 条；可继续缩小关键词范围" : "已入库知识可调整对内/公开；所有调整和撤销都会保留审核轨迹"}</small></div><div className="knowledge-manage-list">{items.map((item) => <article className="knowledge-manage-row" key={item.id}>
+      <div className="knowledge-manage-main"><div><span className="knowledge-category">{item.category}</span><KnowledgeVisibilityBadge item={item} /><KnowledgeStatusBadge status={item.status} /></div><h3>{item.title}</h3>{item.summary && <p>{item.summary}</p>}<small>{item.submitterName || item.submitterEmail || "项目成员"} · 更新于 {formatDate(item.updatedAt)}</small></div>
+      <div className="knowledge-manage-actions"><Button type="button" variant="outline" onClick={() => onOpen(item)}>{item.status === "active" && item.canSetVisibility ? "查看并调整范围" : "查看详情"}</Button>{item.status === "active" && item.canRevoke ? <Button type="button" variant="outline" className="knowledge-revoke-button" onClick={() => onRevoke(item)}>停止用于问答</Button> : item.status === "active" && !item.canSetVisibility ? <span className="knowledge-manage-state">本人投稿需由其他负责人处理</span> : item.status !== "active" ? <span className="knowledge-manage-state">{statusMeta[item.status]?.detail || "状态已记录"}</span> : null}</div>
+    </article>)}</div></div>}
+  </section>;
 }
 
 const eventLabels: Record<string, string> = {
@@ -391,6 +428,10 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
   const [manageItems, setManageItems] = useState<KnowledgeItem[]>([]);
   const [manageLoading, setManageLoading] = useState(canReviewKnowledge);
   const [manageError, setManageError] = useState("");
+  const [manageQuery, setManageQuery] = useState("");
+  const [debouncedManageQuery, setDebouncedManageQuery] = useState("");
+  const [manageSort, setManageSort] = useState<KnowledgeListSort>("updated_desc");
+  const manageRequest = useRef<AbortController | null>(null);
   const [reviewTarget, setReviewTarget] = useState<KnowledgeItem | null>(null);
   const [reviewDetail, setReviewDetail] = useState<ReviewDetail | null>(null);
   const [reviewDetailLoading, setReviewDetailLoading] = useState(false);
@@ -436,19 +477,30 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
     }
   }, [canReviewKnowledge]);
 
-  const loadManage = useCallback(async (signal?: AbortSignal) => {
+  const loadManage = useCallback(async (query: string, sort: KnowledgeListSort) => {
     if (!canReviewKnowledge) return;
+    manageRequest.current?.abort();
+    const controller = new AbortController();
+    manageRequest.current = controller;
     setManageLoading(true);
     setManageError("");
     try {
-      const response = await fetch("/api/knowledge?scope=all", { headers: { accept: "application/json" }, credentials: "same-origin", cache: "no-store", signal });
+      const params = new URLSearchParams({
+        scope: "all",
+        q: normalizeKnowledgeListQuery(query),
+        sort,
+      });
+      const response = await fetch(`/api/knowledge?${params.toString()}`, { headers: { accept: "application/json" }, credentials: "same-origin", cache: "no-store", signal: controller.signal });
       const data = await responseJson<KnowledgeListResponse>(response, "知识库记录加载失败");
       setManageItems(data.items ?? []);
     } catch (error) {
-      if (signal?.aborted) return;
+      if (controller.signal.aborted) return;
       setManageError(error instanceof Error ? error.message : "请稍后重试");
     } finally {
-      if (!signal?.aborted) setManageLoading(false);
+      if (manageRequest.current === controller) {
+        manageRequest.current = null;
+        setManageLoading(false);
+      }
     }
   }, [canReviewKnowledge]);
 
@@ -457,17 +509,33 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
     const timerId = window.setTimeout(() => {
       void loadMine(controller.signal);
       void loadReview(controller.signal);
-      void loadManage(controller.signal);
     }, 0);
     return () => { window.clearTimeout(timerId); controller.abort(); };
-  }, [loadManage, loadMine, loadReview]);
+  }, [loadMine, loadReview]);
+
+  useEffect(() => {
+    const normalizedQuery = normalizeKnowledgeListQuery(manageQuery);
+    const timerId = window.setTimeout(() => setDebouncedManageQuery(normalizedQuery), 300);
+    return () => window.clearTimeout(timerId);
+  }, [manageQuery]);
+
+  useEffect(() => {
+    if (!canReviewKnowledge) return;
+    const timerId = window.setTimeout(() => void loadManage(debouncedManageQuery, manageSort), 0);
+    return () => {
+      window.clearTimeout(timerId);
+      const request = manageRequest.current;
+      request?.abort();
+      if (manageRequest.current === request) manageRequest.current = null;
+    };
+  }, [canReviewKnowledge, debouncedManageQuery, loadManage, manageSort]);
 
   useEffect(() => {
     const refreshVisibleKnowledge = () => {
       if (document.visibilityState !== "visible") return;
       void loadMine();
       void loadReview();
-      void loadManage();
+      void loadManage(debouncedManageQuery, manageSort);
     };
     window.addEventListener("focus", refreshVisibleKnowledge);
     document.addEventListener("visibilitychange", refreshVisibleKnowledge);
@@ -475,7 +543,7 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
       window.removeEventListener("focus", refreshVisibleKnowledge);
       document.removeEventListener("visibilitychange", refreshVisibleKnowledge);
     };
-  }, [loadManage, loadMine, loadReview]);
+  }, [debouncedManageQuery, loadManage, loadMine, loadReview, manageSort]);
 
   const submitKnowledge = async (event: FormEvent) => {
     event.preventDefault();
@@ -635,7 +703,7 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
       setReviewNote("");
       setReviewVisibility("");
       setPublicConfirmation("");
-      await Promise.all([loadReview(), loadManage(), loadMine()]);
+      await Promise.all([loadReview(), loadManage(debouncedManageQuery, manageSort), loadMine()]);
     } catch (error) {
       toast.error("审核动作未保存", { description: error instanceof Error ? error.message : "请稍后重试" });
     } finally {
@@ -657,7 +725,7 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
       toast.success("知识已停止用于问答", { description: "原文、版本和审核记录均已保留。" });
       setRevokeTarget(null);
       setRevokeNote("");
-      await Promise.all([loadManage(), loadMine()]);
+      await Promise.all([loadManage(debouncedManageQuery, manageSort), loadMine()]);
     } catch (error) {
       toast.error("知识未停止使用", { description: error instanceof Error ? error.message : "请稍后重试" });
     } finally {
@@ -667,6 +735,11 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
 
   const tabCount = useMemo(() => reviewPendingCount > 99 ? "99+" : String(reviewPendingCount), [reviewPendingCount]);
   const visibleTab = !canReviewKnowledge && (activeTab === "review" || activeTab === "manage") ? "ask" : activeTab;
+  const manageQueryPending = normalizeKnowledgeListQuery(manageQuery) !== debouncedManageQuery;
+  const clearManageQuery = () => {
+    setManageQuery("");
+    setDebouncedManageQuery("");
+  };
 
   return <div className="knowledge-view">
     <section className="page-heading knowledge-heading"><div><div className="eyebrow"><span className="eyebrow-line" />OA 内部知识与问答</div><h1>实验室 AI（内部）</h1><p>登录并完成 OA 准入与保密签署后，可在这里提问、投稿和查看审核状态。项目负责人或 OA 管理员批准时必须选择“对内”或“对外公开”。</p></div><div className="knowledge-live-note"><span /><div><strong>仅限 OA 成员</strong><small>登录并完成准入后使用</small></div></div></section>
@@ -677,7 +750,7 @@ export function KnowledgeView({ canReviewKnowledge }: { canReviewKnowledge: bool
       <TabsContent value="submit"><KnowledgeSubmitPanel draft={draft} setDraft={setDraft} editingItem={editingItem} submitting={submitting} onSubmit={submitKnowledge} onCancelEdit={cancelEditing} /></TabsContent>
       <TabsContent value="mine"><KnowledgeMinePanel items={mine} loading={mineLoading || Boolean(editingLoadingId)} error={mineError} onRetry={() => void loadMine()} onEdit={(item) => void startEditing(item)} editingId={editingLoadingId} /></TabsContent>
       {canReviewKnowledge && <TabsContent value="review"><KnowledgeReviewPanel items={reviewItems} pendingCount={reviewPendingCount} loading={reviewLoading} error={reviewError} onRetry={() => void loadReview()} onOpen={openReview} /></TabsContent>}
-      {canReviewKnowledge && <TabsContent value="manage"><KnowledgeManagePanel items={manageItems} loading={manageLoading} error={manageError} onRetry={() => void loadManage()} onOpen={openReview} onRevoke={(item) => { setRevokeTarget(item); setRevokeNote(""); }} /></TabsContent>}
+      {canReviewKnowledge && <TabsContent value="manage"><KnowledgeManagePanel items={manageItems} loading={manageLoading || manageQueryPending} error={manageError} query={manageQuery} appliedQuery={debouncedManageQuery} sort={manageSort} onQueryChange={setManageQuery} onSortChange={setManageSort} onClearQuery={clearManageQuery} onRetry={() => void loadManage(debouncedManageQuery, manageSort)} onOpen={openReview} onRevoke={(item) => { setRevokeTarget(item); setRevokeNote(""); }} /></TabsContent>}
     </Tabs>
     <KnowledgeReviewDialog detail={reviewDetail} open={Boolean(reviewTarget)} loading={reviewDetailLoading} error={reviewDetailError} note={reviewNote} setNote={setReviewNote} visibility={reviewVisibility} setVisibility={setReviewVisibility} publicConfirmation={publicConfirmation} setPublicConfirmation={setPublicConfirmation} actioning={reviewAction} onOpenChange={(open) => { if (!open) closeReview(); }} onRetry={() => { if (reviewTarget) void loadReviewDetail(reviewTarget); }} onAction={(action, visibility, confirmation) => void performReview(action, visibility, confirmation)} />
     <KnowledgeRevokeDialog item={revokeTarget} note={revokeNote} setNote={setRevokeNote} submitting={revoking} onOpenChange={(open) => { if (!open && !revoking) { setRevokeTarget(null); setRevokeNote(""); } }} onConfirm={() => void performRevoke()} />

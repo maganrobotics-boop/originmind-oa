@@ -100,3 +100,45 @@ test("labels legacy approved events as internal and names both new audit events"
   assert.match(source, /approved_internal: "批准为仅 OA 内部"/u);
   assert.match(source, /approved_public: "批准为对外公开"/u);
 });
+
+test("keeps knowledge management search and sorting compact and usable on mobile", async () => {
+  const [source, styles] = await Promise.all([
+    readFile(path.join(root, "components/knowledge/knowledge-view.tsx"), "utf8"),
+    readFile(path.join(root, "app/globals.css"), "utf8"),
+  ]);
+
+  const panel = source.slice(source.indexOf("function KnowledgeManagePanel"), source.indexOf("const eventLabels"));
+  assert.match(panel, /role="search" aria-label="搜索和排序知识库"/u);
+  assert.match(panel, /placeholder="搜索标题、摘要、正文、分类或来源"/u);
+  assert.match(panel, /maxLength=\{KNOWLEDGE_LIST_QUERY_MAX_LENGTH\}/u);
+  assert.match(panel, /aria-label="清空搜索关键词"/u);
+  assert.match(panel, /当前显示 \$\{items\.length\} 条匹配记录/u);
+  assert.match(panel, /最多显示前 100 条；可继续缩小关键词范围/u);
+  assert.match(source, /value: "updated_desc", label: "最近更新"/u);
+  assert.match(source, /value: "updated_asc", label: "最早更新"/u);
+  assert.match(source, /value: "title_asc", label: "标题 A-Z"/u);
+  assert.match(source, /value: "title_desc", label: "标题 Z-A"/u);
+  assert.ok(panel.indexOf("knowledge-manage-toolbar") < panel.indexOf("没有找到匹配的知识"), "the toolbar must remain before the no-results state");
+
+  assert.match(styles, /\.knowledge-manage-toolbar \{[^}]*display: flex;[^}]*\}/u);
+  assert.match(styles, /@media \(max-width: 560px\)[\s\S]*?\.knowledge-manage-toolbar \{[^}]*flex-direction: column;[^}]*\}/u);
+  assert.match(styles, /\.knowledge-manage-search input, \.knowledge-manage-sort \[data-slot="native-select"\] \{[^}]*min-height: 44px;[^}]*\}/u);
+  assert.match(styles, /\.knowledge-manage-search-clear \{ width: 44px; height: 44px;/u);
+});
+
+test("debounces only the knowledge management query and sends the selected server sort", async () => {
+  const source = await readFile(path.join(root, "components/knowledge/knowledge-view.tsx"), "utf8");
+
+  assert.match(source, /window\.setTimeout\(\(\) => setDebouncedManageQuery\(normalizedQuery\), 300\)/u);
+  assert.match(source, /new URLSearchParams\(\{\s*scope: "all",\s*q: normalizeKnowledgeListQuery\(query\),\s*sort,\s*\}\)/u);
+  assert.match(source, /fetch\(`\/api\/knowledge\?\$\{params\.toString\(\)\}`/u);
+
+  const initialLoadEffect = source.slice(
+    source.indexOf("useEffect(() => {\n    const controller = new AbortController();"),
+    source.indexOf("useEffect(() => {\n    const normalizedQuery = normalizeKnowledgeListQuery(manageQuery);")
+  );
+  assert.match(initialLoadEffect, /loadMine\(controller\.signal\)/u);
+  assert.match(initialLoadEffect, /loadReview\(controller\.signal\)/u);
+  assert.doesNotMatch(initialLoadEffect, /loadManage/u);
+  assert.match(source, /\[canReviewKnowledge, debouncedManageQuery, loadManage, manageSort\]/u);
+});

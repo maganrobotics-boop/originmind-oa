@@ -2,6 +2,12 @@ import { getDb } from "../../../db";
 import { readBoundedJsonObject } from "../../../lib/bounded-json-request";
 import { hashKnowledgeSubmission, parseKnowledgeSubmission } from "../../../lib/knowledge-policy";
 import { countPendingKnowledgeItems, createKnowledgeItem, listKnowledgeItems, type KnowledgeActor, type KnowledgeListScope } from "../../../lib/knowledge-store";
+import {
+  KNOWLEDGE_LIST_QUERY_MAX_LENGTH,
+  KNOWLEDGE_LIST_SORTS,
+  type KnowledgeListOptions,
+  type KnowledgeListSort,
+} from "../../../lib/knowledge-types";
 import { consumeWriteRateLimit } from "../../../lib/write-rate-limit";
 import { getAuthorizedUser, isProjectOwner, type AuthorizedUser } from "../_lib/auth";
 
@@ -48,13 +54,30 @@ export async function GET(request: Request) {
   const access = await authorizeKnowledgeAccess();
   if ("response" in access) return access.response;
   const canReview = canReviewKnowledge(access.authorized);
-  const rawScope = new URL(request.url).searchParams.get("scope") || "all";
+  const searchParams = new URL(request.url).searchParams;
+  const rawScope = searchParams.get("scope") || "all";
   if (rawScope !== "mine" && rawScope !== "review" && rawScope !== "all") return privateJson({ error: "知识列表查询参数不正确。" }, { status: 400 });
   const scope = rawScope as KnowledgeListScope;
   if (scope === "review" && !canReview) return privateJson({ error: "只有项目负责人或 OA 管理员可以查看待审核知识。" }, { status: 403 });
+  const hasManagementQuery = searchParams.has("q") || searchParams.has("sort");
+  if (hasManagementQuery && scope !== "all") return privateJson({ error: "搜索和排序仅可用于知识库管理列表。" }, { status: 400 });
+  if (hasManagementQuery && !canReview) return privateJson({ error: "只有项目负责人或 OA 管理员可以搜索或排序知识库记录。" }, { status: 403 });
+
+  const query = searchParams.get("q")?.trim() || "";
+  if (Array.from(query).length > KNOWLEDGE_LIST_QUERY_MAX_LENGTH) {
+    return privateJson({ error: `搜索关键词不能超过 ${KNOWLEDGE_LIST_QUERY_MAX_LENGTH} 个字符。` }, { status: 400 });
+  }
+  const rawSort = searchParams.get("sort");
+  if (rawSort !== null && !(KNOWLEDGE_LIST_SORTS as readonly string[]).includes(rawSort)) {
+    return privateJson({ error: "知识列表排序参数不正确。" }, { status: 400 });
+  }
+  const listOptions: KnowledgeListOptions | undefined = hasManagementQuery ? {
+    ...(query ? { query } : {}),
+    ...(rawSort ? { sort: rawSort as KnowledgeListSort } : {}),
+  } : undefined;
   try {
     const [items, pendingCount] = await Promise.all([
-      listKnowledgeItems(scope, access.actor, canReview),
+      listKnowledgeItems(scope, access.actor, canReview, listOptions),
       canReview ? countPendingKnowledgeItems(access.actor) : Promise.resolve(0),
     ]);
     return privateJson({ items, pendingCount, canReviewKnowledge: canReview });
