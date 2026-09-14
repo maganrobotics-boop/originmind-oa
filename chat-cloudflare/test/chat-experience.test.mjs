@@ -22,6 +22,10 @@ const api = runInNewContext(`
      chatConversationTitle, chatConversationsSnapshot, writeChatConversations,
      readChatConversations, recentChatConversations, renderAnswerBody, userFacingAnswer });
 `, { document, Node: TestNode });
+const installHelperApi = runInNewContext(`
+  ${section("function isStandaloneWebApp", "const TOPIC_LABELS")}
+  ({ isStandaloneWebApp, isAppleMobileDevice, registerPublicServiceWorker });
+`, Object.create(null));
 function storage() {
   const values = new Map();
   return { values, getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) };
@@ -38,7 +42,7 @@ function conversation(id, section = "technology", extra = {}) {
     ...session(), ...extra,
   };
 }
-const allowedSections = ["technology", "academic", "company", "association"];
+const allowedSections = ["general", "technology", "academic", "company", "association"];
 function nodes(root, tag) { return [...(root.tag === tag ? [root] : []), ...root.children.flatMap((child) => nodes(child, tag))]; }
 
 test("v2 storage restores multiple conversations in the same topic without leaking unrelated state", () => {
@@ -210,7 +214,69 @@ test("code, escaped pipes and malformed tables retain their text", () => {
   assert.match(body.textContent, /单列/u);
 });
 
-function publicAppHarness(store, { failChat = false } = {}) {
+test("install helpers detect standalone and Apple mobile environments", () => {
+  const { isStandaloneWebApp, isAppleMobileDevice } = installHelperApi;
+  let mediaQuery = "";
+  assert.equal(isStandaloneWebApp({
+    matchMedia(query) { mediaQuery = query; return { matches: true }; },
+  }, {}), true);
+  assert.equal(mediaQuery, "(display-mode: standalone)");
+  assert.equal(isStandaloneWebApp({ matchMedia: () => ({ matches: false }) }, { standalone: true }), true);
+  assert.equal(isStandaloneWebApp({ matchMedia: () => ({ matches: false }) }, {}), false);
+
+  assert.equal(isAppleMobileDevice({ userAgent: "Mozilla/5.0 (iPhone)", platform: "iPhone" }), true);
+  assert.equal(isAppleMobileDevice({ userAgent: "Mozilla/5.0", platform: "MacIntel", maxTouchPoints: 5 }), true);
+  assert.equal(isAppleMobileDevice({ userAgent: "Mozilla/5.0 (Linux; Android 16)", platform: "Linux armv8l", maxTouchPoints: 5 }), false);
+});
+
+test("service worker helper registers once at the right lifecycle point and fails soft", async () => {
+  const { registerPublicServiceWorker } = installHelperApi;
+  const immediateCalls = [];
+  registerPublicServiceWorker({}, {
+    serviceWorker: {
+      register(url, options) { immediateCalls.push({ url, options }); return Promise.resolve(); },
+    },
+  }, { readyState: "complete" });
+  assert.equal(immediateCalls.length, 1);
+  assert.equal(immediateCalls[0].url, "/service-worker.js");
+  assert.equal(immediateCalls[0].options.scope, "/");
+  assert.equal(immediateCalls[0].options.updateViaCache, "none");
+
+  const delayedCalls = [];
+  let loadListener = null;
+  let loadOptions = null;
+  registerPublicServiceWorker({
+    addEventListener(name, callback, options) {
+      assert.equal(name, "load");
+      loadListener = callback;
+      loadOptions = options;
+    },
+  }, {
+    serviceWorker: {
+      register(url, options) { delayedCalls.push({ url, options }); return Promise.resolve(); },
+    },
+  }, { readyState: "interactive" });
+  assert.equal(delayedCalls.length, 0);
+  assert.equal(loadOptions.once, true);
+  loadListener();
+  assert.equal(delayedCalls.length, 1);
+
+  assert.doesNotThrow(() => registerPublicServiceWorker({
+    addEventListener() { throw new Error("must not listen without service worker support"); },
+  }, {}, { readyState: "loading" }));
+  registerPublicServiceWorker({}, {
+    serviceWorker: { register: () => Promise.reject(new Error("registration blocked")) },
+  }, { readyState: "complete" });
+  await new Promise((resolve) => setImmediate(resolve));
+});
+
+function publicAppHarness(store, {
+  failChat = false,
+  pathname = "/technology",
+  suggestions = [],
+  navigatorOptions = {},
+  standalone = false,
+} = {}) {
   const all = [];
   class AppNode extends TestNode {
     constructor(tag) {
@@ -245,30 +311,206 @@ function publicAppHarness(store, { failChat = false } = {}) {
   const win = new AppNode("window");
   const timers = new Map(); let nextTimer = 0;
   Object.assign(win, {
-    localStorage: store, location: { pathname: "/technology", origin: "https://chat.omindos.ai" },
+    localStorage: store, location: {
+      pathname,
+      origin: "https://chat.omindos.ai",
+      href: `https://chat.omindos.ai${pathname}`,
+    },
     innerHeight: 800, confirm: () => true,
+    matchMedia: (query) => ({
+      matches: query === "(display-mode: standalone)" && standalone,
+    }),
     setTimeout: (callback) => { timers.set(++nextTimer, callback); return nextTimer; },
     clearTimeout: (id) => timers.delete(id),
     requestAnimationFrame: (callback) => { callback(); return 0; }, cancelAnimationFrame() {},
-    history: { pushState(_state, _unused, pathname) { win.location.pathname = pathname; } },
+    history: {
+      state: null,
+      pushState(state, _unused, nextPathname) {
+        this.state = state;
+        win.location.pathname = new URL(nextPathname, win.location.origin).pathname;
+      },
+      replaceState(state, _unused, nextPathname) {
+        this.state = state;
+        win.location.pathname = new URL(nextPathname, win.location.origin).pathname;
+      },
+    },
   });
+  const navigatorObject = {
+    onLine: true,
+    userAgent: "Mozilla/5.0",
+    platform: "Linux x86_64",
+    maxTouchPoints: 0,
+    ...navigatorOptions,
+  };
+  const suggestionPayload = {
+    suggestions: suggestions.map((item, index) => (
+      typeof item === "string"
+        ? { question: item, suggestionToken: `suggestion-${index + 1}` }
+        : item
+    )),
+    knowledgeReady: true,
+  };
+  const readyStatus = {
+    storageReady: true,
+    modelReady: true,
+    qwenReady: true,
+    modelPending: false,
+    oaReady: true,
+    knowledgeReady: true,
+    retrievalReady: true,
+    oaPending: false,
+    budgetReady: true,
+    systemReady: true,
+    documentParsingReady: true,
+  };
   const requests = [];
   runInNewContext(source, {
     Node: TestNode, HTMLElement: AppNode, document: doc, window: win,
     TextDecoder, TextEncoder, URL, URLSearchParams, AbortController, AbortSignal, crypto,
-    navigator: { onLine: true },
+    navigator: navigatorObject,
     fetch: async (url, options) => {
       requests.push({ url, body: options?.body });
+      if (url === "/_health") return Response.json({ ready: true });
+      if (url === "/api/status") return Response.json(readyStatus);
+      if (url === "/api/suggestions") return Response.json(suggestionPayload);
       if (url === "/api/chat") {
         if (failChat) throw new Error("offline");
         return Response.json({ answer: "**可以试点。**\n\n- 明确目标\n- 验证结果", conversationToken: "new-server-token", oaPublicStatus: "connected" });
       }
-      return Response.json({ suggestions: [], knowledgeReady: false });
+      return Response.json({});
     },
   });
-  return { all, root, win, requests, input: () => doc.getElementById("question") };
+  return { all, root, win, doc, navigator: navigatorObject, requests, input: () => doc.getElementById("question") };
 }
 const settle = () => new Promise((resolve) => setImmediate(resolve));
+
+test("empty chats use the laboratory assistant brand, scoped guidance and data prompt", async () => {
+  for (const [pathname, expectedSubtitle] of [
+    ["/", "从已审核的实验室公开知识中检索并回答"],
+    ["/technology", "从“成果与应用”公开知识中检索并回答"],
+  ]) {
+    const app = publicAppHarness(storage(), { pathname });
+    await settle();
+    const hero = nodes(app.root, "section").find((node) => node.className === "empty-hero");
+    assert.ok(hero, pathname);
+    assert.equal(hero.getAttribute("aria-labelledby"), "empty-chat-title");
+    assert.equal(nodes(hero, "h2")[0].textContent, "想了解实验室的什么？");
+    assert.equal(nodes(hero, "p")[0].textContent, expectedSubtitle);
+    assert.equal(app.input().getAttribute("placeholder"), "询问实验室大数据");
+    assert.equal(app.all.find((node) => node.id === "new-chat-question").getAttribute("placeholder"), "询问实验室大数据");
+
+    const brandTitles = nodes(app.root, "strong")
+      .filter((node) => node.className === "sidebar-brand-title")
+      .map((node) => node.textContent);
+    const brandSubtitles = nodes(app.root, "span")
+      .filter((node) => node.className === "sidebar-brand-subtitle")
+      .map((node) => node.textContent);
+    assert.deepEqual(brandTitles, ["实验室助手", "实验室助手"]);
+    assert.deepEqual(brandSubtitles, ["ARTS Robotics", "ARTS Robotics"]);
+  }
+});
+
+test("live recommendations render as a five-item sparkle list in the page and new-chat dialog", async () => {
+  const questions = [
+    "实验室目前有哪些机器人？",
+    "双臂机器人适合哪些任务？",
+    "如何开展科研合作？",
+    "OmindOS 可以做什么？",
+    "学生可以参加哪些活动？",
+    "第六条不应展示",
+  ];
+  const app = publicAppHarness(storage(), { pathname: "/", suggestions: questions });
+  await settle();
+  await settle();
+
+  const panel = nodes(app.root, "section").find((node) => node.className === "composer-suggestions");
+  assert.equal(panel.hidden, false);
+  assert.equal(nodes(panel, "p")[0].textContent, "今日推荐 · 基于公开知识，每日更新");
+  const suggestionList = nodes(panel, "div").find((node) => node.className === "suggestions");
+  assert.equal(suggestionList.getAttribute("role"), "group");
+  assert.equal(suggestionList.getAttribute("aria-label"), "根据近期入库知识生成的推荐话题");
+  const mainButtons = nodes(suggestionList, "button");
+  assert.equal(mainButtons.length, 5);
+  assert.deepEqual(mainButtons.map((button) => button.textContent), questions.slice(0, 5).map((question) => `✦${question}`));
+  for (const button of mainButtons) {
+    assert.equal(button.children[0].className, "suggestion-sparkle");
+    assert.equal(button.children[0].textContent, "✦");
+    assert.equal(button.children[0].getAttribute("aria-hidden"), "true");
+    assert.equal(button.children[1].tag, "span");
+  }
+
+  nodes(app.root, "button").find((node) => node.className === "sidebar-chat-button").fire("click");
+  const dialog = nodes(app.root, "dialog").find((node) => node.id === "new-chat-dialog");
+  assert.equal(dialog.open, true);
+  const dialogPanel = nodes(dialog, "section").find((node) => node.className === "new-chat-suggestions");
+  assert.equal(dialogPanel.hidden, false);
+  assert.equal(nodes(dialogPanel, "p")[0].textContent, "今日推荐 · 基于公开知识，每日更新");
+  const dialogButtons = nodes(dialogPanel, "button")
+    .filter((node) => node.className === "new-chat-suggestion");
+  assert.equal(dialogButtons.length, 5);
+  assert.equal(dialogButtons.every((button) => button.children[0].className === "suggestion-sparkle"), true);
+});
+
+test("install controls provide platform guidance and complete the browser install lifecycle", async () => {
+  for (const [navigatorOptions, expectedTitle, expectedDescription, expectedSteps] of [
+    [
+      { userAgent: "Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)", platform: "iPhone", maxTouchPoints: 5 },
+      "添加到主屏幕",
+      /Safari 的系统菜单/u,
+      ["点击 Safari 的分享按钮", "选择“添加到主屏幕”", "确认“作为网页 App 打开”，再点击“添加”"],
+    ],
+    [
+      { userAgent: "Mozilla/5.0 (Linux; Android 16)", platform: "Linux armv8l", maxTouchPoints: 5 },
+      "安装实验室助手",
+      /浏览器菜单添加到桌面/u,
+      ["打开浏览器菜单", "选择“安装应用”或“添加到桌面”", "按系统提示确认"],
+    ],
+  ]) {
+    const app = publicAppHarness(storage(), { navigatorOptions });
+    const installButton = nodes(app.root, "button").find((node) => node.className === "sidebar-install-button");
+    assert.equal(installButton.textContent, "⇩安装应用");
+    assert.equal(installButton.getAttribute("aria-label"), "安装实验室助手");
+    assert.equal(installButton.getAttribute("aria-haspopup"), "dialog");
+    installButton.fire("click");
+
+    const dialog = nodes(app.root, "dialog").find((node) => node.id === "install-dialog");
+    assert.equal(dialog.open, true);
+    assert.equal(nodes(dialog, "h2")[0].textContent, expectedTitle);
+    assert.match(nodes(dialog, "p")[0].textContent, expectedDescription);
+    assert.deepEqual(nodes(dialog, "li").map((node) => node.textContent), expectedSteps);
+  }
+
+  const app = publicAppHarness(storage());
+  const installButtons = nodes(app.root, "button").filter((node) => node.className === "sidebar-install-button");
+  let prevented = 0;
+  let prompted = 0;
+  app.win.fire("beforeinstallprompt", {
+    preventDefault() { prevented += 1; },
+    prompt: async () => { prompted += 1; },
+    userChoice: Promise.resolve({ outcome: "accepted" }),
+  });
+  installButtons[0].fire("click");
+  await settle();
+  await settle();
+  assert.equal(prevented, 1);
+  assert.equal(prompted, 1);
+  assert.match(app.root.textContent, /正在安装实验室助手/u);
+
+  const installDialog = nodes(app.root, "dialog").find((node) => node.id === "install-dialog");
+  installDialog.showModal();
+  app.win.fire("appinstalled");
+  assert.equal(installDialog.open, false);
+  assert.equal(installButtons.every((button) => button.disabled === true), true);
+  assert.equal(installButtons.every((button) => button.textContent === "⇩已安装"), true);
+  assert.equal(installButtons.every((button) => button.getAttribute("aria-haspopup") === "false"), true);
+  assert.match(app.root.textContent, /实验室助手已安装到桌面/u);
+
+  const standaloneApp = publicAppHarness(storage(), { standalone: true });
+  const standaloneButtons = nodes(standaloneApp.root, "button")
+    .filter((node) => node.className === "sidebar-install-button");
+  assert.equal(standaloneButtons.every((button) => button.disabled === true), true);
+  assert.equal(standaloneButtons.every((button) => button.getAttribute("aria-label") === "实验室助手已安装"), true);
+});
 
 test("the complete UI migrates v1 through startup, saves drafts and clears the active v2 conversation", async () => {
   const store = storage();
@@ -293,6 +535,26 @@ test("the complete UI migrates v1 through startup, saves drafts and clears the a
   assert.doesNotMatch(refreshed.root.textContent, /自主巡检/u);
 });
 
+test("clearing a general chat replaces browser history with the new conversation", async () => {
+  const store = storage();
+  const current = conversation("general001", "general", {
+    messages: [{ role: "user", content: "实验室有哪些机器人？" }, { role: "assistant", content: "这里是回答。" }],
+    draft: "",
+    updatedAt: Date.now(),
+  });
+  api.writeChatConversations(store, [current], current.id, Date.now());
+  const app = publicAppHarness(store, { pathname: "/" });
+  await settle();
+  assert.equal(app.win.history.state.conversationId, current.id);
+
+  app.all.find((node) => node.className === "chat-info-row chat-info-clear").fire("click");
+  assert.equal(app.win.location.pathname, "/");
+  assert.equal(app.win.history.state.topic, "general");
+  assert.notEqual(app.win.history.state.conversationId, current.id);
+  assert.match(app.root.textContent, /已删除当前聊天/u);
+  assert.doesNotMatch(app.root.textContent, /已删除聊天当前聊天/u);
+});
+
 test("the complete UI persists completed answers and retains failed questions as drafts", async () => {
   for (const failChat of [false, true]) {
     const store = storage(); const app = publicAppHarness(store, { failChat });
@@ -315,7 +577,7 @@ test("the complete UI persists completed answers and retains failed questions as
   }
 });
 
-test("the complete UI switches recent conversations and starts another same-topic chat from the sidebar", async () => {
+test("the complete UI switches recent conversations and starts a general chat from the sidebar", async () => {
   const store = storage();
   const uiNow = Date.now();
   const older = conversation("uiside001", "technology", {
@@ -348,17 +610,21 @@ test("the complete UI switches recent conversations and starts another same-topi
   const dialog = app.all.find((node) => node.id === "new-chat-dialog");
   const newChatInput = app.all.find((node) => node.id === "new-chat-question");
   assert.equal(dialog.open, true);
+  assert.match(dialog.textContent, /当前知识范围：全部公开知识/u);
   newChatInput.value = "第三个技术问题";
   newChatInput.fire("input");
   app.all.find((node) => node.className === "new-chat-form").fire("submit");
   await settle(); await settle();
 
   const restored = api.readChatConversations(store, allowedSections);
-  assert.equal(restored.conversations.filter((item) => item.section === "technology").length, 3);
+  assert.equal(restored.conversations.filter((item) => item.section === "technology").length, 2);
+  assert.equal(restored.conversations.filter((item) => item.section === "general").length, 1);
   const active = restored.conversations.find((item) => item.id === restored.activeConversationId);
   assert.equal(active.title, "第三个技术问题");
   assert.equal(active.messages.length, 2);
   assert.equal(active.messages[1].content, "**可以试点。**\n\n- 明确目标\n- 验证结果");
+  const chatRequest = app.requests.filter((request) => request.url === "/api/chat").at(-1);
+  assert.equal(JSON.parse(chatRequest.body).topic, "research");
   assert.equal(dialog.open, false);
   const renderedRecentTitles = nodes(app.root, "span")
     .filter((node) => node.className === "sidebar-recent-title")

@@ -35,6 +35,16 @@ const validSuggestionsPayload = {
       question: "《已公开项目资料》中的“核心应用”有哪些值得关注的内容？",
       updatedAt: "2026-09-12",
     },
+    {
+      id: "4",
+      question: "《矿井巡检周报》中的“现场进展”有哪些值得关注的内容？",
+      updatedAt: "2026-09-11",
+    },
+    {
+      id: "5",
+      question: "《机器人导航方案》有哪些值得关注的核心内容？",
+      updatedAt: "2026-09-10",
+    },
   ],
 };
 
@@ -219,7 +229,7 @@ test("OA suggestions preflight authenticates, validates, and retrieves every sug
     },
   });
 
-  assert.equal(requests.length, 4);
+  assert.equal(requests.length, 6);
   const [suggestionsRequest, ...retrieveRequests] = requests;
   assert.equal(suggestionsRequest.url, OA_PUBLIC_SUGGESTIONS_URL);
   assert.equal(suggestionsRequest.options.method, "GET");
@@ -261,9 +271,9 @@ test("OA suggestions preflight authenticates, validates, and retrieves every sug
     classification: "connected_with_answerable_suggestions",
     suggestionsHttpStatus: 200,
     retrievalHttpStatus: 200,
-    suggestionCount: 3,
-    answerableSuggestionCount: 3,
-    chunkCount: 3,
+    suggestionCount: 5,
+    answerableSuggestionCount: 5,
+    chunkCount: 5,
     durationMs: 75,
   });
   const serialized = JSON.stringify(result);
@@ -273,14 +283,14 @@ test("OA suggestions preflight authenticates, validates, and retrieves every sug
   }
 });
 
-test("OA suggestions preflight requires one to four strict bounded suggestions", async () => {
+test("OA suggestions preflight requires one to five strict bounded suggestions", async () => {
   const cases = [
     [{ suggestions: [] }, "suggestions_empty", 0],
     [{ ...validSuggestionsPayload, extra: true }, "suggestions_invalid_contract", null],
     [{
       suggestions: [
         ...validSuggestionsPayload.suggestions,
-        { id: "4", question: "第四条不应被接受", updatedAt: "2026-09-11" },
+        { id: "6", question: "《第六项公开知识》有哪些值得关注的核心内容？", updatedAt: "2026-09-09" },
       ],
     }, "suggestions_invalid_contract", null],
     [{
@@ -408,9 +418,9 @@ test("OA suggestions preflight attempts every retrieval and fails when any sugge
   assert.equal(result.classification, "suggestion_not_answerable");
   assert.equal(result.suggestionsHttpStatus, 200);
   assert.equal(result.retrievalHttpStatus, 200);
-  assert.equal(result.suggestionCount, 3);
-  assert.equal(result.answerableSuggestionCount, 1);
-  assert.equal(result.chunkCount, 1);
+  assert.equal(result.suggestionCount, 5);
+  assert.equal(result.answerableSuggestionCount, 3);
+  assert.equal(result.chunkCount, 3);
   const serialized = JSON.stringify(result);
   assert.equal(serialized.includes(token), false);
   for (const { question } of validSuggestionsPayload.suggestions) {

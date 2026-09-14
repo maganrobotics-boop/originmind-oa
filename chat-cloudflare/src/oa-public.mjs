@@ -17,7 +17,7 @@ const TIMEOUT_MS = 12_000;
 // check into an expensive multi-term ranking query.
 const OA_PROBE_QUESTION = "oaretrievalprobe";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
-const OA_SUGGESTION_LIMIT = 4;
+const OA_SUGGESTION_LIMIT = 5;
 
 export function isWellFormedUnicode(value) {
   for (let index = 0; index < value.length; index += 1) {
@@ -185,7 +185,7 @@ export function parseOaSuggestions(value) {
     const item = exactObject(candidate, ["id", "question", "updatedAt"]);
     const updatedAt = stringField(item.updatedAt, { max: 10, pattern: DATE_PATTERN });
     const parsed = {
-      id: stringField(item.id, { max: 1, pattern: /^[1-4]$/u }),
+      id: stringField(item.id, { max: 1, pattern: /^[1-5]$/u }),
       question: cleanPublicChatText(stringField(item.question, { trim: true, min: 2, max: 300 })),
       updatedAt,
     };

@@ -1098,7 +1098,7 @@ test("public health stays ready before an admin account is initialized", async (
   });
 });
 
-test("static topic links, root, manager and generated hashed assets are served by the ASSETS binding", async () => {
+test("static topic links, PWA files, root, manager and generated hashed assets use ASSETS", async () => {
   const assets = mockAssets();
   const env = environment({ ASSETS: assets });
   const paths = [
@@ -1108,7 +1108,10 @@ test("static topic links, root, manager and generated hashed assets are served b
     "/originmind",
     "/ius",
     "/manage",
+    "/manifest.webmanifest",
+    "/service-worker.js",
     "/assets/app-0123456789abcdef.js",
+    "/assets/pwa/icon-192-v1.png",
   ];
   for (const path of paths) {
     const response = await worker.fetch(request(path, { origin: null }), env, {});
@@ -1121,7 +1124,10 @@ test("static topic links, root, manager and generated hashed assets are served b
     "/index.html",
     "/index.html",
     "/index.html",
+    "/manifest.webmanifest",
+    "/service-worker.js",
     "/assets/app-0123456789abcdef.js",
+    "/assets/pwa/icon-192-v1.png",
   ]);
 });
 

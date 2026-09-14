@@ -74,6 +74,14 @@ function withoutReturnedKnowledgeItemQuery(href) {
   return `${url.pathname}${url.search}${url.hash}`;
 }
 
+const GENERAL_CHAT_TOPIC = Object.freeze({
+  id: "general",
+  path: "/",
+  requestTopic: "research",
+  title: "聊天",
+  detail: "全部公开知识",
+});
+
 const TOPICS = [
   {
     id: "technology",
@@ -121,11 +129,9 @@ const TOPICS = [
   },
 ];
 
-const DEFAULT_TOPIC_ID = TOPICS[0].id;
-const TOPIC_ID_BY_PATH = new Map([
-  ["/", DEFAULT_TOPIC_ID],
-  ...TOPICS.map((topic) => [topic.path, topic.id]),
-]);
+const CHAT_TOPICS = Object.freeze([GENERAL_CHAT_TOPIC, ...TOPICS]);
+const DEFAULT_TOPIC_ID = GENERAL_CHAT_TOPIC.id;
+const TOPIC_ID_BY_PATH = new Map(CHAT_TOPICS.map((topic) => [topic.path, topic.id]));
 
 function topicIdForPath(pathname) {
   return TOPIC_ID_BY_PATH.get(pathname) || DEFAULT_TOPIC_ID;
@@ -153,9 +159,36 @@ function knowledgeSuggestionsFromPayload(payload) {
     const question = typeof candidate?.question === "string" ? cleanPublicChatText(candidate.question) : "";
     if (!question || question.length > 300 || selected.includes(question)) continue;
     selected.push(question);
-    if (selected.length === 4) break;
+    if (selected.length === 5) break;
   }
   return selected;
+}
+
+function isStandaloneWebApp(windowObject = window, navigatorObject = navigator) {
+  const displayModeStandalone = typeof windowObject?.matchMedia === "function" &&
+    windowObject.matchMedia("(display-mode: standalone)").matches;
+  return displayModeStandalone || navigatorObject?.standalone === true;
+}
+
+function isAppleMobileDevice(navigatorObject = navigator) {
+  const userAgent = String(navigatorObject?.userAgent || "");
+  const platform = String(navigatorObject?.platform || "");
+  const touchPoints = Number(navigatorObject?.maxTouchPoints) || 0;
+  return /iPad|iPhone|iPod/u.test(userAgent) || (platform === "MacIntel" && touchPoints > 1);
+}
+
+function registerPublicServiceWorker(windowObject = window, navigatorObject = navigator, documentObject = document) {
+  if (!navigatorObject?.serviceWorker || typeof navigatorObject.serviceWorker.register !== "function") return;
+  const register = () => {
+    void navigatorObject.serviceWorker.register("/service-worker.js", {
+      scope: "/",
+      updateViaCache: "none",
+    }).catch(() => {
+      // Installation remains optional; a registration failure must never block chat.
+    });
+  };
+  if (documentObject?.readyState === "complete") register();
+  else windowObject.addEventListener("load", register, { once: true });
 }
 
 const TOPIC_LABELS = Object.freeze({
@@ -698,7 +731,9 @@ const SYSTEM_LIGHTS = Object.freeze([
 const SYSTEM_STATUS_REFRESH_MS = 60_000;
 const SYSTEM_STATUS_RETRY_MS = 5_000;
 const SYSTEM_STATUS_TIMEOUT_MS = 15_000;
-const SUGGESTIONS_REFRESH_MS = 60_000;
+const SUGGESTIONS_RETRY_MS = 5 * 60_000;
+const DAY_MS = 24 * 60 * 60_000;
+const BEIJING_UTC_OFFSET_MS = 8 * 60 * 60_000;
 const CHAT_OA_PUBLIC_STATUSES = Object.freeze([
   "connected",
   "not_configured",
@@ -787,13 +822,24 @@ function oaRetrievalStatusDetail(service) {
   return "OA 知识检索暂不可用";
 }
 
+function beijingDayKey(timestamp) {
+  if (!Number.isFinite(timestamp) || timestamp < 0) return "";
+  return new Date(timestamp + BEIJING_UTC_OFFSET_MS).toISOString().slice(0, 10);
+}
+
+function suggestionsRefreshDelay(now = Date.now()) {
+  const shiftedNow = now + BEIJING_UTC_OFFSET_MS;
+  const nextBeijingDay = (Math.floor(shiftedNow / DAY_MS) + 1) * DAY_MS - BEIJING_UTC_OFFSET_MS;
+  return Math.max(1_000, nextBeijingDay - now);
+}
+
 function suggestionsRefreshNeeded({ ready, loaded, loading, pending, fetchedAt, now }) {
   return ready === true &&
     loading !== true &&
     (
       loaded !== true ||
       pending === true ||
-      now - fetchedAt >= SUGGESTIONS_REFRESH_MS
+      beijingDayKey(now) !== beijingDayKey(fetchedAt)
     );
 }
 
@@ -807,7 +853,7 @@ function createPublicApp() {
   let historyDetail = null;
 
   function blankConversation(section, now = Date.now()) {
-    const topic = TOPICS.find((item) => item.id === section) || TOPICS[0];
+    const topic = CHAT_TOPICS.find((item) => item.id === section) || GENERAL_CHAT_TOPIC;
     return {
       id: makeRequestId(),
       section: topic.id,
@@ -828,7 +874,7 @@ function createPublicApp() {
   }
 
   const initialSection = topicIdForPath(window.location.pathname);
-  const storedConversations = readChatConversations(historyStorage, TOPICS.map((topic) => topic.id));
+  const storedConversations = readChatConversations(historyStorage, CHAT_TOPICS.map((topic) => topic.id));
   const conversations = storedConversations?.conversations || [];
   let migratedLegacyHistory = false;
   if (!storedConversations) {
@@ -916,7 +962,7 @@ function createPublicApp() {
   }
 
   function topicFor(section = state.section) {
-    return TOPICS.find((topic) => topic.id === section) || TOPICS[0];
+    return CHAT_TOPICS.find((topic) => topic.id === section) || GENERAL_CHAT_TOPIC;
   }
 
   function conversationFor(conversationId) {
@@ -1048,14 +1094,18 @@ function createPublicApp() {
   const topicLinks = new Map(TOPICS.map((topic) => [topic.id, []]));
   const recentLists = [];
   const chatLaunchButtons = [];
+  const installControls = [];
+  let deferredInstallPrompt = null;
+  let installDialogOpener = null;
+  let installedWebApp = isStandaloneWebApp();
 
   function sidebarContent({ mobile = false } = {}) {
     const shell = element("div", { className: "sidebar-shell" });
     const sidebarHeader = element("div", { className: "sidebar-header" });
-    const sidebarBrand = element("strong", {
-      className: "sidebar-brand",
-      text: "ARTS Robotics",
-    });
+    const sidebarBrand = element("div", { className: "sidebar-brand" }, [
+      element("strong", { className: "sidebar-brand-title", text: "实验室助手" }),
+      element("span", { className: "sidebar-brand-subtitle", text: "ARTS Robotics" }),
+    ]);
     const sidebarSearch = textButton("⌕", "sidebar-search");
     sidebarSearch.setAttribute("aria-label", "搜索最近聊天");
     sidebarSearch.addEventListener("click", searchRecentConversations);
@@ -1113,8 +1163,18 @@ function createPublicApp() {
       attributes: { href: "/manage" },
       text: "管理",
     });
+    const installButton = textButton("", "sidebar-install-button");
+    const installLabel = element("span", { text: "安装应用" });
+    installButton.append(
+      icon("⇩", "sidebar-install-icon"),
+      installLabel,
+    );
+    installButton.setAttribute("aria-controls", "install-dialog");
+    installButton.setAttribute("aria-haspopup", "dialog");
+    installButton.addEventListener("click", () => { void requestAppInstall(installButton); });
+    installControls.push({ button: installButton, label: installLabel });
     if (officialLink) utilityLinks.append(officialLink);
-    utilityLinks.append(manageLink);
+    utilityLinks.append(manageLink, installButton);
     const bottomRow = element("div", { className: "sidebar-bottom-row" });
     const chatButton = textButton("", "sidebar-chat-button");
     chatButton.setAttribute("aria-controls", "new-chat-dialog");
@@ -1161,7 +1221,9 @@ function createPublicApp() {
     if (topicDrawer.open) return;
     menuButton.setAttribute("aria-expanded", "true");
     topicDrawer.showModal();
-    window.requestAnimationFrame(() => topicLinks.get(state.section)?.at(-1)?.focus());
+    window.requestAnimationFrame(() => (
+      topicLinks.get(state.section)?.at(-1) || topicLinks.get(TOPICS[0].id)?.at(-1)
+    )?.focus());
   });
   topicDrawer.addEventListener("click", (event) => {
     if (event.target === topicDrawer) closeTopicDrawer();
@@ -1211,8 +1273,12 @@ function createPublicApp() {
     className: "suggestions",
     attributes: { role: "group" },
   });
+  const suggestionCaption = element("p", {
+    className: "suggestion-caption",
+    text: "今日推荐 · 基于公开知识，每日更新",
+  });
   suggestionPanel.hidden = true;
-  suggestionPanel.append(suggestionList);
+  suggestionPanel.append(suggestionCaption, suggestionList);
 
   const composer = element("form", { className: "composer" });
   const questionLabel = element("label", {
@@ -1225,7 +1291,7 @@ function createPublicApp() {
     attributes: {
       maxlength: "2000",
       rows: "1",
-      placeholder: "输入消息",
+      placeholder: "询问实验室大数据",
       autocomplete: "off",
     },
   });
@@ -1249,7 +1315,7 @@ function createPublicApp() {
   const newChatClose = textButton("×", "new-chat-close");
   newChatClose.setAttribute("aria-label", "关闭新建聊天");
   newChatHeader.append(newChatTitle, newChatClose);
-  const newChatContextValue = element("strong", { text: topicFor().title });
+  const newChatContextValue = element("strong", { text: GENERAL_CHAT_TOPIC.detail });
   const newChatContext = element("p", { className: "new-chat-context" }, [
     "当前知识范围：",
     newChatContextValue,
@@ -1262,7 +1328,11 @@ function createPublicApp() {
     className: "new-chat-suggestion-list",
     attributes: { role: "group" },
   });
-  newChatSuggestionPanel.append(newChatSuggestionList);
+  const newChatSuggestionCaption = element("p", {
+    className: "new-chat-suggestion-caption",
+    text: "今日推荐 · 基于公开知识，每日更新",
+  });
+  newChatSuggestionPanel.append(newChatSuggestionCaption, newChatSuggestionList);
   const newChatForm = element("form", { className: "new-chat-form" });
   const newChatInputLabel = element("label", {
     className: "sr-only",
@@ -1288,7 +1358,7 @@ function createPublicApp() {
   newChatDialog.append(newChatPanel);
 
   let newChatDialogOpener = null;
-  let newChatSection = state.section;
+  let newChatSection = GENERAL_CHAT_TOPIC.id;
   let newChatDialogEpoch = 0;
 
   function finishNewChatClose() {
@@ -1310,8 +1380,8 @@ function createPublicApp() {
     const resolvedOpener = topicDrawer.contains(opener) ? menuButton : opener;
     closeTopicDrawer();
     newChatDialogOpener = resolvedOpener instanceof HTMLElement ? resolvedOpener : document.activeElement;
-    newChatSection = state.section;
-    newChatContextValue.textContent = topicFor(newChatSection).title;
+    newChatSection = GENERAL_CHAT_TOPIC.id;
+    newChatContextValue.textContent = GENERAL_CHAT_TOPIC.detail;
     newChatInput.value = "";
     newChatSend.disabled = true;
     newChatDialogEpoch += 1;
@@ -1347,6 +1417,116 @@ function createPublicApp() {
     event.preventDefault();
     startNewChatQuestion(newChatInput.value);
   });
+
+  const installDialog = element("dialog", {
+    id: "install-dialog",
+    className: "install-dialog",
+    attributes: {
+      "aria-labelledby": "install-dialog-title",
+      "aria-describedby": "install-dialog-description",
+    },
+  });
+  const installPanel = element("div", { className: "install-panel" });
+  const installHeader = element("header", { className: "install-header" });
+  const installTitle = element("h2", { id: "install-dialog-title", text: "安装实验室助手" });
+  const installClose = textButton("×", "install-close");
+  installClose.setAttribute("aria-label", "关闭安装说明");
+  installHeader.append(installTitle, installClose);
+  const installDescription = element("p", {
+    id: "install-dialog-description",
+    className: "install-description",
+  });
+  const installSteps = element("ol", { className: "install-steps" });
+  const installDone = textButton("知道了", "install-done");
+  installPanel.append(installHeader, installDescription, installSteps, installDone);
+  installDialog.append(installPanel);
+
+  function updateInstallControls() {
+    installedWebApp = installedWebApp || isStandaloneWebApp();
+    for (const { button, label } of installControls) {
+      button.disabled = installedWebApp;
+      label.textContent = installedWebApp ? "已安装" : "安装应用";
+      button.setAttribute("aria-label", installedWebApp ? "实验室助手已安装" : "安装实验室助手");
+      button.setAttribute("aria-haspopup", installedWebApp ? "false" : "dialog");
+    }
+  }
+
+  function finishInstallDialogClose() {
+    const opener = installDialogOpener;
+    installDialogOpener = null;
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+  }
+
+  function closeInstallDialog() {
+    if (installDialog.open) installDialog.close();
+  }
+
+  function openInstallGuidance(opener) {
+    installDialogOpener = topicDrawer.contains(opener) ? menuButton : opener;
+    closeTopicDrawer();
+    installSteps.replaceChildren();
+    if (isAppleMobileDevice()) {
+      installTitle.textContent = "添加到主屏幕";
+      installDescription.textContent = "iPhone 和 iPad 需要通过 Safari 的系统菜单完成安装。";
+      for (const step of ["点击 Safari 的分享按钮", "选择“添加到主屏幕”", "确认“作为网页 App 打开”，再点击“添加”"]) {
+        installSteps.append(element("li", { text: step }));
+      }
+    } else {
+      installTitle.textContent = "安装实验室助手";
+      installDescription.textContent = "当前浏览器暂未提供站内安装确认。你仍可通过浏览器菜单添加到桌面。";
+      for (const step of ["打开浏览器菜单", "选择“安装应用”或“添加到桌面”", "按系统提示确认"]) {
+        installSteps.append(element("li", { text: step }));
+      }
+    }
+    if (!installDialog.open) installDialog.showModal();
+    window.requestAnimationFrame(() => installClose.focus({ preventScroll: true }));
+  }
+
+  async function requestAppInstall(opener) {
+    if (installedWebApp || isStandaloneWebApp()) {
+      installedWebApp = true;
+      updateInstallControls();
+      topicStatus.textContent = "实验室助手已作为桌面应用打开";
+      return;
+    }
+    const promptEvent = deferredInstallPrompt;
+    if (!promptEvent || typeof promptEvent.prompt !== "function") {
+      openInstallGuidance(opener);
+      return;
+    }
+    closeTopicDrawer();
+    deferredInstallPrompt = null;
+    updateInstallControls();
+    try {
+      await promptEvent.prompt();
+      const choice = await promptEvent.userChoice;
+      if (choice?.outcome === "accepted") {
+        topicStatus.textContent = "正在安装实验室助手";
+      }
+    } catch {
+      openInstallGuidance(opener);
+    }
+  }
+
+  installClose.addEventListener("click", closeInstallDialog);
+  installDone.addEventListener("click", closeInstallDialog);
+  installDialog.addEventListener("click", (event) => {
+    if (event.target === installDialog) closeInstallDialog();
+  });
+  installDialog.addEventListener("close", finishInstallDialogClose);
+  window.addEventListener("beforeinstallprompt", (event) => {
+    event.preventDefault?.();
+    deferredInstallPrompt = event;
+    updateInstallControls();
+  });
+  window.addEventListener("appinstalled", () => {
+    deferredInstallPrompt = null;
+    installedWebApp = true;
+    updateInstallControls();
+    closeInstallDialog();
+    topicStatus.textContent = "实验室助手已安装到桌面";
+  });
+  updateInstallControls();
 
   function chatInfoActionRow(labelText, action, extraClass = "") {
     const row = textButton("", `chat-info-row${extraClass ? ` ${extraClass}` : ""}`);
@@ -1456,7 +1636,16 @@ function createPublicApp() {
     if (opener?.isConnected) opener.focus();
   });
 
-  app.append(desktopSidebar, header, layout, topicDrawer, newChatDialog, chatInfoDialog, inquiryDialog);
+  app.append(
+    desktopSidebar,
+    header,
+    layout,
+    topicDrawer,
+    newChatDialog,
+    installDialog,
+    chatInfoDialog,
+    inquiryDialog,
+  );
   root.replaceChildren(app);
 
   let systemStatusEpoch = 0;
@@ -1891,6 +2080,12 @@ function createPublicApp() {
     const replacement = createConversation(section);
     state.activeConversationId = replacement.id;
     state.section = section;
+    const replacementTopic = topicFor(section);
+    window.history.replaceState?.(
+      { ...(window.history.state || {}), topic: replacementTopic.id, conversationId: replacement.id },
+      "",
+      replacementTopic.path,
+    );
     if (state.inquiry.conversationId === removedId) {
       state.inquiry.summary = "";
       state.inquiry.includeConversation = false;
@@ -1905,7 +2100,7 @@ function createPublicApp() {
     syncTopicControls();
     renderRecentConversations();
     persistSession();
-    topicStatus.textContent = `已删除${topicFor().title}当前聊天`;
+    topicStatus.textContent = "已删除当前聊天";
     if (closeDrawer) closeTopicDrawer();
     if (closeInfo) closeChatInfo();
     window.requestAnimationFrame(() => questionInput.focus());
@@ -1944,7 +2139,7 @@ function createPublicApp() {
   }
 
   function activateTopic(section, { historyMode = "none", announce = false } = {}) {
-    const nextTopic = TOPICS.find((topic) => topic.id === section);
+    const nextTopic = CHAT_TOPICS.find((topic) => topic.id === section);
     if (!nextTopic) return;
     const active = conversationFor(state.activeConversationId);
     const reusable = active?.section === nextTopic.id && active.messages.length === 0 && !active.sending
@@ -2042,7 +2237,14 @@ function createPublicApp() {
       for (const suggestion of state.suggestions) {
         const button = textButton("", "suggestion-button");
         button.title = suggestion;
-        button.append(element("span", { text: suggestion }));
+        button.append(
+          element("span", {
+            className: "suggestion-sparkle",
+            text: "✦",
+            attributes: { "aria-hidden": "true" },
+          }),
+          element("span", { text: suggestion }),
+        );
         button.addEventListener("click", () => { void dispatchSuggestion(suggestion, conversationId); });
         suggestionList.append(button);
       }
@@ -2058,7 +2260,14 @@ function createPublicApp() {
     const dialogEpoch = newChatDialogEpoch;
     for (const suggestion of state.suggestions) {
       const button = textButton("", "new-chat-suggestion");
-      button.append(element("span", { text: suggestion }));
+      button.append(
+        element("span", {
+          className: "suggestion-sparkle",
+          text: "✦",
+          attributes: { "aria-hidden": "true" },
+        }),
+        element("span", { text: suggestion }),
+      );
       button.addEventListener("click", () => {
         void dispatchSuggestion(suggestion, "", {
           startNew: true,
@@ -2086,6 +2295,7 @@ function createPublicApp() {
     const epoch = ++suggestionsEpoch;
     let current = [];
     let suggestionToken = "";
+    let refreshSucceeded = false;
     try {
       const payload = await requestJson("/api/suggestions", {
         cache: "no-store",
@@ -2095,6 +2305,7 @@ function createPublicApp() {
       current = knowledgeSuggestionsFromPayload(payload);
       const candidate = payload.suggestions?.find((item) => item.question === question);
       suggestionToken = typeof candidate?.suggestionToken === "string" ? candidate.suggestionToken : "";
+      refreshSucceeded = true;
     } catch {
       // A recommendation that cannot be revalidated is not sent to chat.
     } finally {
@@ -2104,7 +2315,9 @@ function createPublicApp() {
         state.suggestionsLoading = false;
         state.suggestionsFetchedAt = Date.now();
         renderSuggestions();
-        if (knowledgeRetrievalReady()) scheduleSuggestionsRefresh();
+        if (knowledgeRetrievalReady()) {
+          scheduleSuggestionsRefresh(refreshSucceeded ? suggestionsRefreshDelay() : SUGGESTIONS_RETRY_MS);
+        }
       }
     }
     if (epoch !== suggestionsEpoch || !current.includes(question) || !recommendationsReady()) return;
@@ -2121,7 +2334,7 @@ function createPublicApp() {
     }
   }
 
-  function scheduleSuggestionsRefresh(delay = SUGGESTIONS_REFRESH_MS) {
+  function scheduleSuggestionsRefresh(delay = suggestionsRefreshDelay()) {
     if (suggestionsRefreshTimer !== null) window.clearTimeout(suggestionsRefreshTimer);
     suggestionsRefreshDueAt = Date.now() + delay;
     suggestionsRefreshTimer = window.setTimeout(() => {
@@ -2150,6 +2363,7 @@ function createPublicApp() {
     state.suggestionsLoading = true;
     const epoch = ++suggestionsEpoch;
     let current = [];
+    let refreshSucceeded = false;
     try {
       const payload = await requestJson("/api/suggestions", {
         cache: "no-store",
@@ -2157,6 +2371,7 @@ function createPublicApp() {
         timeoutMessage: "推荐话题加载超时。",
       });
       current = knowledgeSuggestionsFromPayload(payload);
+      refreshSucceeded = true;
     } catch {
       // Recommendations are optional. Never replace verified knowledge with static guesses.
     } finally {
@@ -2166,7 +2381,9 @@ function createPublicApp() {
         state.suggestionsLoading = false;
         state.suggestionsFetchedAt = Date.now();
         renderSuggestions();
-        if (knowledgeRetrievalReady()) scheduleSuggestionsRefresh();
+        if (knowledgeRetrievalReady()) {
+          scheduleSuggestionsRefresh(refreshSucceeded ? suggestionsRefreshDelay() : SUGGESTIONS_RETRY_MS);
+        }
       }
     }
   }
@@ -2178,6 +2395,7 @@ function createPublicApp() {
     const restoreTop = session.scrollTop;
     const epoch = ++renderEpoch;
     const content = element("div", { className: session.messages.length ? "message-list" : "empty-conversation" });
+    conversation.classList.toggle("is-empty", session.messages.length === 0);
     if (session.messages.length) {
       for (const message of session.messages) content.append(assistantMessageNode(message, conversationId));
       if (session.sending) {
@@ -2191,6 +2409,21 @@ function createPublicApp() {
           ]),
         );
       }
+    } else {
+      content.append(element("section", {
+        className: "empty-hero",
+        attributes: { "aria-labelledby": "empty-chat-title" },
+      }, [
+        element("h2", {
+          id: "empty-chat-title",
+          text: "想了解实验室的什么？",
+        }),
+        element("p", {
+          text: topic.id === GENERAL_CHAT_TOPIC.id
+            ? "从已审核的实验室公开知识中检索并回答"
+            : `从“${topic.title}”公开知识中检索并回答`,
+        }),
+      ]));
     }
     messageScroll.setAttribute("aria-live", "off");
     messageScroll.replaceChildren(content);
@@ -2568,12 +2801,13 @@ function createPublicApp() {
   });
   document.addEventListener("visibilitychange", () => {
     if (document.hidden) { flushHistory(); return; }
+    const now = Date.now();
     const statusRefreshDue =
-      (systemStatusRefreshDueAt > 0 && Date.now() >= systemStatusRefreshDueAt) ||
-      (systemStatusRefreshDueAt === 0 && Date.now() - systemStatusCheckedAt >= SYSTEM_STATUS_REFRESH_MS);
+      (systemStatusRefreshDueAt > 0 && now >= systemStatusRefreshDueAt) ||
+      (systemStatusRefreshDueAt === 0 && now - systemStatusCheckedAt >= SYSTEM_STATUS_REFRESH_MS);
     const suggestionsRefreshDue =
-      (suggestionsRefreshDueAt > 0 && Date.now() >= suggestionsRefreshDueAt) ||
-      (suggestionsRefreshDueAt === 0 && Date.now() - state.suggestionsFetchedAt >= SUGGESTIONS_REFRESH_MS);
+      (suggestionsRefreshDueAt > 0 && now >= suggestionsRefreshDueAt) ||
+      (suggestionsRefreshDueAt === 0 && beijingDayKey(now) !== beijingDayKey(state.suggestionsFetchedAt));
     if (statusRefreshDue) {
       void loadSystemStatus({ showPending: true });
     } else if (suggestionsRefreshDue) {
@@ -2582,6 +2816,7 @@ function createPublicApp() {
   });
 
   window.addEventListener("pagehide", flushHistory);
+  registerPublicServiceWorker();
 
   const modelContext = document.modelContext;
   if (modelContext && typeof modelContext.registerTool === "function") {

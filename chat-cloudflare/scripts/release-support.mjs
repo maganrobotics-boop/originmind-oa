@@ -142,7 +142,13 @@ export async function verifySourceTree() {
     "frontend/app.js",
     "frontend/styles.css",
     "public/_headers",
+    "public/assets/pwa/apple-touch-icon-180-v1.png",
+    "public/assets/pwa/icon-192-v1.png",
+    "public/assets/pwa/icon-512-v1.png",
+    "public/assets/pwa/icon-maskable-512-v1.png",
     "public/index.html",
+    "public/manifest.webmanifest",
+    "public/service-worker.js",
   ];
   for (const item of required) {
     const path = resolve(CHAT_ROOT, item);

@@ -17,7 +17,8 @@ async function harness() {
   const timers = new Map();
   let nextTimer = 0;
   const api = runInNewContext(`
-    const SUGGESTIONS_REFRESH_MS = 60_000;
+    const SUGGESTIONS_RETRY_MS = 5 * 60_000;
+    const suggestionsRefreshDelay = () => 24 * 60 * 60_000;
     const state = {
       section: "academic", activeConversationId: "conversation-academic", networkReady: true,
       service: { knowledgeReady: true, retrievalReady: true },

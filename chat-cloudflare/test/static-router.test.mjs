@@ -30,8 +30,11 @@ function mockEnvironment() {
             "/index.html",
             "/favicon.svg",
             "/LICENSES.md",
+            "/manifest.webmanifest",
+            "/service-worker.js",
             "/assets/app-0123456789abcdef.js",
             "/assets/styles-0123456789abcdef.css",
+            "/assets/pwa/icon-192-v1.png",
           ]);
           if (!known.has(url.pathname)) {
             return new Response("missing", { status: 404 });
@@ -75,6 +78,8 @@ test("path classifier is exact and does not turn unknown paths into the SPA", ()
   assert.equal(classifyPath("/assets/app.js"), RouteKind.ASSET);
   assert.equal(classifyPath("/favicon.svg"), RouteKind.ASSET);
   assert.equal(classifyPath("/LICENSES.md"), RouteKind.ASSET);
+  assert.equal(classifyPath("/manifest.webmanifest"), RouteKind.ASSET);
+  assert.equal(classifyPath("/service-worker.js"), RouteKind.ASSET);
   assert.equal(classifyPath("/unknown"), RouteKind.NOT_FOUND);
 });
 
@@ -179,7 +184,16 @@ test("unknown paths return hardened 404 responses", async () => {
 
 test("unsafe methods cannot retrieve the shell or static assets", async () => {
   const { env, calls } = mockEnvironment();
-  for (const path of ["/", ...TOPIC_PATHS, "/technology/", "/manage", "/manage/", "/favicon.svg"]) {
+  for (const path of [
+    "/",
+    ...TOPIC_PATHS,
+    "/technology/",
+    "/manage",
+    "/manage/",
+    "/favicon.svg",
+    "/manifest.webmanifest",
+    "/service-worker.js",
+  ]) {
     const response = await routeStaticRequest(
       new Request(`https://chat.omindos.ai${path}`, { method: "POST" }),
       env,
@@ -204,7 +218,14 @@ test("hashed assets are immutable while auxiliary assets use a short TTL", async
   assertHardened(script, "public, max-age=31536000, immutable");
   assert.equal(calls[0].ifNoneMatch, '"asset-etag"');
 
-  for (const path of ["/favicon.svg", "/LICENSES.md"]) {
+  const icon = await routeStaticRequest(
+    new Request("https://chat.omindos.ai/assets/pwa/icon-192-v1.png"),
+    env,
+  );
+  assert.equal(icon.status, 200);
+  assertHardened(icon, "public, max-age=31536000, immutable");
+
+  for (const path of ["/favicon.svg", "/LICENSES.md", "/manifest.webmanifest"]) {
     const response = await routeStaticRequest(
       new Request(`https://chat.omindos.ai${path}`),
       env,
@@ -212,6 +233,13 @@ test("hashed assets are immutable while auxiliary assets use a short TTL", async
     assert.equal(response.status, 200);
     assertHardened(response, "public, max-age=3600");
   }
+
+  const serviceWorker = await routeStaticRequest(
+    new Request("https://chat.omindos.ai/service-worker.js"),
+    env,
+  );
+  assert.equal(serviceWorker.status, 200);
+  assertHardened(serviceWorker, "no-cache, no-store, must-revalidate");
 });
 
 test("missing files under /assets are not cached as immutable", async () => {
