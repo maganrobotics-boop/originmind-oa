@@ -14,6 +14,7 @@ class TestNode {
 const document = { createElement: (tag) => new TestNode(tag), createTextNode: (text) => new TestNode("#text", text) };
 function section(start, end) { return source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start))); }
 const api = runInNewContext(`
+  ${section("function cleanPublicChatText", "function knowledgeSuggestionsFromPayload")}
   ${section("function element(", "function icon(")}
   ${section("function referenceSectionStart", "function serviceLabel")}
   ({ CHAT_HISTORY_KEY, CHAT_HISTORY_TTL_MS, CHAT_TOKEN_TTL_MS,

@@ -48,7 +48,7 @@ test("OA suggestion parser accepts only the exact bounded contract", () => {
     { suggestions: [{ ...SUGGESTIONS[0], updatedAt: "2026-02-30" }] },
     { suggestions: [{ ...SUGGESTIONS[0], question: "最近有哪些有趣内容？" }] },
     { suggestions: [SUGGESTIONS[0], { ...SUGGESTIONS[0], id: "2" }] },
-    { suggestions: Array.from({ length: 4 }, (_, index) => ({
+    { suggestions: Array.from({ length: 5 }, (_, index) => ({
       id: String(index + 1),
       question: `推荐问题 ${index + 1}`,
       updatedAt: "2026-09-14",
@@ -278,4 +278,28 @@ test("extractive fallback deduplicates and bounds approved knowledge excerpts", 
   assert.equal((answer.match(/^- /gmu) || []).length, 2);
   assert.match(answer, /…/u);
   assert.match(answer, /另一条公开内容/u);
+});
+
+test("model and retrieval fallback responses hide labels without breaking source binding or conversation tokens", async (t) => {
+  for (const mode of ["ai", "retrieval"]) {
+    const env = environment({ AI: { run: async () => {
+      if (mode === "retrieval") throw new Error("model unavailable");
+      return { response: "《巡检方案（脱敏版）》采用 ROS2 导航。[1]" };
+    } } });
+    t.after(() => env.DB.close());
+    const response = await handleRequest(new Request(`${ORIGIN}/api/chat`, {
+      method: "POST", headers: { "CF-Connecting-IP": "203.0.113.56", "Content-Type": "application/json", Origin: ORIGIN },
+      body: JSON.stringify({ topic: "research", messages: [{ role: "user", content: "《巡检方案》有哪些值得关注的核心内容？" }] }),
+    }), env, {}, { fetch: async () => Response.json({ chunks: [{
+      id: "1", title: "巡检方案（脱敏版）", category: "research", sectionTitle: "方法（脱密版）", paragraphRef: "第 1 段",
+      excerpt: "《巡检方案（脱敏版）》采用 ROS2 导航。", sourceLabel: "公开知识（匿名化）", updatedAt: "2026-09-14",
+    }] }) });
+    assert.equal(response.status, 200);
+    const result = await response.json();
+    assert.equal(result.mode, mode);
+    assert.match(result.answer, /ROS2/u);
+    assert.equal(result.sources.length, 1);
+    assert.doesNotMatch(JSON.stringify(result), /脱敏|脱密|匿名化/u);
+    assert.equal(typeof result.conversationToken, "string");
+  }
 });

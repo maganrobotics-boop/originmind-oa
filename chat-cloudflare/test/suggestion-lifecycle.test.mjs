@@ -30,7 +30,7 @@ async function harness() {
     let suggestionsRefreshDueAt = 0;
     let suggestionsRefreshPending = false;
     let suggestionsEpoch = 0;
-    ${section("function knowledgeSuggestionsFromPayload", "const TOPIC_LABELS")}
+    ${section("function cleanPublicChatText", "const TOPIC_LABELS")}
     ${section("function knowledgeRetrievalReady", "function setSystemLight")}
     ${section("async function dispatchSuggestion", "function renderMessages")}
     ({ state, loadSuggestions, dispatchSuggestion, invalidateSuggestions,

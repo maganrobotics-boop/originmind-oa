@@ -2652,41 +2652,36 @@ body.public-chat-page {
 
 .chat-app .suggestions {
   display: flex;
+  flex-direction: column-reverse;
   width: min(100%, 860px);
+  max-height: min(42dvh, 320px);
   margin: 0 auto;
   padding: 1px 0 3px;
-  overflow-x: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
   flex-wrap: nowrap;
-  justify-content: safe center;
-  gap: 8px;
-  scrollbar-width: none;
-  overscroll-behavior-inline: contain;
-  scroll-snap-type: inline proximity;
-}
-
-.chat-app .suggestions::-webkit-scrollbar {
-  display: none;
+  align-items: flex-end;
+  justify-content: flex-start;
+  gap: 6px;
+  overscroll-behavior: contain;
 }
 
 .chat-app .suggestion-button {
   display: block;
   flex: 0 0 auto;
-  width: auto;
-  max-width: min(72vw, 520px);
+  width: fit-content;
+  max-width: min(100%, 680px);
   min-height: 44px;
-  align-items: center;
   padding: 8px 14px;
-  overflow: hidden;
   border: 1px solid rgba(187, 187, 187, 0.78);
-  border-radius: 999px;
+  border-radius: 18px;
   background: rgba(255, 255, 255, 0.94);
   color: #252525;
   font-size: 14px;
   line-height: 1.5;
   text-align: left;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  scroll-snap-align: start;
+  white-space: normal;
+  overflow-wrap: anywhere;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.045);
 }
 

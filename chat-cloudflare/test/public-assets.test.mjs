@@ -51,7 +51,8 @@ async function frontendAnswerFormatter() {
   const start = script.indexOf("function referenceSectionStart");
   const end = script.indexOf("function serviceLabel", start);
   assert.ok(start >= 0 && end > start, "frontend answer formatter must remain directly testable");
-  return runInNewContext(`${script.slice(start, end)}\nuserFacingAnswer;`, Object.create(null));
+  const clean = script.slice(script.indexOf("function cleanPublicChatText"), script.indexOf("function knowledgeSuggestionsFromPayload"));
+  return runInNewContext(`${clean}\n${script.slice(start, end)}\nuserFacingAnswer;`, Object.create(null));
 }
 
 async function frontendImportHelpers() {
@@ -78,7 +79,7 @@ async function frontendOaStatusHelpers() {
 
 async function frontendSuggestionHelpers() {
   const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
-  const start = script.indexOf("function knowledgeSuggestionsFromPayload");
+  const start = script.indexOf("function cleanPublicChatText");
   const end = script.indexOf("const TOPIC_LABELS", start);
   assert.ok(start >= 0 && end > start, "frontend suggestion normalization must remain directly testable");
   return runInNewContext(
@@ -701,10 +702,11 @@ test("knowledge recommendations accept only bounded questions returned by the AP
         { question: "知识库问题二？" },
         { question: "x".repeat(301) },
         { question: "知识库问题三？" },
-        { question: "不会被选中的第四个问题？" },
+        { question: "知识库问题四？" },
+        { question: "不会被选中的第五个问题？" },
       ],
     })],
-    ["知识库问题一？", "知识库问题二？", "知识库问题三？"],
+    ["知识库问题一？", "知识库问题二？", "知识库问题三？", "知识库问题四？"],
   );
   assert.deepEqual([...normalize({ suggestions: ["静态字符串不属于接口契约", {}, null] })], []);
   assert.deepEqual([...normalize({ suggestions: [] })], []);
@@ -764,8 +766,8 @@ test("public chat keeps a minimal topic header and compact message composer", as
   }
   assert.match(style, /\.chat-app\s+\.composer\s*\{[\s\S]*?display:\s*flex/u);
   assert.match(style, /\.chat-app\s+\.composer-suggestions\s*\{[\s\S]*?flex:\s*0 0 auto[\s\S]*?width:\s*100%/u);
-  assert.match(style, /\.chat-app\s+\.suggestions\s*\{[\s\S]*?overflow-x:\s*auto[\s\S]*?flex-wrap:\s*nowrap/u);
-  assert.match(style, /\.chat-app\s+\.suggestion-button\s*\{[\s\S]*?flex:\s*0 0 auto[\s\S]*?min-height:\s*44px[\s\S]*?border-radius:\s*999px/u);
+  assert.match(style, /\.chat-app\s+\.suggestions\s*\{[\s\S]*?flex-direction:\s*column-reverse[\s\S]*?overflow-y:\s*auto[\s\S]*?flex-wrap:\s*nowrap/u);
+  assert.match(style, /\.chat-app\s+\.suggestion-button\s*\{[\s\S]*?flex:\s*0 0 auto[\s\S]*?min-height:\s*44px[\s\S]*?border-radius:\s*18px/u);
   assert.match(style, /\.chat-app\s+:focus-visible\s*\{[\s\S]*?outline-color:\s*#0b57d0/u);
   assert.match(style, /\.chat-app\s+\.composer\s+textarea:focus-visible\s*\{[\s\S]*?outline:\s*3px solid #0b57d0/u);
   assert.match(style, /\.chat-app\s+\.composer\s+textarea\s*\{[\s\S]*?min-height:\s*44px[\s\S]*?font-size:\s*16px/u);
