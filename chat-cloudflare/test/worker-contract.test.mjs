@@ -252,9 +252,11 @@ test("status requires a live Qwen probe and caches failed probes briefly", async
       },
     },
     OA_SERVICE: {
-      async fetch() {
+      async fetch(boundRequest) {
         oaCalls += 1;
-        return Response.json({ oaReady: true, publicKnowledgeReady: true, retrievalReady: true });
+        return boundRequest.method === "POST"
+          ? Response.json({ chunks: OA_CHUNKS }, { headers: { "Content-Type": "application/json" } })
+          : Response.json({ oaReady: true, publicKnowledgeReady: true, retrievalReady: true });
       },
     },
   });
@@ -268,7 +270,7 @@ test("status requires a live Qwen probe and caches failed probes briefly", async
     assert.equal(result.provider, null);
   }
   assert.equal(aiCalls, 1);
-  assert.equal(oaCalls, 1);
+  assert.equal(oaCalls, 2);
 });
 
 test("status probe budget prevents unbounded unauthenticated model calls", async () => {
@@ -362,6 +364,68 @@ test("a failed real chat call immediately replaces a cached green Qwen status", 
   assert.equal(aiCalls, 2);
 });
 
+test("a failed real OA retrieval immediately replaces cached green knowledge lights", async () => {
+  let retrievalAvailable = true;
+  const serviceCalls = [];
+  const env = environment({
+    AI: { async run() { return { response: "连接成功" }; } },
+    OA_SERVICE: {
+      async fetch(boundRequest) {
+        serviceCalls.push({ method: boundRequest.method, url: boundRequest.url });
+        if (boundRequest.url === OA_STATUS_URL) {
+          return Response.json(
+            { oaReady: true, publicKnowledgeReady: true, retrievalReady: true },
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (boundRequest.url === OA_URL && retrievalAvailable) {
+          return Response.json({ chunks: OA_CHUNKS }, { headers: { "Content-Type": "application/json" } });
+        }
+        return new Response(null, { status: 503 });
+      },
+    },
+  });
+
+  const firstStatus = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+  assert.equal((await body(firstStatus)).systemReady, true);
+  retrievalAvailable = false;
+
+  const failedChat = await handleRequest(
+    request("/api/chat", { method: "POST", body: chatBody("机器人研究方向有哪些？") }),
+    env,
+    {},
+    oaRuntime(),
+  );
+  const failedChatBody = await body(failedChat);
+  assert.equal(failedChat.status, 200);
+  assert.equal(failedChatBody.oaPublicStatus, "unavailable");
+
+  const updatedStatus = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+  const result = await body(updatedStatus);
+  assert.equal(result.oaReady, false);
+  assert.equal(result.knowledgeReady, false);
+  assert.equal(result.retrievalReady, false);
+  assert.equal(result.systemReady, false);
+  assert.deepEqual(serviceCalls.map(({ method }) => method), ["GET", "POST", "POST"]);
+});
+
+test("a one-character question does not falsely turn OA knowledge lights red", async () => {
+  const env = environment({ AI: { async run() { return { response: "连接成功" }; } } });
+  const initialStatus = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+  assert.equal((await body(initialStatus)).systemReady, true);
+
+  const shortQuestion = await handleRequest(
+    request("/api/chat", { method: "POST", body: chatBody("？") }),
+    env,
+    {},
+    oaRuntime(),
+  );
+  assert.equal((await body(shortQuestion)).oaPublicStatus, "invalid_question");
+
+  const statusAfterQuestion = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+  assert.equal((await body(statusAfterQuestion)).systemReady, true);
+});
+
 test("an obsolete Qwen probe cannot overwrite a newer configuration status", async () => {
   const DB = await bailianDatabase();
   const env = environment({ DB });
@@ -452,10 +516,16 @@ test("five-light status uses the authenticated OA Service Binding without exposi
     OA_SERVICE: {
       async fetch(boundRequest) {
         serviceCalls.push(boundRequest.clone());
-        return Response.json(
-          { oaReady: true, publicKnowledgeReady: true, retrievalReady: true },
-          { headers: { "Content-Type": "application/json" } },
-        );
+        if (boundRequest.url === OA_STATUS_URL && boundRequest.method === "GET") {
+          return Response.json(
+            { oaReady: true, publicKnowledgeReady: true, retrievalReady: true },
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        if (boundRequest.url === OA_URL && boundRequest.method === "POST") {
+          return Response.json({ chunks: OA_CHUNKS }, { headers: { "Content-Type": "application/json" } });
+        }
+        return new Response(null, { status: 404 });
       },
     },
     AI: { async run() { return { response: "unused" }; } },
@@ -472,13 +542,16 @@ test("five-light status uses the authenticated OA Service Binding without exposi
   assert.equal(result.qwenReady, true);
   assert.equal(result.systemReady, true);
   assert.equal(Object.hasOwn(result, "token"), false);
-  assert.equal(serviceCalls.length, 1);
-  const boundRequest = serviceCalls[0];
-  assert.equal(boundRequest.url, OA_STATUS_URL);
-  assert.equal(boundRequest.method, "GET");
-  assert.equal(boundRequest.headers.get("x-originmind-public-lab-ai-service-token"), SERVICE_TOKEN);
-  assert.equal(boundRequest.headers.has("cookie"), false);
-  assert.equal(boundRequest.headers.has("authorization"), false);
+  assert.equal(serviceCalls.length, 2);
+  assert.deepEqual(serviceCalls.map((boundRequest) => [boundRequest.url, boundRequest.method]), [
+    [OA_STATUS_URL, "GET"],
+    [OA_URL, "POST"],
+  ]);
+  for (const boundRequest of serviceCalls) {
+    assert.equal(boundRequest.headers.get("x-originmind-public-lab-ai-service-token"), SERVICE_TOKEN);
+    assert.equal(boundRequest.headers.has("cookie"), false);
+    assert.equal(boundRequest.headers.has("authorization"), false);
+  }
 });
 
 test("OA Service Binding is preferred and preserves the hardened request", async () => {
