@@ -19,7 +19,14 @@ import {
   fallbackAnswer,
   safeSourceUrl,
 } from "./knowledge.mjs";
-import { inspectOaPublicKnowledge, probeOaPublicKnowledge, retrieveOa } from "./oa-public.mjs";
+import {
+  inspectOaPublicKnowledge,
+  probeOaPublicKnowledge,
+  retrieveOa,
+  retrieveOaSuggestions,
+  suggestionKnowledgeReference,
+  suggestionMatchesKnowledge,
+} from "./oa-public.mjs";
 import {
   parseChatPayload,
   parseDocumentPayload,
@@ -37,6 +44,7 @@ const MODEL_STATUS_READY_TTL_MS = 5 * 60_000;
 const MODEL_STATUS_RETRY_MS = 30_000;
 const OA_STATUS_READY_TTL_MS = 30_000;
 const OA_STATUS_RETRY_MS = 5_000;
+const SUGGESTIONS_HOURLY_LIMIT = 6_000;
 const MODEL_DAILY_LIMIT = 300;
 const MODEL_STATUS_PROBE_DAILY_LIMIT = 300;
 const MODEL_STATUS_PROBE_BUDGET_MESSAGE = "MODEL_STATUS_PROBE_BUDGET_EXHAUSTED";
@@ -633,6 +641,12 @@ async function currentOaStatus(context) {
   );
 }
 
+async function currentOaSuggestions(context) {
+  // Recommendations are approval-sensitive. Every request asks OA directly;
+  // no D1 TTL, lease, or in-process single-flight may replay an older set.
+  return retrieveOaSuggestions(context);
+}
+
 function boundedUserMessages(messages, maximum = 3_000) {
   const recent = messages.filter((message) => message.role === "user").slice(-2);
   let remaining = maximum;
@@ -845,6 +859,21 @@ async function api(context) {
         }, 503);
       }
     }
+    if (path === "suggestions" && method === "GET") {
+      if (new URL(request.url).search) throw new PublicError("请求格式错误", 400);
+      await limit(context, "suggestions", SUGGESTIONS_HOURLY_LIMIT);
+      let result;
+      try {
+        result = await currentOaSuggestions(context);
+      } catch {
+        result = { status: "unavailable", suggestions: [] };
+      }
+      const recommendationsReady = result.status === "connected";
+      return json({
+        suggestions: recommendationsReady ? result.suggestions : [],
+        oaPublicStatus: recommendationsReady ? "connected" : "unavailable",
+      });
+    }
     if (path.startsWith("admin/")) await requireOwner(context);
     if (path === "chat" && method === "POST") {
       const payload = parseChatPayload(await readJson(request, 80_000));
@@ -852,10 +881,11 @@ async function api(context) {
       if (last.role !== "user" || last.content.length > 2_000) throw new PublicError("请输入有效的问题");
       await limit(context, "chat", 25);
       const history = await conversationHistory(payload, context.env.APP_ENCRYPTION_KEY);
+      const retrievalHistory = history.length ? history : boundedUserMessages(payload.messages.slice(0, -1));
       const oaStartedAt = Date.now();
       let oa;
       try {
-        oa = await retrieveOa(retrievalQuestion(last.content, history), context);
+        oa = await retrieveOa(retrievalQuestion(last.content, retrievalHistory), context);
       } finally {
         chatTiming.oa = Date.now() - oaStartedAt;
       }
@@ -872,7 +902,11 @@ async function api(context) {
           conversationToken: token,
         }, 200, chatTimingHeaders(chatTiming));
       };
-      const documents = oa.documents.map((document) => ({
+      const suggestionReference = suggestionKnowledgeReference(last.content);
+      const sourceDocuments = oa.documents.filter((document) => (
+        !suggestionReference || suggestionMatchesKnowledge(last.content, document)
+      ));
+      const documents = sourceDocuments.map((document) => ({
         ...document,
         title: displayKnowledgeTitle(document),
       }));
@@ -916,7 +950,7 @@ async function api(context) {
             "不能确认当前招生名额、录取、报价、交付或合同，不得代团队或负责人作承诺。不把计划说成已完成，不把来访或讨论说成正式合作，不把原型说成正式部署，不把意向说成订单或交付。旧资料只代表发布时情况。资料不足则明确说“目前知识库没有找到足够依据”；可以提供一般咨询准备建议，但必须明确标为建议。" +
             "历史对话仅用于理解追问，旧回答不能替代本次检索资料；具体事实仍须由本次参考资料支持。" +
             "为系统内部事实校验，每个有资料依据的具体事实后必须紧跟 [1] 这样的编号，并至少使用一个有效编号；严禁捏造编号。编号会在展示前自动隐藏，不要单列“参考资料”“参考文献”“资料来源”、来源标题或链接。数字方括号仅供内部编号使用；技术下标或数组位置请改写成文字。不要声称已经转交、发邮件或通知负责人：只有访客确认提交咨询才会进入待处理列表。涉及需要负责人决定的事项，引导用户点击“提交咨询”。" +
-            `仅输出给访客的正文，不使用复杂 Markdown 表格。\n参考资料开始\n${referenceContext}\n参考资料结束`,
+            `仅输出给访客的正文。可以使用 Markdown 加粗突出少量重点，步骤用有序列表，并列内容用无序列表；涉及选项对比时可使用不超过四列的简短表格，其他回答优先短段落。不要输出 HTML、图片或装饰性标题。\n参考资料开始\n${referenceContext}\n参考资料结束`,
         },
         ...(history.length ? [...history, { role: "user", content: last.content }] : boundedUserMessages(payload.messages)),
       ];
@@ -948,13 +982,19 @@ async function api(context) {
         } catch {
           // Status evidence is best effort and must not discard a valid answer.
         }
-      } catch (error) {
+      } catch {
         try {
           await recordModelStatus(context, config, active, { ready: false, provider: null, model: null });
         } catch {
-          // Preserve the model error even if recording its status also fails.
+          // The approved-knowledge fallback must not depend on status-cache writes.
         }
-        throw error;
+        return chatResult({
+          answer: fallbackAnswer(documents),
+          sources,
+          mode: "retrieval",
+          oaPublicStatus: oa.status,
+          releaseId: releaseId(context),
+        });
       }
       const visibleAnswer = visibleAiAnswer(answer, sources.length);
       if (!visibleAnswer) {

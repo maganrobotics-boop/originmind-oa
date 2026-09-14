@@ -2642,52 +2642,60 @@ body.public-chat-page {
 }
 
 .chat-app .composer-suggestions {
-  width: min(100%, 760px);
-  margin: 0 auto;
-  padding: 0 2px 10px;
+  flex: 0 0 auto;
+  width: 100%;
+  margin: 0;
+  padding: 4px max(10px, env(safe-area-inset-right)) 6px max(10px, env(safe-area-inset-left));
+  background: #ededed;
   animation: enter-soft 180ms ease both;
-}
-
-.chat-app .suggestion-title {
-  margin: 0 0 8px;
-  color: #666666;
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 1.4;
-  text-align: center;
 }
 
 .chat-app .suggestions {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  width: min(100%, 860px);
+  margin: 0 auto;
+  padding: 1px 0 3px;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  justify-content: safe center;
   gap: 8px;
-  margin: 0;
+  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: inline proximity;
+}
+
+.chat-app .suggestions::-webkit-scrollbar {
+  display: none;
 }
 
 .chat-app .suggestion-button {
-  display: inline-flex;
-  width: fit-content;
-  max-width: 100%;
+  display: block;
+  flex: 0 0 auto;
+  width: auto;
+  max-width: min(72vw, 520px);
   min-height: 44px;
   align-items: center;
-  padding: 9px 14px;
-  border: 1px solid #d8d8d8;
-  border-radius: 15px;
-  background: #ffffff;
+  padding: 8px 14px;
+  overflow: hidden;
+  border: 1px solid rgba(187, 187, 187, 0.78);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
   color: #252525;
-  font-size: 15px;
-  line-height: 1.45;
+  font-size: 14px;
+  line-height: 1.5;
   text-align: left;
-  box-shadow: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  scroll-snap-align: start;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.045);
 }
 
 .chat-app .suggestion-button:hover {
   border-color: #bdbdbd;
   background: #fafafa;
   color: #111111;
-  box-shadow: none;
-  transform: none;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
 }
 
 .chat-app .message-list {
@@ -2774,7 +2782,7 @@ body.public-chat-page {
     8px max(10px, env(safe-area-inset-right))
     max(8px, env(safe-area-inset-bottom))
     max(10px, env(safe-area-inset-left));
-  border-top: 1px solid #d4d4d4;
+  border-top: 0;
   background: rgba(247, 247, 247, 0.97);
   backdrop-filter: blur(15px) saturate(120%);
 }
@@ -3063,8 +3071,7 @@ body.public-chat-page {
   }
 
   .chat-app .suggestions {
-    flex-direction: column;
-    align-items: flex-start;
+    justify-content: flex-start;
   }
 
   .chat-app .message-list {
@@ -3076,4 +3083,41 @@ body.public-chat-page {
   .chat-app .message-actions {
     max-width: 88%;
   }
+}
+/* Readable, inert answer formatting; wide tables scroll inside the message. */
+.chat-app .message.assistant .answer-content {
+  min-width: 0;
+  max-width: min(90%, 740px);
+  padding: 12px 14px;
+  white-space: normal;
+  line-height: 1.75;
+}
+
+.answer-content > :first-child { margin-top: 0; }
+.answer-content > :last-child { margin-bottom: 0; }
+.answer-content p { margin: 0 0 0.8em; white-space: pre-wrap; }
+.answer-content strong { font-weight: 650; }
+.answer-content h3,
+.answer-content h4,
+.answer-content h5,
+.answer-content h6 { margin: 1em 0 0.4em; font-size: 1em; line-height: 1.5; font-weight: 650; }
+.answer-content ul,
+.answer-content ol { margin: 0.6em 0 0.9em; padding-left: 1.5em; }
+.answer-content li { margin: 0.3em 0; }
+.answer-content code { border-radius: 4px; padding: 0.1em 0.3em; background: #f1f3f2; font-size: 0.9em; }
+.answer-content pre { max-width: 100%; overflow-x: auto; padding: 12px; border-radius: 6px; background: #f1f3f2; white-space: pre; }
+.answer-content pre code { padding: 0; background: none; }
+.answer-content blockquote { margin: 0.8em 0; padding: 0.15em 0.8em; border-left: 3px solid #ccd8d0; color: #526057; white-space: pre-wrap; }
+.answer-table-scroll { max-width: 100%; margin: 0.8em 0; overflow-x: auto; border: 1px solid #dce4df; border-radius: 6px; overscroll-behavior-x: contain; }
+.answer-table-scroll:focus-visible { outline: 2px solid #248348; outline-offset: 2px; }
+.answer-content table { width: 100%; border-collapse: collapse; font-size: 0.94em; }
+.answer-content th,
+.answer-content td { min-width: 100px; padding: 8px 10px; border-right: 1px solid #e2e8e4; border-bottom: 1px solid #e2e8e4; text-align: left; vertical-align: top; overflow-wrap: anywhere; }
+.answer-content th { background: #f1f6f3; font-weight: 650; }
+.answer-content th:last-child,
+.answer-content td:last-child { border-right: 0; }
+.answer-content tbody tr:last-child td { border-bottom: 0; }
+.chat-history-detail { margin: 0; padding: 0 16px 14px; color: #727a75; font-size: 13px; line-height: 1.6; }
+@media (max-width: 600px) {
+  .chat-app .message.assistant .answer-content { max-width: 94%; padding: 10px 12px; }
 }

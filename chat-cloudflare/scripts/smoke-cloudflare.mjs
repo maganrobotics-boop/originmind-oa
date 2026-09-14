@@ -2,6 +2,8 @@ import { createHash, randomBytes } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { pathToFileURL } from "node:url";
 
+import { parseOaSuggestions } from "../src/oa-public.mjs";
+
 // A newly published Worker or route can briefly return 404/421 while edge state converges.
 const TRANSIENT_STATUSES = new Set([404, 408, 421, 425, 500, 502, 503, 504]);
 const DOCUMENT_SMOKE_FIXTURES = Object.freeze([
@@ -139,7 +141,31 @@ function hasReferenceSection(answer) {
   );
 }
 
-export function validateServiceEvidence({ health, status, chat }, releaseIdValue) {
+export function validateSuggestionEvidence(payload) {
+  if (
+    !payload ||
+    typeof payload !== "object" ||
+    Array.isArray(payload) ||
+    !Object.hasOwn(payload, "suggestions") ||
+    !Object.hasOwn(payload, "oaPublicStatus") ||
+    Object.keys(payload).length !== 2 ||
+    payload.oaPublicStatus !== "connected"
+  ) {
+    throw new Error("/api/suggestions did not return connected OA recommendations");
+  }
+  let suggestions;
+  try {
+    suggestions = parseOaSuggestions({ suggestions: payload.suggestions });
+  } catch {
+    throw new Error("/api/suggestions returned an invalid recommendation contract");
+  }
+  if (!suggestions.length) {
+    throw new Error("/api/suggestions did not return any answerable recommendations");
+  }
+  return suggestions;
+}
+
+export function validateServiceEvidence({ health, status, suggestions, chat }, releaseIdValue) {
   const releaseId = expectedRelease(releaseIdValue);
   if (
     health?.app !== "arts-robotics-ai-assistant" ||
@@ -185,6 +211,7 @@ export function validateServiceEvidence({ health, status, chat }, releaseIdValue
   ) {
     throw new Error("/api/chat sources were not exclusively OA-approved public knowledge");
   }
+  const recommendations = validateSuggestionEvidence(suggestions);
   return {
     app: health.app,
     ready: health.ready,
@@ -193,6 +220,7 @@ export function validateServiceEvidence({ health, status, chat }, releaseIdValue
     provider: chat.provider || status.provider,
     model: status.model,
     sources: chat.sources.length,
+    suggestions: recommendations.length,
   };
 }
 
@@ -202,8 +230,8 @@ function validateAdminAuth(adminAuth) {
   }
 }
 
-export function validateReleaseEvidence({ health, status, chat, adminAuth }, releaseIdValue) {
-  const evidence = validateServiceEvidence({ health, status, chat }, releaseIdValue);
+export function validateReleaseEvidence({ health, status, suggestions, chat, adminAuth }, releaseIdValue) {
+  const evidence = validateServiceEvidence({ health, status, suggestions, chat }, releaseIdValue);
   validateAdminAuth(adminAuth);
   return { ...evidence, adminKdfCompatible: true };
 }
@@ -251,11 +279,19 @@ async function smokeOnce(origin, releaseId) {
     throw Object.assign(new Error("Unknown API route did not return 404"), { status: missingResponse.status });
   }
 
+  const suggestionsResponse = await request(origin, "/api/suggestions");
+  if (suggestionsResponse.status !== 200) {
+    throw Object.assign(new Error(`/api/suggestions returned ${suggestionsResponse.status}`), { status: suggestionsResponse.status });
+  }
+  apiHeaders(suggestionsResponse, "/api/suggestions");
+  const suggestions = await json(suggestionsResponse, "/api/suggestions");
+  const recommendations = validateSuggestionEvidence(suggestions);
+
   const chatResponse = await request(origin, "/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json", Origin: origin },
     body: JSON.stringify({
-      messages: [{ role: "user", content: "请根据公开资料简要说明 ARTS Robotics 的机器人研究方向。" }],
+      messages: [{ role: "user", content: recommendations[0].question }],
       topic: "research",
     }),
   });
@@ -274,7 +310,7 @@ async function smokeOnce(origin, releaseId) {
   apiHeaders(statusResponse, "/api/status");
   const status = await json(statusResponse, "/api/status");
 
-  return validateServiceEvidence({ health, status, chat }, releaseId);
+  return validateServiceEvidence({ health, status, suggestions, chat }, releaseId);
 }
 
 async function verifyAdminPasswordRuntime(origin) {

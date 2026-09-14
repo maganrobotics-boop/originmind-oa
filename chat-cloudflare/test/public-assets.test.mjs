@@ -71,7 +71,18 @@ async function frontendOaStatusHelpers() {
   const end = script.indexOf("function createPublicApp", start);
   assert.ok(start >= 0 && end > start, "frontend OA status helpers must remain directly testable");
   return runInNewContext(
-    `${script.slice(start, end)}\n({ reconciledChatOaEvidence, systemStatusRefreshPlan, oaRetrievalStatusDetail });`,
+    `${script.slice(start, end)}\n({ reconciledChatOaEvidence, systemStatusRefreshPlan, oaRetrievalStatusDetail, suggestionsRefreshNeeded });`,
+    Object.create(null),
+  );
+}
+
+async function frontendSuggestionHelpers() {
+  const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
+  const start = script.indexOf("function knowledgeSuggestionsFromPayload");
+  const end = script.indexOf("const TOPIC_LABELS", start);
+  assert.ok(start >= 0 && end > start, "frontend suggestion normalization must remain directly testable");
+  return runInNewContext(
+    `${script.slice(start, end)}\nknowledgeSuggestionsFromPayload;`,
     Object.create(null),
   );
 }
@@ -509,10 +520,24 @@ test("OA status retries back off to the normal refresh interval and reset after 
   assert.equal(healthy.nextRetryDelay, 5_000);
 });
 
+test("a recommendation refresh due during a status probe runs as soon as status is ready", async () => {
+  const helpers = await frontendOaStatusHelpers();
+  const dueDuringProbe = {
+    loaded: true,
+    loading: false,
+    pending: true,
+    fetchedAt: 1_000,
+    now: 61_000,
+  };
+  assert.equal(helpers.suggestionsRefreshNeeded({ ...dueDuringProbe, ready: false }), false);
+  assert.equal(helpers.suggestionsRefreshNeeded({ ...dueDuringProbe, ready: true }), true);
+});
+
 test("vanilla frontend preserves every same-origin API and visibility contract", async () => {
   const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
   for (const route of [
     "/api/status",
+    "/api/suggestions",
     "/api/chat",
     "/api/inquiries",
     "/api/auth/status",
@@ -535,7 +560,7 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   ]) {
     assert.ok(script.includes(section), section);
   }
-  for (const question of [
+  for (const removedStaticQuestion of [
     "四足巡检机器人最近有什么新进展？",
     "最近公开了哪些机器人技术成果？",
     "ARTS Robotics 最近公开了哪些研究成果？",
@@ -545,7 +570,7 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
     "IUS 最近有哪些活动或项目？",
     "近期开放了哪些学生创新机会？",
   ]) {
-    assert.ok(script.includes(question), question);
+    assert.equal(script.includes(removedStaticQuestion), false, removedStaticQuestion);
   }
   assert.match(script, /id:\s*["']technology["'][\s\S]*?requestTopic:\s*["']research["']/u);
   assert.match(script, /id:\s*["']academic["'][\s\S]*?requestTopic:\s*["']research["']/u);
@@ -666,6 +691,26 @@ test("public topics keep independent view state without a duplicate welcome avat
   assert.doesNotMatch(style, /\.welcome-mark\b/u);
 });
 
+test("knowledge recommendations accept only bounded questions returned by the API", async () => {
+  const normalize = await frontendSuggestionHelpers();
+  assert.deepEqual(
+    [...normalize({
+      suggestions: [
+        { question: "  知识库问题一？  " },
+        { question: "知识库问题一？" },
+        { question: "知识库问题二？" },
+        { question: "x".repeat(301) },
+        { question: "知识库问题三？" },
+        { question: "不会被选中的第四个问题？" },
+      ],
+    })],
+    ["知识库问题一？", "知识库问题二？", "知识库问题三？"],
+  );
+  assert.deepEqual([...normalize({ suggestions: ["静态字符串不属于接口契约", {}, null] })], []);
+  assert.deepEqual([...normalize({ suggestions: [] })], []);
+  assert.deepEqual([...normalize(null)], []);
+});
+
 test("public chat keeps a minimal topic header and compact message composer", async () => {
   const [script, style] = await Promise.all([
     readFile(path.join(frontendDir, "app.js"), "utf8"),
@@ -681,11 +726,30 @@ test("public chat keeps a minimal topic header and compact message composer", as
   assert.ok(script.includes("正在检索并生成回答…"));
   assert.equal(script.includes("正在整理回答…"), false);
   assert.match(script, /className:\s*["']composer-suggestions["']/u);
-  assert.match(script, /className:\s*["']suggestion-title["'],\s*text:\s*["']聊聊新话题["']/u);
-  assert.match(script, /composerArea\.append\(errorRegion,\s*noticeRegion,\s*suggestionPanel,\s*composer\)/u);
-  assert.match(script, /suggestionPanel\.hidden\s*=\s*session\.messages\.length\s*>\s*0/u);
-  assert.match(script, /function\s+suggestionsForTopic\s*\(/u);
-  assert.match(script, /selected\.length\s*===\s*2/u);
+  assert.match(script, /suggestionPanel\.hidden\s*=\s*true/u);
+  assert.match(script, /composerArea\.append\(errorRegion,\s*noticeRegion,\s*composer\)/u);
+  assert.match(script, /conversation\.append\(messageScroll,\s*suggestionPanel,\s*composerArea\)/u);
+  assert.match(
+    script,
+    /suggestionPanel\.hidden\s*=\s*!recommendationsReady\(\)\s*\|\|\s*session\.messages\.length\s*>\s*0\s*\|\|\s*session\.sending\s*\|\|\s*state\.suggestions\.length\s*===\s*0/u,
+  );
+  assert.match(script, /function recommendationsReady\(\) \{[\s\S]{0,180}?knowledgeRetrievalReady\(\)\s*&&\s*systemStatusController\s*===\s*null/u);
+  assert.match(script, /function knowledgeRetrievalReady\(\) \{[\s\S]{0,220}?state\.networkReady\s*===\s*true[\s\S]{0,220}?state\.service\?\.knowledgeReady\s*===\s*true[\s\S]{0,220}?state\.service\?\.retrievalReady\s*===\s*true/u);
+  assert.match(script, /requestJson\(["']\/api\/suggestions["'],\s*\{[\s\S]{0,180}?cache:\s*["']no-store["']/u);
+  assert.match(script, /SUGGESTIONS_REFRESH_MS\s*=\s*60_000/u);
+  assert.match(script, /if \(force\) \{[\s\S]{0,120}?state\.suggestions\s*=\s*\[\][\s\S]{0,120}?renderSuggestions\(\)/u);
+  assert.match(script, /suggestionsRefreshDueAt[\s\S]{0,700}?suggestionsRefreshPending\s*=\s*true[\s\S]{0,100}?loadSuggestions\(\{ force: true \}\)/u);
+  assert.match(script, /if \(!recommendationsReady\(\) \|\| state\.suggestionsLoading\) \{[\s\S]{0,180}?suggestionsRefreshPending\s*=\s*true/u);
+  assert.match(script, /suggestionsRefreshNeeded\(\{[\s\S]{0,360}?pending:\s*suggestionsRefreshPending[\s\S]{0,360}?void loadSuggestions/u);
+  assert.match(script, /current\s*=\s*knowledgeSuggestionsFromPayload\(payload\)/u);
+  assert.match(script, /let current\s*=\s*\[\][\s\S]{0,420}?catch\s*\{[\s\S]{0,160}?Never replace verified knowledge with static guesses/u);
+  assert.match(script, /button\.append\(element\(["']span["'],\s*\{\s*text:\s*suggestion\s*\}\)\)/u);
+  assert.match(script, /button\.addEventListener\(["']click["'],[\s\S]{0,100}?dispatchSuggestion\(suggestion,\s*section\)/u);
+  assert.match(script, /function dispatchSuggestion[\s\S]{0,2200}?epoch\s*===\s*suggestionsEpoch[\s\S]{0,220}?current\.includes\(question\)[\s\S]{0,220}?recommendationsReady\(\)/u);
+  assert.match(script, /function invalidateSuggestions\(\)[\s\S]{0,400}?suggestionsEpoch\s*\+=\s*1[\s\S]{0,400}?suggestionsRefreshPending\s*=\s*false/u);
+  assert.match(script, /if \(statusRefreshDue\) \{\s*void loadSystemStatus\(\{ showPending: true \}\);\s*\} else if \(suggestionsRefreshDue\)/u);
+  assert.doesNotMatch(script, /\b(?:featuredSuggestions|fallbackSuggestions|suggestionsForTopic)\b/u);
+  assert.equal(script.includes("聊聊新话题"), false);
   assert.doesNotMatch(script, /className:\s*["']suggestion-arrow["']/u);
   for (const removedClass of ["context-panel", "conversation-toolbar", "composer-footer", "site-footer", "topic-select"]) {
     assert.doesNotMatch(script, new RegExp(`className:\\s*["']${removedClass}["']`, "u"), removedClass);
@@ -699,8 +763,9 @@ test("public chat keeps a minimal topic header and compact message composer", as
     assert.equal(script.includes(removedCopy), false, removedCopy);
   }
   assert.match(style, /\.chat-app\s+\.composer\s*\{[\s\S]*?display:\s*flex/u);
-  assert.match(style, /\.chat-app\s+\.composer-suggestions\s*\{[\s\S]*?padding:\s*0 2px 10px/u);
-  assert.match(style, /\.chat-app\s+\.suggestion-button\s*\{[\s\S]*?min-height:\s*44px[\s\S]*?border-radius:\s*15px/u);
+  assert.match(style, /\.chat-app\s+\.composer-suggestions\s*\{[\s\S]*?flex:\s*0 0 auto[\s\S]*?width:\s*100%/u);
+  assert.match(style, /\.chat-app\s+\.suggestions\s*\{[\s\S]*?overflow-x:\s*auto[\s\S]*?flex-wrap:\s*nowrap/u);
+  assert.match(style, /\.chat-app\s+\.suggestion-button\s*\{[\s\S]*?flex:\s*0 0 auto[\s\S]*?min-height:\s*44px[\s\S]*?border-radius:\s*999px/u);
   assert.match(style, /\.chat-app\s+:focus-visible\s*\{[\s\S]*?outline-color:\s*#0b57d0/u);
   assert.match(style, /\.chat-app\s+\.composer\s+textarea:focus-visible\s*\{[\s\S]*?outline:\s*3px solid #0b57d0/u);
   assert.match(style, /\.chat-app\s+\.composer\s+textarea\s*\{[\s\S]*?min-height:\s*44px[\s\S]*?font-size:\s*16px/u);

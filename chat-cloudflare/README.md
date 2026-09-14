@@ -15,6 +15,19 @@ required and checked inside the Worker, then removed before the answer is
 returned or stored in signed conversation context. OA-public source records stay
 in the API response as release evidence but are not part of the visible answer.
 
+The public frontend restores recent conversations and drafts separately for each
+section from this browser's local storage (up to 40 messages / 80,000 characters
+per section, expiring after seven days). Clearing a section or starting its new
+conversation removes that saved record. Interrupted questions return as drafts
+and are never resent automatically. Storage failures leave chat usable. Contact
+forms, administrative state and knowledge suggestions are not persisted. Signed
+conversation context expires independently after twelve hours; subsequent
+retrieval can use prior user questions, never unsigned assistant messages.
+
+Answers support inert Markdown emphasis, lists, code and horizontally scrollable
+tables. Raw HTML, images and links are never executed or loaded by this renderer;
+reference hiding still runs before display and again when restoring history.
+
 ## Isolation and visibility
 
 - This Worker and its D1 database are separate from the internal OA Worker and
