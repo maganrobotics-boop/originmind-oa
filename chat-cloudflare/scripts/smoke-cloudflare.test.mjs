@@ -9,6 +9,7 @@ import {
   smokeCloudflare,
   smokeSavedAdminAuthentication,
   validateReleaseEvidence,
+  validateServiceEvidence,
   validateDocumentExtractionEvidence,
   validateSuggestionEvidence,
 } from "./smoke-cloudflare.mjs";
@@ -530,4 +531,61 @@ test("frontend smoke accepts one deterministic content-hashed script and stylesh
     ),
     /does not reference/u,
   );
+});
+
+test("release propagation and safe fallback can settle but only the exact AI release passes", async () => {
+  const staleRelease = `${"b".repeat(40)}-2`;
+  const snapshots = [
+    { ...evidence, health: { ...evidence.health, releaseId: staleRelease } },
+    { ...evidence, chat: { ...evidence.chat, releaseId: staleRelease } },
+    { ...evidence, chat: { ...evidence.chat, mode: "retrieval" } },
+    evidence,
+  ];
+  let calls = 0;
+  let authCalls = 0;
+  const delays = [];
+  const result = await smokeCloudflare("https://test.workers.dev", {
+    releaseId,
+    smokeAttempt: async () => validateServiceEvidence(snapshots[calls++], releaseId),
+    verifyAdmin: async () => { authCalls += 1; return evidence.adminAuth; },
+    sleepImpl: async (ms) => { delays.push(ms); },
+  });
+  assert.equal(calls, 4);
+  assert.equal(authCalls, 1);
+  assert.deepEqual(delays, [1500, 3000, 4500]);
+  assert.equal(result.releaseId, releaseId);
+  assert.equal(result.adminKdfCompatible, true);
+});
+
+test("a permanently stale release or retrieval fallback exhausts the bounded attempts and never passes", async () => {
+  for (const snapshot of [
+    { ...evidence, health: { ...evidence.health, releaseId: `${"b".repeat(40)}-1` } },
+    { ...evidence, chat: { ...evidence.chat, mode: "retrieval" } },
+  ]) {
+    let calls = 0;
+    let authCalls = 0;
+    await assert.rejects(smokeCloudflare("https://test.workers.dev", {
+      releaseId, attempts: 3,
+      smokeAttempt: async () => { calls += 1; return validateServiceEvidence(snapshot, releaseId); },
+      verifyAdmin: async () => { authCalls += 1; return evidence.adminAuth; },
+      sleepImpl: async () => {},
+    }));
+    assert.equal(calls, 3);
+    assert.equal(authCalls, 0);
+  }
+});
+
+test("malformed identities, unsafe sources and visible reference output remain non-retryable failures", () => {
+  const invalid = [
+    { ...evidence, health: { ...evidence.health, app: "unrelated-service" } },
+    { ...evidence, health: { ...evidence.health, releaseId: "unknown" } },
+    { ...evidence, chat: { ...evidence.chat, releaseId: undefined } },
+    { ...evidence, chat: { ...evidence.chat, mode: "retrieval", sources: [] } },
+    { ...evidence, chat: { ...evidence.chat, mode: "retrieval", sources: [{ origin: "chat_draft" }] } },
+    { ...evidence, chat: { ...evidence.chat, mode: "retrieval", answer: "技术说明。[1]" } },
+    { ...evidence, chat: { ...evidence.chat, mode: "retrieval", oaPublicStatus: "auth_error" } },
+  ];
+  for (const snapshot of invalid) {
+    assert.throws(() => validateServiceEvidence(snapshot, releaseId), (error) => error.retryable !== true);
+  }
 });

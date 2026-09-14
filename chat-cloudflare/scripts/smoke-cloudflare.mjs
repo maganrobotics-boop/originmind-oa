@@ -165,15 +165,22 @@ export function validateSuggestionEvidence(payload) {
   return suggestions;
 }
 
-export function validateServiceEvidence({ health, status, suggestions, chat }, releaseIdValue) {
-  const releaseId = expectedRelease(releaseIdValue);
+function validateHealthEvidence(health, releaseId) {
   if (
     health?.app !== "arts-robotics-ai-assistant" ||
     health?.ready !== true ||
     health?.releaseId !== releaseId
   ) {
-    throw new Error("/_health did not identify the expected ready ARTS Robotics AI assistant release");
+    throw Object.assign(new Error("/_health did not identify the expected ready ARTS Robotics AI assistant release"), {
+      retryable: health?.app === "arts-robotics-ai-assistant" && health?.ready === true &&
+        /^[a-f0-9]{40}-[1-9][0-9]{0,5}$/u.test(health?.releaseId || "") && health.releaseId !== releaseId,
+    });
   }
+}
+
+export function validateServiceEvidence({ health, status, suggestions, chat }, releaseIdValue) {
+  const releaseId = expectedRelease(releaseIdValue);
+  validateHealthEvidence(health, releaseId);
   const readiness = [
     status?.storageReady,
     status?.modelReady,
@@ -193,22 +200,28 @@ export function validateServiceEvidence({ health, status, suggestions, chat }, r
         (readiness.every((value) => typeof value === "boolean") && readiness.some((value) => value === false)),
     });
   }
+  if (chat?.releaseId !== releaseId) {
+    throw Object.assign(new Error("/api/chat did not return the expected release; edge propagation may still be in progress"), {
+      retryable: /^[a-f0-9]{40}-[1-9][0-9]{0,5}$/u.test(chat?.releaseId || ""),
+    });
+  }
+  const validPublicSources = Array.isArray(chat?.sources) && chat.sources.length > 0 &&
+    chat.sources.every((source) => source?.origin === "oa_public");
+  const validPublicAnswer = typeof chat?.answer === "string" && Boolean(chat.answer.trim()) &&
+    !/[\[［【][^\]］】\r\n]*[0-9０-９]+[^\]］】\r\n]*[\]］】]/u.test(chat.answer) &&
+    !hasReferenceSection(chat.answer);
   if (
     chat?.mode !== "ai" ||
     chat?.oaPublicStatus !== "connected" ||
-    chat?.releaseId !== releaseId ||
-    typeof chat?.answer !== "string" ||
-    !chat.answer.trim() ||
-    /[\[［【][^\]］】\r\n]*[0-9０-９]+[^\]］】\r\n]*[\]］】]/u.test(chat.answer) ||
-    hasReferenceSection(chat.answer)
+    !validPublicAnswer
   ) {
-    throw new Error("/api/chat did not return a citation-free OA-backed AI answer from the expected release");
+    throw Object.assign(new Error("/api/chat did not return a citation-free OA-backed AI answer from the expected release" +
+      (chat?.mode === "retrieval" ? " (retrieval fallback)" : " (answer contract)")), {
+      retryable: chat?.mode === "retrieval" && chat.oaPublicStatus === "connected" &&
+        validPublicSources && validPublicAnswer,
+    });
   }
-  if (
-    !Array.isArray(chat.sources) ||
-    chat.sources.length < 1 ||
-    !chat.sources.every((source) => source?.origin === "oa_public")
-  ) {
+  if (!validPublicSources) {
     throw new Error("/api/chat sources were not exclusively OA-approved public knowledge");
   }
   const recommendations = validateSuggestionEvidence(suggestions);
@@ -264,6 +277,8 @@ async function smokeOnce(origin, releaseId) {
   }
   apiHeaders(healthResponse, "/_health");
   const health = await json(healthResponse, "/_health");
+  // Do not spend model calls or test the wrong Worker during edge propagation.
+  validateHealthEvidence(health, releaseId);
 
   const hostileResponse = await request(origin, "/api/chat", {
     method: "POST",
