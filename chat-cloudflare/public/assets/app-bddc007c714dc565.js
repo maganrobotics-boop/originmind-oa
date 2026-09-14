@@ -353,10 +353,15 @@ function userFacingAnswer(value) {
 }
 
 const CHAT_HISTORY_KEY = "arts-public-chat-history-v1:";
+const CHAT_CONVERSATIONS_KEY = "arts-public-chat-conversations-v2";
 const CHAT_HISTORY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CHAT_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
 const CHAT_HISTORY_MAX_CHARS = 80_000;
 const CHAT_HISTORY_MAX_MESSAGES = 40;
+const CHAT_CONVERSATION_LIMIT = 20;
+const CHAT_RECENT_LIMIT = 8;
+const CHAT_TITLE_MAX_CHARACTERS = 30;
+const CHAT_CONVERSATIONS_MAX_STORED_CHARS = 2_000_000;
 
 function boundedChatMessages(messages) {
   const result = [];
@@ -402,6 +407,7 @@ function readChatHistory(storage, section, now = Date.now()) {
     const tokenFresh = Number.isFinite(value.tokenSavedAt) && value.tokenSavedAt > 0 &&
       value.tokenSavedAt <= now && now - value.tokenSavedAt < CHAT_TOKEN_TTL_MS;
     return {
+      savedAt: value.savedAt,
       messages: boundedChatMessages(value.messages).map((item) => ({
         role: item.role,
         content: item.role === "assistant" ? userFacingAnswer(item.content) : item.content,
@@ -432,6 +438,142 @@ function writeChatHistory(storage, section, session, now = Date.now()) {
   } catch {
     return false;
   }
+}
+
+function chatConversationTitle(messages, fallback = "新聊天") {
+  const firstQuestion = (Array.isArray(messages) ? messages : [])
+    .find((message) => message?.role === "user" && typeof message.content === "string")?.content || "";
+  const normalized = firstQuestion
+    .replace(/[\u0000-\u001F\u007F-\u009F]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!normalized) return fallback;
+  const characters = Array.from(normalized);
+  return characters.length > CHAT_TITLE_MAX_CHARACTERS
+    ? `${characters.slice(0, CHAT_TITLE_MAX_CHARACTERS).join("")}…`
+    : normalized;
+}
+
+function chatConversationsSnapshot(conversations, activeConversationId, now = Date.now()) {
+  const items = (Array.isArray(conversations) ? conversations : [])
+    .filter((conversation) => conversation && typeof conversation.id === "string" &&
+      typeof conversation.section === "string" && Number.isFinite(conversation.updatedAt) &&
+      conversation.updatedAt <= now && now - conversation.updatedAt < CHAT_HISTORY_TTL_MS &&
+      (conversation.messages?.length || String(conversation.draft || "").trim()))
+    .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
+    .slice(0, CHAT_CONVERSATION_LIMIT)
+    .map((conversation) => {
+      const snapshot = chatHistorySnapshot(conversation.section, conversation, conversation.updatedAt);
+      return {
+        ...snapshot,
+        id: conversation.id,
+        title: chatConversationTitle(snapshot.messages, String(conversation.title || "新聊天")),
+        createdAt: Number.isFinite(conversation.createdAt) && conversation.createdAt <= conversation.updatedAt
+          ? conversation.createdAt : conversation.updatedAt,
+        updatedAt: conversation.updatedAt,
+      };
+    });
+  return {
+    version: 2,
+    savedAt: now,
+    activeConversationId: items.some((item) => item.id === activeConversationId) ? activeConversationId : items[0]?.id || "",
+    conversations: items,
+  };
+}
+
+function writeChatConversations(storage, conversations, activeConversationId, now = Date.now()) {
+  try {
+    if (!storage) return false;
+    const value = chatConversationsSnapshot(conversations, activeConversationId, now);
+    if (!value.conversations.length) storage.removeItem(CHAT_CONVERSATIONS_KEY);
+    else {
+      let serialized = JSON.stringify(value);
+      while (serialized.length > CHAT_CONVERSATIONS_MAX_STORED_CHARS && value.conversations.length > 1) {
+        let oldestInactiveIndex = value.conversations.length - 1;
+        while (oldestInactiveIndex >= 0 &&
+          value.conversations[oldestInactiveIndex].id === value.activeConversationId) oldestInactiveIndex -= 1;
+        value.conversations.splice(oldestInactiveIndex >= 0 ? oldestInactiveIndex : value.conversations.length - 1, 1);
+        if (!value.conversations.some((conversation) => conversation.id === value.activeConversationId)) {
+          value.activeConversationId = value.conversations[0]?.id || "";
+        }
+        serialized = JSON.stringify(value);
+      }
+      if (serialized.length > CHAT_CONVERSATIONS_MAX_STORED_CHARS) return false;
+      storage.setItem(CHAT_CONVERSATIONS_KEY, serialized);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function readChatConversations(storage, allowedSections, now = Date.now()) {
+  try {
+    const raw = storage?.getItem(CHAT_CONVERSATIONS_KEY);
+    if (!raw) return null;
+    if (raw.length > CHAT_CONVERSATIONS_MAX_STORED_CHARS) throw new Error("Oversized conversation history");
+    const value = JSON.parse(raw);
+    const allowed = new Set(Array.isArray(allowedSections) ? allowedSections : []);
+    if (!value || value.version !== 2 || !Array.isArray(value.conversations) ||
+        value.conversations.length > CHAT_CONVERSATION_LIMIT) throw new Error("Invalid conversation history");
+    const conversations = [];
+    const seen = new Set();
+    for (const item of value.conversations) {
+      if (!item || typeof item.id !== "string" || !/^[A-Za-z0-9_-]{8,100}$/u.test(item.id) || seen.has(item.id) ||
+          !allowed.has(item.section) || !Number.isFinite(item.updatedAt) || item.updatedAt > now ||
+          now - item.updatedAt >= CHAT_HISTORY_TTL_MS || !Array.isArray(item.messages) ||
+          item.messages.length > CHAT_HISTORY_MAX_MESSAGES ||
+          item.messages.some((message) => !message || !["user", "assistant"].includes(message.role) ||
+            typeof message.content !== "string" || message.content.length > (message.role === "user" ? 2000 : 12_000)) ||
+          typeof item.draft !== "string" || item.draft.length > 2000) continue;
+      const tokenFresh = Number.isFinite(item.tokenSavedAt) && item.tokenSavedAt > 0 &&
+        item.tokenSavedAt <= now && now - item.tokenSavedAt < CHAT_TOKEN_TTL_MS;
+      const messages = boundedChatMessages(item.messages).map((message) => ({
+        role: message.role,
+        content: message.role === "assistant" ? userFacingAnswer(message.content) : message.content,
+      }));
+      const interrupted = item.interrupted === true;
+      conversations.push({
+        id: item.id,
+        section: item.section,
+        title: chatConversationTitle(messages, typeof item.title === "string" ? item.title.slice(0, 80) : "新聊天"),
+        createdAt: Number.isFinite(item.createdAt) && item.createdAt <= item.updatedAt ? item.createdAt : item.updatedAt,
+        updatedAt: item.updatedAt,
+        messages,
+        draft: String(item.draft || ""),
+        conversationToken: tokenFresh && typeof item.conversationToken === "string" && item.conversationToken.length <= 40_000
+          ? item.conversationToken : "",
+        tokenSavedAt: tokenFresh ? item.tokenSavedAt : 0,
+        scrollTop: Number.isFinite(item.scrollTop) ? Math.max(0, item.scrollTop) : 0,
+        stickToEnd: item.stickToEnd !== false,
+        sending: false,
+        error: "",
+        notice: interrupted ? "上次回答未完成，问题已保留在输入框中，可重新发送。" : "",
+      });
+      seen.add(item.id);
+    }
+    conversations.sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id));
+    if (!conversations.length) {
+      storage.removeItem(CHAT_CONVERSATIONS_KEY);
+      return null;
+    }
+    return {
+      conversations,
+      activeConversationId: conversations.some((item) => item.id === value.activeConversationId)
+        ? value.activeConversationId : conversations[0].id,
+    };
+  } catch {
+    try { storage?.removeItem(CHAT_CONVERSATIONS_KEY); } catch { /* Storage may be disabled. */ }
+    return null;
+  }
+}
+
+function recentChatConversations(conversations) {
+  return (Array.isArray(conversations) ? conversations : [])
+    .filter((conversation) => Array.isArray(conversation?.messages) &&
+      conversation.messages.some((message) => message?.role === "user" && String(message.content || "").trim()))
+    .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id))
+    .slice(0, CHAT_RECENT_LIMIT);
 }
 
 function appendAnswerInline(parent, text) {
@@ -661,20 +803,18 @@ function createPublicApp() {
 
   let historyStorage = null;
   try { historyStorage = window.localStorage; } catch { /* Chat works without browser storage. */ }
-  const historySaveTimers = new Map();
+  let historySaveTimer = null;
   let historyDetail = null;
 
-  const state = {
-    section: topicIdForPath(window.location.pathname),
-    networkReady: null,
-    service: null,
-    serviceError: "",
-    suggestions: [],
-    suggestionsLoaded: false,
-    suggestionsLoading: false,
-    suggestionsFetchedAt: 0,
-    sessions: Object.fromEntries(TOPICS.map((topic) => [topic.id, {
+  function blankConversation(section, now = Date.now()) {
+    const topic = TOPICS.find((item) => item.id === section) || TOPICS[0];
+    return {
+      id: makeRequestId(),
+      section: topic.id,
       requestTopic: topic.requestTopic,
+      title: "新聊天",
+      createdAt: now,
+      updatedAt: now,
       messages: [],
       conversationToken: "",
       tokenSavedAt: 0,
@@ -684,7 +824,48 @@ function createPublicApp() {
       sending: false,
       error: "",
       notice: "",
-    }])),
+    };
+  }
+
+  const initialSection = topicIdForPath(window.location.pathname);
+  const storedConversations = readChatConversations(historyStorage, TOPICS.map((topic) => topic.id));
+  const conversations = storedConversations?.conversations || [];
+  let migratedLegacyHistory = false;
+  if (!storedConversations) {
+    for (const topic of TOPICS) {
+      const restored = readChatHistory(historyStorage, topic.id);
+      if (!restored || (!restored.messages.length && !restored.draft)) continue;
+      const conversation = blankConversation(topic.id, restored.savedAt || Date.now());
+      Object.assign(conversation, restored, {
+        title: chatConversationTitle(restored.messages),
+        createdAt: restored.savedAt || Date.now(),
+        updatedAt: restored.savedAt || Date.now(),
+      });
+      conversations.push(conversation);
+      migratedLegacyHistory = true;
+    }
+  }
+  let initialConversation = conversations.find((conversation) => (
+    conversation.id === storedConversations?.activeConversationId && conversation.section === initialSection
+  )) || conversations
+    .filter((conversation) => conversation.section === initialSection)
+    .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+  if (!initialConversation) {
+    initialConversation = blankConversation(initialSection);
+    conversations.push(initialConversation);
+  }
+
+  const state = {
+    section: initialConversation.section,
+    conversations,
+    activeConversationId: initialConversation.id,
+    networkReady: null,
+    service: null,
+    serviceError: "",
+    suggestions: [],
+    suggestionsLoaded: false,
+    suggestionsLoading: false,
+    suggestionsFetchedAt: 0,
     inquiry: {
       name: "",
       organisation: "",
@@ -697,39 +878,57 @@ function createPublicApp() {
       reference: "",
       error: "",
       section: "",
+      conversationId: "",
     },
   };
 
-  for (const topic of TOPICS) {
-    const restored = readChatHistory(historyStorage, topic.id);
-    if (restored) Object.assign(state.sessions[topic.id], restored);
+  if (migratedLegacyHistory && writeChatConversations(
+    historyStorage,
+    state.conversations,
+    state.activeConversationId,
+  )) {
+    for (const topic of TOPICS) {
+      try { historyStorage?.removeItem(CHAT_HISTORY_KEY + topic.id); } catch { /* Keep chat usable. */ }
+    }
   }
 
-  function persistSession(section = state.section) {
-    window.clearTimeout(historySaveTimers.get(section));
-    historySaveTimers.delete(section);
-    const saved = writeChatHistory(historyStorage, section, sessionFor(section));
+  function persistSession() {
+    if (historySaveTimer !== null) window.clearTimeout(historySaveTimer);
+    historySaveTimer = null;
+    const saved = writeChatConversations(
+      historyStorage,
+      state.conversations,
+      state.activeConversationId,
+    );
     if (historyDetail) historyDetail.textContent = saved
-      ? "对话和草稿仅保存在当前浏览器，保留 7 天。清空聊天记录会同时删除本机保存的当前栏目对话。"
+      ? "对话和草稿仅保存在当前浏览器，保留 7 天。删除聊天会同时删除本机保存的对应记录。"
       : "当前浏览器无法保存对话，刷新后可能丢失。你仍可继续聊天或复制回答。";
   }
 
-  function scheduleHistorySave(section = state.section) {
-    window.clearTimeout(historySaveTimers.get(section));
-    historySaveTimers.set(section, window.setTimeout(() => persistSession(section), 300));
+  function scheduleHistorySave() {
+    if (historySaveTimer !== null) window.clearTimeout(historySaveTimer);
+    historySaveTimer = window.setTimeout(persistSession, 300);
   }
 
   function flushHistory() {
     saveCurrentView();
-    for (const section of [...historySaveTimers.keys()]) persistSession(section);
+    persistSession();
   }
 
   function topicFor(section = state.section) {
     return TOPICS.find((topic) => topic.id === section) || TOPICS[0];
   }
 
+  function conversationFor(conversationId) {
+    return state.conversations.find((conversation) => conversation.id === conversationId) || null;
+  }
+
   function sessionFor(section = state.section) {
-    return state.sessions[section] || state.sessions[TOPICS[0].id];
+    const active = conversationFor(state.activeConversationId);
+    if (active?.section === section) return active;
+    return state.conversations
+      .filter((conversation) => conversation.section === section)
+      .sort((left, right) => right.updatedAt - left.updatedAt)[0] || active || state.conversations[0];
   }
 
   function hasResettableState(session) {
@@ -846,59 +1045,110 @@ function createPublicApp() {
   });
   header.append(menuButton, topicHeader, chatInfoButton, statusText, topicStatus);
 
+  const topicLinks = new Map(TOPICS.map((topic) => [topic.id, []]));
+  const recentLists = [];
+  const chatLaunchButtons = [];
+
+  function sidebarContent({ mobile = false } = {}) {
+    const shell = element("div", { className: "sidebar-shell" });
+    const sidebarHeader = element("div", { className: "sidebar-header" });
+    const sidebarBrand = element("strong", {
+      className: "sidebar-brand",
+      text: "ARTS Robotics",
+    });
+    const sidebarSearch = textButton("⌕", "sidebar-search");
+    sidebarSearch.setAttribute("aria-label", "搜索最近聊天");
+    sidebarSearch.addEventListener("click", searchRecentConversations);
+    sidebarHeader.append(sidebarBrand, sidebarSearch);
+    if (mobile) {
+      sidebarBrand.id = "topic-drawer-title";
+      const close = textButton("×", "drawer-close");
+      close.setAttribute("aria-label", "关闭聊天侧栏");
+      close.addEventListener("click", closeTopicDrawer);
+      sidebarHeader.append(close);
+    }
+
+    const pinnedLabel = element("p", {
+      className: "sidebar-section-label",
+      text: "置顶",
+    });
+    const pinned = element("nav", {
+      className: "sidebar-topic-list",
+      attributes: { "aria-label": "置顶知识域" },
+    });
+    for (const topic of TOPICS) {
+      const link = element("a", {
+        className: "sidebar-topic-link",
+        attributes: { href: topic.path },
+      });
+      link.append(
+        element("span", { className: "sidebar-folder-icon", attributes: { "aria-hidden": "true" } }),
+        element("span", { text: topic.title }),
+      );
+      link.addEventListener("click", (event) => {
+        if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        activateTopic(topic.id, { historyMode: "push", announce: true });
+        closeTopicDrawer();
+      });
+      topicLinks.get(topic.id).push(link);
+      pinned.append(link);
+    }
+
+    const recentLabel = element("p", {
+      className: "sidebar-section-label sidebar-recent-label",
+      text: "最近",
+    });
+    const recentList = element("div", {
+      className: "sidebar-recent-list",
+      attributes: { role: "list", "aria-label": "最近聊天" },
+    });
+    recentLists.push(recentList);
+
+    const sidebarBottom = element("div", { className: "sidebar-bottom" });
+    const utilityLinks = element("div", { className: "sidebar-utility-links" });
+    const officialLink = externalLink("官网", OFFICIAL_SITE, "sidebar-utility-link");
+    const manageLink = element("a", {
+      className: "sidebar-utility-link",
+      attributes: { href: "/manage" },
+      text: "管理",
+    });
+    if (officialLink) utilityLinks.append(officialLink);
+    utilityLinks.append(manageLink);
+    const bottomRow = element("div", { className: "sidebar-bottom-row" });
+    const chatButton = textButton("", "sidebar-chat-button");
+    chatButton.setAttribute("aria-controls", "new-chat-dialog");
+    chatButton.setAttribute("aria-haspopup", "dialog");
+    chatButton.setAttribute("aria-expanded", "false");
+    chatButton.append(icon("＋", "sidebar-chat-icon"), element("span", { text: "聊天" }));
+    chatButton.addEventListener("click", () => openNewChat(chatButton));
+    chatLaunchButtons.push(chatButton);
+    bottomRow.append(
+      chatButton,
+      element("span", {
+        className: "sidebar-avatar",
+        text: "GM",
+        attributes: { "aria-label": "当前用户 GM" },
+      }),
+    );
+    sidebarBottom.append(utilityLinks, bottomRow);
+    shell.append(sidebarHeader, pinnedLabel, pinned, recentLabel, recentList, sidebarBottom);
+    return shell;
+  }
+
+  const desktopSidebar = element("aside", {
+    className: "chat-sidebar",
+    attributes: { "aria-label": "聊天侧栏" },
+  });
+  desktopSidebar.append(sidebarContent());
+
   const topicDrawer = element("dialog", {
     id: "topic-drawer",
     className: "topic-drawer",
     attributes: { "aria-labelledby": "topic-drawer-title" },
   });
   const drawerPanel = element("div", { className: "drawer-panel" });
-  const drawerHeader = element("div", { className: "drawer-header" });
-  const drawerTitle = element("div", { className: "drawer-title" }, [
-    element("strong", { id: "topic-drawer-title", text: "ARTS Robotics" }),
-  ]);
-  const drawerClose = textButton("×", "drawer-close");
-  drawerClose.setAttribute("aria-label", "关闭主题菜单");
-  drawerHeader.append(drawerTitle, drawerClose);
-
-  const topicList = element("nav", {
-    className: "drawer-topic-list",
-    attributes: { "aria-label": "聊天栏目" },
-  });
-  const topicLinks = new Map();
-  for (const topic of TOPICS) {
-    const link = element("a", {
-      className: "drawer-topic-link",
-      attributes: { href: topic.path },
-    });
-    if (topic.id === state.section) link.setAttribute("aria-current", "page");
-    link.append(
-      element("span", { text: topic.title }),
-      icon("›", "drawer-topic-arrow"),
-    );
-    link.addEventListener("click", (event) => {
-      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-      event.preventDefault();
-      closeTopicDrawer();
-      activateTopic(topic.id, { historyMode: "push", announce: true });
-    });
-    topicLinks.set(topic.id, link);
-    topicList.append(link);
-  }
-  topicLinks.get(state.section)?.classList.add("selected");
-
-  const drawerActions = element("div", { className: "drawer-actions" });
-  const newConversation = textButton("新对话", "drawer-action drawer-reset");
-  newConversation.disabled = true;
-  const officialLink = externalLink("访问官网", OFFICIAL_SITE, "drawer-action drawer-link");
-  const manageLink = element("a", {
-    className: "drawer-action drawer-link",
-    attributes: { href: "/manage" },
-    text: "管理入口",
-  });
-  drawerActions.append(newConversation);
-  if (officialLink) drawerActions.append(officialLink);
-  drawerActions.append(manageLink);
-  drawerPanel.append(drawerHeader, topicList, drawerActions);
+  drawerPanel.append(sidebarContent({ mobile: true }));
   topicDrawer.append(drawerPanel);
 
   function closeTopicDrawer() {
@@ -911,9 +1161,8 @@ function createPublicApp() {
     if (topicDrawer.open) return;
     menuButton.setAttribute("aria-expanded", "true");
     topicDrawer.showModal();
-    window.requestAnimationFrame(() => topicLinks.get(state.section)?.focus());
+    window.requestAnimationFrame(() => topicLinks.get(state.section)?.at(-1)?.focus());
   });
-  drawerClose.addEventListener("click", closeTopicDrawer);
   topicDrawer.addEventListener("click", (event) => {
     if (event.target === topicDrawer) closeTopicDrawer();
   });
@@ -929,9 +1178,6 @@ function createPublicApp() {
   const conversation = element("section", {
     className: "conversation",
     attributes: { "aria-label": "咨询对话" },
-  });
-  newConversation.addEventListener("click", () => {
-    resetCurrentConversation({ closeDrawer: true });
   });
 
   const messageScroll = element("div", {
@@ -991,6 +1237,116 @@ function createPublicApp() {
   composerArea.append(errorRegion, noticeRegion, composer);
   conversation.append(messageScroll, suggestionPanel, composerArea);
   layout.append(conversation);
+
+  const newChatDialog = element("dialog", {
+    id: "new-chat-dialog",
+    className: "new-chat-dialog",
+    attributes: { "aria-labelledby": "new-chat-title" },
+  });
+  const newChatPanel = element("div", { className: "new-chat-panel" });
+  const newChatHeader = element("header", { className: "new-chat-header" });
+  const newChatTitle = element("h2", { id: "new-chat-title", text: "新建聊天" });
+  const newChatClose = textButton("×", "new-chat-close");
+  newChatClose.setAttribute("aria-label", "关闭新建聊天");
+  newChatHeader.append(newChatTitle, newChatClose);
+  const newChatContextValue = element("strong", { text: topicFor().title });
+  const newChatContext = element("p", { className: "new-chat-context" }, [
+    "当前知识范围：",
+    newChatContextValue,
+  ]);
+  const newChatSuggestionPanel = element("section", {
+    className: "new-chat-suggestions",
+    attributes: { "aria-label": "新聊天推荐话题" },
+  });
+  const newChatSuggestionList = element("div", {
+    className: "new-chat-suggestion-list",
+    attributes: { role: "group" },
+  });
+  newChatSuggestionPanel.append(newChatSuggestionList);
+  const newChatForm = element("form", { className: "new-chat-form" });
+  const newChatInputLabel = element("label", {
+    className: "sr-only",
+    text: "新聊天问题",
+    attributes: { for: "new-chat-question" },
+  });
+  const newChatInput = element("textarea", {
+    id: "new-chat-question",
+    className: "new-chat-input",
+    attributes: {
+      maxlength: "2000",
+      rows: "2",
+      placeholder: "询问实验室大数据",
+      autocomplete: "off",
+    },
+  });
+  const newChatSend = textButton("↑", "new-chat-send");
+  newChatSend.type = "submit";
+  newChatSend.disabled = true;
+  newChatSend.setAttribute("aria-label", "开始聊天并发送问题");
+  newChatForm.append(newChatInputLabel, newChatInput, newChatSend);
+  newChatPanel.append(newChatHeader, newChatContext, newChatSuggestionPanel, newChatForm);
+  newChatDialog.append(newChatPanel);
+
+  let newChatDialogOpener = null;
+  let newChatSection = state.section;
+  let newChatDialogEpoch = 0;
+
+  function finishNewChatClose() {
+    newChatDialogEpoch += 1;
+    for (const button of chatLaunchButtons) button.setAttribute("aria-expanded", "false");
+    const opener = newChatDialogOpener;
+    newChatDialogOpener = null;
+    if (opener?.isConnected) opener.focus({ preventScroll: true });
+    syncChatViewport();
+  }
+
+  function closeNewChat() {
+    if (!newChatDialog.open) return;
+    newChatDialog.close();
+  }
+
+  function openNewChat(opener) {
+    if (newChatDialog.open) return;
+    const resolvedOpener = topicDrawer.contains(opener) ? menuButton : opener;
+    closeTopicDrawer();
+    newChatDialogOpener = resolvedOpener instanceof HTMLElement ? resolvedOpener : document.activeElement;
+    newChatSection = state.section;
+    newChatContextValue.textContent = topicFor(newChatSection).title;
+    newChatInput.value = "";
+    newChatSend.disabled = true;
+    newChatDialogEpoch += 1;
+    renderNewChatSuggestions();
+    for (const button of chatLaunchButtons) button.setAttribute("aria-expanded", "true");
+    newChatDialog.showModal();
+    window.requestAnimationFrame(() => {
+      newChatInput.focus({ preventScroll: true });
+      syncChatViewport();
+    });
+  }
+
+  newChatClose.addEventListener("click", closeNewChat);
+  newChatDialog.addEventListener("click", (event) => {
+    if (event.target === newChatDialog) closeNewChat();
+  });
+  newChatDialog.addEventListener("cancel", () => {
+    for (const button of chatLaunchButtons) button.setAttribute("aria-expanded", "false");
+  });
+  newChatDialog.addEventListener("close", finishNewChatClose);
+  newChatInput.addEventListener("input", () => {
+    newChatSend.disabled = !newChatInput.value.trim();
+  });
+  newChatInput.addEventListener("focus", syncChatViewport);
+  newChatInput.addEventListener("blur", syncChatViewport);
+  newChatInput.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
+      event.preventDefault();
+      startNewChatQuestion(newChatInput.value);
+    }
+  });
+  newChatForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    startNewChatQuestion(newChatInput.value);
+  });
 
   function chatInfoActionRow(labelText, action, extraClass = "") {
     const row = textButton("", `chat-info-row${extraClass ? ` ${extraClass}` : ""}`);
@@ -1056,7 +1412,7 @@ function createPublicApp() {
   historyDetail = element("p", {
     className: "chat-history-detail",
     text: historyStorage
-      ? "对话和草稿仅保存在当前浏览器，保留 7 天。清空聊天记录会同时删除本机保存的当前栏目对话。"
+      ? "对话和草稿仅保存在当前浏览器，保留 7 天。删除聊天会同时删除本机保存的对应记录。"
       : "当前浏览器无法保存对话，刷新后可能丢失。你仍可继续聊天或复制回答。",
   });
   chatInfoClearBlock.append(historyDetail);
@@ -1100,7 +1456,7 @@ function createPublicApp() {
     if (opener?.isConnected) opener.focus();
   });
 
-  app.append(header, layout, topicDrawer, chatInfoDialog, inquiryDialog);
+  app.append(desktopSidebar, header, layout, topicDrawer, newChatDialog, chatInfoDialog, inquiryDialog);
   root.replaceChildren(app);
 
   let systemStatusEpoch = 0;
@@ -1345,7 +1701,7 @@ function createPublicApp() {
     window.cancelAnimationFrame(viewportFrame);
     viewportFrame = window.requestAnimationFrame(() => {
       const viewport = window.visualViewport;
-      const followsVisualViewport = viewport && document.activeElement === questionInput;
+      const followsVisualViewport = viewport && [questionInput, newChatInput].includes(document.activeElement);
       const height = followsVisualViewport ? viewport.height : window.innerHeight;
       const offsetTop = followsVisualViewport ? viewport.offsetTop : 0;
       app.style.setProperty("--chat-viewport-height", `${Math.max(1, Math.round(height))}px`);
@@ -1393,8 +1749,8 @@ function createPublicApp() {
     closeChatInfo({ restoreFocus: false });
     clearSearchMatches();
 
-    const section = state.section;
-    const session = sessionFor(section);
+    const conversationId = state.activeConversationId;
+    const session = conversationFor(conversationId);
     const normalizedQuery = query.toLocaleLowerCase();
     const matchIndex = session.messages.findIndex((message) => (
       String(message.content || "").toLocaleLowerCase().includes(normalizedQuery)
@@ -1405,7 +1761,7 @@ function createPublicApp() {
     }
 
     window.requestAnimationFrame(() => {
-      if (state.section !== section) return;
+      if (state.activeConversationId !== conversationId) return;
       const match = messageScroll.querySelectorAll(".message").item(matchIndex);
       if (!(match instanceof HTMLElement)) return;
       const originalLabel = match.getAttribute("aria-label") || "聊天消息";
@@ -1419,21 +1775,126 @@ function createPublicApp() {
     });
   }
 
+  function searchRecentConversations() {
+    const rawQuery = window.prompt("搜索最近聊天");
+    if (rawQuery === null) return;
+    const query = rawQuery.trim().toLocaleLowerCase();
+    if (!query) return;
+    const match = recentChatConversations(state.conversations).find((conversation) => (
+      conversation.title.toLocaleLowerCase().includes(query) ||
+      conversation.messages.some((message) => String(message.content || "").toLocaleLowerCase().includes(query))
+    ));
+    if (!match) {
+      window.alert("未找到相关最近聊天。");
+      return;
+    }
+    activateConversation(match.id, { historyMode: "push", announce: true });
+    closeTopicDrawer();
+  }
+
+  function renderRecentConversations() {
+    const recent = recentChatConversations(state.conversations);
+    for (const list of recentLists) {
+      list.replaceChildren();
+      if (!recent.length) {
+        list.append(element("p", { className: "sidebar-recent-empty", text: "暂无聊天记录" }));
+        continue;
+      }
+      for (const conversation of recent) {
+        const item = element("div", {
+          className: "sidebar-recent-entry",
+          attributes: { role: "listitem" },
+        });
+        const button = textButton("", "sidebar-recent-item");
+        button.setAttribute("aria-label", `${conversation.title}，${topicFor(conversation.section).title}`);
+        if (conversation.id === state.activeConversationId) {
+          button.classList.add("selected");
+          button.setAttribute("aria-current", "true");
+        }
+        button.append(element("span", {
+          className: "sidebar-recent-title",
+          text: conversation.title,
+        }));
+        button.addEventListener("click", () => {
+          activateConversation(conversation.id, { historyMode: "push", announce: true });
+          closeTopicDrawer();
+        });
+        item.append(button);
+        list.append(item);
+      }
+    }
+  }
+
+  function createConversation(section) {
+    const previousActiveId = state.activeConversationId;
+    state.conversations = state.conversations.filter((item) => (
+      item.id === previousActiveId || item.sending || item.messages.length || String(item.draft || "").trim()
+    ));
+    const conversation = blankConversation(section);
+    state.conversations.push(conversation);
+    const ranked = [...state.conversations]
+      .sort((left, right) => right.updatedAt - left.updatedAt || left.id.localeCompare(right.id));
+    const keep = new Set(ranked.slice(0, CHAT_CONVERSATION_LIMIT).map((item) => item.id));
+    keep.add(conversation.id);
+    if (previousActiveId) keep.add(previousActiveId);
+    for (const item of state.conversations) {
+      if (item.sending) keep.add(item.id);
+    }
+    state.conversations = state.conversations.filter((item) => keep.has(item.id));
+    return conversation;
+  }
+
+  function activateConversation(conversationId, { historyMode = "none", announce = false } = {}) {
+    const conversation = conversationFor(conversationId);
+    if (!conversation) return false;
+    const changed = state.activeConversationId !== conversation.id;
+    if (changed) saveCurrentView();
+    state.activeConversationId = conversation.id;
+    state.section = conversation.section;
+    const topic = topicFor(conversation.section);
+    if (historyMode === "push" && (changed || window.location.pathname !== topic.path)) {
+      window.history.pushState({ topic: topic.id, conversationId: conversation.id }, "", topic.path);
+    }
+    questionInput.value = conversation.draft;
+    resizeQuestionInput();
+    clearSearchMatches();
+    syncFeedback();
+    updateComposer();
+    renderMessages({
+      scrollMode: conversation.messages.length === 0
+        ? "start"
+        : conversation.stickToEnd ? "end" : "restore",
+    });
+    syncTopicControls();
+    renderRecentConversations();
+    persistSession();
+    if (announce) topicStatus.textContent = `已打开${conversation.title}`;
+    return true;
+  }
+
+  function startNewChatQuestion(rawQuestion, suggestionToken = "") {
+    const question = String(rawQuestion || "").trim();
+    if (!question) return false;
+    const conversation = createConversation(newChatSection);
+    closeNewChat();
+    activateConversation(conversation.id, { historyMode: "push" });
+    dispatchQuestion(question, conversation.id, suggestionToken);
+    return true;
+  }
+
   function resetCurrentConversation({ closeDrawer = false, closeInfo = false } = {}) {
     const session = sessionFor();
     if (session.sending || !hasResettableState(session)) return false;
-    session.messages = [];
-    session.conversationToken = "";
-    session.tokenSavedAt = 0;
-    session.draft = "";
-    session.scrollTop = 0;
-    session.stickToEnd = true;
-    session.error = "";
-    session.notice = "";
-    persistSession();
-    if (state.inquiry.section === state.section) {
+    const removedId = session.id;
+    const section = session.section;
+    state.conversations = state.conversations.filter((conversation) => conversation.id !== removedId);
+    const replacement = createConversation(section);
+    state.activeConversationId = replacement.id;
+    state.section = section;
+    if (state.inquiry.conversationId === removedId) {
       state.inquiry.summary = "";
       state.inquiry.includeConversation = false;
+      state.inquiry.conversationId = "";
     }
     questionInput.value = "";
     clearSearchMatches();
@@ -1441,7 +1902,10 @@ function createPublicApp() {
     syncFeedback();
     updateComposer();
     renderMessages({ scrollMode: "start" });
-    topicStatus.textContent = `已清空${topicFor().title}对话`;
+    syncTopicControls();
+    renderRecentConversations();
+    persistSession();
+    topicStatus.textContent = `已删除${topicFor().title}当前聊天`;
     if (closeDrawer) closeTopicDrawer();
     if (closeInfo) closeChatInfo();
     window.requestAnimationFrame(() => questionInput.focus());
@@ -1455,6 +1919,8 @@ function createPublicApp() {
 
   function saveCurrentView() {
     const session = sessionFor();
+    if (!session) return;
+    if (session.draft !== questionInput.value) session.updatedAt = Date.now();
     session.draft = questionInput.value;
     session.scrollTop = messageScroll.scrollTop;
     session.stickToEnd = session.messages.length === 0 ||
@@ -1463,13 +1929,15 @@ function createPublicApp() {
   }
 
   function syncTopicControls() {
-    for (const [section, link] of topicLinks) {
+    for (const [section, links] of topicLinks) {
       const selected = section === state.section;
-      link.classList.toggle("selected", selected);
-      if (selected) {
-        link.setAttribute("aria-current", "page");
-      } else {
-        link.removeAttribute("aria-current");
+      for (const link of links) {
+        link.classList.toggle("selected", selected);
+        if (selected) {
+          link.setAttribute("aria-current", "page");
+        } else {
+          link.removeAttribute("aria-current");
+        }
       }
     }
     topicTitle.textContent = topicFor().title;
@@ -1478,28 +1946,15 @@ function createPublicApp() {
   function activateTopic(section, { historyMode = "none", announce = false } = {}) {
     const nextTopic = TOPICS.find((topic) => topic.id === section);
     if (!nextTopic) return;
-
-    const changed = state.section !== nextTopic.id;
-    if (changed) saveCurrentView();
-    if (historyMode === "push" && window.location.pathname !== nextTopic.path) {
-      window.history.pushState({ topic: nextTopic.id }, "", nextTopic.path);
-    }
-
-    if (changed) {
-      state.section = nextTopic.id;
-      questionInput.value = sessionFor().draft;
-      resizeQuestionInput();
-      syncFeedback();
-      updateComposer();
-      const session = sessionFor();
-      renderMessages({
-        scrollMode: session.messages.length === 0
-          ? "start"
-          : session.stickToEnd ? "end" : "restore",
-      });
-    }
-
-    syncTopicControls();
+    const active = conversationFor(state.activeConversationId);
+    const reusable = active?.section === nextTopic.id && active.messages.length === 0 && !active.sending
+      ? active
+      : state.conversations
+        .filter((conversation) => conversation.section === nextTopic.id &&
+          conversation.messages.length === 0 && !conversation.sending)
+        .sort((left, right) => right.updatedAt - left.updatedAt)[0];
+    const conversation = reusable || createConversation(nextTopic.id);
+    activateConversation(conversation.id, { historyMode, announce: false });
     if (announce) topicStatus.textContent = `已切换到${nextTopic.title}`;
   }
 
@@ -1514,18 +1969,21 @@ function createPublicApp() {
     sendButton.disabled = session.sending || !questionInput.value.trim();
     sendButton.textContent = session.sending ? "回答中" : "发送";
     questionInput.setAttribute("aria-busy", session.sending ? "true" : "false");
-    newConversation.disabled = session.sending || !hasResettableState(session);
+    for (const button of chatLaunchButtons) button.disabled = session.sending;
     clearChatHistory.disabled = session.sending || !hasResettableState(session);
     messageScroll.setAttribute("aria-busy", session.sending ? "true" : "false");
-    for (const [section, button] of topicLinks) {
-      const candidate = sessionFor(section);
-      button.classList.toggle("busy", candidate.sending);
-      button.setAttribute("aria-busy", candidate.sending ? "true" : "false");
+    for (const [section, links] of topicLinks) {
+      const busy = state.conversations.some((conversation) => conversation.section === section && conversation.sending);
+      for (const button of links) {
+        button.classList.toggle("busy", busy);
+        button.setAttribute("aria-busy", busy ? "true" : "false");
+      }
     }
   }
 
-  async function copyAnswer(content, section) {
-    const session = sessionFor(section);
+  async function copyAnswer(content, conversationId) {
+    const session = conversationFor(conversationId);
+    if (!session) return;
     try {
       if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
       await navigator.clipboard.writeText(content);
@@ -1533,10 +1991,10 @@ function createPublicApp() {
     } catch {
       session.notice = "无法自动复制，请长按选择文字。";
     }
-    if (state.section === section) syncFeedback();
+    if (state.activeConversationId === conversationId) syncFeedback();
   }
 
-  function assistantMessageNode(message, section) {
+  function assistantMessageNode(message, conversationId) {
     const article = element("article", {
       className: `message ${message.role}`,
       attributes: {
@@ -1556,7 +2014,7 @@ function createPublicApp() {
       const copy = textButton("", "copy-answer");
       copy.setAttribute("aria-label", "复制回答");
       copy.append(icon("□"));
-      copy.addEventListener("click", () => void copyAnswer(answer, section));
+      copy.addEventListener("click", () => void copyAnswer(answer, conversationId));
       const further = textButton("需要进一步交流", "further-inquiry");
       further.addEventListener("click", (event) => openInquiry(event.currentTarget));
       actions.append(copy, further);
@@ -1565,33 +2023,59 @@ function createPublicApp() {
     return article;
   }
 
-  function dispatchQuestion(rawQuestion, section, suggestionToken = "") {
+  function dispatchQuestion(rawQuestion, conversationId = state.activeConversationId, suggestionToken = "") {
     const question = String(rawQuestion || "").trim();
-    if (!question || sessionFor(section).sending) return;
-    const request = sendQuestion(question, section, suggestionToken);
-    if (state.section === section) questionInput.focus({ preventScroll: true });
+    const session = conversationFor(conversationId);
+    if (!question || !session || session.sending) return;
+    const request = sendQuestion(question, conversationId, suggestionToken);
+    if (state.activeConversationId === conversationId) questionInput.focus({ preventScroll: true });
     void request.catch(() => {});
   }
 
   function renderSuggestions() {
-    const section = state.section;
-    const session = sessionFor(section);
+    const conversationId = state.activeConversationId;
+    const session = conversationFor(conversationId);
     suggestionPanel.hidden = !recommendationsReady() || session.messages.length > 0 || session.sending || state.suggestions.length === 0;
     suggestionList.replaceChildren();
     suggestionList.setAttribute("aria-label", "根据近期入库知识生成的推荐话题");
-    if (suggestionPanel.hidden) return;
+    if (!suggestionPanel.hidden) {
+      for (const suggestion of state.suggestions) {
+        const button = textButton("", "suggestion-button");
+        button.title = suggestion;
+        button.append(element("span", { text: suggestion }));
+        button.addEventListener("click", () => { void dispatchSuggestion(suggestion, conversationId); });
+        suggestionList.append(button);
+      }
+    }
+    renderNewChatSuggestions();
+  }
+
+  function renderNewChatSuggestions() {
+    const ready = recommendationsReady() && !state.suggestionsLoading && state.suggestions.length > 0;
+    newChatSuggestionPanel.hidden = !ready;
+    newChatSuggestionList.replaceChildren();
+    if (!ready) return;
+    const dialogEpoch = newChatDialogEpoch;
     for (const suggestion of state.suggestions) {
-      const button = textButton("", "suggestion-button");
-      button.title = suggestion;
+      const button = textButton("", "new-chat-suggestion");
       button.append(element("span", { text: suggestion }));
-      button.addEventListener("click", () => { void dispatchSuggestion(suggestion, section); });
-      suggestionList.append(button);
+      button.addEventListener("click", () => {
+        void dispatchSuggestion(suggestion, "", {
+          startNew: true,
+          section: newChatSection,
+          dialogEpoch,
+        });
+      });
+      newChatSuggestionList.append(button);
     }
   }
 
-  async function dispatchSuggestion(rawQuestion, section) {
+  async function dispatchSuggestion(rawQuestion, conversationId, options = {}) {
     const question = String(rawQuestion || "").trim();
-    if (!question || !recommendationsReady() || state.suggestionsLoading || sessionFor(section).sending) return;
+    const startNew = options.startNew === true;
+    const target = startNew ? null : conversationFor(conversationId);
+    const sourceDraft = startNew ? newChatInput.value : target?.draft;
+    if (!question || !recommendationsReady() || state.suggestionsLoading || (!startNew && (!target || target.sending))) return;
     if (suggestionsRefreshTimer !== null) window.clearTimeout(suggestionsRefreshTimer);
     suggestionsRefreshTimer = null;
     suggestionsRefreshDueAt = 0;
@@ -1623,16 +2107,17 @@ function createPublicApp() {
         if (knowledgeRetrievalReady()) scheduleSuggestionsRefresh();
       }
     }
-    const session = sessionFor(section);
-    if (
-      epoch === suggestionsEpoch &&
-      current.includes(question) &&
-      recommendationsReady() &&
-      state.section === section &&
-      session.messages.length === 0 &&
-      !session.sending
-    ) {
-      dispatchQuestion(question, section, suggestionToken);
+    if (epoch !== suggestionsEpoch || !current.includes(question) || !recommendationsReady()) return;
+    if (startNew) {
+      if (!newChatDialog.open || options.dialogEpoch !== newChatDialogEpoch || options.section !== newChatSection ||
+          newChatInput.value !== sourceDraft) return;
+      startNewChatQuestion(question, suggestionToken);
+      return;
+    }
+    const session = conversationFor(conversationId);
+    if (state.activeConversationId === conversationId && session?.messages.length === 0 && !session.sending &&
+        session.draft === sourceDraft) {
+      dispatchQuestion(question, conversationId, suggestionToken);
     }
   }
 
@@ -1687,14 +2172,14 @@ function createPublicApp() {
   }
 
   function renderMessages({ scrollMode = "restore" } = {}) {
-    const section = state.section;
-    const session = sessionFor(section);
-    const topic = topicFor(section);
+    const conversationId = state.activeConversationId;
+    const session = conversationFor(conversationId);
+    const topic = topicFor(session.section);
     const restoreTop = session.scrollTop;
     const epoch = ++renderEpoch;
     const content = element("div", { className: session.messages.length ? "message-list" : "empty-conversation" });
     if (session.messages.length) {
-      for (const message of session.messages) content.append(assistantMessageNode(message, section));
+      for (const message of session.messages) content.append(assistantMessageNode(message, conversationId));
       if (session.sending) {
         content.append(
           element("div", {
@@ -1713,9 +2198,8 @@ function createPublicApp() {
     messageScroll.setAttribute("aria-label", `${topic.title}对话内容`);
     messageScroll.setAttribute("aria-live", session.messages.length ? "polite" : "off");
     renderSuggestions();
-    newConversation.disabled = session.sending || !hasResettableState(session);
     window.requestAnimationFrame(() => {
-      if (state.section !== section || renderEpoch !== epoch) return;
+      if (state.activeConversationId !== conversationId || renderEpoch !== epoch) return;
       if (session.messages.length === 0 || scrollMode === "start") {
         messageScroll.scrollTop = 0;
       } else if (scrollMode === "end") {
@@ -1730,9 +2214,10 @@ function createPublicApp() {
     });
   }
 
-  async function sendQuestion(rawQuestion, section = state.section, suggestionToken = "") {
-    const session = sessionFor(section);
-    const topic = topicFor(section);
+  async function sendQuestion(rawQuestion, conversationId = state.activeConversationId, suggestionToken = "") {
+    const session = conversationFor(conversationId);
+    if (!session) throw new Error("聊天记录不存在，请重新开始聊天");
+    const topic = topicFor(session.section);
     const question = String(rawQuestion || "").trim();
     if (!question || session.sending) {
       if (session.sending) throw new Error("请等待当前回答完成");
@@ -1740,7 +2225,7 @@ function createPublicApp() {
     }
     if (question.length > 2000) {
       session.error = "每次问题请控制在 2000 字以内。";
-      if (state.section === section) syncFeedback();
+      if (state.activeConversationId === conversationId) syncFeedback();
       throw new Error(session.error);
     }
     const oaEvidenceEpoch = ++systemStatusEpoch;
@@ -1757,10 +2242,13 @@ function createPublicApp() {
     session.error = "";
     session.notice = "";
     session.messages.push({ role: "user", content: question });
+    session.title = chatConversationTitle(session.messages);
+    session.updatedAt = Date.now();
     session.draft = "";
     session.stickToEnd = true;
-    persistSession(section);
-    if (state.section === section) {
+    persistSession();
+    renderRecentConversations();
+    if (state.activeConversationId === conversationId) {
       questionInput.value = "";
       resizeQuestionInput();
       syncFeedback();
@@ -1785,6 +2273,7 @@ function createPublicApp() {
       session.conversationToken = typeof payload.conversationToken === "string" ? payload.conversationToken : "";
       session.tokenSavedAt = Date.now();
       session.messages.push(assistant);
+      session.updatedAt = Date.now();
       completed = true;
       return {
         answer: assistant.content,
@@ -1795,7 +2284,7 @@ function createPublicApp() {
       session.scrollTop = previousScrollTop;
       session.stickToEnd = previousStickToEnd;
       session.error = error instanceof Error ? error.message : "服务暂时不可用";
-      if (state.section === section) {
+      if (state.activeConversationId === conversationId) {
         questionInput.value = session.draft;
         resizeQuestionInput();
         syncFeedback();
@@ -1807,9 +2296,10 @@ function createPublicApp() {
       throw error;
     } finally {
       session.sending = false;
-      persistSession(section);
+      persistSession();
+      renderRecentConversations();
       updateComposer();
-      if (state.section === section) {
+      if (state.activeConversationId === conversationId) {
         questionInput.value = session.draft;
         resizeQuestionInput();
         syncFeedback();
@@ -1824,13 +2314,14 @@ function createPublicApp() {
 
   function prefillInquirySummary() {
     const inquiry = state.inquiry;
-    if (inquiry.section !== state.section) {
+    if (inquiry.conversationId !== state.activeConversationId) {
+      inquiry.conversationId = state.activeConversationId;
       inquiry.section = state.section;
       inquiry.summary = "";
       inquiry.includeConversation = false;
     }
     if (inquiry.summary) return;
-    inquiry.summary = sessionFor(inquiry.section).messages
+    inquiry.summary = conversationFor(inquiry.conversationId).messages
       .filter((message) => message.role === "user")
       .map((message) => message.content)
       .join("\n")
@@ -1949,9 +2440,8 @@ function createPublicApp() {
   async function submitInquiry(event) {
     event.preventDefault();
     const inquiry = state.inquiry;
-    const section = state.sessions[inquiry.section] ? inquiry.section : state.section;
-    const session = sessionFor(section);
-    const topic = topicFor(section);
+    const session = conversationFor(inquiry.conversationId) || sessionFor();
+    const topic = topicFor(session.section);
     if (inquiry.submitting || !inquiry.consent) return;
     inquiry.submitting = true;
     inquiry.error = "";
@@ -1978,6 +2468,7 @@ function createPublicApp() {
       inquiry.consent = false;
       inquiry.includeConversation = false;
       inquiry.section = "";
+      inquiry.conversationId = "";
     } catch (error) {
       inquiry.error = error instanceof Error ? error.message : "提交失败";
     } finally {
@@ -2014,7 +2505,9 @@ function createPublicApp() {
     scheduleHistorySave();
   }, { passive: true });
   questionInput.addEventListener("input", () => {
-    sessionFor().draft = questionInput.value;
+    const session = sessionFor();
+    session.draft = questionInput.value;
+    session.updatedAt = Date.now();
     scheduleHistorySave();
     resizeQuestionInput();
     updateComposer();
@@ -2027,19 +2520,32 @@ function createPublicApp() {
   questionInput.addEventListener("keydown", (event) => {
     if (event.key === "Enter" && !event.shiftKey && !event.isComposing) {
       event.preventDefault();
-      dispatchQuestion(questionInput.value, state.section);
+      dispatchQuestion(questionInput.value, state.activeConversationId);
     }
   });
   composer.addEventListener("submit", (event) => {
     event.preventDefault();
-    dispatchQuestion(questionInput.value, state.section);
+    dispatchQuestion(questionInput.value, state.activeConversationId);
   });
-  window.addEventListener("popstate", () => {
-    activateTopic(topicIdForPath(window.location.pathname), { announce: true });
+  window.addEventListener("popstate", (event) => {
+    const conversation = conversationFor(event.state?.conversationId);
+    const section = topicIdForPath(window.location.pathname);
+    if (conversation?.section === section) {
+      activateConversation(conversation.id, { announce: true });
+    } else {
+      activateTopic(section, { announce: true });
+    }
   });
+
+  window.history.replaceState?.(
+    { ...(window.history.state || {}), topic: state.section, conversationId: state.activeConversationId },
+    "",
+    window.location.href,
+  );
 
   questionInput.value = sessionFor().draft;
   syncTopicControls();
+  renderRecentConversations();
   syncFeedback();
   renderMessages({ scrollMode: sessionFor().stickToEnd ? "end" : "restore" });
   resizeQuestionInput();
@@ -2100,9 +2606,9 @@ function createPublicApp() {
         if (!input || typeof input.question !== "string" || !input.question.trim() || input.question.length > 2000) {
           throw new Error("请输入 1–2000 字的问题");
         }
-        const section = state.section;
-        if (sessionFor(section).sending) throw new Error("请等待当前回答完成");
-        return sendQuestion(input.question, section);
+        const conversationId = state.activeConversationId;
+        if (conversationFor(conversationId)?.sending) throw new Error("请等待当前回答完成");
+        return sendQuestion(input.question, conversationId);
       },
     };
     try {

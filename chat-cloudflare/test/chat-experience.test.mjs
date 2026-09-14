@@ -17,8 +17,10 @@ const api = runInNewContext(`
   ${section("function cleanPublicChatText", "function knowledgeSuggestionsFromPayload")}
   ${section("function element(", "function icon(")}
   ${section("function referenceSectionStart", "function serviceLabel")}
-  ({ CHAT_HISTORY_KEY, CHAT_HISTORY_TTL_MS, CHAT_TOKEN_TTL_MS,
-     readChatHistory, writeChatHistory, chatHistorySnapshot, renderAnswerBody, userFacingAnswer });
+  ({ CHAT_HISTORY_KEY, CHAT_CONVERSATIONS_KEY, CHAT_HISTORY_TTL_MS, CHAT_TOKEN_TTL_MS,
+     CHAT_RECENT_LIMIT, readChatHistory, writeChatHistory, chatHistorySnapshot,
+     chatConversationTitle, chatConversationsSnapshot, writeChatConversations,
+     readChatConversations, recentChatConversations, renderAnswerBody, userFacingAnswer });
 `, { document, Node: TestNode });
 function storage() {
   const values = new Map();
@@ -30,80 +32,150 @@ function session(extra = {}) {
     draft: "进一步说明", conversationToken: "opaque-server-token", tokenSavedAt: now,
     sending: false, scrollTop: 123, stickToEnd: false, ...extra };
 }
+function conversation(id, section = "technology", extra = {}) {
+  return {
+    id, section, title: "新聊天", createdAt: now - 1000, updatedAt: now,
+    ...session(), ...extra,
+  };
+}
+const allowedSections = ["technology", "academic", "company", "association"];
 function nodes(root, tag) { return [...(root.tag === tag ? [root] : []), ...root.children.flatMap((child) => nodes(child, tag))]; }
 
-test("reload restores isolated topic messages, draft and fresh signed context without persisting unrelated state", () => {
+test("v2 storage restores multiple conversations in the same topic without leaking unrelated state", () => {
   const store = storage();
-  api.writeChatHistory(store, "technology", session({ contact: "do not save", apiKey: "do not save", error: "transient" }), now);
-  api.writeChatHistory(store, "company", session({ draft: "产品问题" }), now);
-  const restored = api.readChatHistory(store, "technology", now + 1000);
-  assert.equal(restored.messages.length, 2);
-  assert.equal(restored.messages[1].content, "支持**自主巡检**。");
-  assert.equal(restored.draft, "进一步说明");
-  assert.equal(restored.conversationToken, "opaque-server-token");
-  assert.equal(restored.scrollTop, 123);
-  assert.equal(restored.stickToEnd, false);
-  assert.equal(restored.sending, false);
-  assert.equal(api.readChatHistory(store, "company", now + 1000).draft, "产品问题");
-  assert.equal(api.readChatHistory(store, "association", now + 1000), null);
-  assert.doesNotMatch(store.getItem(api.CHAT_HISTORY_KEY + "technology"), /contact|apiKey|transient/u);
+  const first = conversation("techconv01", "technology", {
+    messages: [{ role: "user", content: "第一个技术问题" }, { role: "assistant", content: "第一条回答" }],
+    draft: "继续第一个问题", contact: "do not save", apiKey: "do not save", error: "transient",
+  });
+  const second = conversation("techconv02", "technology", {
+    messages: [{ role: "user", content: "第二个技术问题" }, { role: "assistant", content: "第二条回答" }],
+    draft: "", updatedAt: now - 100,
+  });
+  const company = conversation("company001", "company", { draft: "产品问题", updatedAt: now - 200 });
+  assert.equal(api.writeChatConversations(store, [first, second, company], second.id, now), true);
+
+  const restored = api.readChatConversations(store, allowedSections, now + 1000);
+  assert.equal(restored.conversations.length, 3);
+  assert.equal(restored.conversations.filter((item) => item.section === "technology").length, 2);
+  assert.equal(restored.activeConversationId, second.id);
+  assert.equal(restored.conversations.find((item) => item.id === first.id).draft, "继续第一个问题");
+  assert.equal(restored.conversations.find((item) => item.id === first.id).conversationToken, "opaque-server-token");
+  assert.equal(restored.conversations.find((item) => item.id === first.id).scrollTop, 123);
+  assert.equal(restored.conversations.find((item) => item.id === first.id).stickToEnd, false);
+  assert.equal(restored.conversations.find((item) => item.id === company.id).draft, "产品问题");
+  assert.doesNotMatch(store.getItem(api.CHAT_CONVERSATIONS_KEY), /contact|apiKey|transient/u);
 });
 
-test("interrupted requests restore as an unsent draft without a duplicate user turn or automatic send", () => {
+test("v2 interrupted requests restore as an unsent draft without a duplicate user turn", () => {
   const store = storage();
-  const pending = session({ draft: "", sending: true });
+  const pending = conversation("pending001", "technology", { draft: "", sending: true });
   pending.messages.push({ role: "user", content: "这个方案的局限是什么？" });
-  api.writeChatHistory(store, "technology", pending, now);
-  const restored = api.readChatHistory(store, "technology", now + 1000);
+  api.writeChatConversations(store, [pending], pending.id, now);
+  const restored = api.readChatConversations(store, allowedSections, now + 1000).conversations[0];
   assert.equal(restored.messages.length, 2);
   assert.equal(restored.draft, "这个方案的局限是什么？");
   assert.equal(restored.sending, false);
   assert.match(restored.notice, /未完成/u);
 });
 
-test("clearing a conversation removes only that topic's stored record", () => {
+test("v2 recent conversations use first-question titles and newest-first order", () => {
   const store = storage();
-  for (const topic of ["technology", "company"]) api.writeChatHistory(store, topic, session(), now);
-  api.writeChatHistory(store, "technology", session({ messages: [], draft: "", conversationToken: "" }), now + 1);
-  assert.equal(api.readChatHistory(store, "technology", now + 2), null);
-  assert.equal(api.readChatHistory(store, "company", now + 2).messages.length, 2);
+  const longQuestion = `  ${"新".repeat(31)}\n后续空白  `;
+  const records = [
+    conversation("recent001", "technology", {
+      messages: [{ role: "user", content: "较早的话题" }, { role: "assistant", content: "回答" }],
+      draft: "", updatedAt: now - 300,
+    }),
+    conversation("recent002", "technology", {
+      messages: [{ role: "user", content: longQuestion }, { role: "assistant", content: "回答" }],
+      draft: "", updatedAt: now - 100,
+    }),
+    conversation("draftonly", "company", { messages: [], draft: "只有草稿", updatedAt: now }),
+  ];
+  api.writeChatConversations(store, records, records[0].id, now);
+  const restored = api.readChatConversations(store, allowedSections, now);
+  assert.deepEqual(Array.from(restored.conversations, (item) => item.id), ["draftonly", "recent002", "recent001"]);
+  const recent = api.recentChatConversations(restored.conversations);
+  assert.deepEqual(Array.from(recent, (item) => item.id), ["recent002", "recent001"]);
+  assert.equal(recent[0].title, `${"新".repeat(30)}…`);
+  assert.equal(recent[1].title, "较早的话题");
+  assert.equal(api.chatConversationTitle([], "备用标题"), "备用标题");
 });
 
-test("expired signed context is discarded while visible history survives until its retention limit", () => {
+test("v2 discards signed context after 12 hours and conversations after 7 days", () => {
   const store = storage();
-  api.writeChatHistory(store, "technology", session(), now);
-  const restored = api.readChatHistory(store, "technology", now + api.CHAT_TOKEN_TTL_MS);
+  const record = conversation("expires001");
+  api.writeChatConversations(store, [record], record.id, now);
+  const restored = api.readChatConversations(store, allowedSections, now + api.CHAT_TOKEN_TTL_MS).conversations[0];
   assert.equal(restored.conversationToken, "");
   assert.equal(restored.messages.length, 2);
-  assert.equal(api.readChatHistory(store, "technology", now + api.CHAT_HISTORY_TTL_MS), null);
+  assert.equal(api.readChatConversations(store, allowedSections, now + api.CHAT_HISTORY_TTL_MS), null);
   assert.equal(store.values.size, 0);
 });
 
-test("corrupt, wrong-topic and oversized histories cannot break startup", () => {
-  for (const value of ["{broken", "x".repeat(800_001), JSON.stringify({ version: 2 }),
-    JSON.stringify(api.chatHistorySnapshot("company", session(), now)),
-    JSON.stringify(api.chatHistorySnapshot("technology", session(), now + 1))]) {
+test("v2 storage fails soft for corrupt, oversized and partially invalid records", () => {
+  for (const value of ["{broken", "x".repeat(2_000_001), JSON.stringify({ version: 1 }),
+    JSON.stringify({ version: 2, conversations: "invalid" })]) {
     const store = storage();
-    store.setItem(api.CHAT_HISTORY_KEY + "technology", value);
-    assert.equal(api.readChatHistory(store, "technology", now), null);
+    store.setItem(api.CHAT_CONVERSATIONS_KEY, value);
+    assert.equal(api.readChatConversations(store, allowedSections, now), null);
     assert.equal(store.values.size, 0);
   }
+
+  const store = storage();
+  const snapshot = api.chatConversationsSnapshot([
+    conversation("validrec01"),
+    conversation("short", "technology"),
+    conversation("wrongsec01", "private"),
+  ], "short", now);
+  store.setItem(api.CHAT_CONVERSATIONS_KEY, JSON.stringify(snapshot));
+  const restored = api.readChatConversations(store, allowedSections, now);
+  assert.deepEqual(Array.from(restored.conversations, (item) => item.id), ["validrec01"]);
+  assert.equal(restored.activeConversationId, "validrec01");
+
   const blocked = { getItem() { throw Error("disabled"); }, setItem() { throw Error("quota"); }, removeItem() { throw Error("disabled"); } };
-  assert.equal(api.readChatHistory(blocked, "technology", now), null);
-  assert.equal(api.writeChatHistory(blocked, "technology", session(), now), false);
+  assert.equal(api.readChatConversations(blocked, allowedSections, now), null);
+  assert.equal(api.writeChatConversations(blocked, [conversation("blocked001")], "blocked001", now), false);
 });
 
-test("large histories retain recent bounded messages and remove visible reference sections again on reload", () => {
+test("v2 large histories retain bounded messages and remove visible reference sections on reload", () => {
   const store = storage();
   const messages = Array.from({ length: 100 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", content: "字".repeat(2000) }));
-  api.writeChatHistory(store, "technology", session({ messages }), now);
-  const restored = api.readChatHistory(store, "technology", now);
+  const record = conversation("bounded001", "technology", { messages, draft: "" });
+  api.writeChatConversations(store, [record], record.id, now);
+  const restored = api.readChatConversations(store, allowedSections, now).conversations[0];
   assert.ok(restored.messages.length <= 40);
   assert.ok(restored.messages.reduce((sum, message) => sum + message.content.length, 0) <= 80_000);
   assert.equal(restored.messages[0].role, "user");
   messages.splice(0, messages.length, { role: "user", content: "请介绍" }, { role: "assistant", content: "公开技术成果。[1]\n\n参考文献：\n[1] 来源标题" });
-  api.writeChatHistory(store, "technology", session({ messages }), now);
-  assert.equal(api.readChatHistory(store, "technology", now).messages[1].content, "公开技术成果。");
+  record.messages = messages;
+  api.writeChatConversations(store, [record], record.id, now);
+  assert.equal(api.readChatConversations(store, allowedSections, now).conversations[0].messages[1].content, "公开技术成果。");
+});
+
+test("v2 writer trims oldest conversations before reaching its own read limit", () => {
+  const store = storage();
+  const messages = Array.from({ length: 12 }, (_, index) => ({
+    role: index % 2 ? "assistant" : "user",
+    content: (index % 2 ? "答" : "问").repeat(index % 2 ? 12_000 : 2_000),
+  }));
+  const records = Array.from({ length: 20 }, (_, index) => conversation(
+    `large${String(index).padStart(3, "0")}`,
+    "technology",
+    {
+      messages,
+      draft: "",
+      conversationToken: "t".repeat(40_000),
+      updatedAt: now - index,
+    },
+  ));
+  assert.equal(api.writeChatConversations(store, records, records[0].id, now), true);
+  const serialized = store.getItem(api.CHAT_CONVERSATIONS_KEY);
+  assert.ok(serialized.length <= 2_000_000);
+  const restored = api.readChatConversations(store, allowedSections, now);
+  assert.ok(restored);
+  assert.equal(restored.activeConversationId, records[0].id);
+  assert.ok(restored.conversations.length < records.length);
 });
 
 test("answers render paragraphs, emphasis, lists and accessible tables using semantic nodes", () => {
@@ -148,14 +220,21 @@ function publicAppHarness(store, { failChat = false } = {}) {
       this.classList = { add() {}, remove() {}, toggle() {} };
     }
     addEventListener(name, callback) { (this.listeners[name] ||= []).push(callback); }
-    fire(name) { for (const callback of this.listeners[name] || []) callback({ target: this, currentTarget: this, preventDefault() {} }); }
+    fire(name, event = {}) {
+      for (const callback of this.listeners[name] || []) callback({
+        target: this, currentTarget: this, button: 0, preventDefault() {}, ...event,
+      });
+    }
+    getAttribute(name) { return this.attributes[name] ?? null; }
     removeAttribute(name) { delete this.attributes[name]; }
     replaceChildren(...children) { this.children = []; this.append(...children); }
     querySelectorAll() { const result = []; result.item = () => null; return result; }
     contains(target) { return this === target || this.children.some((node) => node.contains?.(target)); }
     focus() {}
+    blur() {}
+    scrollIntoView() {}
     showModal() { this.open = true; }
-    close() { this.open = false; }
+    close() { this.open = false; this.fire("close"); }
   }
   const root = new AppNode("div"); root.id = "app";
   const doc = new AppNode("document");
@@ -191,22 +270,26 @@ function publicAppHarness(store, { failChat = false } = {}) {
 }
 const settle = () => new Promise((resolve) => setImmediate(resolve));
 
-test("the complete UI restores on startup, saves drafts before pagehide and clears persisted records", async () => {
+test("the complete UI migrates v1 through startup, saves drafts and clears the active v2 conversation", async () => {
   const store = storage();
-  api.writeChatHistory(store, "technology", session({ tokenSavedAt: Date.now() }), Date.now());
+  const uiNow = Date.now();
+  api.writeChatHistory(store, "technology", session({ tokenSavedAt: uiNow }), uiNow);
   const app = publicAppHarness(store);
   await settle();
   assert.equal(app.input().value, "进一步说明");
   assert.match(app.root.textContent, /自主巡检/u);
   assert.equal(app.requests.filter((request) => request.url === "/api/chat").length, 0);
+  assert.equal(store.getItem(api.CHAT_HISTORY_KEY + "technology"), null);
+  assert.equal(api.readChatConversations(store, allowedSections).conversations.length, 1);
+
   app.input().value = "刷新前未提交的草稿";
   app.input().fire("input");
   app.win.fire("pagehide");
   const refreshed = publicAppHarness(store);
   await settle();
   assert.equal(refreshed.input().value, "刷新前未提交的草稿");
-  refreshed.all.find((node) => node.className === "drawer-action drawer-reset").fire("click");
-  assert.equal(api.readChatHistory(store, "technology"), null);
+  refreshed.all.find((node) => node.className === "chat-info-row chat-info-clear").fire("click");
+  assert.equal(api.readChatConversations(store, allowedSections), null);
   assert.doesNotMatch(refreshed.root.textContent, /自主巡检/u);
 });
 
@@ -217,7 +300,8 @@ test("the complete UI persists completed answers and retains failed questions as
     app.input().value = "请介绍技术方案"; app.input().fire("input");
     app.all.find((node) => node.tag === "form" && node.className === "composer").fire("submit");
     await settle(); await settle();
-    const restored = api.readChatHistory(store, "technology");
+    const collection = api.readChatConversations(store, allowedSections);
+    const restored = collection.conversations.find((item) => item.id === collection.activeConversationId);
     assert.equal(restored.sending, false);
     if (failChat) {
       assert.equal(restored.messages.length, 0);
@@ -225,7 +309,85 @@ test("the complete UI persists completed answers and retains failed questions as
     } else {
       assert.equal(restored.messages.length, 2);
       assert.equal(restored.conversationToken, "new-server-token");
+      assert.equal(restored.title, "请介绍技术方案");
       assert.equal(nodes(app.root, "strong").some((node) => node.textContent === "可以试点。"), true);
     }
   }
+});
+
+test("the complete UI switches recent conversations and starts another same-topic chat from the sidebar", async () => {
+  const store = storage();
+  const uiNow = Date.now();
+  const older = conversation("uiside001", "technology", {
+    messages: [{ role: "user", content: "较早的会话" }, { role: "assistant", content: "较早回答内容" }],
+    draft: "较早草稿", updatedAt: uiNow - 2000, tokenSavedAt: uiNow - 2000,
+  });
+  const newer = conversation("uiside002", "technology", {
+    messages: [{ role: "user", content: "较新的会话" }, { role: "assistant", content: "较新回答内容" }],
+    draft: "较新草稿", updatedAt: uiNow - 1000, tokenSavedAt: uiNow - 1000,
+  });
+  api.writeChatConversations(store, [older, newer], older.id, uiNow);
+
+  const app = publicAppHarness(store);
+  await settle();
+  assert.equal(app.input().value, "较早草稿");
+  assert.match(app.root.textContent, /较早回答内容/u);
+  const recentTitles = app.all
+    .filter((node) => node.className === "sidebar-recent-title")
+    .slice(0, 2)
+    .map((node) => node.textContent);
+  assert.deepEqual(recentTitles, ["较新的会话", "较早的会话"]);
+
+  app.all.find((node) => node.className === "sidebar-recent-item" && node.textContent === "较新的会话").fire("click");
+  assert.equal(app.input().value, "较新草稿");
+  assert.match(app.root.textContent, /较新回答内容/u);
+  assert.doesNotMatch(app.root.textContent, /较早回答内容/u);
+
+  const launch = app.all.find((node) => node.className === "sidebar-chat-button");
+  launch.fire("click");
+  const dialog = app.all.find((node) => node.id === "new-chat-dialog");
+  const newChatInput = app.all.find((node) => node.id === "new-chat-question");
+  assert.equal(dialog.open, true);
+  newChatInput.value = "第三个技术问题";
+  newChatInput.fire("input");
+  app.all.find((node) => node.className === "new-chat-form").fire("submit");
+  await settle(); await settle();
+
+  const restored = api.readChatConversations(store, allowedSections);
+  assert.equal(restored.conversations.filter((item) => item.section === "technology").length, 3);
+  const active = restored.conversations.find((item) => item.id === restored.activeConversationId);
+  assert.equal(active.title, "第三个技术问题");
+  assert.equal(active.messages.length, 2);
+  assert.equal(active.messages[1].content, "**可以试点。**\n\n- 明确目标\n- 验证结果");
+  assert.equal(dialog.open, false);
+  const renderedRecentTitles = nodes(app.root, "span")
+    .filter((node) => node.className === "sidebar-recent-title")
+    .slice(0, 3)
+    .map((node) => node.textContent);
+  assert.deepEqual(renderedRecentTitles, ["第三个技术问题", "较新的会话", "较早的会话"]);
+});
+
+test("switching away from a pristine conversation never overwrites another saved draft", async () => {
+  const store = storage();
+  const uiNow = Date.now();
+  const saved = conversation("protected1", "technology", {
+    messages: [{ role: "user", content: "已保存的问题" }, { role: "assistant", content: "已保存的回答" }],
+    draft: "不要覆盖这段草稿",
+    updatedAt: uiNow,
+    tokenSavedAt: uiNow,
+  });
+  api.writeChatConversations(store, [saved], saved.id, uiNow);
+  const app = publicAppHarness(store);
+  await settle();
+
+  const openTopic = (title) => app.all.find((node) => (
+    node.className === "sidebar-topic-link" && node.textContent.includes(title)
+  )).fire("click");
+  openTopic("科研与合作");
+  openTopic("成果与应用");
+  openTopic("公司与产品");
+  app.win.fire("pagehide");
+
+  const restored = api.readChatConversations(store, allowedSections);
+  assert.equal(restored.conversations.find((item) => item.id === saved.id).draft, "不要覆盖这段草稿");
 });
