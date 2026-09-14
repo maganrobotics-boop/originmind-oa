@@ -571,7 +571,7 @@ async function recordModelStatus(context, config, active, result) {
 async function oaStatusIdentity(context) {
   return sha256Hex(JSON.stringify([
     releaseId(context),
-    "oa-public-status-v1",
+    "oa-public-status-v2",
     context.env.PUBLIC_LAB_AI_SERVICE_TOKEN || null,
     typeof context.env.OA_SERVICE?.fetch === "function",
   ]));
@@ -583,7 +583,7 @@ async function recordOaStatus(context, result) {
   const identity = await oaStatusIdentity(context);
   await database(context)
     .prepare("INSERT INTO settings (id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value")
-    .bind(`system-status-oa-v1:${identity}`, JSON.stringify({
+    .bind(`system-status-oa-v2:${identity}`, JSON.stringify({
       version: 1,
       identity,
       leaseId: null,
@@ -614,22 +614,24 @@ async function currentOaStatus(context) {
   return cachedStatusProbe(
     context,
     {
-      id: `system-status-oa-v1:${identity}`,
+      id: `system-status-oa-v2:${identity}`,
       identity,
       fallback: { oaReady: false, knowledgeReady: false, retrievalReady: false },
       validateResult: validatedOaStatus,
       ttlForResult: () => OA_STATUS_TTL_MS,
     },
     async () => {
-      const [result, retrievalStatus] = await Promise.all([
-        inspectOaPublicKnowledge(context),
-        probeOaPublicKnowledge(context),
-      ]);
+      const result = await inspectOaPublicKnowledge(context);
       const oaReady = result.status === "connected";
+      const knowledgeReady = oaReady && result.documentCount > 0;
+      if (!knowledgeReady || result.retrievalReady !== true) {
+        return { oaReady, knowledgeReady, retrievalReady: false };
+      }
+      const retrievalStatus = await probeOaPublicKnowledge(context);
       return {
         oaReady,
-        knowledgeReady: oaReady && result.documentCount > 0,
-        retrievalReady: oaReady && result.retrievalReady === true && retrievalStatus === "connected",
+        knowledgeReady,
+        retrievalReady: retrievalStatus === "connected",
       };
     },
   );
