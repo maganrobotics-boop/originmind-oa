@@ -80,6 +80,16 @@ test("keeps the internal laboratory AI discoverable only inside the admitted OA 
   assert.ok(pageSource.indexOf("if (needsNda) return") < pageSource.indexOf('<div className="oa-app">'));
 });
 
+test("labels the internal laboratory AI wait as retrieval and answer generation", async () => {
+  const knowledgeSource = await readFile(path.join(root, "components/knowledge/knowledge-view.tsx"), "utf8");
+
+  assert.match(knowledgeSource, /knowledge-answer-loading" role="status"/u);
+  assert.match(knowledgeSource, /正在检索并生成回答…/u);
+  assert.match(knowledgeSource, /\{asking \? "回答中" : "发送"\}/u);
+  assert.doesNotMatch(knowledgeSource, /正在查找审核通过的知识…/u);
+  assert.doesNotMatch(knowledgeSource, /\{asking \? "检索中" : "发送"\}/u);
+});
+
 test("makes the official Feishu QR the primary login and keeps ChatGPT and GitHub under smaller alternatives", async () => {
   const pageSource = await readFile(path.join(root, "app/page.tsx"), "utf8");
   const choiceStart = pageSource.indexOf(

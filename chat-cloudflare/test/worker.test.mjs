@@ -92,6 +92,19 @@ async function responseJson(response) {
   return { status: response.status, body: await response.json() };
 }
 
+function assertChatServerTiming(response) {
+  const value = response.headers.get("server-timing");
+  assert.match(value, /^oa;dur=\d+, model;dur=\d+, total;dur=\d+$/u);
+  const timings = Object.fromEntries(
+    value.split(", ").map((entry) => {
+      const [name, rawDuration] = entry.split(";dur=");
+      return [name, Number(rawDuration)];
+    }),
+  );
+  assert.ok(timings.total >= timings.oa + timings.model);
+  return timings;
+}
+
 async function storeVerifiedBailianConfig(env, credential = "test-key-not-a-real-secret") {
   const value = {
     baseUrl: "https://dashscope.aliyuncs.com/compatible-mode/v1",
@@ -194,11 +207,14 @@ test("zero retrieved documents returns retrieval fallback and never invokes a mo
     method: "POST",
     body: { messages: [{ role: "user", content: "zzzz-no-match" }], topic: "research" },
   });
-  const result = await responseJson(await handleRequest(request, env, {}, runtime(async () => emptyOaResponse())));
+  const response = await handleRequest(request, env, {}, runtime(async () => emptyOaResponse()));
+  const timings = assertChatServerTiming(response);
+  const result = await responseJson(response);
   assert.equal(result.status, 200);
   assert.equal(result.body.mode, "retrieval");
   assert.equal(result.body.sources.length, 0);
   assert.equal(calls, 0);
+  assert.equal(timings.model, 0);
 });
 
 test("Workers AI gets only two bounded user turns and never client assistant text", async (t) => {
@@ -237,6 +253,7 @@ test("Workers AI gets only two bounded user turns and never client assistant tex
   assert.equal(result.body.answer, "团队主要研究机器人灵巧操作。");
   assert.equal(captured.model, WORKERS_AI_MODEL);
   assert.equal(captured.input.stream, false);
+  assert.equal(captured.input.max_tokens, 700);
   const nonSystem = captured.input.messages.slice(1);
   assert.ok(nonSystem.length <= 2);
   assert.ok(nonSystem.every((message) => message.role === "user"));
@@ -430,7 +447,9 @@ test("verified Bailian config overrides Workers AI and uses hardened fetch optio
     method: "POST",
     body: { messages: [{ role: "user", content: "研究方向是什么？" }], topic: "research" },
   });
-  const result = await responseJson(await handleRequest(request, env, {}, runtime(externalFetch)));
+  const response = await handleRequest(request, env, {}, runtime(externalFetch));
+  assertChatServerTiming(response);
+  const result = await responseJson(response);
   assert.equal(result.status, 200);
   assert.equal(result.body.mode, "ai");
   assert.equal(result.body.provider, "bailian");
@@ -440,6 +459,41 @@ test("verified Bailian config overrides Workers AI and uses hardened fetch optio
   assert.equal(modelFetch.init.cache, "no-store");
   assert.equal(modelFetch.init.credentials, "omit");
   assert.equal(JSON.parse(modelFetch.init.body).stream, false);
+  assert.equal(JSON.parse(modelFetch.init.body).max_tokens, 700);
+});
+
+test("model timing includes a failed Bailian attempt and its Workers fallback", async (t) => {
+  const delay = () => new Promise((resolve) => setTimeout(resolve, 15));
+  const env = makeEnvironment({
+    AI: {
+      run: async () => {
+        await delay();
+        return { choices: [{ message: { role: "assistant", content: "备用模型回答 [1]" } }] };
+      },
+    },
+  });
+  t.after(() => env.DB.close());
+  await storeVerifiedBailianConfig(env);
+  const externalFetch = async (url) => {
+    if (url === "https://oa.omindos.ai/api/public/lab-ai/retrieve") return oaResponse();
+    await delay();
+    return new Response(null, { status: 503 });
+  };
+  const response = await handleRequest(
+    apiRequest("/api/chat", {
+      method: "POST",
+      body: { messages: [{ role: "user", content: "研究方向是什么？" }], topic: "research" },
+    }),
+    env,
+    {},
+    runtime(externalFetch),
+  );
+  const timings = assertChatServerTiming(response);
+  const result = await response.json();
+  assert.equal(response.status, 200);
+  assert.equal(result.provider, "workers-ai");
+  assert.equal(result.answer, "备用模型回答");
+  assert.ok(timings.model >= 20);
 });
 
 test("Bailian rejects a chunked JSON response larger than 256 KiB", async (t) => {
@@ -463,7 +517,9 @@ test("Bailian rejects a chunked JSON response larger than 256 KiB", async (t) =>
     method: "POST",
     body: { messages: [{ role: "user", content: "研究方向是什么？" }], topic: "research" },
   });
-  const result = await responseJson(await handleRequest(request, env, {}, runtime(externalFetch)));
+  const response = await handleRequest(request, env, {}, runtime(externalFetch));
+  assertChatServerTiming(response);
+  const result = await responseJson(response);
   assert.equal(result.status, 502);
   assert.match(result.body.error, /模型服务暂时不可用/u);
 });
@@ -1077,6 +1133,12 @@ test("rate-limit identity uses the dedicated HMAC secret", () => {
   assert.doesNotMatch(source, /hmacHex\(\s*context\.env\.APP_ENCRYPTION_KEY/u);
 });
 
+test("chat model defaults cap response length and Bailian wait time", () => {
+  const source = readFileSync(new URL("../src/app.mjs", import.meta.url), "utf8");
+  assert.match(source, /modelCall\(context, config, messages, maxTokens = 700, timeoutMs = 20_000\)/u);
+  assert.match(source, /workersAiCall\(context, messages, maxTokens = 700\)/u);
+});
+
 test("chat keeps the 25 requests per IP per hour limit", async (t) => {
   let modelCalls = 0;
   const env = makeEnvironment({
@@ -1100,17 +1162,17 @@ test("chat keeps the 25 requests per IP per hour limit", async (t) => {
     );
     assert.equal(response.status, 200);
   }
-  const blocked = await responseJson(
-    await handleRequest(
-      apiRequest("/api/chat", {
-        method: "POST",
-        body: { messages: [{ role: "user", content: "研究方向是什么？" }], topic: "research" },
-      }),
-      env,
-      {},
-      runtime(),
-    ),
+  const blockedResponse = await handleRequest(
+    apiRequest("/api/chat", {
+      method: "POST",
+      body: { messages: [{ role: "user", content: "研究方向是什么？" }], topic: "research" },
+    }),
+    env,
+    {},
+    runtime(),
   );
+  assertChatServerTiming(blockedResponse);
+  const blocked = await responseJson(blockedResponse);
   assert.equal(blocked.status, 429);
   assert.equal(modelCalls, 25);
 });

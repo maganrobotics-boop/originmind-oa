@@ -23,7 +23,10 @@ import {
 } from "./knowledge-types";
 
 const KNOWLEDGE_LIST_LIMIT = 100;
-const KNOWLEDGE_SEARCH_CANDIDATE_LIMIT = MAX_KNOWLEDGE_CHUNKS;
+// Retrieval ranks at most six chunks. Keep the candidate pool large enough for
+// cross-document recall without hydrating the 4,096-chunk storage ceiling on
+// every question.
+export const KNOWLEDGE_SEARCH_CANDIDATE_LIMIT = 256;
 const KNOWLEDGE_SQL_SEARCH_TERM_LIMIT = 16;
 const KNOWLEDGE_TITLE_COLLATOR = new Intl.Collator("zh-CN-u-co-pinyin", {
   usage: "sort",
@@ -1044,8 +1047,7 @@ export async function getActiveKnowledgeChunks(actor: KnowledgeActor, question?:
     ), item_term_candidates AS (
       SELECT
         c.id, c.item_id, c.revision_id, c.chunk_no,
-        r.title, r.category, r.source_label, r.source_url, c.section_title, c.paragraph_ref,
-        c.content, c.search_text, i.updated_at, search_terms.term_no, search_terms.term, search_terms.quota,
+        i.updated_at, search_terms.term_no, search_terms.term, search_terms.quota,
         COUNT(*) OVER (PARTITION BY search_terms.term_no) AS term_frequency,
         ROW_NUMBER() OVER (
           PARTITION BY search_terms.term_no, c.item_id
@@ -1081,15 +1083,26 @@ export async function getActiveKnowledgeChunks(actor: KnowledgeActor, question?:
       ) AS item_candidate_rank
       FROM scored_candidates
       WHERE duplicate_rank = 1
+    ), limited_candidates AS (
+      SELECT
+        id, item_id, revision_id, chunk_no, updated_at,
+        quota_selected, rarest_term_frequency, best_term_length, item_candidate_rank
+      FROM unique_candidates
+      ORDER BY
+        quota_selected DESC, rarest_term_frequency ASC, best_term_length DESC,
+        item_candidate_rank ASC, updated_at DESC, item_id ASC, chunk_no ASC
+      LIMIT ?
     )
     SELECT
-      id, item_id, revision_id, title, category, source_label, source_url, section_title, paragraph_ref,
-      content, search_text, updated_at
-    FROM unique_candidates
+      c.id, c.item_id, c.revision_id, r.title, r.category, r.source_label, r.source_url,
+      c.section_title, c.paragraph_ref, c.content, c.search_text, limited.updated_at
+    FROM limited_candidates AS limited
+    INNER JOIN knowledge_chunks AS c
+      ON c.id = limited.id AND c.item_id = limited.item_id AND c.revision_id = limited.revision_id
+    INNER JOIN knowledge_revisions AS r ON r.id = c.revision_id AND r.item_id = c.item_id
     ORDER BY
-      quota_selected DESC, rarest_term_frequency ASC, best_term_length DESC,
-      item_candidate_rank ASC, updated_at DESC, item_id ASC, chunk_no ASC
-    LIMIT ?
+      limited.quota_selected DESC, limited.rarest_term_frequency ASC, limited.best_term_length DESC,
+      limited.item_candidate_rank ASC, limited.updated_at DESC, limited.item_id ASC, limited.chunk_no ASC
   `).bind(...terms, ...guard.values, KNOWLEDGE_SEARCH_CANDIDATE_LIMIT).all<{
     id: string;
     item_id: string;
@@ -1158,8 +1171,7 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
     ), item_term_candidates AS (
       SELECT
         c.id, c.item_id, c.revision_id, c.chunk_no,
-        r.title, r.category, r.source_label, c.section_title, c.paragraph_ref,
-        c.content, c.search_text, i.updated_at, search_terms.term_no, search_terms.term, search_terms.quota,
+        i.updated_at, search_terms.term_no, search_terms.term, search_terms.quota,
         COUNT(*) OVER (PARTITION BY search_terms.term_no) AS term_frequency,
         ROW_NUMBER() OVER (
           PARTITION BY search_terms.term_no, c.item_id
@@ -1194,16 +1206,28 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
       ) AS item_candidate_rank
       FROM scored_candidates
       WHERE duplicate_rank = 1
+    ), limited_candidates AS (
+      SELECT
+        id, item_id, revision_id, chunk_no, updated_at,
+        quota_selected, rarest_term_frequency, best_term_length, item_candidate_rank
+      FROM unique_candidates
+      ORDER BY
+        quota_selected DESC, rarest_term_frequency ASC, best_term_length DESC,
+        item_candidate_rank ASC, updated_at DESC, item_id ASC, chunk_no ASC
+      LIMIT ?
     )
     SELECT
-      ROW_NUMBER() OVER (ORDER BY updated_at DESC, item_id ASC, chunk_no ASC) AS public_chunk_no,
-      DENSE_RANK() OVER (ORDER BY item_id ASC) AS public_item_no,
-      title, category, source_label, section_title, paragraph_ref, content, search_text, updated_at
-    FROM unique_candidates
+      ROW_NUMBER() OVER (ORDER BY limited.updated_at DESC, limited.item_id ASC, limited.chunk_no ASC) AS public_chunk_no,
+      DENSE_RANK() OVER (ORDER BY limited.item_id ASC) AS public_item_no,
+      r.title, r.category, r.source_label, c.section_title, c.paragraph_ref,
+      c.content, c.search_text, limited.updated_at
+    FROM limited_candidates AS limited
+    INNER JOIN knowledge_chunks AS c
+      ON c.id = limited.id AND c.item_id = limited.item_id AND c.revision_id = limited.revision_id
+    INNER JOIN knowledge_revisions AS r ON r.id = c.revision_id AND r.item_id = c.item_id
     ORDER BY
-      quota_selected DESC, rarest_term_frequency ASC, best_term_length DESC,
-      item_candidate_rank ASC, updated_at DESC, item_id ASC, chunk_no ASC
-    LIMIT ?
+      limited.quota_selected DESC, limited.rarest_term_frequency ASC, limited.best_term_length DESC,
+      limited.item_candidate_rank ASC, limited.updated_at DESC, limited.item_id ASC, limited.chunk_no ASC
   `).bind(...terms, KNOWLEDGE_SEARCH_CANDIDATE_LIMIT).all<{
     public_chunk_no: number;
     public_item_no: number;
@@ -1216,21 +1240,29 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
     search_text: string;
     updated_at: string;
   }>() : await database.prepare(`
+    WITH limited_candidates AS (
+      SELECT c.id, c.item_id, c.revision_id, c.chunk_no, i.updated_at
+      FROM knowledge_chunks AS c
+      INNER JOIN knowledge_items AS i ON i.id = c.item_id
+      INNER JOIN knowledge_revisions AS r ON r.id = c.revision_id AND r.item_id = i.id
+      WHERE c.is_active = 1
+        AND i.status = 'active'
+        AND i.visibility = 'public'
+        AND r.status = 'active'
+        AND i.active_revision_id = c.revision_id
+      ORDER BY i.updated_at DESC, c.item_id ASC, c.chunk_no ASC
+      LIMIT ?
+    )
     SELECT
-      ROW_NUMBER() OVER (ORDER BY i.updated_at DESC, i.id ASC, c.chunk_no ASC) AS public_chunk_no,
-      DENSE_RANK() OVER (ORDER BY i.id ASC) AS public_item_no,
+      ROW_NUMBER() OVER (ORDER BY limited.updated_at DESC, limited.item_id ASC, limited.chunk_no ASC) AS public_chunk_no,
+      DENSE_RANK() OVER (ORDER BY limited.item_id ASC) AS public_item_no,
       r.title, r.category, r.source_label, c.section_title, c.paragraph_ref,
-      c.content, c.search_text, i.updated_at
-    FROM knowledge_chunks AS c
-    INNER JOIN knowledge_items AS i ON i.id = c.item_id
-    INNER JOIN knowledge_revisions AS r ON r.id = c.revision_id AND r.item_id = i.id
-    WHERE c.is_active = 1
-      AND i.status = 'active'
-      AND i.visibility = 'public'
-      AND r.status = 'active'
-      AND i.active_revision_id = c.revision_id
-    ORDER BY i.updated_at DESC, c.item_id ASC, c.chunk_no ASC
-    LIMIT ?
+      c.content, c.search_text, limited.updated_at
+    FROM limited_candidates AS limited
+    INNER JOIN knowledge_chunks AS c
+      ON c.id = limited.id AND c.item_id = limited.item_id AND c.revision_id = limited.revision_id
+    INNER JOIN knowledge_revisions AS r ON r.id = c.revision_id AND r.item_id = c.item_id
+    ORDER BY limited.updated_at DESC, limited.item_id ASC, limited.chunk_no ASC
   `).bind(KNOWLEDGE_SEARCH_CANDIDATE_LIMIT).all<{
     public_chunk_no: number;
     public_item_no: number;
