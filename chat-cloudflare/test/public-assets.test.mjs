@@ -631,7 +631,7 @@ test("public chat keeps five compact live status lights below the fixed header t
     ["network", "网络"],
     ["oa", "OA"],
     ["qwen", "千问"],
-    ["knowledge", "知识"],
+    ["knowledge", "OA 知识"],
     ["system", "系统"],
   ]) {
     assert.match(script, new RegExp(`key:\\s*["']${key}["']\\s*,\\s*label:\\s*["']${label}["']`, "u"), key);
@@ -642,6 +642,10 @@ test("public chat keeps five compact live status lights below the fixed header t
   assert.match(script, /fetch\(["']\/_health["']/u);
   assert.match(script, /requestJson\(["']\/api\/status["']/u);
   assert.match(script, /service\.systemReady\s*===\s*true/u);
+  assert.match(script, /service\?\.knowledgeReady\s*===\s*true\s*&&\s*service\?\.retrievalReady\s*===\s*true/u);
+  assert.match(script, /function\s+reconcileChatOaStatus\s*\(/u);
+  assert.match(script, /reconcileChatOaStatus\(payload\)/u);
+  assert.match(script, /oaPublicStatus\s*!==\s*["']unavailable["'][\s\S]{0,100}?oaPublicStatus\s*!==\s*["']not_configured["']/u);
   assert.match(script, /textButton\(\s*["']["']\s*,\s*["']system-status-strip["']\s*\)/u);
   assert.ok(script.includes('systemStatus.setAttribute("aria-controls", "system-status-details")'));
   assert.ok(script.includes('systemStatus.setAttribute("aria-expanded", "false")'));
