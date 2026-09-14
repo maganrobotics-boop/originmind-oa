@@ -387,7 +387,8 @@ const SYSTEM_LIGHTS = Object.freeze([
   { key: "system", label: "系统" },
 ]);
 const SYSTEM_STATUS_REFRESH_MS = 60_000;
-const SYSTEM_STATUS_TIMEOUT_MS = 12_000;
+const SYSTEM_STATUS_RETRY_MS = 5_000;
+const SYSTEM_STATUS_TIMEOUT_MS = 15_000;
 
 function createPublicApp() {
   document.documentElement.classList.add("public-chat-page");
@@ -903,26 +904,56 @@ function createPublicApp() {
 
   function reconcileChatOaStatus(payload) {
     const oaPublicStatus = payload?.oaPublicStatus;
-    if (!state.service || (oaPublicStatus !== "unavailable" && oaPublicStatus !== "not_configured")) return;
+    if (!state.service || ![
+      "connected",
+      "not_configured",
+      "auth_error",
+      "rate_limited",
+      "timeout",
+      "invalid_response",
+      "unavailable",
+    ].includes(oaPublicStatus)) return;
     systemStatusEpoch += 1;
     if (systemStatusController) {
       systemStatusController.abort();
       systemStatusController = null;
     }
+    const connected = oaPublicStatus === "connected";
+    const configurationFailure = oaPublicStatus === "not_configured" || oaPublicStatus === "auth_error";
+    const knowledgeReady = connected
+      ? state.service.knowledgeReady === true || (Array.isArray(payload.sources) && payload.sources.length > 0)
+      : configurationFailure
+        ? false
+        : state.service.knowledgeReady;
     state.service = {
       ...state.service,
-      oaReady: oaPublicStatus === "not_configured" ? false : state.service.oaReady,
-      knowledgeReady: oaPublicStatus === "not_configured" ? false : state.service.knowledgeReady,
-      retrievalReady: false,
+      oaReady: connected ? true : configurationFailure ? false : state.service.oaReady,
+      knowledgeReady,
+      retrievalReady: connected,
       oaPending: false,
-      systemReady: false,
+      systemReady: connected &&
+        state.service.storageReady === true &&
+        state.service.modelReady === true &&
+        state.service.qwenReady === true &&
+        knowledgeReady &&
+        state.service.budgetReady === true,
     };
-    state.serviceError = oaPublicStatus === "not_configured"
-      ? "OA 知识服务未配置"
-      : "OA 知识检索不可用";
+    state.serviceError = connected
+      ? ""
+      : oaPublicStatus === "not_configured"
+        ? "OA 知识服务未配置"
+        : oaPublicStatus === "auth_error"
+          ? "OA 知识服务凭证校验失败"
+          : oaPublicStatus === "rate_limited"
+            ? "OA 知识检索请求较多"
+            : oaPublicStatus === "timeout"
+              ? "OA 知识检索响应超时"
+              : oaPublicStatus === "invalid_response"
+                ? "OA 知识服务响应异常"
+                : "OA 知识检索暂不可用";
     statusText.textContent = serviceLabel(state.service);
     updateSystemLights();
-    scheduleSystemStatusRefresh(2_000);
+    scheduleSystemStatusRefresh(state.service.systemReady ? SYSTEM_STATUS_REFRESH_MS : SYSTEM_STATUS_RETRY_MS);
   }
 
   function scheduleSystemStatusRefresh(delay = SYSTEM_STATUS_REFRESH_MS) {
@@ -984,7 +1015,13 @@ function createPublicApp() {
     updateSystemLights();
     syncFeedback();
     scheduleSystemStatusRefresh(
-      state.service.modelPending === true || state.service.oaPending === true ? 2_000 : SYSTEM_STATUS_REFRESH_MS,
+      state.service.modelPending === true ||
+        state.service.oaPending === true ||
+        state.service.oaReady !== true ||
+        state.service.knowledgeReady !== true ||
+        state.service.retrievalReady !== true
+        ? SYSTEM_STATUS_RETRY_MS
+        : SYSTEM_STATUS_REFRESH_MS,
     );
   }
 
@@ -2200,7 +2237,7 @@ function createAdminApp() {
       ? "已连接"
       : state.oaStatus === "not_configured"
         ? "未配置"
-        : state.oaStatus === "unavailable"
+        : ["auth_error", "rate_limited", "timeout", "invalid_response", "unavailable"].includes(state.oaStatus)
           ? "暂不可用"
           : "尚未检测";
     connection.append(
@@ -2221,7 +2258,15 @@ function createAdminApp() {
           ? "OA 公开知识连接正常。"
           : state.oaStatus === "not_configured"
             ? "尚未配置 OA 公共知识服务 Token。"
-            : "OA 公开知识暂不可用，请核对两端 Token 和 OA 部署状态。";
+            : state.oaStatus === "auth_error"
+              ? "OA 服务凭证校验失败，请检查两端 Token。"
+              : state.oaStatus === "rate_limited"
+                ? "OA 检索请求较多，请稍后再检测。"
+                : state.oaStatus === "timeout"
+                  ? "OA 检索检测超时，系统会自动重试；无需重复填写 Token。"
+                  : state.oaStatus === "invalid_response"
+                    ? "OA 返回格式异常，系统会自动重试。"
+                    : "OA 公开知识暂时不可用，系统会自动重试。";
       });
     });
     connection.append(element("div", { className: "admin-buttons" }, [probe]));
