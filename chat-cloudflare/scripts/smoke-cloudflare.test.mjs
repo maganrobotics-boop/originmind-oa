@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import test from "node:test";
 
 import {
@@ -9,9 +10,18 @@ import {
   smokeSavedAdminAuthentication,
   validateReleaseEvidence,
   validateDocumentExtractionEvidence,
+  validateSuggestionEvidence,
 } from "./smoke-cloudflare.mjs";
 
 const releaseId = `${"a".repeat(40)}-1`;
+const recommendationQuestion = "《灵巧操作进展》有哪些值得关注的核心内容？";
+const suggestionEvidence = {
+  suggestions: [
+    { id: "1", question: recommendationQuestion, updatedAt: "2026-09-14" },
+    { id: "2", question: "《机器人安全指南》有哪些值得关注的核心内容？", updatedAt: "2026-09-13" },
+  ],
+  oaPublicStatus: "connected",
+};
 const evidence = {
   health: { app: "arts-robotics-ai-assistant", ready: true, releaseId },
   status: {
@@ -27,6 +37,7 @@ const evidence = {
     provider: "workers-ai",
     model: "test-model",
   },
+  suggestions: suggestionEvidence,
   chat: {
     mode: "ai",
     answer: "团队主要研究机器人灵巧操作。",
@@ -47,8 +58,25 @@ test("release evidence accepts only the exact OA-backed Chat release", () => {
     provider: "workers-ai",
     model: "test-model",
     sources: 1,
+    suggestions: 2,
     adminKdfCompatible: true,
   });
+});
+
+test("suggestion evidence requires a nonempty exact connected OA contract", () => {
+  assert.deepEqual(validateSuggestionEvidence(suggestionEvidence), suggestionEvidence.suggestions);
+  for (const payload of [
+    undefined,
+    { suggestions: [], oaPublicStatus: "connected" },
+    { suggestions: suggestionEvidence.suggestions, oaPublicStatus: "unavailable" },
+    { ...suggestionEvidence, extra: true },
+    { suggestions: [{ ...suggestionEvidence.suggestions[0], id: "2" }], oaPublicStatus: "connected" },
+  ]) {
+    assert.throws(
+      () => validateReleaseEvidence({ ...evidence, suggestions: payload }, releaseId),
+      /recommendation|answerable/u,
+    );
+  }
 });
 
 test("release evidence rejects stale releases and legacy or local-only knowledge", () => {
@@ -192,6 +220,7 @@ test("administrator authentication runs once after retryable release checks sett
     provider: "workers-ai",
     model: "test-model",
     sources: 1,
+    suggestions: 2,
   };
   const result = await smokeCloudflare("https://chat.example.com", {
     attempts: 3,
@@ -212,6 +241,72 @@ test("administrator authentication runs once after retryable release checks sett
   assert.equal(authCalls, 1);
   assert.deepEqual(sleeps, [1_500, 3_000]);
   assert.deepEqual(result, { ...serviceEvidence, adminKdfCompatible: true });
+});
+
+test("service smoke fetches recommendations and sends the first one to chat", async (context) => {
+  const originalFetch = globalThis.fetch;
+  context.after(() => {
+    globalThis.fetch = originalFetch;
+  });
+  const origin = "https://chat.example.com";
+  const appBody = "export const smoke = true;\n".padEnd(240, " ");
+  const styleBody = ".smoke { display: block; }\n".padEnd(240, " ");
+  const appHash = createHash("sha256").update(appBody).digest("hex").slice(0, 16);
+  const styleHash = createHash("sha256").update(styleBody).digest("hex").slice(0, 16);
+  const appPath = `/assets/app-${appHash}.js`;
+  const stylePath = `/assets/styles-${styleHash}.css`;
+  const html = `<html><head><link rel="stylesheet" href="${stylePath}"></head><body>${"shell".repeat(50)}<script type="module" src="${appPath}"></script></body></html>`;
+  const calls = [];
+  let submittedQuestion = null;
+  const apiResponse = (payload, status = 200) => new Response(JSON.stringify(payload), {
+    status,
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+
+  globalThis.fetch = async (url, options = {}) => {
+    const pathname = new URL(url).pathname;
+    calls.push({ pathname, options });
+    if (["/", "/technology", "/research", "/originmind", "/ius", "/manage"].includes(pathname)) {
+      return new Response(html, {
+        headers: { "Content-Type": "text/html", "X-Content-Type-Options": "nosniff" },
+      });
+    }
+    if (pathname === appPath || pathname === stylePath) {
+      return new Response(pathname === appPath ? appBody : styleBody, {
+        headers: {
+          "Content-Type": pathname === appPath ? "application/javascript" : "text/css",
+          "Cache-Control": "public, max-age=31536000, immutable",
+          "X-Content-Type-Options": "nosniff",
+        },
+      });
+    }
+    if (pathname === "/_health") return apiResponse(evidence.health);
+    if (pathname === "/api/release-smoke-missing") return apiResponse({ error: "missing" }, 404);
+    if (pathname === "/api/suggestions") return apiResponse(suggestionEvidence);
+    if (pathname === "/api/status") return apiResponse(evidence.status);
+    if (pathname === "/api/chat" && options.headers?.Origin === "https://invalid.example") {
+      return apiResponse({ error: "origin" }, 403);
+    }
+    if (pathname === "/api/chat") {
+      submittedQuestion = JSON.parse(options.body).messages[0].content;
+      return apiResponse(evidence.chat);
+    }
+    throw new Error(`unexpected smoke path: ${pathname}`);
+  };
+
+  const result = await smokeCloudflare(origin, {
+    attempts: 1,
+    releaseId,
+    verifyAdmin: async () => {},
+  });
+  assert.equal(calls.filter((call) => call.pathname === "/api/suggestions").length, 1);
+  assert.equal(submittedQuestion, recommendationQuestion);
+  assert.equal(result.suggestions, suggestionEvidence.suggestions.length);
+  assert.equal(result.adminKdfCompatible, true);
 });
 
 test("the administrator-only production smoke validates the exact origin once", async () => {

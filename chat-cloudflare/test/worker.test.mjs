@@ -496,7 +496,7 @@ test("model timing includes a failed Bailian attempt and its Workers fallback", 
   assert.ok(timings.model >= 20);
 });
 
-test("Bailian rejects a chunked JSON response larger than 256 KiB", async (t) => {
+test("an oversized Bailian response falls back to retrieved knowledge", async (t) => {
   const env = makeEnvironment({ AI: undefined });
   t.after(() => env.DB.close());
   await storeVerifiedBailianConfig(env);
@@ -520,8 +520,9 @@ test("Bailian rejects a chunked JSON response larger than 256 KiB", async (t) =>
   const response = await handleRequest(request, env, {}, runtime(externalFetch));
   assertChatServerTiming(response);
   const result = await responseJson(response);
-  assert.equal(result.status, 502);
-  assert.match(result.body.error, /模型服务暂时不可用/u);
+  assert.equal(result.status, 200);
+  assert.equal(result.body.mode, "retrieval");
+  assert.equal(result.body.answer, "经 OA 审核公开的资料包括机器人灵巧操作与机器人系统设计。");
 });
 
 test("Chat admin cannot publish documents directly", async (t) => {

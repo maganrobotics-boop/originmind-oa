@@ -23,7 +23,7 @@ import {
   workersDevSubdomain,
   writeJson,
 } from "./release-support.mjs";
-import { checkOaPublicRetrieve } from "./check-oa-public.mjs";
+import { checkOaPublicRetrieve, checkOaPublicSuggestions } from "./check-oa-public.mjs";
 import { smokeCloudflare, smokeSavedAdminAuthentication } from "./smoke-cloudflare.mjs";
 
 const rawPublicToken = process.env.PUBLIC_LAB_AI_SERVICE_TOKEN || "";
@@ -106,6 +106,18 @@ try {
   if (oaPreflight.classification !== "connected_with_public_knowledge") {
     const status = oaPreflight.httpStatus === null ? "" : ` (HTTP ${oaPreflight.httpStatus})`;
     throw new Error(`OA public live preflight failed: ${oaPreflight.classification}${status}`);
+  }
+
+  progress("Verifying every OA public suggestion has retrievable public knowledge.");
+  const oaSuggestionsPreflight = await checkOaPublicSuggestions(environment.publicToken);
+  await writeJson(join(evidenceRoot, "oa-public-suggestions-preflight.json"), oaSuggestionsPreflight);
+  if (oaSuggestionsPreflight.classification !== "connected_with_answerable_suggestions") {
+    const status = oaSuggestionsPreflight.retrievalHttpStatus
+      ?? oaSuggestionsPreflight.suggestionsHttpStatus;
+    const statusDetail = status === null ? "" : ` (HTTP ${status})`;
+    throw new Error(
+      `OA public suggestions preflight failed: ${oaSuggestionsPreflight.classification}${statusDetail}`,
+    );
   }
 
   await writeJson(bootstrapConfigPath, {

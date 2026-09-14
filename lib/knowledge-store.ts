@@ -171,6 +171,12 @@ export type KnowledgeItemWithRevisionRow = KnowledgeItemRow & {
   content_part_count: number | string | null;
 };
 
+export type PublicKnowledgeSuggestionCandidate = {
+  title: string;
+  sectionTitle: string;
+  updatedAt: string;
+};
+
 type KnowledgeItemListRow = Omit<KnowledgeItemWithRevisionRow, "content" | "content_hash">;
 
 export type KnowledgeListScope = "mine" | "review" | "all";
@@ -1287,6 +1293,51 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
     paragraphRef: row.paragraph_ref,
     content: row.content,
     searchText: row.search_text,
+    updatedAt: row.updated_at,
+  }));
+}
+
+export async function getLatestPublicKnowledgeSuggestionCandidates(
+  limit = 12,
+): Promise<PublicKnowledgeSuggestionCandidate[]> {
+  if (!Number.isSafeInteger(limit) || limit < 1 || limit > 20) {
+    throw new RangeError("invalid public knowledge suggestion candidate limit");
+  }
+  const database = await getD1Database();
+  const result = await database.prepare(`
+    SELECT r.title, representative.section_title, i.updated_at
+    FROM knowledge_items AS i
+    INNER JOIN knowledge_revisions AS r
+      ON r.id = i.active_revision_id AND r.item_id = i.id
+    INNER JOIN knowledge_chunks AS representative
+      ON representative.item_id = i.id
+      AND representative.revision_id = i.active_revision_id
+      AND representative.is_active = 1
+      AND representative.id = (
+        SELECT c.id
+        FROM knowledge_chunks AS c
+        WHERE c.item_id = i.id
+          AND c.revision_id = i.active_revision_id
+          AND c.is_active = 1
+        ORDER BY
+          CASE WHEN trim(c.section_title) = '' THEN 1 ELSE 0 END ASC,
+          c.chunk_no ASC,
+          c.id ASC
+        LIMIT 1
+      )
+    WHERE i.status = 'active'
+      AND i.visibility = 'public'
+      AND r.status = 'active'
+    ORDER BY i.updated_at DESC, i.id ASC
+    LIMIT ?
+  `).bind(limit).all<{
+    title: string;
+    section_title: string;
+    updated_at: string;
+  }>();
+  return result.results.map((row) => ({
+    title: row.title,
+    sectionTitle: row.section_title,
     updatedAt: row.updated_at,
   }));
 }

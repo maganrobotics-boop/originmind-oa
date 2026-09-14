@@ -85,14 +85,6 @@ const TOPICS = [
     eyebrow: "TECHNOLOGY & IMPACT",
     heading: "从核心技术到真实场景",
     intro: "了解数字孪生双臂操作、精密装配、智能巡检等成果与产业应用方向。",
-    featuredSuggestions: [
-      { kind: "latest", text: "四足巡检机器人最近有什么新进展？" },
-      { kind: "latest", text: "最近公开了哪些机器人技术成果？" },
-    ],
-    fallbackSuggestions: [
-      "团队有哪些可落地的机器人技术成果？",
-      "机器人自主移动与操作包含哪些核心能力？",
-    ],
   },
   {
     id: "academic",
@@ -104,14 +96,6 @@ const TOPICS = [
     eyebrow: "RESEARCH & EXCHANGE",
     heading: "与全球研究网络建立连接",
     intro: "了解团队的国际科研经历、合作网络与代表性研究成果。",
-    featuredSuggestions: [
-      { kind: "latest", text: "ARTS Robotics 最近公开了哪些研究成果？" },
-      { kind: "latest", text: "近期有哪些新的科研合作与交流？" },
-    ],
-    fallbackSuggestions: [
-      "ARTS Robotics 主要研究哪些方向？",
-      "团队开展过哪些国内外科研合作？",
-    ],
   },
   {
     id: "company",
@@ -123,14 +107,6 @@ const TOPICS = [
     eyebrow: "ORIGINMIND",
     heading: "让机器人硬件与 OmindOS 协同工作",
     intro: "了解深圳源灵智能科技有限公司的机器人产品、工程适配与商业合作方案。",
-    featuredSuggestions: [
-      { kind: "feature", text: "新上线的四个 AI 模块有什么区别？" },
-      { kind: "feature", text: "OmindOS 最近新增了哪些能力？" },
-    ],
-    fallbackSuggestions: [
-      "源灵智能有哪些机器人产品与解决方案？",
-      "机器人厂商可以怎样与源灵智能合作？",
-    ],
   },
   {
     id: "association",
@@ -142,14 +118,6 @@ const TOPICS = [
     eyebrow: "STUDENT INNOVATION",
     heading: "让学生创新走进机器人前沿",
     intro: "从协会指导教师与所在实验室出发，了解面向学生的智能无人系统研究方向、竞赛与创新成果。",
-    featuredSuggestions: [
-      { kind: "latest", text: "IUS 最近有哪些活动或项目？" },
-      { kind: "latest", text: "近期开放了哪些学生创新机会？" },
-    ],
-    fallbackSuggestions: [
-      "IUS 主要开展哪些机器人创新实践？",
-      "学生可以怎样参与协会项目？",
-    ],
   },
 ];
 
@@ -163,17 +131,14 @@ function topicIdForPath(pathname) {
   return TOPIC_ID_BY_PATH.get(pathname) || DEFAULT_TOPIC_ID;
 }
 
-function suggestionsForTopic(topic) {
+function knowledgeSuggestionsFromPayload(payload) {
+  if (!Array.isArray(payload?.suggestions)) return [];
   const selected = [];
-  const candidates = [
-    ...(Array.isArray(topic.featuredSuggestions) ? topic.featuredSuggestions.map((item) => item?.text) : []),
-    ...(Array.isArray(topic.fallbackSuggestions) ? topic.fallbackSuggestions : []),
-  ];
-  for (const candidate of candidates) {
-    const text = typeof candidate === "string" ? candidate.trim() : "";
-    if (!text || selected.includes(text)) continue;
-    selected.push(text);
-    if (selected.length === 2) break;
+  for (const candidate of payload.suggestions) {
+    const question = typeof candidate?.question === "string" ? candidate.question.trim() : "";
+    if (!question || question.length > 300 || selected.includes(question)) continue;
+    selected.push(question);
+    if (selected.length === 3) break;
   }
   return selected;
 }
@@ -389,6 +354,7 @@ const SYSTEM_LIGHTS = Object.freeze([
 const SYSTEM_STATUS_REFRESH_MS = 60_000;
 const SYSTEM_STATUS_RETRY_MS = 5_000;
 const SYSTEM_STATUS_TIMEOUT_MS = 15_000;
+const SUGGESTIONS_REFRESH_MS = 60_000;
 const CHAT_OA_PUBLIC_STATUSES = Object.freeze([
   "connected",
   "not_configured",
@@ -477,6 +443,16 @@ function oaRetrievalStatusDetail(service) {
   return "OA 知识检索暂不可用";
 }
 
+function suggestionsRefreshNeeded({ ready, loaded, loading, pending, fetchedAt, now }) {
+  return ready === true &&
+    loading !== true &&
+    (
+      loaded !== true ||
+      pending === true ||
+      now - fetchedAt >= SUGGESTIONS_REFRESH_MS
+    );
+}
+
 function createPublicApp() {
   document.documentElement.classList.add("public-chat-page");
   document.body.classList.add("public-chat-page");
@@ -486,6 +462,10 @@ function createPublicApp() {
     networkReady: null,
     service: null,
     serviceError: "",
+    suggestions: [],
+    suggestionsLoaded: false,
+    suggestionsLoading: false,
+    suggestionsFetchedAt: 0,
     sessions: Object.fromEntries(TOPICS.map((topic) => [topic.id, {
       requestTopic: topic.requestTopic,
       messages: [],
@@ -748,14 +728,14 @@ function createPublicApp() {
 
   const suggestionPanel = element("section", {
     className: "composer-suggestions",
-    attributes: { "aria-label": "聊聊新话题" },
+    attributes: { "aria-label": "知识库推荐话题" },
   });
-  const suggestionTitle = element("p", { className: "suggestion-title", text: "聊聊新话题" });
   const suggestionList = element("div", {
     className: "suggestions",
     attributes: { role: "group" },
   });
-  suggestionPanel.append(suggestionTitle, suggestionList);
+  suggestionPanel.hidden = true;
+  suggestionPanel.append(suggestionList);
 
   const composer = element("form", { className: "composer" });
   const questionLabel = element("label", {
@@ -777,8 +757,8 @@ function createPublicApp() {
   sendButton.setAttribute("aria-label", "发送问题");
   sendButton.disabled = true;
   composer.append(questionLabel, questionInput, sendButton);
-  composerArea.append(errorRegion, noticeRegion, suggestionPanel, composer);
-  conversation.append(messageScroll, composerArea);
+  composerArea.append(errorRegion, noticeRegion, composer);
+  conversation.append(messageScroll, suggestionPanel, composerArea);
   layout.append(conversation);
 
   function chatInfoActionRow(labelText, action, extraClass = "") {
@@ -890,7 +870,32 @@ function createPublicApp() {
   let systemStatusRefreshTimer = null;
   let systemStatusRefreshDueAt = 0;
   let systemStatusRetryDelay = SYSTEM_STATUS_RETRY_MS;
+  let suggestionsRefreshTimer = null;
+  let suggestionsRefreshDueAt = 0;
+  let suggestionsRefreshPending = false;
+  let suggestionsEpoch = 0;
   let announcedSystemDescription = "";
+
+  function knowledgeRetrievalReady() {
+    return state.networkReady === true &&
+      state.service?.knowledgeReady === true &&
+      state.service?.retrievalReady === true;
+  }
+
+  function recommendationsReady() {
+    return knowledgeRetrievalReady() && systemStatusController === null;
+  }
+
+  function invalidateSuggestions() {
+    suggestionsEpoch += 1;
+    if (suggestionsRefreshTimer !== null) window.clearTimeout(suggestionsRefreshTimer);
+    suggestionsRefreshTimer = null;
+    suggestionsRefreshDueAt = 0;
+    suggestionsRefreshPending = false;
+    state.suggestions = [];
+    state.suggestionsLoaded = false;
+    state.suggestionsLoading = false;
+  }
 
   function setSystemLight(key, tone, detail) {
     const nodes = systemLightNodes.get(key);
@@ -973,6 +978,19 @@ function createPublicApp() {
       announcedSystemDescription = description;
       systemStatusAnnouncement.textContent = description;
     }
+    if (!knowledgeRetrievalReady()) {
+      invalidateSuggestions();
+    } else if (suggestionsRefreshNeeded({
+      ready: recommendationsReady(),
+      loaded: state.suggestionsLoaded,
+      loading: state.suggestionsLoading,
+      pending: suggestionsRefreshPending,
+      fetchedAt: state.suggestionsFetchedAt,
+      now: Date.now(),
+    })) {
+      void loadSuggestions({ force: state.suggestionsLoaded });
+    }
+    renderSuggestions();
   }
 
   async function probeNetwork(signal) {
@@ -1038,6 +1056,7 @@ function createPublicApp() {
     const epoch = ++systemStatusEpoch;
     const controller = new AbortController();
     systemStatusController = controller;
+    renderSuggestions();
     const timeout = window.setTimeout(() => controller.abort(), SYSTEM_STATUS_TIMEOUT_MS);
     if (showPending || state.service === null) {
       state.networkReady = null;
@@ -1181,7 +1200,7 @@ function createPublicApp() {
     syncFeedback();
     updateComposer();
     renderMessages({ scrollMode: "start" });
-    topicStatus.textContent = `已清空${topicFor().title}对话并返回精选问题`;
+    topicStatus.textContent = `已清空${topicFor().title}对话`;
     if (closeDrawer) closeTopicDrawer();
     if (closeInfo) closeChatInfo();
     window.requestAnimationFrame(() => questionInput.focus());
@@ -1311,18 +1330,112 @@ function createPublicApp() {
   }
 
   function renderSuggestions() {
-    const topic = topicFor();
     const section = state.section;
     const session = sessionFor(section);
-    suggestionPanel.hidden = session.messages.length > 0;
+    suggestionPanel.hidden = !recommendationsReady() || session.messages.length > 0 || session.sending || state.suggestions.length === 0;
     suggestionList.replaceChildren();
-    suggestionList.setAttribute("aria-label", `${topic.title}精选问题`);
+    suggestionList.setAttribute("aria-label", "根据近期入库知识生成的推荐话题");
     if (suggestionPanel.hidden) return;
-    for (const suggestion of suggestionsForTopic(topic)) {
+    for (const suggestion of state.suggestions) {
       const button = textButton("", "suggestion-button");
+      button.title = suggestion;
       button.append(element("span", { text: suggestion }));
-      button.addEventListener("click", () => dispatchQuestion(suggestion, section));
+      button.addEventListener("click", () => { void dispatchSuggestion(suggestion, section); });
       suggestionList.append(button);
+    }
+  }
+
+  async function dispatchSuggestion(rawQuestion, section) {
+    const question = String(rawQuestion || "").trim();
+    if (!question || !recommendationsReady() || state.suggestionsLoading || sessionFor(section).sending) return;
+    if (suggestionsRefreshTimer !== null) window.clearTimeout(suggestionsRefreshTimer);
+    suggestionsRefreshTimer = null;
+    suggestionsRefreshDueAt = 0;
+    suggestionsRefreshPending = false;
+    state.suggestions = [];
+    state.suggestionsLoading = true;
+    renderSuggestions();
+    const epoch = ++suggestionsEpoch;
+    let current = [];
+    try {
+      const payload = await requestJson("/api/suggestions", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(15_000),
+        timeoutMessage: "推荐话题核验超时。",
+      });
+      current = knowledgeSuggestionsFromPayload(payload);
+    } catch {
+      // A recommendation that cannot be revalidated is not sent to chat.
+    } finally {
+      if (epoch === suggestionsEpoch) {
+        state.suggestions = current;
+        state.suggestionsLoaded = true;
+        state.suggestionsLoading = false;
+        state.suggestionsFetchedAt = Date.now();
+        renderSuggestions();
+        if (knowledgeRetrievalReady()) scheduleSuggestionsRefresh();
+      }
+    }
+    const session = sessionFor(section);
+    if (
+      epoch === suggestionsEpoch &&
+      current.includes(question) &&
+      recommendationsReady() &&
+      state.section === section &&
+      session.messages.length === 0 &&
+      !session.sending
+    ) {
+      dispatchQuestion(question, section);
+    }
+  }
+
+  function scheduleSuggestionsRefresh(delay = SUGGESTIONS_REFRESH_MS) {
+    if (suggestionsRefreshTimer !== null) window.clearTimeout(suggestionsRefreshTimer);
+    suggestionsRefreshDueAt = Date.now() + delay;
+    suggestionsRefreshTimer = window.setTimeout(() => {
+      suggestionsRefreshTimer = null;
+      if (document.hidden) {
+        suggestionsRefreshDueAt = Date.now();
+        return;
+      }
+      suggestionsRefreshDueAt = 0;
+      suggestionsRefreshPending = true;
+      void loadSuggestions({ force: true });
+    }, delay);
+  }
+
+  async function loadSuggestions({ force = false } = {}) {
+    if (!recommendationsReady() || state.suggestionsLoading) {
+      if (force && knowledgeRetrievalReady()) suggestionsRefreshPending = true;
+      return;
+    }
+    if (state.suggestionsLoaded && !force) return;
+    suggestionsRefreshPending = false;
+    if (force) {
+      state.suggestions = [];
+      renderSuggestions();
+    }
+    state.suggestionsLoading = true;
+    const epoch = ++suggestionsEpoch;
+    let current = [];
+    try {
+      const payload = await requestJson("/api/suggestions", {
+        cache: "no-store",
+        signal: AbortSignal.timeout(15_000),
+        timeoutMessage: "推荐话题加载超时。",
+      });
+      current = knowledgeSuggestionsFromPayload(payload);
+    } catch {
+      // Recommendations are optional. Never replace verified knowledge with static guesses.
+    } finally {
+      if (epoch === suggestionsEpoch) {
+        state.suggestions = current;
+        state.suggestionsLoaded = true;
+        state.suggestionsLoading = false;
+        state.suggestionsFetchedAt = Date.now();
+        renderSuggestions();
+        if (knowledgeRetrievalReady()) scheduleSuggestionsRefresh();
+      }
     }
   }
 
@@ -1679,7 +1792,9 @@ function createPublicApp() {
   updateComposer();
   updateSystemLights();
   void loadSystemStatus({ showPending: true });
-  window.addEventListener("online", () => void loadSystemStatus({ showPending: true }));
+  window.addEventListener("online", () => {
+    void loadSystemStatus({ showPending: true });
+  });
   window.addEventListener("offline", () => {
     systemStatusEpoch += 1;
     systemStatusController?.abort();
@@ -1691,11 +1806,17 @@ function createPublicApp() {
     syncFeedback();
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && (
+    if (document.hidden) return;
+    const statusRefreshDue =
       (systemStatusRefreshDueAt > 0 && Date.now() >= systemStatusRefreshDueAt) ||
-      (systemStatusRefreshDueAt === 0 && Date.now() - systemStatusCheckedAt >= SYSTEM_STATUS_REFRESH_MS)
-    )) {
-      void loadSystemStatus();
+      (systemStatusRefreshDueAt === 0 && Date.now() - systemStatusCheckedAt >= SYSTEM_STATUS_REFRESH_MS);
+    const suggestionsRefreshDue =
+      (suggestionsRefreshDueAt > 0 && Date.now() >= suggestionsRefreshDueAt) ||
+      (suggestionsRefreshDueAt === 0 && Date.now() - state.suggestionsFetchedAt >= SUGGESTIONS_REFRESH_MS);
+    if (statusRefreshDue) {
+      void loadSystemStatus({ showPending: true });
+    } else if (suggestionsRefreshDue) {
+      void loadSuggestions({ force: true });
     }
   });
 

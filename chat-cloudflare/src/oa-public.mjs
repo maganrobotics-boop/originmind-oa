@@ -1,5 +1,6 @@
 import {
   OA_PUBLIC_RETRIEVE_URL,
+  OA_PUBLIC_SUGGESTIONS_URL,
   OA_PUBLIC_STATUS_URL,
   PUBLIC_LAB_AI_SERVICE_TOKEN_PATTERN,
 } from "./constants.mjs";
@@ -15,6 +16,7 @@ const TIMEOUT_MS = 12_000;
 // check into an expensive multi-term ranking query.
 const OA_PROBE_QUESTION = "oaretrievalprobe";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
+const OA_SUGGESTION_LIMIT = 3;
 
 export function isWellFormedUnicode(value) {
   for (let index = 0; index < value.length; index += 1) {
@@ -43,6 +45,34 @@ export function normalizedQuestion(value) {
     end -= 1;
   }
   return clean.slice(0, end);
+}
+
+function normalizedKnowledgeLabel(value) {
+  return value.normalize("NFKC").replace(/\s+/gu, " ").trim().toLocaleLowerCase("zh-CN");
+}
+
+export function suggestionKnowledgeReference(value) {
+  const question = normalizedQuestion(value);
+  if (!question || question.length > 300) return null;
+  const sectionQuestion = /^《(.{2,100})》中的“(.{2,100})”有哪些值得关注的内容\?$/u.exec(question);
+  if (sectionQuestion) return { title: sectionQuestion[1], sectionTitle: sectionQuestion[2] };
+  const titleQuestion = /^《(.{2,100})》有哪些值得关注的核心内容\?$/u.exec(question);
+  return titleQuestion ? { title: titleQuestion[1], sectionTitle: null } : null;
+}
+
+export function suggestionMatchesKnowledge(question, knowledge) {
+  const reference = suggestionKnowledgeReference(question);
+  if (
+    !reference ||
+    typeof knowledge?.title !== "string" ||
+    normalizedKnowledgeLabel(knowledge.title) !== normalizedKnowledgeLabel(reference.title)
+  ) {
+    return false;
+  }
+  return reference.sectionTitle === null || (
+    typeof knowledge.sectionTitle === "string" &&
+    normalizedKnowledgeLabel(knowledge.sectionTitle) === normalizedKnowledgeLabel(reference.sectionTitle)
+  );
 }
 
 async function boundedJson(response) {
@@ -141,6 +171,74 @@ export function parseOaResult(value) {
     throw new Error("OA_RESPONSE_INVALID");
   }
   return items;
+}
+
+export function parseOaSuggestions(value) {
+  const input = exactObject(value, ["suggestions"]);
+  if (!Array.isArray(input.suggestions) || input.suggestions.length > OA_SUGGESTION_LIMIT) {
+    throw new Error("OA_RESPONSE_INVALID");
+  }
+  const seen = new Set();
+  const seenReferences = new Set();
+  return input.suggestions.map((candidate, index) => {
+    const item = exactObject(candidate, ["id", "question", "updatedAt"]);
+    const updatedAt = stringField(item.updatedAt, { max: 10, pattern: DATE_PATTERN });
+    const parsed = {
+      id: stringField(item.id, { max: 1, pattern: /^[1-3]$/u }),
+      question: stringField(item.question, { trim: true, min: 2, max: 300 }),
+      updatedAt,
+    };
+    const key = parsed.question.normalize("NFKC").toLocaleLowerCase("zh-CN");
+    const reference = suggestionKnowledgeReference(parsed.question);
+    const referenceKey = reference
+      ? `${normalizedKnowledgeLabel(reference.title)}\n${reference.sectionTitle === null ? "" : normalizedKnowledgeLabel(reference.sectionTitle)}`
+      : "";
+    if (
+      parsed.id !== String(index + 1) ||
+      !validDate(updatedAt) ||
+      seen.has(key) ||
+      !referenceKey ||
+      seenReferences.has(referenceKey)
+    ) {
+      throw new Error("OA_RESPONSE_INVALID");
+    }
+    seen.add(key);
+    seenReferences.add(referenceKey);
+    return parsed;
+  });
+}
+
+export async function retrieveOaSuggestions(context) {
+  const token = context.env.PUBLIC_LAB_AI_SERVICE_TOKEN || "";
+  if (!PUBLIC_LAB_AI_SERVICE_TOKEN_PATTERN.test(token)) {
+    return { status: "not_configured", suggestions: [] };
+  }
+  try {
+    const init = {
+      method: "GET",
+      headers: { "x-originmind-public-lab-ai-service-token": token },
+      redirect: "manual",
+      cache: "no-store",
+      credentials: "omit",
+      signal: AbortSignal.timeout(TIMEOUT_MS),
+    };
+    const service = context.env.OA_SERVICE;
+    const response = typeof service?.fetch === "function"
+      ? await service.fetch(new Request(OA_PUBLIC_SUGGESTIONS_URL, init))
+      : await context.runtime.fetch(OA_PUBLIC_SUGGESTIONS_URL, init);
+    const mediaType = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+    if (!response.ok) return { status: responseFailureStatus(response), suggestions: [] };
+    if (mediaType !== "application/json") return { status: "invalid_response", suggestions: [] };
+    let suggestions;
+    try {
+      suggestions = parseOaSuggestions(await boundedJson(response));
+    } catch {
+      return { status: "invalid_response", suggestions: [] };
+    }
+    return { status: "connected", suggestions };
+  } catch (error) {
+    return { status: requestFailureStatus(error), suggestions: [] };
+  }
 }
 
 export async function retrieveOa(question, context) {

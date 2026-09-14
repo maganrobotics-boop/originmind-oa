@@ -1,6 +1,8 @@
-import type { RankedKnowledgeChunk } from "../../../../../lib/knowledge-policy";
+import { knowledgeSearchTerms, type RankedKnowledgeChunk } from "../../../../../lib/knowledge-policy";
+import type { PublicKnowledgeSuggestionCandidate } from "../../../../../lib/knowledge-store";
 
 export const PUBLIC_LAB_AI_MAX_CHUNKS = 6;
+export const PUBLIC_LAB_AI_MAX_SUGGESTIONS = 3;
 export const PUBLIC_LAB_AI_MAX_EXCERPT_CHARS = 600;
 export const PUBLIC_LAB_AI_MAX_TOTAL_EXCERPT_CHARS = 3_000;
 export const PUBLIC_LAB_AI_MAX_TOTAL_TEXT_CHARS = 4_096;
@@ -18,6 +20,14 @@ type PublicLabAiChunk = {
 };
 
 export type PublicLabAiRetrieveResponse = { chunks: PublicLabAiChunk[] };
+
+type PublicLabAiSuggestion = {
+  id: string;
+  question: string;
+  updatedAt: string;
+};
+
+export type PublicLabAiSuggestionsResponse = { suggestions: PublicLabAiSuggestion[] };
 
 function makeWellFormed(value: string): string {
   let result = "";
@@ -108,6 +118,33 @@ export function buildPublicLabAiRetrieveResponse(ranked: RankedKnowledgeChunk[])
   });
   chunks.forEach((chunk, index) => { chunk.id = String(index + 1); });
   return { chunks };
+}
+
+export function buildPublicLabAiSuggestionsResponse(
+  candidates: readonly PublicKnowledgeSuggestionCandidate[],
+): PublicLabAiSuggestionsResponse {
+  const suggestions: PublicLabAiSuggestion[] = [];
+  const seenTitles = new Set<string>();
+  for (const candidate of candidates) {
+    const title = boundedLine(candidate.title, 100);
+    const sectionTitle = boundedLine(candidate.sectionTitle, 100);
+    const updatedAt = validDate(candidate.updatedAt);
+    const normalizedTitle = title.toLocaleLowerCase("zh-CN");
+    const titleTerms = knowledgeSearchTerms(title);
+    if (title.length < 2 || !titleTerms.length || !updatedAt || seenTitles.has(normalizedTitle)) continue;
+    const meaningfulSection = sectionTitle.length >= 2 &&
+      sectionTitle.toLocaleLowerCase("zh-CN") !== normalizedTitle &&
+      knowledgeSearchTerms(sectionTitle).length > 0;
+    const question = meaningfulSection
+      ? `《${title}》中的“${sectionTitle}”有哪些值得关注的内容？`
+      : `《${title}》有哪些值得关注的核心内容？`;
+    const questionTerms = new Set(knowledgeSearchTerms(question));
+    if (question.length > 300 || !questionTerms.size || !titleTerms.some((term) => questionTerms.has(term))) continue;
+    seenTitles.add(normalizedTitle);
+    suggestions.push({ id: String(suggestions.length + 1), question, updatedAt });
+    if (suggestions.length === PUBLIC_LAB_AI_MAX_SUGGESTIONS) break;
+  }
+  return { suggestions };
 }
 
 export function publicLabAiJson(data: unknown, init: ResponseInit = {}): Response {

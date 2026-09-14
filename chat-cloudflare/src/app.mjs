@@ -19,7 +19,14 @@ import {
   fallbackAnswer,
   safeSourceUrl,
 } from "./knowledge.mjs";
-import { inspectOaPublicKnowledge, probeOaPublicKnowledge, retrieveOa } from "./oa-public.mjs";
+import {
+  inspectOaPublicKnowledge,
+  probeOaPublicKnowledge,
+  retrieveOa,
+  retrieveOaSuggestions,
+  suggestionKnowledgeReference,
+  suggestionMatchesKnowledge,
+} from "./oa-public.mjs";
 import {
   parseChatPayload,
   parseDocumentPayload,
@@ -37,6 +44,7 @@ const MODEL_STATUS_READY_TTL_MS = 5 * 60_000;
 const MODEL_STATUS_RETRY_MS = 30_000;
 const OA_STATUS_READY_TTL_MS = 30_000;
 const OA_STATUS_RETRY_MS = 5_000;
+const SUGGESTIONS_HOURLY_LIMIT = 6_000;
 const MODEL_DAILY_LIMIT = 300;
 const MODEL_STATUS_PROBE_DAILY_LIMIT = 300;
 const MODEL_STATUS_PROBE_BUDGET_MESSAGE = "MODEL_STATUS_PROBE_BUDGET_EXHAUSTED";
@@ -633,6 +641,12 @@ async function currentOaStatus(context) {
   );
 }
 
+async function currentOaSuggestions(context) {
+  // Recommendations are approval-sensitive. Every request asks OA directly;
+  // no D1 TTL, lease, or in-process single-flight may replay an older set.
+  return retrieveOaSuggestions(context);
+}
+
 function boundedUserMessages(messages, maximum = 3_000) {
   const recent = messages.filter((message) => message.role === "user").slice(-2);
   let remaining = maximum;
@@ -845,6 +859,21 @@ async function api(context) {
         }, 503);
       }
     }
+    if (path === "suggestions" && method === "GET") {
+      if (new URL(request.url).search) throw new PublicError("请求格式错误", 400);
+      await limit(context, "suggestions", SUGGESTIONS_HOURLY_LIMIT);
+      let result;
+      try {
+        result = await currentOaSuggestions(context);
+      } catch {
+        result = { status: "unavailable", suggestions: [] };
+      }
+      const recommendationsReady = result.status === "connected";
+      return json({
+        suggestions: recommendationsReady ? result.suggestions : [],
+        oaPublicStatus: recommendationsReady ? "connected" : "unavailable",
+      });
+    }
     if (path.startsWith("admin/")) await requireOwner(context);
     if (path === "chat" && method === "POST") {
       const payload = parseChatPayload(await readJson(request, 80_000));
@@ -872,7 +901,11 @@ async function api(context) {
           conversationToken: token,
         }, 200, chatTimingHeaders(chatTiming));
       };
-      const documents = oa.documents.map((document) => ({
+      const suggestionReference = suggestionKnowledgeReference(last.content);
+      const sourceDocuments = oa.documents.filter((document) => (
+        !suggestionReference || suggestionMatchesKnowledge(last.content, document)
+      ));
+      const documents = sourceDocuments.map((document) => ({
         ...document,
         title: displayKnowledgeTitle(document),
       }));
@@ -948,13 +981,19 @@ async function api(context) {
         } catch {
           // Status evidence is best effort and must not discard a valid answer.
         }
-      } catch (error) {
+      } catch {
         try {
           await recordModelStatus(context, config, active, { ready: false, provider: null, model: null });
         } catch {
-          // Preserve the model error even if recording its status also fails.
+          // The approved-knowledge fallback must not depend on status-cache writes.
         }
-        throw error;
+        return chatResult({
+          answer: fallbackAnswer(documents),
+          sources,
+          mode: "retrieval",
+          oaPublicStatus: oa.status,
+          releaseId: releaseId(context),
+        });
       }
       const visibleAnswer = visibleAiAnswer(answer, sources.length);
       if (!visibleAnswer) {
