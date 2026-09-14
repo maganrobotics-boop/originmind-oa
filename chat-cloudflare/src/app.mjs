@@ -35,7 +35,8 @@ const SESSION_SECONDS = 43_200;
 const STATUS_PROBE_LEASE_MS = 15_000;
 const MODEL_STATUS_READY_TTL_MS = 5 * 60_000;
 const MODEL_STATUS_RETRY_MS = 30_000;
-const OA_STATUS_TTL_MS = 30_000;
+const OA_STATUS_READY_TTL_MS = 30_000;
+const OA_STATUS_RETRY_MS = 5_000;
 const MODEL_DAILY_LIMIT = 300;
 const MODEL_STATUS_PROBE_DAILY_LIMIT = 300;
 const MODEL_STATUS_PROBE_BUDGET_MESSAGE = "MODEL_STATUS_PROBE_BUDGET_EXHAUSTED";
@@ -577,13 +578,40 @@ async function oaStatusIdentity(context) {
   ]));
 }
 
-async function recordOaStatus(context, result) {
-  const normalized = validatedOaStatus(result);
-  if (!normalized) return;
+async function recordOaRetrievalStatus(context, status, hasDocuments) {
+  if (![
+    "connected",
+    "not_configured",
+    "auth_error",
+    "rate_limited",
+    "timeout",
+    "invalid_response",
+    "unavailable",
+  ].includes(status)) return;
   const identity = await oaStatusIdentity(context);
+  const id = `system-status-oa-v2:${identity}`;
+  const row = await database(context).prepare("SELECT value FROM settings WHERE id = ?").bind(id).first();
+  const previous = row
+    ? parsedStatusCache(row.value, identity, validatedOaStatus)?.result
+    : null;
+  const configurationFailure = status === "not_configured" || status === "auth_error";
+  const normalized = validatedOaStatus(status === "connected"
+    ? {
+        oaReady: true,
+        knowledgeReady: previous?.knowledgeReady === true || hasDocuments === true,
+        retrievalReady: true,
+      }
+    : configurationFailure
+      ? { oaReady: false, knowledgeReady: false, retrievalReady: false }
+      : {
+          oaReady: previous?.oaReady === true,
+          knowledgeReady: previous?.knowledgeReady === true,
+          retrievalReady: false,
+        });
+  if (!normalized) return;
   await database(context)
     .prepare("INSERT INTO settings (id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value")
-    .bind(`system-status-oa-v2:${identity}`, JSON.stringify({
+    .bind(id, JSON.stringify({
       version: 1,
       identity,
       leaseId: null,
@@ -618,20 +646,21 @@ async function currentOaStatus(context) {
       identity,
       fallback: { oaReady: false, knowledgeReady: false, retrievalReady: false },
       validateResult: validatedOaStatus,
-      ttlForResult: () => OA_STATUS_TTL_MS,
+      ttlForResult: (result) => result.oaReady && result.knowledgeReady && result.retrievalReady
+        ? OA_STATUS_READY_TTL_MS
+        : OA_STATUS_RETRY_MS,
     },
     async () => {
-      const result = await inspectOaPublicKnowledge(context);
-      const oaReady = result.status === "connected";
+      const [result, retrievalStatus] = await Promise.all([
+        inspectOaPublicKnowledge(context),
+        probeOaPublicKnowledge(context),
+      ]);
+      const oaReady = result.status === "connected" || retrievalStatus === "connected";
       const knowledgeReady = oaReady && result.documentCount > 0;
-      if (!knowledgeReady || result.retrievalReady !== true) {
-        return { oaReady, knowledgeReady, retrievalReady: false };
-      }
-      const retrievalStatus = await probeOaPublicKnowledge(context);
       return {
         oaReady,
         knowledgeReady,
-        retrievalReady: retrievalStatus === "connected",
+        retrievalReady: knowledgeReady && result.retrievalReady === true && retrievalStatus === "connected",
       };
     },
   );
@@ -854,11 +883,11 @@ async function api(context) {
       await limit(context, "chat", 25);
       const history = await conversationHistory(payload, context.env.APP_ENCRYPTION_KEY);
       const oa = await retrieveOa(retrievalQuestion(last.content, history), context);
-      if (oa.status === "unavailable" || oa.status === "not_configured") {
+      if (oa.status !== "invalid_question") {
         try {
-          await recordOaStatus(context, { oaReady: false, knowledgeReady: false, retrievalReady: false });
+          await recordOaRetrievalStatus(context, oa.status, oa.documents.length > 0);
         } catch {
-          // The answer must still fail closed even if status evidence cannot be updated.
+          // The answer must still follow the live retrieval result if status evidence cannot be updated.
         }
       }
       const chatResult = async (result) => json({
