@@ -900,6 +900,11 @@ function createPublicApp() {
   function reconcileChatOaStatus(payload) {
     const oaPublicStatus = payload?.oaPublicStatus;
     if (!state.service || (oaPublicStatus !== "unavailable" && oaPublicStatus !== "not_configured")) return;
+    systemStatusEpoch += 1;
+    if (systemStatusController) {
+      systemStatusController.abort();
+      systemStatusController = null;
+    }
     state.service = {
       ...state.service,
       oaReady: oaPublicStatus === "not_configured" ? false : state.service.oaReady,
@@ -913,6 +918,7 @@ function createPublicApp() {
       : "OA 知识检索不可用";
     statusText.textContent = serviceLabel(state.service);
     updateSystemLights();
+    scheduleSystemStatusRefresh(2_000);
   }
 
   function scheduleSystemStatusRefresh(delay = SYSTEM_STATUS_REFRESH_MS) {
