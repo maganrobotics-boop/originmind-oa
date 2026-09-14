@@ -371,6 +371,7 @@ function userFacingAnswer(value) {
 function serviceLabel(service) {
   if (!service) return "正在连接…";
   if (!service.storageReady) return "资料服务暂不可用";
+  if (!service.oaReady || !service.knowledgeReady || !service.retrievalReady) return "OA 知识暂不可用";
   return service.modelReady ? "基于 OA 审核公开资料回答" : "公开资料检索模式";
 }
 
@@ -378,7 +379,7 @@ const SYSTEM_LIGHTS = Object.freeze([
   { key: "network", label: "网络" },
   { key: "oa", label: "OA" },
   { key: "qwen", label: "千问" },
-  { key: "knowledge", label: "知识" },
+  { key: "knowledge", label: "OA 知识" },
   { key: "system", label: "系统" },
 ]);
 const SYSTEM_STATUS_REFRESH_MS = 60_000;
@@ -826,17 +827,26 @@ function createPublicApp() {
     setSystemLight("qwen", qwenTone, qwenDetail);
     details.push(`千问：${qwenDetail}`);
 
-    const knowledgeTone = unavailable || service.oaPending ? "pending" : service.knowledgeReady ? "ok" : "error";
+    const knowledgeReady = service?.knowledgeReady === true && service?.retrievalReady === true;
+    const knowledgeTone = unavailable || service.oaPending ? "pending" : knowledgeReady ? "ok" : "error";
     const knowledgeDetail = unavailable || service.oaPending
       ? "正在检测"
-      : service.knowledgeReady
-        ? "公开知识可用"
-        : "公开知识不可用";
+      : knowledgeReady
+        ? "OA 知识可检索"
+        : service.knowledgeReady === true
+          ? "OA 知识检索不可用"
+          : "OA 公开知识不可用";
     setSystemLight("knowledge", knowledgeTone, knowledgeDetail);
     details.push(`知识：${knowledgeDetail}`);
 
     const servicePending = unavailable || service.modelPending || service.oaPending;
-    const allReady = !servicePending && state.networkReady === true && service.systemReady === true;
+    const allReady = !servicePending &&
+      state.networkReady === true &&
+      service.oaReady === true &&
+      service.qwenReady === true &&
+      knowledgeReady &&
+      service.budgetReady === true &&
+      service.systemReady === true;
     const systemTone = servicePending ? "pending" : allReady ? "ok" : "error";
     const systemDetail = servicePending
       ? "正在检测"
@@ -854,7 +864,7 @@ function createPublicApp() {
       state.networkReady === true,
       service?.oaReady === true,
       service?.qwenReady === true,
-      service?.knowledgeReady === true,
+      knowledgeReady,
       allReady,
     ].filter(Boolean).length;
     const summary = allReady
@@ -885,6 +895,24 @@ function createPublicApp() {
     } catch {
       return false;
     }
+  }
+
+  function reconcileChatOaStatus(payload) {
+    const oaPublicStatus = payload?.oaPublicStatus;
+    if (!state.service || (oaPublicStatus !== "unavailable" && oaPublicStatus !== "not_configured")) return;
+    state.service = {
+      ...state.service,
+      oaReady: oaPublicStatus === "not_configured" ? false : state.service.oaReady,
+      knowledgeReady: oaPublicStatus === "not_configured" ? false : state.service.knowledgeReady,
+      retrievalReady: false,
+      oaPending: false,
+      systemReady: false,
+    };
+    state.serviceError = oaPublicStatus === "not_configured"
+      ? "OA 知识服务未配置"
+      : "OA 知识检索不可用";
+    statusText.textContent = serviceLabel(state.service);
+    updateSystemLights();
   }
 
   function scheduleSystemStatusRefresh(delay = SYSTEM_STATUS_REFRESH_MS) {
@@ -1275,6 +1303,7 @@ function createPublicApp() {
         topic: topic.requestTopic,
         ...(session.conversationToken ? { conversationToken: session.conversationToken } : {}),
       }));
+      reconcileChatOaStatus(payload);
       const assistant = {
         role: "assistant",
         content: userFacingAnswer(payload.answer),
