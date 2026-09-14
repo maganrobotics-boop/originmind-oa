@@ -639,6 +639,8 @@ test("public chat keeps five compact live status lights below the fixed header t
   assert.match(script, /className:\s*["']topic-header["'][\s\S]{0,160}?\[\s*topicTitle,\s*systemStatus,/u);
   assert.match(script, /header\.append\(menuButton,\s*topicHeader,\s*chatInfoButton/u);
   assert.match(script, /SYSTEM_STATUS_REFRESH_MS\s*=\s*60_000/u);
+  assert.match(script, /SYSTEM_STATUS_RETRY_MS\s*=\s*5_000/u);
+  assert.match(script, /SYSTEM_STATUS_TIMEOUT_MS\s*=\s*15_000/u);
   assert.match(script, /fetch\(["']\/_health["']/u);
   assert.match(script, /requestJson\(["']\/api\/status["']/u);
   assert.match(script, /timeoutMessage\s*=\s*["']请求超时，请稍后重试。["']/u);
@@ -647,9 +649,12 @@ test("public chat keeps five compact live status lights below the fixed header t
   assert.match(script, /service\?\.knowledgeReady\s*===\s*true\s*&&\s*service\?\.retrievalReady\s*===\s*true/u);
   assert.match(script, /function\s+reconcileChatOaStatus\s*\(/u);
   assert.match(script, /reconcileChatOaStatus\(payload\)/u);
-  assert.match(script, /oaPublicStatus\s*!==\s*["']unavailable["'][\s\S]{0,100}?oaPublicStatus\s*!==\s*["']not_configured["']/u);
+  assert.match(script, /["']connected["'][\s\S]{0,180}?["']auth_error["'][\s\S]{0,180}?["']rate_limited["'][\s\S]{0,180}?["']timeout["'][\s\S]{0,180}?["']invalid_response["']/u);
   assert.match(script, /systemStatusEpoch\s*\+=\s*1[\s\S]{0,160}?systemStatusController\.abort\(\)[\s\S]{0,160}?systemStatusController\s*=\s*null/u);
-  assert.match(script, /reconcileChatOaStatus[\s\S]{0,900}?scheduleSystemStatusRefresh\(2_000\)/u);
+  assert.match(script, /reconcileChatOaStatus[\s\S]{0,1800}?retrievalReady:\s*connected[\s\S]{0,1800}?scheduleSystemStatusRefresh\(state\.service\.systemReady\s*\?\s*SYSTEM_STATUS_REFRESH_MS\s*:\s*SYSTEM_STATUS_RETRY_MS\)/u);
+  assert.match(script, /Array\.isArray\(payload\.sources\)\s*&&\s*payload\.sources\.length\s*>\s*0/u);
+  assert.doesNotMatch(script, /OA 公开知识暂不可用，请核对两端 Token 和 OA 部署状态/u);
+  assert.ok(script.includes("OA 检索检测超时，系统会自动重试；无需重复填写 Token。"));
   assert.match(script, /textButton\(\s*["']["']\s*,\s*["']system-status-strip["']\s*\)/u);
   assert.ok(script.includes('systemStatus.setAttribute("aria-controls", "system-status-details")'));
   assert.ok(script.includes('systemStatus.setAttribute("aria-expanded", "false")'));
