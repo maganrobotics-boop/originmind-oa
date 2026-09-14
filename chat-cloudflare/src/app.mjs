@@ -9,6 +9,7 @@ import {
 import { cleanPublicChatText } from "./public-text.mjs";
 import { PublicError, ValidationError } from "./errors.mjs";
 import { conversationHistory, conversationToken, retrievalQuestion } from "./conversation.mjs";
+import { naturalizeSuggestions, naturalQuestions, suggestionRetrievalQuestion } from "./natural-suggestions.mjs";
 import {
   MAX_DOCUMENT_UPLOAD_BYTES,
   extractDocument,
@@ -645,7 +646,8 @@ async function currentOaStatus(context) {
 async function currentOaSuggestions(context) {
   // Recommendations are approval-sensitive. Every request asks OA directly;
   // no D1 TTL, lease, or in-process single-flight may replay an older set.
-  return retrieveOaSuggestions(context);
+  const deadline = Date.now() + 13_000;
+  return naturalizeSuggestions(await retrieveOaSuggestions(context), context, deadline);
 }
 
 function boundedUserMessages(messages, maximum = 3_000) {
@@ -882,11 +884,15 @@ async function api(context) {
       if (last.role !== "user" || last.content.length > 2_000) throw new PublicError("请输入有效的问题");
       await limit(context, "chat", 25);
       const history = await conversationHistory(payload, context.env.APP_ENCRYPTION_KEY);
+      const sourceQuestion = payload.suggestionToken
+        ? await suggestionRetrievalQuestion(payload.suggestionToken, last.content, context.env.APP_ENCRYPTION_KEY)
+        : null;
+      if (payload.suggestionToken && !sourceQuestion) throw new PublicError("推荐问题已更新，请重新选择。", 400);
       const retrievalHistory = history.length ? history : boundedUserMessages(payload.messages.slice(0, -1));
       const oaStartedAt = Date.now();
       let oa;
       try {
-        oa = await retrieveOa(retrievalQuestion(last.content, retrievalHistory), context);
+        oa = await retrieveOa(sourceQuestion || retrievalQuestion(last.content, retrievalHistory), context);
       } finally {
         chatTiming.oa = Date.now() - oaStartedAt;
       }
@@ -912,11 +918,13 @@ async function api(context) {
           conversationToken: token,
         }, 200, chatTimingHeaders(chatTiming));
       };
-      const suggestionReference = suggestionKnowledgeReference(last.content);
+      const suggestionReference = suggestionKnowledgeReference(sourceQuestion || last.content);
       const sourceDocuments = oa.documents.filter((document) => (
-        !suggestionReference || suggestionMatchesKnowledge(last.content, document)
+        !suggestionReference || suggestionMatchesKnowledge(sourceQuestion || last.content, document)
       ));
-      const documents = sourceDocuments.map((document) => ({
+      const applicableDocuments = sourceQuestion && !naturalQuestions(sourceDocuments).includes(last.content)
+        ? [] : sourceDocuments;
+      const documents = applicableDocuments.map((document) => ({
         ...document,
         title: displayKnowledgeTitle(document),
       }));

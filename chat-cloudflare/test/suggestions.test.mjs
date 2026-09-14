@@ -4,6 +4,9 @@ import test from "node:test";
 import { handleRequest } from "../src/app.mjs";
 import { OA_PUBLIC_SUGGESTIONS_URL } from "../src/constants.mjs";
 import { fallbackAnswer } from "../src/knowledge.mjs";
+import { naturalQuestions, suggestionRetrievalQuestion } from "../src/natural-suggestions.mjs";
+import { decryptSecret, encryptSecret } from "../src/crypto.mjs";
+import { cleanPublicChatText } from "../src/public-text.mjs";
 import {
   parseOaSuggestions,
   retrieveOaSuggestions,
@@ -18,6 +21,28 @@ const SUGGESTIONS = Object.freeze([
   { id: "1", question: "《灵巧操作进展》有哪些值得关注的核心内容？", updatedAt: "2026-09-14" },
   { id: "2", question: "《OmindOS 巡检实践》有哪些值得关注的核心内容？", updatedAt: "2026-09-13" },
 ]);
+
+function knowledgeResponse(init) {
+  const reference = suggestionKnowledgeReference(JSON.parse(init.body).question);
+  return Response.json({ chunks: [{
+    id: "1", title: reference.title, category: "research", sectionTitle: reference.sectionTitle || "",
+    paragraphRef: "第 1 段", sourceLabel: "OA 公开知识", updatedAt: "2026-09-14",
+    excerpt: reference.title === "灵巧操作进展"
+      ? "触觉反馈能够帮助机器人在抓取物体时调整抓握力度。"
+      : "无 GNSS 环境下，机器人通过激光雷达与惯性信息融合实现定位。",
+  }] });
+}
+
+function assertNaturalPayload(payload) {
+  assert.equal(payload.oaPublicStatus, "connected");
+  assert.deepEqual(payload.suggestions.map((item) => item.question), [
+    "触觉反馈能怎样帮助机器人抓稳物体？", "没有卫星信号时，机器人怎么定位？",
+  ]);
+  for (const item of payload.suggestions) {
+    assert.equal(typeof item.suggestionToken, "string");
+    assert.doesNotMatch(item.question, /《|值得关注|\.(?:pptx?|pdf)|脱敏|脱密/iu);
+  }
+}
 
 function environment(overrides = {}) {
   return {
@@ -109,6 +134,7 @@ test("suggestion endpoint revalidates every connected set and exposes no static 
   t.after(() => env.DB.close());
   const runtime = {
     async fetch(url, init) {
+      if (String(url) !== OA_PUBLIC_SUGGESTIONS_URL) return knowledgeResponse(init);
       calls += 1;
       assert.equal(String(url), OA_PUBLIC_SUGGESTIONS_URL);
       assert.equal(init.method, "GET");
@@ -118,11 +144,11 @@ test("suggestion endpoint revalidates every connected set and exposes no static 
 
   const first = await handleRequest(request("/api/suggestions"), env, {}, runtime);
   assert.equal(first.status, 200);
-  assert.deepEqual(await first.json(), { suggestions: SUGGESTIONS, oaPublicStatus: "connected" });
+  assertNaturalPayload(await first.json());
 
   const revalidated = await handleRequest(request("/api/suggestions", "203.0.113.19"), env, {}, runtime);
   assert.equal(revalidated.status, 200);
-  assert.deepEqual(await revalidated.json(), { suggestions: SUGGESTIONS, oaPublicStatus: "connected" });
+  assertNaturalPayload(await revalidated.json());
   assert.equal(calls, 2);
 });
 
@@ -171,7 +197,8 @@ test("concurrent suggestion requests each revalidate with OA and create no repla
   t.after(() => env.DB.close());
   let calls = 0;
   const runtime = {
-    async fetch() {
+    async fetch(url, init) {
+      if (String(url) !== OA_PUBLIC_SUGGESTIONS_URL) return knowledgeResponse(init);
       calls += 1;
       await new Promise((resolve) => setTimeout(resolve, 5));
       return Response.json({ suggestions: SUGGESTIONS });
@@ -184,7 +211,7 @@ test("concurrent suggestion requests each revalidate with OA and create no repla
   assert.equal(calls, 2);
   for (const response of responses) {
     assert.equal(response.status, 200);
-    assert.deepEqual(await response.json(), { suggestions: SUGGESTIONS, oaPublicStatus: "connected" });
+    assertNaturalPayload(await response.json());
   }
   const cache = env.DB.sqlite.prepare(
     "SELECT id FROM settings WHERE id LIKE 'system-suggestions-oa-v1:%'",
@@ -278,6 +305,59 @@ test("extractive fallback deduplicates and bounds approved knowledge excerpts", 
   assert.equal((answer.match(/^- /gmu) || []).length, 2);
   assert.match(answer, /…/u);
   assert.match(answer, /另一条公开内容/u);
+});
+
+test("questions come from excerpt topics, never filename metadata or unsupported placeholders", () => {
+  const questions = naturalQuestions([{
+    title: "！Magan Robotic Manipulation_20260914_脱敏版.PPTX",
+    body: "触觉反馈能够帮助机器人在抓取物体时调整抓握力度。",
+  }]);
+  assert.equal(questions[0], "触觉反馈能怎样帮助机器人抓稳物体？");
+  assert.doesNotMatch(questions.join(""), /Magan|20260914|PPT|脱敏|值得关注|《/u);
+  assert.deepEqual(naturalQuestions([{ title: "矿井巡检.PPT", body: "暂无正文内容。" }]), []);
+});
+
+test("natural clicks bind to the original source without showing its upload filename", async (t) => {
+  const env = environment();
+  t.after(() => env.DB.close());
+  const filename = "机器人抓取_20260914_脱敏版.PPTX";
+  const sourceQuestion = `《${filename}》有哪些值得关注的核心内容？`;
+  let sourceChanged = false;
+  let retrievedQuestion;
+  const runtime = { fetch: async (url, init) => {
+    if (String(url) === OA_PUBLIC_SUGGESTIONS_URL) return Response.json({ suggestions: [
+      { id: "1", question: sourceQuestion, updatedAt: "2026-09-14" },
+    ] });
+    retrievedQuestion = JSON.parse(init.body).question;
+    return Response.json({ chunks: [{
+      id: "1", title: filename, category: "research", sectionTitle: "触觉反馈",
+      paragraphRef: "第 1 段", sourceLabel: "OA 公开知识", updatedAt: "2026-09-14",
+      excerpt: sourceChanged ? "这项研究只讨论三维重建。" : "触觉反馈帮助机器人调整抓取物体时的力度。",
+    }] });
+  } };
+  const listed = await handleRequest(request("/api/suggestions"), env, {}, runtime);
+  const item = (await listed.json()).suggestions[0];
+  assert.equal(item.question, "触觉反馈能怎样帮助机器人抓稳物体？");
+  assert.doesNotMatch(JSON.stringify(item), /PPTX|脱敏版|值得关注/u);
+  const expectedSource = cleanPublicChatText(sourceQuestion).normalize("NFKC");
+  assert.equal(await suggestionRetrievalQuestion(item.suggestionToken, item.question, env.APP_ENCRYPTION_KEY), cleanPublicChatText(sourceQuestion));
+  const post = (overrides = {}) => handleRequest(new Request(`${ORIGIN}/api/chat`, {
+    method: "POST", headers: { Origin: ORIGIN, "Content-Type": "application/json", "CF-Connecting-IP": "203.0.113.71" },
+    body: JSON.stringify({ topic: "research", messages: [{ role: "user", content: item.question }], suggestionToken: item.suggestionToken, ...overrides }),
+  }), env, {}, runtime);
+  const response = await post();
+  assert.equal(response.status, 200);
+  assert.equal(retrievedQuestion, expectedSource);
+  assert.equal((await response.json()).answer, "触觉反馈帮助机器人调整抓取物体时的力度。");
+  assert.equal((await post({ messages: [{ role: "user", content: "篡改后的问题" }] })).status, 400);
+  const clear = JSON.parse(await decryptSecret(item.suggestionToken, env.APP_ENCRYPTION_KEY));
+  const expired = await encryptSecret(JSON.stringify({ ...clear, expiresAt: Date.now() - 1 }), env.APP_ENCRYPTION_KEY);
+  assert.equal((await post({ suggestionToken: expired })).status, 400);
+  assert.equal((await post({ suggestionToken: `x${item.suggestionToken}` })).status, 400);
+  sourceChanged = true;
+  const changed = await (await post()).json();
+  assert.deepEqual(changed.sources, []);
+  assert.match(changed.answer, /没有足够信息/u);
 });
 
 test("model and retrieval fallback responses hide labels without breaking source binding or conversation tokens", async (t) => {

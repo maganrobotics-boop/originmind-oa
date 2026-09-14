@@ -14,11 +14,12 @@ import {
 } from "./smoke-cloudflare.mjs";
 
 const releaseId = `${"a".repeat(40)}-1`;
-const recommendationQuestion = "《灵巧操作进展》有哪些值得关注的核心内容？";
+const recommendationQuestion = "触觉反馈能怎样帮助机器人抓稳物体？";
+const recommendationToken = `${"A".repeat(16)}.${"B".repeat(64)}`;
 const suggestionEvidence = {
   suggestions: [
-    { id: "1", question: recommendationQuestion, updatedAt: "2026-09-14" },
-    { id: "2", question: "《机器人安全指南》有哪些值得关注的核心内容？", updatedAt: "2026-09-13" },
+    { id: "1", question: recommendationQuestion, suggestionToken: recommendationToken, updatedAt: "2026-09-14" },
+    { id: "2", question: "人和协作机器人一起工作时，怎样保障安全？", suggestionToken: recommendationToken, updatedAt: "2026-09-13" },
   ],
   oaPublicStatus: "connected",
 };
@@ -292,6 +293,7 @@ test("service smoke fetches recommendations and sends the first one to chat", as
       return apiResponse({ error: "origin" }, 403);
     }
     if (pathname === "/api/chat") {
+      assert.equal(JSON.parse(options.body).suggestionToken, recommendationToken);
       submittedQuestion = JSON.parse(options.body).messages[0].content;
       return apiResponse(evidence.chat);
     }

@@ -242,7 +242,7 @@ export async function retrieveOaSuggestions(context) {
   }
 }
 
-export async function retrieveOa(question, context) {
+export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS) {
   const token = context.env.PUBLIC_LAB_AI_SERVICE_TOKEN || "";
   const normalized = normalizedQuestion(question);
   if (!PUBLIC_LAB_AI_SERVICE_TOKEN_PATTERN.test(token)) {
@@ -260,7 +260,7 @@ export async function retrieveOa(question, context) {
       redirect: "manual",
       cache: "no-store",
       credentials: "omit",
-      signal: AbortSignal.timeout(TIMEOUT_MS),
+      signal: AbortSignal.timeout(Math.min(TIMEOUT_MS, timeoutMs)),
     };
     const service = context.env.OA_SERVICE;
     const response = typeof service?.fetch === "function"

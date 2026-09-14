@@ -2,7 +2,7 @@ import { createHash, randomBytes } from "node:crypto";
 import { Buffer } from "node:buffer";
 import { pathToFileURL } from "node:url";
 
-import { parseOaSuggestions } from "../src/oa-public.mjs";
+import { parseChatSuggestions } from "../src/natural-suggestions.mjs";
 
 // A newly published Worker or route can briefly return 404/421 while edge state converges.
 const TRANSIENT_STATUSES = new Set([404, 408, 421, 425, 500, 502, 503, 504]);
@@ -155,7 +155,7 @@ export function validateSuggestionEvidence(payload) {
   }
   let suggestions;
   try {
-    suggestions = parseOaSuggestions({ suggestions: payload.suggestions });
+    suggestions = parseChatSuggestions(payload.suggestions);
   } catch {
     throw new Error("/api/suggestions returned an invalid recommendation contract");
   }
@@ -293,6 +293,7 @@ async function smokeOnce(origin, releaseId) {
     body: JSON.stringify({
       messages: [{ role: "user", content: recommendations[0].question }],
       topic: "research",
+      suggestionToken: recommendations[0].suggestionToken,
     }),
   });
   if (chatResponse.status !== 200) {
