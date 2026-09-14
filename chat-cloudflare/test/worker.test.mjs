@@ -1044,7 +1044,7 @@ test("file extraction rejects a mismatched JPEG signature before invoking Cloudf
   assert.equal(calls, 0);
 });
 
-test("file extraction keeps its independent 20 requests per IP hourly limit", async (t) => {
+test("file extraction allows one 100-file admin batch per IP each hour", async (t) => {
   let calls = 0;
   const env = makeEnvironment({
     AI: {
@@ -1060,7 +1060,7 @@ test("file extraction keeps its independent 20 requests per IP hourly limit", as
     .bind(await sha256Hex(token), Date.now() + 60_000)
     .run();
 
-  for (let index = 0; index < 20; index += 1) {
+  for (let index = 0; index < 100; index += 1) {
     const response = await handleRequest(
       uploadRequest("report.pdf", "application/pdf", pdfBytes(), {
         cookie: `__Host-ma-session=${token}`,
@@ -1083,7 +1083,7 @@ test("file extraction keeps its independent 20 requests per IP hourly limit", as
   ));
   assert.equal(limited.status, 429);
   assert.match(limited.body.error, /频繁/u);
-  assert.equal(calls, 20);
+  assert.equal(calls, 100);
 });
 
 test("file extraction keeps its independent 100 conversions per UTC day budget", async (t) => {

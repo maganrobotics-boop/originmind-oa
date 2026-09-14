@@ -1199,7 +1199,9 @@ async function api(context) {
       return json({ oaPublicKnowledge: await probeOaPublicKnowledge(context) });
     }
     if (path === "admin/extract" && method === "POST") {
-      await limit(context, "document-extract", 20);
+      // The endpoint remains single-file and memory-bounded. The higher authenticated
+      // request allowance lets the admin UI process one safe batch as small parallel uploads.
+      await limit(context, "document-extract", 100);
       const encodedName = context.request.headers.get("x-file-name") || "";
       if (!encodedName || encodedName.length > 2_000) throw new PublicError("缺少有效文件名");
       let name;

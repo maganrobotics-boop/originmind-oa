@@ -8,6 +8,9 @@ const OA_CHAT_IMPORT_URL = "https://oa.omindos.ai/api/knowledge/import-chat";
 const OA_CHAT_IMPORT_STATUS_URL = "https://oa.omindos.ai/api/knowledge/import-chat/status";
 const MAX_TEXT_IMPORT_BYTES = 5 * 1024 * 1024;
 const MAX_BINARY_IMPORT_BYTES = 10 * 1024 * 1024;
+const MAX_BATCH_IMPORT_FILES = 100;
+const MAX_BATCH_IMPORT_BYTES = 500 * 1024 * 1024;
+const BATCH_IMPORT_CONCURRENCY = 3;
 const CHAT_DIRECT_OA_THRESHOLD_CHARACTERS = 30_000;
 const MAX_OA_STORAGE_FRAGMENT_CHARACTERS = 20_000;
 const SAFE_RETURNED_KNOWLEDGE_ITEM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -18,6 +21,110 @@ const IMPORT_MIME_BY_EXTENSION = Object.freeze({
   png: "image/png",
   webp: "image/webp",
 });
+
+function importFilePath(file) {
+  const candidate = typeof file?.webkitRelativePath === "string" && file.webkitRelativePath.trim()
+    ? file.webkitRelativePath
+    : file?.name;
+  const path = String(candidate || "").normalize("NFC").replace(/\\/gu, "/").trim();
+  const segments = path.split("/");
+  if (
+    !path ||
+    path.length > 500 ||
+    segments.some((segment) => !segment || segment === "." || segment === "..") ||
+    /[\u0000-\u001f\u007f]/u.test(path)
+  ) {
+    throw new Error("文件路径不正确，请重新选择文件。");
+  }
+  return path;
+}
+
+function classifyImportFile(file) {
+  const path = importFilePath(file);
+  const extension = path.split(".").at(-1)?.toLowerCase() || "";
+  const isText = extension === "txt" || extension === "md";
+  const mimeType = IMPORT_MIME_BY_EXTENSION[extension] || "";
+  if (!isText && !mimeType) {
+    throw new Error(`${path}：仅支持 TXT、Markdown、PDF、JPG、PNG 和 WebP 文件。`);
+  }
+  const size = Number(file?.size);
+  if (!Number.isFinite(size) || size <= 0) throw new Error(`${path}：文件为空。`);
+  const maximum = isText ? MAX_TEXT_IMPORT_BYTES : MAX_BINARY_IMPORT_BYTES;
+  if (size > maximum) {
+    throw new Error(
+      isText
+        ? `${path}：TXT、Markdown 文件不能超过 5 MB。`
+        : `${path}：PDF 或图片不能超过 10 MB，请压缩或拆分后重试。`,
+    );
+  }
+  return {
+    file,
+    path,
+    extension,
+    isText,
+    mimeType,
+    kind: isText ? (extension === "md" ? "Markdown" : "文本") : extension === "pdf" ? "PDF" : "图片",
+  };
+}
+
+function ignoredImportFile(file) {
+  const path = String(file?.webkitRelativePath || file?.name || "").replace(/\\/gu, "/");
+  return /(?:^|\/)(?:__MACOSX|\.DS_Store$|Thumbs\.db$)/iu.test(path);
+}
+
+function prepareImportFiles(files) {
+  const selected = Array.from(files || []).filter((file) => !ignoredImportFile(file));
+  if (!selected.length) throw new Error("请先选择需要导入的文件。");
+  if (selected.length > MAX_BATCH_IMPORT_FILES) {
+    throw new Error(`每批最多导入 ${MAX_BATCH_IMPORT_FILES} 个文件，请分批处理。`);
+  }
+  const descriptors = selected.map(classifyImportFile);
+  const totalBytes = descriptors.reduce((total, item) => total + Number(item.file.size), 0);
+  if (totalBytes > MAX_BATCH_IMPORT_BYTES) throw new Error("本批文件总大小不能超过 500 MB，请分批处理。");
+  const paths = new Set();
+  for (const descriptor of descriptors) {
+    const identity = descriptor.path.toLocaleLowerCase("zh-CN");
+    if (paths.has(identity)) throw new Error(`${descriptor.path}：存在重复文件路径，请整理后重试。`);
+    paths.add(identity);
+  }
+  return descriptors.sort((left, right) => left.path.localeCompare(right.path, "zh-CN", {
+    numeric: true,
+    sensitivity: "base",
+  }));
+}
+
+function safeMarkdownImportLabel(value) {
+  return String(value)
+    .replace(/[\r\n\t]+/gu, " ")
+    .replace(/[\u202a-\u202e\u2066-\u2069]/gu, "")
+    .replace(/[`<>]/gu, "")
+    .replace(/#/gu, "＃")
+    .trim()
+    .slice(0, 500);
+}
+
+function importedSection(descriptor, text) {
+  return `## ${descriptor.kind}：${safeMarkdownImportLabel(descriptor.path)}\n\n${normalizeImportedText(text).trim()}`;
+}
+
+function combineImportedSections(results, forceSections = false) {
+  const successful = results.filter((result) => result?.text && result?.descriptor);
+  if (!successful.length) return "";
+  if (successful.length === 1 && !forceSections) return normalizeImportedText(successful[0].text).trim();
+  return successful.map((result) => importedSection(result.descriptor, result.text)).join("\n\n---\n\n");
+}
+
+function suggestedBatchTitle(descriptors) {
+  if (descriptors.length === 1) {
+    return descriptors[0].path.replace(/\.(?:txt|md|pdf|jpe?g|png|webp)$/iu, "").trim().slice(0, 120);
+  }
+  const roots = new Set(descriptors
+    .map((descriptor) => descriptor.path.includes("/") ? descriptor.path.split("/", 1)[0] : "")
+    .filter(Boolean));
+  if (roots.size === 1) return [...roots][0].slice(0, 120);
+  const imageOnly = descriptors.every((descriptor) => descriptor.kind === "图片");
+  return `${imageOnly ? "图片资料" : "批量资料"}（${descriptors.length}项）`.slice(0, 120);
+}
 
 function normalizeImportedText(value) {
   return String(value)
@@ -3085,6 +3192,8 @@ function createAdminApp() {
     analyticsLoadedDays: 0,
     analyticsLoading: false,
     analyticsError: "",
+    importJob: null,
+    failedImportFiles: [],
     draft: emptyDraft(),
     returnedKnowledgeItemId: returnedKnowledgeItemIdFromSearch(window.location.search),
   };
@@ -3107,6 +3216,134 @@ function createAdminApp() {
 
   function adminRequest(endpoint, options) {
     return requestJson(`/api/admin/${endpoint}`, options);
+  }
+
+  async function importedFileDigest(file) {
+    const bytes = await file.arrayBuffer();
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    return Array.from(new Uint8Array(digest), (value) => value.toString(16).padStart(2, "0")).join("");
+  }
+
+  async function extractImportFile(descriptor) {
+    if (descriptor.isText) {
+      const text = decodeImportedUtf8(await descriptor.file.arrayBuffer());
+      if (utf8ByteLength(text) > MAX_TEXT_IMPORT_BYTES) {
+        throw new Error("规范化后的 TXT、Markdown 正文不能超过 5 MB（按 UTF-8 计算）。");
+      }
+      return text;
+    }
+    const result = await adminRequest("extract", {
+      method: "POST",
+      headers: {
+        "Content-Type": descriptor.mimeType,
+        "X-File-Name": encodeURIComponent(descriptor.file.name),
+      },
+      body: descriptor.file,
+      signal: AbortSignal.timeout(120_000),
+      timeoutMessage: "文件处理超时，请压缩或拆分文件后重试。",
+    });
+    if (typeof result.text !== "string") throw new Error("文件解析结果异常，请稍后重试。");
+    return result.text;
+  }
+
+  async function importDocumentFiles(files, { source = "files", retry = false } = {}) {
+    if (state.busy) return false;
+    let descriptors;
+    try {
+      descriptors = prepareImportFiles(files);
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : "文件选择无效。";
+      state.notice = "";
+      renderAdminShell();
+      return false;
+    }
+    if (!retry && state.draft.body.trim() && !window.confirm("批量导入将替换当前正文，是否继续？")) return false;
+
+    state.busy = "files";
+    state.error = "";
+    state.notice = "";
+    state.failedImportFiles = [];
+    state.importJob = {
+      total: descriptors.length,
+      completed: 0,
+      succeeded: 0,
+      failed: 0,
+      duplicates: 0,
+      currentName: "准备导入…",
+      failures: [],
+      running: true,
+    };
+    renderAdminShell();
+
+    const results = new Array(descriptors.length);
+    const digestTasks = new Map();
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < descriptors.length) {
+        const index = cursor;
+        cursor += 1;
+        const descriptor = descriptors[index];
+        state.importJob.currentName = descriptor.path;
+        renderAdminShell();
+        try {
+          const digest = await importedFileDigest(descriptor.file);
+          const prior = digestTasks.get(digest);
+          if (prior) {
+            await prior;
+            state.importJob.duplicates += 1;
+            results[index] = { descriptor, duplicate: true };
+          } else {
+            const task = extractImportFile(descriptor);
+            digestTasks.set(digest, task);
+            const text = await task;
+            if (normalizeImportedText(text).trim().length < 10) {
+              throw new Error("未识别到足够内容，请换一份清晰文件或手动填写正文。");
+            }
+            results[index] = { descriptor, text };
+            state.importJob.succeeded += 1;
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "读取失败";
+          state.importJob.failed += 1;
+          state.importJob.failures.push({ path: descriptor.path, message, file: descriptor.file });
+        } finally {
+          state.importJob.completed += 1;
+          renderAdminShell();
+        }
+      }
+    };
+
+    try {
+      await Promise.all(Array.from(
+        { length: Math.min(BATCH_IMPORT_CONCURRENCY, descriptors.length) },
+        () => worker(),
+      ));
+      const importedBody = combineImportedSections(results, descriptors.length > 1 || source === "folder");
+      if (!importedBody) throw new Error("本批文件均未成功识别，请查看失败清单后重试。");
+      const nextBody = retry && state.draft.body.trim()
+        ? `${normalizeImportedText(state.draft.body).trim()}\n\n---\n\n${importedBody}`
+        : importedBody;
+      if (utf8ByteLength(nextBody) > MAX_TEXT_IMPORT_BYTES) {
+        throw new Error("批量识别后的正文超过 5 MB，请减少本批文件数量后重试。");
+      }
+      state.draft.body = nextBody;
+      if (!state.draft.title) state.draft.title = suggestedBatchTitle(descriptors);
+      state.failedImportFiles = state.importJob.failures.map((failure) => failure.file);
+      const successCopy = `成功 ${state.importJob.succeeded} 个`;
+      const duplicateCopy = state.importJob.duplicates ? `，跳过重复文件 ${state.importJob.duplicates} 个` : "";
+      const failureCopy = state.importJob.failed ? `，失败 ${state.importJob.failed} 个，可在下方重试` : "";
+      state.notice = `批量导入完成：${successCopy}${duplicateCopy}${failureCopy}。已合并为一条 Markdown 正文，原文件未保存；请核对后提交 OA 待审。`;
+      return true;
+    } catch (error) {
+      state.error = error instanceof Error ? error.message : "批量导入失败。";
+      state.failedImportFiles = state.importJob.failures.map((failure) => failure.file);
+      return false;
+    } finally {
+      state.importJob.running = false;
+      state.importJob.currentName = "";
+      state.busy = "";
+      renderAdminShell();
+    }
   }
 
   function clearReturnedKnowledgeContext(expectedItemId) {
@@ -3753,11 +3990,24 @@ function createAdminApp() {
     bodyLabel.append(body);
 
     const fileLabel = element("label", { attributes: { for: "document-file" } });
-    fileLabel.append(document.createTextNode(state.busy === "file" ? "正在自动解析…" : "导入资料文件"));
+    fileLabel.append(document.createTextNode(state.busy === "files" ? "正在批量解析…" : "选择文件（支持多选）"));
     const fileInput = element("input", {
       id: "document-file",
       attributes: {
         type: "file",
+        multiple: true,
+        accept: ".txt,.md,.pdf,.jpg,.jpeg,.png,.webp,text/plain,text/markdown,application/pdf,image/jpeg,image/png,image/webp",
+      },
+    });
+    const folderLabel = element("label", { attributes: { for: "document-folder" } });
+    folderLabel.append(document.createTextNode("选择整个文件夹"));
+    const folderInput = element("input", {
+      id: "document-folder",
+      attributes: {
+        type: "file",
+        multiple: true,
+        directory: true,
+        webkitdirectory: true,
         accept: ".txt,.md,.pdf,.jpg,.jpeg,.png,.webp,text/plain,text/markdown,application/pdf,image/jpeg,image/png,image/webp",
       },
     });
@@ -3769,89 +4019,59 @@ function createAdminApp() {
       });
     };
     fileInput.disabled = Boolean(state.busy);
-    fileInput.addEventListener("change", async (event) => {
-      const file = event.currentTarget.files?.[0];
-      if (!file || state.busy) return;
-      state.notice = "";
-      const extension = file.name.split(".").at(-1)?.toLowerCase() || "";
-      const isText = extension === "txt" || extension === "md";
-      const extractionMimeType = IMPORT_MIME_BY_EXTENSION[extension];
-      if (!isText && !extractionMimeType) {
-        state.error = "仅支持 TXT、Markdown、PDF、JPG、PNG 和 WebP 文件。";
-        renderAdminShell();
-        focusImportedField("document-file");
-        return;
-      }
-      const maximum = isText ? MAX_TEXT_IMPORT_BYTES : MAX_BINARY_IMPORT_BYTES;
-      if (file.size > maximum) {
-        state.error = isText
-          ? "TXT、Markdown 文件不能超过 5 MB。"
-          : "PDF 或图片不能超过 10 MB，请压缩或拆分后重试。";
-        renderAdminShell();
-        focusImportedField("document-file");
-        return;
-      }
-      if (state.draft.body.trim() && !window.confirm("导入新文件将替换当前正文，是否继续？")) {
-        event.currentTarget.value = "";
-        return;
-      }
-      state.busy = "file";
-      state.error = "";
-      renderAdminShell();
-      let imported = false;
-      try {
-        let text;
-        if (isText) {
-          text = decodeImportedUtf8(await file.arrayBuffer());
-          if (utf8ByteLength(text) > MAX_TEXT_IMPORT_BYTES) {
-            throw new Error("规范化后的 TXT、Markdown 正文不能超过 5 MB（按 UTF-8 计算）。");
-          }
-        } else {
-          const result = await adminRequest("extract", {
-            method: "POST",
-            headers: {
-              "Content-Type": extractionMimeType,
-              "X-File-Name": encodeURIComponent(file.name),
-            },
-            body: file,
-            signal: AbortSignal.timeout(120_000),
-            timeoutMessage: "文件处理超时，请压缩或拆分文件后重试。",
-          });
-          if (typeof result.text !== "string") throw new Error("文件解析结果异常，请稍后重试。");
-          text = result.text;
-        }
-        if (text.trim().length < 10) throw new Error("未识别到足够内容，请手动填写正文。");
-        if (!state.draft.title) {
-          state.draft.title = file.name
-            .replace(/\.(txt|md|pdf|jpe?g|png|webp)$/i, "")
-            .trim()
-            .slice(0, 120);
-        }
-        state.draft.body = text;
-        imported = true;
-        const importedKind = isText ? "文本" : extension === "pdf" ? "PDF" : "图片";
-        state.notice = state.returnedKnowledgeItemId
-          ? `修改后的${isText ? "文本" : extension === "pdf" ? "PDF" : "图片"}已导入。Chat 不保存原文件或正文；本次仅替换正文，标题、分类、资料日期、来源链接和可见范围沿用原 OA 条目。`
-          : text.length > CHAT_DIRECT_OA_THRESHOLD_CHARACTERS
-          ? `${importedKind}已导入（${text.length} 字）。Chat 不保存原文件或大型正文草稿；提交时将直接发送 OA，作为 1 条资料审核，并存为预计至少 ${estimatedOaStorageFragmentCount(text)} 个片段（每个不超过 20000 字）。`
-          : isText
-          ? "文本已导入。Chat 不保存原文件，请核对后保存草稿。"
-          : `${extension === "pdf" ? "PDF" : "图片"}已由 Cloudflare AI 临时解析（${text.length} 字），本站未保存原件。请核对识别结果后提交。`;
-      } catch (error) {
-        state.error = error instanceof Error ? error.message : "读取失败";
-      } finally {
-        state.busy = "";
-        renderAdminShell();
-        focusImportedField(imported ? "document-body" : "document-file");
-      }
+    folderInput.disabled = Boolean(state.busy);
+    const handleImportSelection = (source) => (event) => {
+      const selected = Array.from(event.currentTarget.files || []);
+      if (!selected.length || state.busy) return;
+      void importDocumentFiles(selected, { source }).then((imported) => {
+        focusImportedField(imported ? "document-body" : source === "folder" ? "document-folder" : "document-file");
+      });
+    };
+    fileInput.addEventListener("change", handleImportSelection("files"));
+    folderInput.addEventListener("change", handleImportSelection("folder"));
+    fileLabel.append(fileInput);
+    folderLabel.append(folderInput);
+
+    const importControls = element("div", { className: "document-import-controls" }, [fileLabel, folderLabel]);
+    const importStatus = element("div", {
+      className: "import-status",
+      attributes: { "aria-live": "polite" },
     });
-    fileLabel.append(
-      fileInput,
-      element("span", {
-        className: "small-note",
-        text: "TXT、Markdown 单个文件最多 5 MB，1.6 MB 文件可以直接导入；PDF、扫描件和图片单个文件最多 10 MB，会发送至 Cloudflare AI 临时解析，本站不保存原件。解析正文不设 30000 字上限；大型正文会直接提交 OA，OA 作为 1 条资料统一审核，并自动拆成每个不超过 20000 字的存储片段。识别可能有误，请提交前核对。",
-      }),
-    );
+    if (state.importJob) {
+      const progress = element("progress", {
+        className: "import-progress",
+        attributes: {
+          max: String(state.importJob.total),
+          value: String(state.importJob.completed),
+          "aria-label": "批量导入进度",
+        },
+      });
+      const statusText = state.importJob.running
+        ? `正在处理 ${state.importJob.completed}/${state.importJob.total}：${state.importJob.currentName}`
+        : `本批共 ${state.importJob.total} 个：成功 ${state.importJob.succeeded} 个，重复 ${state.importJob.duplicates} 个，失败 ${state.importJob.failed} 个。`;
+      importStatus.append(progress, element("p", { className: "import-summary", text: statusText }));
+      if (state.importJob.failures.length) {
+        const failures = element("details", { className: "import-failure-list" });
+        failures.append(element("summary", { text: `查看失败文件（${state.importJob.failures.length}）` }));
+        const listItems = state.importJob.failures.map((failure) => element("li", {
+          text: `${failure.path}：${failure.message}`,
+        }));
+        failures.append(element("ul", {}, listItems));
+        importStatus.append(failures);
+      }
+      if (!state.importJob.running && state.failedImportFiles.length) {
+        const retry = textButton(`重试失败项（${state.failedImportFiles.length}）`, "secondary-button small-button");
+        retry.disabled = Boolean(state.busy);
+        retry.addEventListener("click", () => {
+          void importDocumentFiles(state.failedImportFiles, { source: "retry", retry: true });
+        });
+        importStatus.append(retry);
+      }
+    }
+    const importHelp = element("p", {
+      className: "small-note",
+      text: "可一次选择多个文件或整个文件夹，每批最多 100 个、总计 500 MB。TXT、Markdown 单个文件最多 5 MB；PDF、扫描件和图片单个文件最多 10 MB，会以最多 3 个并行任务发送至 Cloudflare AI 临时解析。系统按路径排序、自动跳过重复内容，并合并为一条 Markdown 正文；本站不保存原件。解析正文不设 30000 字上限；大型正文会直接提交 OA，OA 作为 1 条资料统一审核，并自动拆成每个不超过 20000 字的存储片段。识别可能有误，请提交前核对。",
+    });
 
     const actions = element("div", { className: "admin-buttons" });
     const directOaImport = Boolean(state.returnedKnowledgeItemId) || state.draft.body.length > CHAT_DIRECT_OA_THRESHOLD_CHARACTERS;
@@ -3869,6 +4089,8 @@ function createAdminApp() {
       cancel.disabled = Boolean(state.busy);
       cancel.addEventListener("click", () => {
         state.draft = emptyDraft();
+        state.importJob = null;
+        state.failedImportFiles = [];
         renderAdminShell();
       });
       actions.append(cancel);
@@ -3878,7 +4100,9 @@ function createAdminApp() {
       pair,
       url.label,
       bodyLabel,
-      fileLabel,
+      importControls,
+      importStatus,
+      importHelp,
       element("p", {
         className: "small-note",
         text: state.returnedKnowledgeItemId
@@ -3910,6 +4134,8 @@ function createAdminApp() {
             ...(returnedKnowledgeItemId ? { submissionContext: { returnedKnowledgeItemId } } : {}),
           });
           state.draft = emptyDraft();
+          state.importJob = null;
+          state.failedImportFiles = [];
           return;
         }
         const draft = { ...state.draft };
@@ -3929,6 +4155,8 @@ function createAdminApp() {
         const savedDocument = state.documents.find((document) => document.id === saved.id);
         if (!savedDocument) throw new Error("资料已保存，但暂时无法读取，请刷新后重试。");
         await submitDocumentToOa({ ...draft, ...savedDocument });
+        state.importJob = null;
+        state.failedImportFiles = [];
       });
     });
     editor.append(form);
@@ -3990,6 +4218,8 @@ function createAdminApp() {
               oaSubmissionState: "unsubmitted",
               submissionRequestId: "",
             };
+            state.importJob = null;
+            state.failedImportFiles = [];
             renderAdminShell();
             window.scrollTo({ top: 0, behavior: "smooth" });
           });
