@@ -44,10 +44,10 @@ async function harness() {
     },
     renderSuggestions() {},
     requestJson: () => new Promise((resolve, reject) => requests.push({ resolve, reject })),
-    dispatchQuestion: (question, section) => sent.push({ question, section }),
+    dispatchQuestion: (question, section, suggestionToken) => sent.push({ question, section, suggestionToken }),
   });
   const respond = (index, question) => requests[index].resolve({
-    suggestions: [{ id: "1", question, updatedAt: "2026-09-14" }],
+    suggestions: [{ id: "1", question, updatedAt: "2026-09-14", suggestionToken: "fresh-source-token" }],
     oaPublicStatus: "connected",
   });
   return { ...api, requests, sent, timers, respond };
@@ -91,6 +91,7 @@ test("click revalidation sends once only while readiness and the source question
     h.respond(0, scenario === "removed" ? "另一条话题" : "当前知识话题");
     await click;
     assert.equal(h.sent.length, scenario === "ready" ? 1 : 0, scenario);
+    if (scenario === "ready") assert.equal(h.sent[0].suggestionToken, "fresh-source-token");
     assert.equal(h.state.suggestionsLoading, false, scenario);
   }
 });

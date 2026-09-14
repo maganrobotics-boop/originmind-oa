@@ -1565,10 +1565,10 @@ function createPublicApp() {
     return article;
   }
 
-  function dispatchQuestion(rawQuestion, section) {
+  function dispatchQuestion(rawQuestion, section, suggestionToken = "") {
     const question = String(rawQuestion || "").trim();
     if (!question || sessionFor(section).sending) return;
-    const request = sendQuestion(question, section);
+    const request = sendQuestion(question, section, suggestionToken);
     if (state.section === section) questionInput.focus({ preventScroll: true });
     void request.catch(() => {});
   }
@@ -1601,6 +1601,7 @@ function createPublicApp() {
     renderSuggestions();
     const epoch = ++suggestionsEpoch;
     let current = [];
+    let suggestionToken = "";
     try {
       const payload = await requestJson("/api/suggestions", {
         cache: "no-store",
@@ -1608,6 +1609,8 @@ function createPublicApp() {
         timeoutMessage: "推荐话题核验超时。",
       });
       current = knowledgeSuggestionsFromPayload(payload);
+      const candidate = payload.suggestions?.find((item) => item.question === question);
+      suggestionToken = typeof candidate?.suggestionToken === "string" ? candidate.suggestionToken : "";
     } catch {
       // A recommendation that cannot be revalidated is not sent to chat.
     } finally {
@@ -1629,7 +1632,7 @@ function createPublicApp() {
       session.messages.length === 0 &&
       !session.sending
     ) {
-      dispatchQuestion(question, section);
+      dispatchQuestion(question, section, suggestionToken);
     }
   }
 
@@ -1727,7 +1730,7 @@ function createPublicApp() {
     });
   }
 
-  async function sendQuestion(rawQuestion, section = state.section) {
+  async function sendQuestion(rawQuestion, section = state.section, suggestionToken = "") {
     const session = sessionFor(section);
     const topic = topicFor(section);
     const question = String(rawQuestion || "").trim();
@@ -1770,6 +1773,7 @@ function createPublicApp() {
         messages: session.messages.filter((message) => message.role === "user").slice(-2).map(({ role, content }) => ({ role, content })),
         topic: topic.requestTopic,
         ...(session.conversationToken ? { conversationToken: session.conversationToken } : {}),
+        ...(suggestionToken ? { suggestionToken } : {}),
       }));
       reconcileChatOaStatus(payload, oaEvidenceEpoch);
       const assistant = {
