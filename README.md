@@ -218,9 +218,9 @@ An external model endpoint is optional and is called only from the server. Confi
 - `OA_LAB_AI_API_KEY=<server-side secret>`
 - `OA_LAB_AI_MODEL=<model name>` (defaults to `qwen3:1.7b`)
 - `OA_LAB_AI_FORMAT=openai|simple` (defaults to OpenAI-compatible chat JSON)
-- `OA_LAB_AI_TIMEOUT_MS=1000..20000` (defaults to 8000 ms)
+- `OA_LAB_AI_TIMEOUT_MS=1000..20000` (defaults to 5000 ms)
 
-The browser never receives the key. The request marks retrieved knowledge as untrusted reference data, sets `store: false`, limits context and response size, and rejects redirects. When the endpoint is absent, disabled, slow, malformed, or unavailable, the OA falls back to an extractive answer with the same reviewed citations rather than generating unsupported claims. PDF, Word, image/OCR, R2, and vector indexing are outside V1.
+The browser never receives the key. The request marks retrieved knowledge as untrusted reference data, sets `store: false`, and, for OpenAI-compatible requests, explicitly sets `enable_thinking: false` and `stream: false`; it also limits context and response size and rejects redirects. When the endpoint is absent, disabled, slow, malformed, or unavailable, the OA falls back to an extractive answer with the same reviewed citations rather than generating unsupported claims. PDF, Word, image/OCR, R2, and vector indexing are outside V1.
 
 The guarded standalone staging release still accepts exactly the two documented OAuth secrets. Do not add `OA_LAB_AI_API_KEY` to that release path until its standalone secret contract and validation gates are extended deliberately.
 

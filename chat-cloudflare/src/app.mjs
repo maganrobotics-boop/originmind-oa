@@ -52,6 +52,17 @@ function json(data, status = 200, headers = {}) {
   });
 }
 
+function chatTimingHeaders(timing) {
+  const duration = (value) => Math.max(0, Math.round(value));
+  return {
+    "Server-Timing": [
+      `oa;dur=${duration(timing.oa)}`,
+      `model;dur=${duration(timing.model)}`,
+      `total;dur=${duration(Date.now() - timing.startedAt)}`,
+    ].join(", "),
+  };
+}
+
 function canonicalOrigin(env) {
   if (typeof env.APP_ORIGIN !== "string") throw new Error("APP_ORIGIN_UNAVAILABLE");
   const url = new URL(env.APP_ORIGIN);
@@ -292,7 +303,7 @@ function bailianAnswer(value) {
   return content;
 }
 
-async function modelCall(context, config, messages, maxTokens = 1_400, timeoutMs = 40_000) {
+async function modelCall(context, config, messages, maxTokens = 700, timeoutMs = 20_000) {
   const url = `${aliyunEndpoint(config.baseUrl)}/chat/completions`;
   const response = await context.runtime.fetch(url, {
     method: "POST",
@@ -336,7 +347,7 @@ function modelProvider(context, config) {
   return { provider: null, model: null };
 }
 
-async function workersAiCall(context, messages, maxTokens = 1_400) {
+async function workersAiCall(context, messages, maxTokens = 700) {
   if (typeof context.env.AI?.run !== "function") {
     throw new PublicError("模型服务暂时不可用，请稍后重试。", 502);
   }
@@ -777,6 +788,9 @@ async function api(context) {
   const { request } = context;
   const path = new URL(request.url).pathname.replace(/^\/api\//u, "");
   const method = request.method;
+  const chatTiming = path === "chat" && method === "POST"
+    ? { startedAt: Date.now(), oa: 0, model: 0 }
+    : null;
   try {
     if (method === "POST" || method === "PATCH") sameOrigin(context);
     if (path === "status" && method === "GET") {
@@ -838,11 +852,26 @@ async function api(context) {
       if (last.role !== "user" || last.content.length > 2_000) throw new PublicError("请输入有效的问题");
       await limit(context, "chat", 25);
       const history = await conversationHistory(payload, context.env.APP_ENCRYPTION_KEY);
-      const oa = await retrieveOa(retrievalQuestion(last.content, history), context);
-      const chatResult = async (result) => json({
-        ...result,
-        conversationToken: await conversationToken(payload.topic, history, last.content, result.answer, context.env.APP_ENCRYPTION_KEY),
-      });
+      const oaStartedAt = Date.now();
+      let oa;
+      try {
+        oa = await retrieveOa(retrievalQuestion(last.content, history), context);
+      } finally {
+        chatTiming.oa = Date.now() - oaStartedAt;
+      }
+      const chatResult = async (result) => {
+        const token = await conversationToken(
+          payload.topic,
+          history,
+          last.content,
+          result.answer,
+          context.env.APP_ENCRYPTION_KEY,
+        );
+        return json({
+          ...result,
+          conversationToken: token,
+        }, 200, chatTimingHeaders(chatTiming));
+      };
       const documents = oa.documents.map((document) => ({
         ...document,
         title: displayKnowledgeTitle(document),
@@ -894,16 +923,21 @@ async function api(context) {
       let provider = active.provider;
       let answer;
       try {
-        if (active.provider === "bailian") {
-          try {
-            answer = await modelCall(context, config, messages);
-          } catch (error) {
-            if (typeof context.env.AI?.run !== "function") throw error;
-            provider = "workers-ai";
+        const modelStartedAt = Date.now();
+        try {
+          if (active.provider === "bailian") {
+            try {
+              answer = await modelCall(context, config, messages);
+            } catch (error) {
+              if (typeof context.env.AI?.run !== "function") throw error;
+              provider = "workers-ai";
+              answer = await workersAiCall(context, messages);
+            }
+          } else {
             answer = await workersAiCall(context, messages);
           }
-        } else {
-          answer = await workersAiCall(context, messages);
+        } finally {
+          chatTiming.model = Date.now() - modelStartedAt;
         }
         try {
           await recordModelStatus(context, config, active, {
@@ -1206,14 +1240,15 @@ async function api(context) {
     }
     return json({ error: "没有找到此接口" }, 404);
   } catch (error) {
-    if (error instanceof ValidationError) return json({ error: error.message }, 400);
-    if (error instanceof PublicError) return json({ error: error.message }, error.status);
+    const responseHeaders = chatTiming ? chatTimingHeaders(chatTiming) : {};
+    if (error instanceof ValidationError) return json({ error: error.message }, 400, responseHeaders);
+    if (error instanceof PublicError) return json({ error: error.message }, error.status, responseHeaders);
     console.error("Request failed", {
       path,
       method,
       type: error instanceof Error ? error.name : "unknown",
     });
-    return json({ error: "服务暂时不可用，内容尚未确认保存，请稍后重试。" }, 503);
+    return json({ error: "服务暂时不可用，内容尚未确认保存，请稍后重试。" }, 503, responseHeaders);
   }
 }
 

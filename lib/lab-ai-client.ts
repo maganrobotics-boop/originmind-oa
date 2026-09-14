@@ -1,6 +1,6 @@
 import { knowledgeExcerpt, type RankedKnowledgeChunk } from "./knowledge-policy";
 
-const DEFAULT_TIMEOUT_MS = 8_000;
+const DEFAULT_TIMEOUT_MS = 5_000;
 const MAX_TIMEOUT_MS = 20_000;
 const MAX_UPSTREAM_RESPONSE_BYTES = 65_536;
 const MAX_ANSWER_LENGTH = 4_000;
@@ -135,6 +135,8 @@ function requestBody(config: LabAiConfig, question: string, chunks: RankedKnowle
     ],
     temperature: 0.1,
     max_tokens: 1_000,
+    enable_thinking: false,
+    stream: false,
     store: false,
   };
 }
@@ -263,4 +265,4 @@ export async function answerLabQuestion(question: string, rankedChunks: RankedKn
   return { answer: extractiveAnswer(question, extractiveChunks), citations: buildCitations(extractiveChunks), mode: "extractive" };
 }
 
-export const __labAiTesting = { safeEndpoint, normalizeAnswer, answerFromPayload };
+export const __labAiTesting = { safeEndpoint, normalizeAnswer, answerFromPayload, configuredTimeout };

@@ -1251,6 +1251,7 @@ function createPublicApp() {
   function updateComposer() {
     const session = sessionFor();
     sendButton.disabled = session.sending || !questionInput.value.trim();
+    sendButton.textContent = session.sending ? "回答中" : "发送";
     questionInput.setAttribute("aria-busy", session.sending ? "true" : "false");
     newConversation.disabled = session.sending || !hasResettableState(session);
     clearChatHistory.disabled = session.sending || !hasResettableState(session);
@@ -1341,7 +1342,7 @@ function createPublicApp() {
             attributes: { role: "status", "aria-live": "polite" },
           }, [
             icon("◌", "spin"),
-            "正在整理回答…",
+            "正在检索并生成回答…",
           ]),
         );
       }

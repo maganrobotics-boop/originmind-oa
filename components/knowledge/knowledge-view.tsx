@@ -223,11 +223,11 @@ function KnowledgeAskPanel() {
           <div className="knowledge-question"><span>你</span><p>{turn.question}</p></div>
           <div className="knowledge-answer"><div className="knowledge-answer-avatar"><Bot className="size-4" /></div><div className="knowledge-answer-content"><div className="knowledge-answer-label"><strong>实验室知识助手</strong><Badge variant="outline">{askModeLabel(turn.mode)}</Badge></div><p>{turn.answer}</p><CitationList citations={turn.citations} turnId={turn.id} />{turn.citations.length === 0 && <div className="knowledge-no-citations"><AlertTriangle className="size-3.5" />本次没有检索到可引用的已审核知识，请勿将回答作为关键操作依据。</div>}</div></div>
         </article>)}
-        {asking && <div className="knowledge-answer knowledge-answer-loading" role="status"><div className="knowledge-answer-avatar"><Bot className="size-4" /></div><div><LoaderCircle className="size-4" />正在查找审核通过的知识…</div></div>}
+        {asking && <div className="knowledge-answer knowledge-answer-loading" role="status"><div className="knowledge-answer-avatar"><Bot className="size-4" /></div><div><LoaderCircle className="size-4" />正在检索并生成回答…</div></div>}
       </div>
       <form className="knowledge-ask-form" onSubmit={ask}>
         <label htmlFor="knowledge-question">输入问题</label>
-        <div><Textarea id="knowledge-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="例如：激光雷达标定前需要做哪些检查？" rows={3} minLength={2} maxLength={500} disabled={asking} /><Button type="submit" className="primary-button" disabled={asking || question.trim().length < 2}>{asking ? <LoaderCircle className="size-4" /> : <Send className="size-4" />}{asking ? "检索中" : "发送"}</Button></div>
+        <div><Textarea id="knowledge-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="例如：激光雷达标定前需要做哪些检查？" rows={3} minLength={2} maxLength={500} disabled={asking} /><Button type="submit" className="primary-button" disabled={asking || question.trim().length < 2}>{asking ? <LoaderCircle className="size-4" /> : <Send className="size-4" />}{asking ? "回答中" : "发送"}</Button></div>
         <small>回答用于项目协作参考；关键操作仍应结合原始记录和负责人要求核对。</small>
       </form>
     </section>

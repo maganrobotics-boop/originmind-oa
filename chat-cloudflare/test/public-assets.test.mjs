@@ -677,6 +677,9 @@ test("public chat keeps a minimal topic header and compact message composer", as
   assert.match(script, /rows:\s*["']1["']/u);
   assert.match(script, /placeholder:\s*["']输入消息["']/u);
   assert.match(script, /textButton\(["']发送["'],\s*["']send-button["']\)/u);
+  assert.match(script, /sendButton\.textContent\s*=\s*session\.sending\s*\?\s*["']回答中["']\s*:\s*["']发送["']/u);
+  assert.ok(script.includes("正在检索并生成回答…"));
+  assert.equal(script.includes("正在整理回答…"), false);
   assert.match(script, /className:\s*["']composer-suggestions["']/u);
   assert.match(script, /className:\s*["']suggestion-title["'],\s*text:\s*["']聊聊新话题["']/u);
   assert.match(script, /composerArea\.append\(errorRegion,\s*noticeRegion,\s*suggestionPanel,\s*composer\)/u);
