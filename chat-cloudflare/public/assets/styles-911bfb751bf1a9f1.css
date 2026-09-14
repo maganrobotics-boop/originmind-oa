@@ -2642,52 +2642,60 @@ body.public-chat-page {
 }
 
 .chat-app .composer-suggestions {
-  width: min(100%, 760px);
-  margin: 0 auto;
-  padding: 0 2px 10px;
+  flex: 0 0 auto;
+  width: 100%;
+  margin: 0;
+  padding: 4px max(10px, env(safe-area-inset-right)) 6px max(10px, env(safe-area-inset-left));
+  background: #ededed;
   animation: enter-soft 180ms ease both;
-}
-
-.chat-app .suggestion-title {
-  margin: 0 0 8px;
-  color: #666666;
-  font-size: 13px;
-  font-weight: 400;
-  line-height: 1.4;
-  text-align: center;
 }
 
 .chat-app .suggestions {
   display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
+  width: min(100%, 860px);
+  margin: 0 auto;
+  padding: 1px 0 3px;
+  overflow-x: auto;
+  flex-wrap: nowrap;
+  justify-content: safe center;
   gap: 8px;
-  margin: 0;
+  scrollbar-width: none;
+  overscroll-behavior-inline: contain;
+  scroll-snap-type: inline proximity;
+}
+
+.chat-app .suggestions::-webkit-scrollbar {
+  display: none;
 }
 
 .chat-app .suggestion-button {
-  display: inline-flex;
-  width: fit-content;
-  max-width: 100%;
+  display: block;
+  flex: 0 0 auto;
+  width: auto;
+  max-width: min(72vw, 520px);
   min-height: 44px;
   align-items: center;
-  padding: 9px 14px;
-  border: 1px solid #d8d8d8;
-  border-radius: 15px;
-  background: #ffffff;
+  padding: 8px 14px;
+  overflow: hidden;
+  border: 1px solid rgba(187, 187, 187, 0.78);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.94);
   color: #252525;
-  font-size: 15px;
-  line-height: 1.45;
+  font-size: 14px;
+  line-height: 1.5;
   text-align: left;
-  box-shadow: none;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  scroll-snap-align: start;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.045);
 }
 
 .chat-app .suggestion-button:hover {
   border-color: #bdbdbd;
   background: #fafafa;
   color: #111111;
-  box-shadow: none;
-  transform: none;
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.06);
+  transform: translateY(-1px);
 }
 
 .chat-app .message-list {
@@ -2774,7 +2782,7 @@ body.public-chat-page {
     8px max(10px, env(safe-area-inset-right))
     max(8px, env(safe-area-inset-bottom))
     max(10px, env(safe-area-inset-left));
-  border-top: 1px solid #d4d4d4;
+  border-top: 0;
   background: rgba(247, 247, 247, 0.97);
   backdrop-filter: blur(15px) saturate(120%);
 }
@@ -3063,8 +3071,7 @@ body.public-chat-page {
   }
 
   .chat-app .suggestions {
-    flex-direction: column;
-    align-items: flex-start;
+    justify-content: flex-start;
   }
 
   .chat-app .message-list {

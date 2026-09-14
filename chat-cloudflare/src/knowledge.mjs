@@ -19,7 +19,27 @@ export function fallbackAnswer(documents) {
   if (!documents.length) {
     return "目前没有足够信息回答这个问题。你可以补充具体方向、对象或时间范围；如需团队确认，请点击“提交咨询”。";
   }
-  return "暂时无法整理出可靠答案。你可以换个更具体的问法；如需确认当前安排，请点击“提交咨询”。";
+  const excerpts = [];
+  const seen = new Set();
+  for (const document of documents) {
+    const clean = typeof document?.body === "string"
+      ? document.body
+        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, " ")
+        .replace(/\s+/gu, " ")
+        .trim()
+      : "";
+    const key = clean.normalize("NFKC").toLocaleLowerCase("zh-CN");
+    if (!clean || seen.has(key)) continue;
+    seen.add(key);
+    const characters = Array.from(clean);
+    excerpts.push(characters.length > 520 ? `${characters.slice(0, 519).join("")}…` : clean);
+    if (excerpts.length === 3) break;
+  }
+  if (!excerpts.length) {
+    return "目前没有足够信息回答这个问题。你可以补充具体方向、对象或时间范围；如需团队确认，请点击“提交咨询”。";
+  }
+  if (excerpts.length === 1) return excerpts[0];
+  return `知识库中与这个问题直接相关的内容包括：\n\n${excerpts.map((excerpt) => `- ${excerpt}`).join("\n")}`;
 }
 
 export function safeSourceUrl(value) {

@@ -90,6 +90,7 @@ const vite = await createServer({
 const policy = await vite.ssrLoadModule("/lib/knowledge-policy.ts");
 const store = await vite.ssrLoadModule("/lib/knowledge-store.ts");
 const chatImport = await vite.ssrLoadModule("/lib/chat-knowledge-import.ts");
+const responseContract = await vite.ssrLoadModule("/app/api/public/lab-ai/_lib/response-contract.ts");
 const [migration, hardeningMigration, visibilityMigration, reclassificationMigration, revisionPartsMigration] = await Promise.all([
   readFile(new URL("../drizzle/0026_rich_jocasta.sql", import.meta.url), "utf8"),
   readFile(new URL("../drizzle/0027_careless_winter_soldier.sql", import.meta.url), "utf8"),
@@ -641,6 +642,202 @@ test("审核必须明确选择内部或公开，公开知识才进入对外检�
 
   const approvalEvents = globalThis[stateKey].sqlite.prepare("SELECT action FROM knowledge_events WHERE action LIKE 'approved_%' ORDER BY rowid").all().map((row) => row.action);
   assert.deepEqual(approvalEvents, ["approved_internal", "approved_public"]);
+});
+
+test("推荐候选只取最新的公开活动版本和活动分块，且生成的问题都能回检到原条目", async () => {
+  const sqlite = globalThis[stateKey].sqlite;
+  let hashNumber = 1;
+  const nextHash = () => (hashNumber++).toString(16).padStart(64, "0");
+  const insertItem = sqlite.prepare(`
+    INSERT INTO knowledge_items (
+      id, project, title, category, submitter_member_id, submitter_name, submitter_email,
+      status, visibility, current_revision_no, current_revision_id, active_revision_id,
+      mutation_revision, created_at, updated_at, revoked_at
+    ) VALUES (?, ?, ?, '测试', 'member-submit', '投稿成员', 'submit@example.com',
+      ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const insertRevision = sqlite.prepare(`
+    INSERT INTO knowledge_revisions (
+      id, item_id, revision_no, previous_revision_id, title, category, content, summary,
+      source_label, source_url, content_hash, status, created_by_member_id, created_by_name,
+      created_by_email, reviewed_by_member_id, reviewed_by_name, reviewed_by_email,
+      review_note, created_at, reviewed_at, activated_at, retired_at
+    ) VALUES (?, ?, ?, ?, ?, '测试', ?, '', '推荐候选测试', '', ?, ?,
+      'member-submit', '投稿成员', 'submit@example.com', 'member-review', '项目管理员',
+      'review@example.com', '测试审核', ?, ?, ?, ?)
+  `);
+  const insertChunk = sqlite.prepare(`
+    INSERT INTO knowledge_chunks (
+      id, item_id, revision_id, chunk_no, section_title, paragraph_ref,
+      content, search_text, is_active, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `);
+  const addRevision = ({
+    itemId,
+    revisionId,
+    revisionNo = 1,
+    previousRevisionId = null,
+    title,
+    status = "active",
+    createdAt,
+    chunks,
+  }) => {
+    const reviewedAt = status === "pending" ? null : createdAt;
+    const activatedAt = status === "active" || status === "superseded" ? createdAt : null;
+    const retiredAt = status === "superseded" || status === "revoked" ? createdAt : null;
+    insertRevision.run(
+      revisionId,
+      itemId,
+      revisionNo,
+      previousRevisionId,
+      title,
+      `${title}的公开测试正文。`,
+      nextHash(),
+      status,
+      createdAt,
+      reviewedAt,
+      activatedAt,
+      retiredAt,
+    );
+    for (const chunk of chunks) {
+      const content = chunk.content || `${title} ${chunk.sectionTitle || "概览"} 的可回答内容。`;
+      insertChunk.run(
+        `${revisionId}-chunk-${chunk.chunkNo}`,
+        itemId,
+        revisionId,
+        chunk.chunkNo,
+        chunk.sectionTitle || "",
+        `第 ${chunk.chunkNo} 段`,
+        content,
+        `${title}\n${chunk.sectionTitle || ""}\n${content}`.toLocaleLowerCase("zh-CN"),
+        chunk.isActive ?? 1,
+        createdAt,
+      );
+    }
+  };
+  const addItem = ({
+    itemId,
+    title,
+    status = "active",
+    visibility = "public",
+    updatedAt,
+    currentRevisionId = `${itemId}-revision-1`,
+    currentRevisionNo = 1,
+    activeRevisionId = status === "active" ? currentRevisionId : null,
+    revokedAt = status === "revoked" ? updatedAt : null,
+  }) => insertItem.run(
+    itemId,
+    policy.KNOWLEDGE_PROJECT,
+    title,
+    status,
+    visibility,
+    currentRevisionNo,
+    currentRevisionId,
+    activeRevisionId,
+    `${itemId}-mutation`,
+    updatedAt,
+    updatedAt,
+    revokedAt,
+  );
+
+  addItem({
+    itemId: "suggestion-new",
+    title: "星云夹爪维护周报",
+    updatedAt: "2026-09-14T12:00:00.000Z",
+    currentRevisionId: "suggestion-new-revision-2",
+    currentRevisionNo: 2,
+  });
+  addRevision({
+    itemId: "suggestion-new",
+    revisionId: "suggestion-new-revision-1",
+    title: "已淘汰的星云夹爪旧版",
+    status: "superseded",
+    createdAt: "2026-09-01T12:00:00.000Z",
+    chunks: [{ chunkNo: 1, sectionTitle: "旧版章节", content: "这段旧版内容不能成为推荐。" }],
+  });
+  addRevision({
+    itemId: "suggestion-new",
+    revisionId: "suggestion-new-revision-2",
+    revisionNo: 2,
+    previousRevisionId: "suggestion-new-revision-1",
+    title: "星云夹爪维护周报",
+    createdAt: "2026-09-14T12:00:00.000Z",
+    chunks: [
+      { chunkNo: 1, sectionTitle: "", content: "概览也可以回答，但不应优先于具名章节。" },
+      { chunkNo: 2, sectionTitle: "力控校准", content: "力控校准应先检查传感器零点。" },
+      { chunkNo: 3, sectionTitle: "停用章节", content: "非活动分块不能成为推荐。", isActive: 0 },
+    ],
+  });
+
+  addItem({
+    itemId: "suggestion-older",
+    title: "火星机械臂导航备忘录",
+    updatedAt: "2026-09-12T12:00:00.000Z",
+  });
+  addRevision({
+    itemId: "suggestion-older",
+    revisionId: "suggestion-older-revision-1",
+    title: "火星机械臂导航备忘录",
+    createdAt: "2026-09-12T12:00:00.000Z",
+    chunks: [
+      { chunkNo: 1, sectionTitle: "路径规划", content: "导航路径规划要保留安全冗余。" },
+      { chunkNo: 2, sectionTitle: "故障恢复", content: "导航故障恢复需要重新定位。" },
+    ],
+  });
+
+  const excluded = [
+    { itemId: "suggestion-internal", title: "内部资料", status: "active", visibility: "internal", updatedAt: "2026-09-20T12:00:00.000Z", revisionStatus: "active", isActive: 1 },
+    { itemId: "suggestion-pending", title: "待审核资料", status: "pending", visibility: "public", updatedAt: "2026-09-19T12:00:00.000Z", revisionStatus: "pending", isActive: 1 },
+    { itemId: "suggestion-revoked", title: "已撤销资料", status: "revoked", visibility: "public", updatedAt: "2026-09-18T12:00:00.000Z", revisionStatus: "revoked", isActive: 1 },
+    { itemId: "suggestion-pending-revision", title: "未生效版本资料", status: "active", visibility: "public", updatedAt: "2026-09-17T12:00:00.000Z", revisionStatus: "pending", isActive: 1 },
+    { itemId: "suggestion-inactive-chunk", title: "无活动分块资料", status: "active", visibility: "public", updatedAt: "2026-09-16T12:00:00.000Z", revisionStatus: "active", isActive: 0 },
+  ];
+  for (const fixture of excluded) {
+    const revisionId = `${fixture.itemId}-revision-1`;
+    addItem({
+      itemId: fixture.itemId,
+      title: fixture.title,
+      status: fixture.status,
+      visibility: fixture.visibility,
+      updatedAt: fixture.updatedAt,
+      currentRevisionId: revisionId,
+      activeRevisionId: fixture.status === "active" ? revisionId : null,
+    });
+    addRevision({
+      itemId: fixture.itemId,
+      revisionId,
+      title: fixture.title,
+      status: fixture.revisionStatus,
+      createdAt: fixture.updatedAt,
+      chunks: [{ chunkNo: 1, sectionTitle: "不应出现", isActive: fixture.isActive }],
+    });
+  }
+
+  const candidates = await store.getLatestPublicKnowledgeSuggestionCandidates(12);
+  assert.deepEqual(candidates, [
+    {
+      title: "星云夹爪维护周报",
+      sectionTitle: "力控校准",
+      updatedAt: "2026-09-14T12:00:00.000Z",
+    },
+    {
+      title: "火星机械臂导航备忘录",
+      sectionTitle: "路径规划",
+      updatedAt: "2026-09-12T12:00:00.000Z",
+    },
+  ]);
+  assert.equal(candidates.filter((candidate) => candidate.title === "星云夹爪维护周报").length, 1);
+
+  const { suggestions } = responseContract.buildPublicLabAiSuggestionsResponse(candidates);
+  assert.equal(suggestions.length, candidates.length);
+  for (const suggestion of suggestions) {
+    const expectedTitle = suggestion.question.match(/^《([^》]+)》/u)?.[1];
+    assert.ok(expectedTitle);
+    const retrieved = await store.getPublicActiveKnowledgeChunks(suggestion.question);
+    const ranked = policy.rankKnowledgeChunks(suggestion.question, retrieved, 6);
+    assert.ok(ranked.length > 0, `suggested question must retrieve evidence: ${suggestion.question}`);
+    assert.equal(ranked[0].title, expectedTitle);
+  }
 });
 
 test("审核人可重新分类 active 知识且不改动正文、版本或分块", async () => {

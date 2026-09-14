@@ -336,7 +336,7 @@ test("Bailian failure and Workers fallback consume one aggregate status-probe bu
   assert.equal(budgetWrites().length, 1);
 });
 
-test("a failed real chat call immediately replaces a cached green Qwen status", async () => {
+test("a failed real chat call returns knowledge while replacing a cached green Qwen status", async () => {
   let aiCalls = 0;
   const env = environment({
     AI: {
@@ -356,7 +356,10 @@ test("a failed real chat call immediately replaces a cached green Qwen status", 
     {},
     oaRuntime(),
   );
-  assert.equal(failedChat.status, 502);
+  assert.equal(failedChat.status, 200);
+  const failedResult = await body(failedChat);
+  assert.equal(failedResult.mode, "retrieval");
+  assert.equal(failedResult.answer, OA_CHUNKS[0].excerpt);
   const updatedStatus = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
   const result = await body(updatedStatus);
   assert.equal(result.qwenReady, false);
@@ -875,7 +878,7 @@ test("a verified Bailian configuration overrides Workers AI and forbids redirect
   assert.equal(JSON.parse(fetchCalls[0].init.body).stream, false);
 });
 
-test("Bailian rejects redirect responses without following them", async () => {
+test("Bailian redirect responses fall back to retrieved knowledge without being followed", async () => {
   const env = environment({ DB: await bailianDatabase() });
   let externalCalls = 0;
   const runtime = oaRuntime(OA_CHUNKS, async (_url, init) => {
@@ -889,11 +892,14 @@ test("Bailian rejects redirect responses without following them", async () => {
     {},
     runtime,
   );
-  assert.equal(response.status, 502);
+  assert.equal(response.status, 200);
+  const result = await body(response);
+  assert.equal(result.mode, "retrieval");
+  assert.equal(result.answer, OA_CHUNKS[0].excerpt);
   assert.equal(externalCalls, 1);
 });
 
-test("Bailian rejects non-JSON responses", async () => {
+test("Bailian non-JSON responses fall back to retrieved knowledge", async () => {
   const env = environment({ DB: await bailianDatabase() });
   const runtime = oaRuntime(OA_CHUNKS, async () => {
       return new Response("<html>not JSON</html>", {
@@ -907,10 +913,13 @@ test("Bailian rejects non-JSON responses", async () => {
     {},
     runtime,
   );
-  assert.equal(response.status, 502);
+  assert.equal(response.status, 200);
+  const result = await body(response);
+  assert.equal(result.mode, "retrieval");
+  assert.equal(result.answer, OA_CHUNKS[0].excerpt);
 });
 
-test("Bailian rejects chunked JSON bodies larger than 256 KiB", async () => {
+test("oversized Bailian responses fall back to retrieved knowledge", async () => {
   const env = environment({ DB: await bailianDatabase() });
   const hugeJson = JSON.stringify({ choices: [{ message: { content: "大".repeat(270 * 1024) } }] });
   const encoded = new TextEncoder().encode(hugeJson);
@@ -934,7 +943,10 @@ test("Bailian rejects chunked JSON bodies larger than 256 KiB", async () => {
     {},
     runtime,
   );
-  assert.equal(response.status, 502);
+  assert.equal(response.status, 200);
+  const result = await body(response);
+  assert.equal(result.mode, "retrieval");
+  assert.equal(result.answer, OA_CHUNKS[0].excerpt);
 });
 
 test("rate-limit identifiers depend on RATE_LIMIT_HMAC_KEY, not the encryption key", async () => {
