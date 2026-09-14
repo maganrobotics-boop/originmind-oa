@@ -389,6 +389,93 @@ const SYSTEM_LIGHTS = Object.freeze([
 const SYSTEM_STATUS_REFRESH_MS = 60_000;
 const SYSTEM_STATUS_RETRY_MS = 5_000;
 const SYSTEM_STATUS_TIMEOUT_MS = 15_000;
+const CHAT_OA_PUBLIC_STATUSES = Object.freeze([
+  "connected",
+  "not_configured",
+  "auth_error",
+  "rate_limited",
+  "timeout",
+  "invalid_response",
+  "unavailable",
+]);
+
+function emptyChatServiceEvidence() {
+  return {
+    storageReady: true,
+    modelReady: false,
+    qwenReady: false,
+    modelPending: false,
+    oaReady: false,
+    knowledgeReady: false,
+    retrievalReady: false,
+    oaPending: false,
+    budgetReady: false,
+    systemReady: false,
+    documentParsingReady: false,
+    provider: null,
+    model: null,
+  };
+}
+
+function oaFailureMessage(status) {
+  if (status === "not_configured") return "OA 知识服务未配置";
+  if (status === "auth_error") return "OA 知识服务凭证校验失败";
+  if (status === "rate_limited") return "OA 知识检索请求较多";
+  if (status === "timeout") return "OA 知识检索响应超时";
+  if (status === "invalid_response") return "OA 知识服务响应异常";
+  return "OA 知识检索暂不可用";
+}
+
+function reconciledChatOaEvidence(service, payload, evidenceEpoch, currentEpoch) {
+  const oaPublicStatus = payload?.oaPublicStatus;
+  if (evidenceEpoch !== currentEpoch || !CHAT_OA_PUBLIC_STATUSES.includes(oaPublicStatus)) return null;
+  const current = service || emptyChatServiceEvidence();
+  const connected = oaPublicStatus === "connected";
+  const configurationFailure = oaPublicStatus === "not_configured" || oaPublicStatus === "auth_error";
+  const knowledgeReady = connected
+    ? current.knowledgeReady === true || (Array.isArray(payload.sources) && payload.sources.length > 0)
+    : configurationFailure
+      ? false
+      : current.knowledgeReady;
+  const next = {
+    ...current,
+    oaReady: connected ? true : configurationFailure ? false : current.oaReady,
+    knowledgeReady,
+    retrievalReady: connected,
+    oaPending: false,
+    oaFailureStatus: connected ? null : oaPublicStatus,
+  };
+  next.systemReady = connected &&
+    next.storageReady === true &&
+    next.modelReady === true &&
+    next.qwenReady === true &&
+    knowledgeReady &&
+    next.budgetReady === true;
+  return {
+    service: next,
+    error: connected ? "" : oaFailureMessage(oaPublicStatus),
+  };
+}
+
+function systemStatusRefreshPlan(service, retryDelay) {
+  if (service?.systemReady === true && service.modelPending !== true && service.oaPending !== true) {
+    return { delay: SYSTEM_STATUS_REFRESH_MS, nextRetryDelay: SYSTEM_STATUS_RETRY_MS };
+  }
+  const delay = Number.isFinite(retryDelay)
+    ? Math.max(SYSTEM_STATUS_RETRY_MS, Math.min(SYSTEM_STATUS_REFRESH_MS, retryDelay))
+    : SYSTEM_STATUS_RETRY_MS;
+  return {
+    delay,
+    nextRetryDelay: Math.min(SYSTEM_STATUS_REFRESH_MS, delay * 2),
+  };
+}
+
+function oaRetrievalStatusDetail(service) {
+  if (service?.oaFailureStatus === "rate_limited") return "OA 检索请求较多";
+  if (service?.oaFailureStatus === "timeout") return "OA 检索响应较慢";
+  if (service?.oaFailureStatus === "invalid_response") return "OA 检索响应异常";
+  return "OA 知识检索暂不可用";
+}
 
 function createPublicApp() {
   document.documentElement.classList.add("public-chat-page");
@@ -801,6 +888,8 @@ function createPublicApp() {
   let systemStatusController = null;
   let systemStatusCheckedAt = 0;
   let systemStatusRefreshTimer = null;
+  let systemStatusRefreshDueAt = 0;
+  let systemStatusRetryDelay = SYSTEM_STATUS_RETRY_MS;
   let announcedSystemDescription = "";
 
   function setSystemLight(key, tone, detail) {
@@ -839,7 +928,7 @@ function createPublicApp() {
       : knowledgeReady
         ? "OA 知识可检索"
         : service.knowledgeReady === true
-          ? "OA 知识检索不可用"
+          ? oaRetrievalStatusDetail(service)
           : "OA 公开知识不可用";
     setSystemLight("knowledge", knowledgeTone, knowledgeDetail);
     details.push(`知识：${knowledgeDetail}`);
@@ -860,7 +949,7 @@ function createPublicApp() {
         : service.budgetReady === false
           ? "今日 AI 额度已用完"
           : service.oaReady === true && service.retrievalReady === false
-            ? "OA 检索繁忙"
+            ? oaRetrievalStatusDetail(service)
             : "运行异常";
     setSystemLight("system", systemTone, systemDetail);
     details.push(`系统：${systemDetail}`);
@@ -902,74 +991,50 @@ function createPublicApp() {
     }
   }
 
-  function reconcileChatOaStatus(payload) {
-    const oaPublicStatus = payload?.oaPublicStatus;
-    if (!state.service || ![
-      "connected",
-      "not_configured",
-      "auth_error",
-      "rate_limited",
-      "timeout",
-      "invalid_response",
-      "unavailable",
-    ].includes(oaPublicStatus)) return;
-    systemStatusEpoch += 1;
-    if (systemStatusController) {
-      systemStatusController.abort();
-      systemStatusController = null;
+  function reconcileChatOaStatus(payload, evidenceEpoch) {
+    const reconciled = reconciledChatOaEvidence(
+      state.service,
+      payload,
+      evidenceEpoch,
+      systemStatusEpoch,
+    );
+    if (!reconciled) {
+      if (evidenceEpoch === systemStatusEpoch) scheduleNextSystemStatusRefresh();
+      return;
     }
-    const connected = oaPublicStatus === "connected";
-    const configurationFailure = oaPublicStatus === "not_configured" || oaPublicStatus === "auth_error";
-    const knowledgeReady = connected
-      ? state.service.knowledgeReady === true || (Array.isArray(payload.sources) && payload.sources.length > 0)
-      : configurationFailure
-        ? false
-        : state.service.knowledgeReady;
-    state.service = {
-      ...state.service,
-      oaReady: connected ? true : configurationFailure ? false : state.service.oaReady,
-      knowledgeReady,
-      retrievalReady: connected,
-      oaPending: false,
-      systemReady: connected &&
-        state.service.storageReady === true &&
-        state.service.modelReady === true &&
-        state.service.qwenReady === true &&
-        knowledgeReady &&
-        state.service.budgetReady === true,
-    };
-    state.serviceError = connected
-      ? ""
-      : oaPublicStatus === "not_configured"
-        ? "OA 知识服务未配置"
-        : oaPublicStatus === "auth_error"
-          ? "OA 知识服务凭证校验失败"
-          : oaPublicStatus === "rate_limited"
-            ? "OA 知识检索请求较多"
-            : oaPublicStatus === "timeout"
-              ? "OA 知识检索响应超时"
-              : oaPublicStatus === "invalid_response"
-                ? "OA 知识服务响应异常"
-                : "OA 知识检索暂不可用";
+    state.service = reconciled.service;
+    state.serviceError = reconciled.error;
     statusText.textContent = serviceLabel(state.service);
     updateSystemLights();
-    scheduleSystemStatusRefresh(state.service.systemReady ? SYSTEM_STATUS_REFRESH_MS : SYSTEM_STATUS_RETRY_MS);
+    systemStatusRetryDelay = SYSTEM_STATUS_RETRY_MS;
+    scheduleNextSystemStatusRefresh();
   }
 
   function scheduleSystemStatusRefresh(delay = SYSTEM_STATUS_REFRESH_MS) {
     if (systemStatusRefreshTimer !== null) window.clearTimeout(systemStatusRefreshTimer);
+    systemStatusRefreshDueAt = Date.now() + delay;
     systemStatusRefreshTimer = window.setTimeout(() => {
       systemStatusRefreshTimer = null;
       if (document.hidden) {
-        scheduleSystemStatusRefresh();
+        systemStatusRefreshDueAt = Date.now();
         return;
       }
+      systemStatusRefreshDueAt = 0;
       void loadSystemStatus();
     }, delay);
   }
 
+  function scheduleNextSystemStatusRefresh() {
+    const plan = systemStatusRefreshPlan(state.service, systemStatusRetryDelay);
+    systemStatusRetryDelay = plan.nextRetryDelay;
+    scheduleSystemStatusRefresh(plan.delay);
+  }
+
   async function loadSystemStatus({ showPending = false } = {}) {
     if (systemStatusController) return;
+    if (systemStatusRefreshTimer !== null) window.clearTimeout(systemStatusRefreshTimer);
+    systemStatusRefreshTimer = null;
+    systemStatusRefreshDueAt = 0;
     const epoch = ++systemStatusEpoch;
     const controller = new AbortController();
     systemStatusController = controller;
@@ -985,8 +1050,8 @@ function createPublicApp() {
       requestJson("/api/status", { cache: "no-store", signal: controller.signal }),
     ]);
     window.clearTimeout(timeout);
+    if (systemStatusController === controller) systemStatusController = null;
     if (epoch !== systemStatusEpoch) return;
-    systemStatusController = null;
     state.networkReady =
       (networkResult.status === "fulfilled" && networkResult.value === true) ||
       statusResult.status === "fulfilled";
@@ -1014,15 +1079,7 @@ function createPublicApp() {
     statusText.textContent = serviceLabel(state.service);
     updateSystemLights();
     syncFeedback();
-    scheduleSystemStatusRefresh(
-      state.service.modelPending === true ||
-        state.service.oaPending === true ||
-        state.service.oaReady !== true ||
-        state.service.knowledgeReady !== true ||
-        state.service.retrievalReady !== true
-        ? SYSTEM_STATUS_RETRY_MS
-        : SYSTEM_STATUS_REFRESH_MS,
-    );
+    scheduleNextSystemStatusRefresh();
   }
 
   let viewportFrame = 0;
@@ -1325,6 +1382,11 @@ function createPublicApp() {
       if (state.section === section) syncFeedback();
       throw new Error(session.error);
     }
+    const oaEvidenceEpoch = ++systemStatusEpoch;
+    if (systemStatusController) {
+      systemStatusController.abort();
+      systemStatusController = null;
+    }
 
     const previousMessages = session.messages.slice();
     const previousScrollTop = session.scrollTop;
@@ -1350,7 +1412,7 @@ function createPublicApp() {
         topic: topic.requestTopic,
         ...(session.conversationToken ? { conversationToken: session.conversationToken } : {}),
       }));
-      reconcileChatOaStatus(payload);
+      reconcileChatOaStatus(payload, oaEvidenceEpoch);
       const assistant = {
         role: "assistant",
         content: userFacingAnswer(payload.answer),
@@ -1373,6 +1435,10 @@ function createPublicApp() {
         questionInput.value = session.draft;
         resizeQuestionInput();
         syncFeedback();
+      }
+      if (oaEvidenceEpoch === systemStatusEpoch) {
+        systemStatusRetryDelay = SYSTEM_STATUS_RETRY_MS;
+        scheduleNextSystemStatusRefresh();
       }
       throw error;
     } finally {
@@ -1624,7 +1690,10 @@ function createPublicApp() {
     syncFeedback();
   });
   document.addEventListener("visibilitychange", () => {
-    if (!document.hidden && Date.now() - systemStatusCheckedAt >= SYSTEM_STATUS_REFRESH_MS) {
+    if (!document.hidden && (
+      (systemStatusRefreshDueAt > 0 && Date.now() >= systemStatusRefreshDueAt) ||
+      (systemStatusRefreshDueAt === 0 && Date.now() - systemStatusCheckedAt >= SYSTEM_STATUS_REFRESH_MS)
+    )) {
       void loadSystemStatus();
     }
   });

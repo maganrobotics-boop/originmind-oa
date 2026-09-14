@@ -364,7 +364,7 @@ test("a failed real chat call immediately replaces a cached green Qwen status", 
   assert.equal(aiCalls, 2);
 });
 
-test("a transient OA retrieval failure preserves structural readiness and a later success clears it", async () => {
+test("a transient OA retrieval failure does not poison the shared readiness cache", async () => {
   let retrievalAvailable = true;
   const serviceCalls = [];
   const env = environment({
@@ -404,26 +404,59 @@ test("a transient OA retrieval failure preserves structural readiness and a late
   const result = await body(updatedStatus);
   assert.equal(result.oaReady, true);
   assert.equal(result.knowledgeReady, true);
-  assert.equal(result.retrievalReady, false);
-  assert.equal(result.systemReady, false);
+  assert.equal(result.retrievalReady, true);
+  assert.equal(result.systemReady, true);
   assert.deepEqual(serviceCalls.map(({ method }) => method), ["GET", "POST", "POST"]);
+});
 
+test("a failed OA readiness probe is retried after the short negative-cache TTL", async () => {
+  let retrievalAvailable = false;
+  const serviceCalls = [];
+  const DB = new MockD1();
+  const env = environment({
+    DB,
+    AI: { async run() { return { response: "连接成功" }; } },
+    OA_SERVICE: {
+      async fetch(boundRequest) {
+        serviceCalls.push(boundRequest.method);
+        if (boundRequest.url === OA_STATUS_URL) {
+          return Response.json(
+            { oaReady: true, publicKnowledgeReady: true, retrievalReady: true },
+            { headers: { "Content-Type": "application/json" } },
+          );
+        }
+        return retrievalAvailable
+          ? Response.json({ chunks: OA_CHUNKS }, { headers: { "Content-Type": "application/json" } })
+          : new Response(null, { status: 503 });
+      },
+    },
+  });
+
+  const failed = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+  const failedResult = await body(failed);
+  assert.equal(failedResult.oaReady, true);
+  assert.equal(failedResult.knowledgeReady, true);
+  assert.equal(failedResult.retrievalReady, false);
+  assert.deepEqual(serviceCalls, ["GET", "POST"]);
+
+  const cached = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+  assert.equal((await body(cached)).retrievalReady, false);
+  assert.deepEqual(serviceCalls, ["GET", "POST"]);
+
+  const cacheEntry = [...DB.settings.entries()].find(([id]) => id.startsWith("system-status-oa-v2:"));
+  assert.ok(cacheEntry);
+  const record = JSON.parse(cacheEntry[1]);
+  record.checkedAt -= 5_001;
+  DB.settings.set(cacheEntry[0], JSON.stringify(record));
   retrievalAvailable = true;
-  const recoveredChat = await handleRequest(
-    request("/api/chat", { method: "POST", body: chatBody("机器人研究方向有哪些？") }),
-    env,
-    {},
-    oaRuntime(),
-  );
-  assert.equal((await body(recoveredChat)).oaPublicStatus, "connected");
 
-  const recoveredStatus = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
-  const recoveredResult = await body(recoveredStatus);
+  const recovered = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
+  const recoveredResult = await body(recovered);
   assert.equal(recoveredResult.oaReady, true);
   assert.equal(recoveredResult.knowledgeReady, true);
   assert.equal(recoveredResult.retrievalReady, true);
   assert.equal(recoveredResult.systemReady, true);
-  assert.deepEqual(serviceCalls.map(({ method }) => method), ["GET", "POST", "POST", "POST"]);
+  assert.deepEqual(serviceCalls, ["GET", "POST", "GET", "POST"]);
 });
 
 test("OA retrieval preserves actionable upstream failure classes", async (t) => {

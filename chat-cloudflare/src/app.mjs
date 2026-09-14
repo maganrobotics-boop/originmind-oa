@@ -578,50 +578,6 @@ async function oaStatusIdentity(context) {
   ]));
 }
 
-async function recordOaRetrievalStatus(context, status, hasDocuments) {
-  if (![
-    "connected",
-    "not_configured",
-    "auth_error",
-    "rate_limited",
-    "timeout",
-    "invalid_response",
-    "unavailable",
-  ].includes(status)) return;
-  const identity = await oaStatusIdentity(context);
-  const id = `system-status-oa-v2:${identity}`;
-  const row = await database(context).prepare("SELECT value FROM settings WHERE id = ?").bind(id).first();
-  const previous = row
-    ? parsedStatusCache(row.value, identity, validatedOaStatus)?.result
-    : null;
-  const configurationFailure = status === "not_configured" || status === "auth_error";
-  const normalized = validatedOaStatus(status === "connected"
-    ? {
-        oaReady: true,
-        knowledgeReady: previous?.knowledgeReady === true || hasDocuments === true,
-        retrievalReady: true,
-      }
-    : configurationFailure
-      ? { oaReady: false, knowledgeReady: false, retrievalReady: false }
-      : {
-          oaReady: previous?.oaReady === true,
-          knowledgeReady: previous?.knowledgeReady === true,
-          retrievalReady: false,
-        });
-  if (!normalized) return;
-  await database(context)
-    .prepare("INSERT INTO settings (id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value")
-    .bind(id, JSON.stringify({
-      version: 1,
-      identity,
-      leaseId: null,
-      checkedAt: Date.now(),
-      leaseUntil: 0,
-      result: normalized,
-    }))
-    .run();
-}
-
 async function currentModelStatus(context, config, active) {
   const identity = await modelStatusIdentity(context, config, active);
   return cachedStatusProbe(
@@ -883,13 +839,6 @@ async function api(context) {
       await limit(context, "chat", 25);
       const history = await conversationHistory(payload, context.env.APP_ENCRYPTION_KEY);
       const oa = await retrieveOa(retrievalQuestion(last.content, history), context);
-      if (oa.status !== "invalid_question") {
-        try {
-          await recordOaRetrievalStatus(context, oa.status, oa.documents.length > 0);
-        } catch {
-          // The answer must still follow the live retrieval result if status evidence cannot be updated.
-        }
-      }
       const chatResult = async (result) => json({
         ...result,
         conversationToken: await conversationToken(payload.topic, history, last.content, result.answer, context.env.APP_ENCRYPTION_KEY),
