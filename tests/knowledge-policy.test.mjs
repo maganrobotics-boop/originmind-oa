@@ -31,9 +31,7 @@ after(async () => {
 });
 
 beforeEach(() => {
-  delete process.env.OA_LAB_AI_ENDPOINT;
-  delete process.env.OA_LAB_AI_API_KEY;
-  delete process.env.OA_LAB_AI_ENABLED;
+  for (const key of Object.keys(originalLabEnvironment)) delete process.env[key];
 });
 
 const policy = await vite.ssrLoadModule("/lib/knowledge-policy.ts");
@@ -325,6 +323,9 @@ test("受保护模型端点返回 grounded 模式且请求只在服务端携带�
     assert.equal(captured.url, process.env.OA_LAB_AI_ENDPOINT);
     assert.equal(captured.init.headers.authorization, `Bearer ${testApiKey}`);
     assert.equal(captured.init.redirect, "error");
+    assert.equal(captured.body.max_tokens, 1_000);
+    assert.equal(captured.body.enable_thinking, false);
+    assert.equal(captured.body.stream, false);
     assert.equal(captured.body.store, false);
     assert.match(captured.body.messages[0].content, /不可信的参考数据/u);
 
@@ -371,4 +372,13 @@ test("外部模型端点校验阻止不安全地址并清理伪造引用", () =>
   assert.equal(labAi.__labAiTesting.normalizeAnswer("答案 [9]", 2), "");
   assert.equal(labAi.__labAiTesting.normalizeAnswer("有依据 [1]，伪造依据 [9]", 2), "");
   assert.equal(labAi.__labAiTesting.normalizeAnswer("有依据 [1]，超长伪造依据 [1000]", 2), "");
+});
+
+test("外部模型超时默认值与边界保持受控", () => {
+  assert.equal(labAi.__labAiTesting.configuredTimeout(undefined), 5_000);
+  assert.equal(labAi.__labAiTesting.configuredTimeout("1000"), 1_000);
+  assert.equal(labAi.__labAiTesting.configuredTimeout("20000"), 20_000);
+  assert.equal(labAi.__labAiTesting.configuredTimeout("999"), 5_000);
+  assert.equal(labAi.__labAiTesting.configuredTimeout("20001"), 5_000);
+  assert.equal(labAi.__labAiTesting.configuredTimeout("invalid"), 5_000);
 });

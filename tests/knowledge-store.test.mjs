@@ -894,6 +894,40 @@ test("审核写入在 SQL 时间复核项目负责人角色，配置型负责人
 
 test("问题预筛选不会让超过候选上限的旧文档尾部在内部或公共检索中饿死", async () => {
   const sqlite = globalThis[stateKey].sqlite;
+  const candidateLimit = store.KNOWLEDGE_SEARCH_CANDIDATE_LIMIT;
+  assert.equal(candidateLimit, 256);
+  assert.ok(candidateLimit < policy.MAX_KNOWLEDGE_CHUNKS);
+
+  const assertLateHydrationSql = (sql) => {
+    const boundedAt = sql.indexOf("limited_candidates AS");
+    const limitAt = sql.indexOf("LIMIT ?", boundedAt);
+    const hydrateAt = sql.indexOf("FROM limited_candidates AS limited", limitAt);
+    const chunkJoinAt = sql.indexOf("INNER JOIN knowledge_chunks AS c", hydrateAt);
+    assert.ok(
+      boundedAt >= 0 && boundedAt < limitAt && limitAt < hydrateAt && hydrateAt < chunkJoinAt,
+      "candidate IDs must be limited before chunk content is hydrated",
+    );
+  };
+  const sqlTermQuotas = (sql) => Array.from(
+    sql.matchAll(/\(\d+, \?, (\d+)\)/gu),
+    (match) => Number(match[1]),
+  );
+  const assertBalancedItemCandidates = (chunks, expectedItemCount) => {
+    const counts = new Map();
+    for (const chunk of chunks) counts.set(chunk.itemId, (counts.get(chunk.itemId) ?? 0) + 1);
+    assert.equal(counts.size, expectedItemCount);
+    const values = Array.from(counts.values());
+    assert.ok(Math.max(...values) - Math.min(...values) <= 1, `unbalanced candidate counts: ${values.join(",")}`);
+  };
+  const assertContiguousPublicIds = (chunks) => {
+    const chunkNumbers = chunks
+      .map((chunk) => Number(chunk.id.replace("public-chunk-", "")))
+      .sort((left, right) => left - right);
+    assert.deepEqual(chunkNumbers, Array.from({ length: chunks.length }, (_, index) => index + 1));
+    const itemNumbers = Array.from(new Set(chunks.map((chunk) => Number(chunk.itemId.replace("public-item-", "")))))
+      .sort((left, right) => left - right);
+    assert.deepEqual(itemNumbers, Array.from({ length: itemNumbers.length }, (_, index) => index + 1));
+  };
   const insertItem = sqlite.prepare(`
     INSERT INTO knowledge_items (
       id, project, title, category, submitter_member_id, submitter_name, submitter_email,
@@ -970,21 +1004,23 @@ test("问题预筛选不会让超过候选上限的旧文档尾部在内部或�
   }
 
   const unfilteredInternal = await store.getActiveKnowledgeChunks(actor("submitter"));
-  assert.equal(unfilteredInternal.length, policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.equal(unfilteredInternal.length, candidateLimit);
   assert.deepEqual(new Set(unfilteredInternal.map((chunk) => chunk.itemId)), new Set(["fixture-new-item"]));
   const unfilteredPublic = await store.getPublicActiveKnowledgeChunks();
-  assert.equal(unfilteredPublic.length, policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.equal(unfilteredPublic.length, candidateLimit);
   assert.ok(unfilteredPublic.every((chunk) => !chunk.content.includes("冷门尾段校验词")));
+  assertLateHydrationSql(globalThis[stateKey].database.preparedSql.at(-1));
+  assertContiguousPublicIds(unfilteredPublic);
 
   const question = "机械臂 冷门尾段校验词在哪里？";
   const internal = await store.getActiveKnowledgeChunks(actor("submitter"), question);
-  assert.ok(internal.length > 1 && internal.length <= policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.ok(internal.length > 1 && internal.length <= candidateLimit);
   const rareInternal = internal.find((chunk) => chunk.content.includes("冷门尾段校验词"));
   assert.equal(rareInternal?.itemId, "fixture-old-item");
   assert.ok(policy.rankKnowledgeChunks(question, internal, 6).some((chunk) => chunk.content.includes("冷门尾段校验词")));
 
   const publicChunks = await store.getPublicActiveKnowledgeChunks(question);
-  assert.ok(publicChunks.length > 1 && publicChunks.length <= policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.ok(publicChunks.length > 1 && publicChunks.length <= candidateLimit);
   const rarePublic = publicChunks.find((chunk) => chunk.content.includes("冷门尾段校验词"));
   assert.ok(rarePublic?.itemId.startsWith("public-item-"));
   assert.ok(policy.rankKnowledgeChunks(question, publicChunks, 6).some((chunk) => chunk.content.includes("冷门尾段校验词")));
@@ -1001,8 +1037,10 @@ test("问题预筛选不会让超过候选上限的旧文档尾部在内部或�
   const maximumInternal = await store.getActiveKnowledgeChunks(actor("submitter"), maximumTermQuestion);
   const internalElapsed = performance.now() - startedAt;
   assert.equal(globalThis[stateKey].database.preparedSql.length - statementCount, 1, "internal prefilter must remain one D1 query");
-  assert.equal(globalThis[stateKey].database.preparedSql.at(-1).match(/\(\d+, \?, \d+\)/gu)?.length, 16);
-  assert.ok(maximumInternal.length <= policy.MAX_KNOWLEDGE_CHUNKS);
+  const maximumInternalSql = globalThis[stateKey].database.preparedSql.at(-1);
+  assert.deepEqual(sqlTermQuotas(maximumInternalSql), Array.from({ length: 16 }, () => 16));
+  assertLateHydrationSql(maximumInternalSql);
+  assert.equal(maximumInternal.length, candidateLimit);
   assert.ok(maximumInternal.some((chunk) => chunk.content.includes("冷门尾段校验词")));
   assert.ok(internalElapsed < 8_000, `64-term internal prefilter took ${internalElapsed.toFixed(0)} ms`);
 
@@ -1011,21 +1049,27 @@ test("问题预筛选不会让超过候选上限的旧文档尾部在内部或�
   const maximumPublic = await store.getPublicActiveKnowledgeChunks(maximumTermQuestion);
   const publicElapsed = performance.now() - startedAt;
   assert.equal(globalThis[stateKey].database.preparedSql.length - statementCount, 1, "public prefilter must remain one D1 query");
-  assert.equal(globalThis[stateKey].database.preparedSql.at(-1).match(/\(\d+, \?, \d+\)/gu)?.length, 16);
-  assert.ok(maximumPublic.length <= policy.MAX_KNOWLEDGE_CHUNKS);
+  const maximumPublicSql = globalThis[stateKey].database.preparedSql.at(-1);
+  assert.deepEqual(sqlTermQuotas(maximumPublicSql), Array.from({ length: 16 }, () => 16));
+  assertLateHydrationSql(maximumPublicSql);
+  assert.equal(maximumPublic.length, candidateLimit);
   assert.ok(maximumPublic.some((chunk) => chunk.content.includes("冷门尾段校验词")));
+  assertContiguousPublicIds(maximumPublic);
   assert.ok(publicElapsed < 8_000, `64-term public prefilter took ${publicElapsed.toFixed(0)} ms`);
 
   const sharedInternalCandidates = await store.getActiveKnowledgeChunks(actor("submitter"), "普通内容");
-  assert.equal(sharedInternalCandidates.length, policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.equal(sharedInternalCandidates.length, candidateLimit);
   assert.deepEqual(new Set(sharedInternalCandidates.map((chunk) => chunk.itemId)), new Set(fixtures.map((fixture) => fixture.itemId)));
+  assertBalancedItemCandidates(sharedInternalCandidates, fixtures.length);
   const sharedInternalResults = policy.rankKnowledgeChunks("普通内容", sharedInternalCandidates, 6);
   assert.equal(sharedInternalResults.length, 6);
   assert.deepEqual(new Set(sharedInternalResults.map((chunk) => chunk.itemId)), new Set(fixtures.map((fixture) => fixture.itemId)));
 
   const sharedPublicCandidates = await store.getPublicActiveKnowledgeChunks("普通内容");
-  assert.equal(sharedPublicCandidates.length, policy.MAX_KNOWLEDGE_CHUNKS);
+  assert.equal(sharedPublicCandidates.length, candidateLimit);
   assert.equal(new Set(sharedPublicCandidates.map((chunk) => chunk.itemId)).size, fixtures.length);
+  assertBalancedItemCandidates(sharedPublicCandidates, fixtures.length);
+  assertContiguousPublicIds(sharedPublicCandidates);
   const sharedPublicResults = policy.rankKnowledgeChunks("普通内容", sharedPublicCandidates, 6);
   assert.equal(sharedPublicResults.length, 6);
   assert.equal(new Set(sharedPublicResults.map((chunk) => chunk.itemId)).size, fixtures.length);
