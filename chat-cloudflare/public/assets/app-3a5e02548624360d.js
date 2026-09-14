@@ -80,7 +80,7 @@ const TOPICS = [
     path: "/technology",
     requestTopic: "research",
     index: "01",
-    title: "技术成果与产业化",
+    title: "成果与应用",
     detail: "核心成果 · 应用转化",
     eyebrow: "TECHNOLOGY & IMPACT",
     heading: "从核心技术到真实场景",
@@ -91,7 +91,7 @@ const TOPICS = [
     path: "/research",
     requestTopic: "research",
     index: "02",
-    title: "科研合作与学术交流",
+    title: "科研与合作",
     detail: "国际合作 · 学术交流",
     eyebrow: "RESEARCH & EXCHANGE",
     heading: "与全球研究网络建立连接",
@@ -102,7 +102,7 @@ const TOPICS = [
     path: "/originmind",
     requestTopic: "business",
     index: "03",
-    title: "源灵智能科技有限公司",
+    title: "公司与产品",
     detail: "机器人产品 · OmindOS",
     eyebrow: "ORIGINMIND",
     heading: "让机器人硬件与 OmindOS 协同工作",
@@ -113,7 +113,7 @@ const TOPICS = [
     path: "/ius",
     requestTopic: "student",
     index: "04",
-    title: "智能无人系统创新协会",
+    title: "协会与活动",
     detail: "学生创新 · 科技实践",
     eyebrow: "STUDENT INNOVATION",
     heading: "让学生创新走进机器人前沿",
@@ -337,6 +337,193 @@ function userFacingAnswer(value) {
   return withoutReferences && !hasResidualMarker ? withoutReferences : "暂时没有可显示的回答。";
 }
 
+const CHAT_HISTORY_KEY = "arts-public-chat-history-v1:";
+const CHAT_HISTORY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
+const CHAT_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
+const CHAT_HISTORY_MAX_CHARS = 80_000;
+const CHAT_HISTORY_MAX_MESSAGES = 40;
+
+function boundedChatMessages(messages) {
+  const result = [];
+  let remaining = CHAT_HISTORY_MAX_CHARS;
+  for (const item of (Array.isArray(messages) ? messages : []).slice(-CHAT_HISTORY_MAX_MESSAGES).reverse()) {
+    if (!item || !["user", "assistant"].includes(item.role) || typeof item.content !== "string") continue;
+    const content = item.content.slice(0, item.role === "user" ? 2000 : 12_000);
+    if (!content.trim() || content.length > remaining) break;
+    result.unshift({ role: item.role, content });
+    remaining -= content.length;
+  }
+  while (result[0]?.role === "assistant") result.shift();
+  return result;
+}
+
+function chatHistorySnapshot(section, session, now = Date.now()) {
+  const messages = [...session.messages];
+  const interrupted = session.sending && messages.at(-1)?.role === "user" ? messages.pop().content : "";
+  return {
+    version: 1, section, savedAt: now,
+    messages: boundedChatMessages(messages),
+    draft: String(session.draft || interrupted || "").slice(0, 2000),
+    interrupted: Boolean(interrupted),
+    conversationToken: typeof session.conversationToken === "string" ? session.conversationToken.slice(0, 40_000) : "",
+    tokenSavedAt: Number.isFinite(session.tokenSavedAt) ? session.tokenSavedAt : 0,
+    scrollTop: Number.isFinite(session.scrollTop) ? Math.max(0, session.scrollTop) : 0,
+    stickToEnd: session.stickToEnd !== false,
+  };
+}
+
+function readChatHistory(storage, section, now = Date.now()) {
+  try {
+    const raw = storage?.getItem(CHAT_HISTORY_KEY + section);
+    if (!raw) return null;
+    if (raw.length > 800_000) throw new Error("Oversized history");
+    const value = JSON.parse(raw);
+    if (!value || value.version !== 1 || value.section !== section ||
+        !Number.isFinite(value.savedAt) || value.savedAt > now || now - value.savedAt >= CHAT_HISTORY_TTL_MS ||
+        !Array.isArray(value.messages) || value.messages.length > CHAT_HISTORY_MAX_MESSAGES ||
+        value.messages.some((item) => !item || !["user", "assistant"].includes(item.role) ||
+          typeof item.content !== "string" || item.content.length > (item.role === "user" ? 2000 : 12_000)) ||
+        typeof value.draft !== "string" || value.draft.length > 2000) throw new Error("Invalid history");
+    const tokenFresh = Number.isFinite(value.tokenSavedAt) && value.tokenSavedAt > 0 &&
+      value.tokenSavedAt <= now && now - value.tokenSavedAt < CHAT_TOKEN_TTL_MS;
+    return {
+      messages: boundedChatMessages(value.messages).map((item) => ({
+        role: item.role,
+        content: item.role === "assistant" ? userFacingAnswer(item.content) : item.content,
+      })),
+      draft: value.draft,
+      conversationToken: tokenFresh && typeof value.conversationToken === "string" && value.conversationToken.length <= 40_000
+        ? value.conversationToken : "",
+      tokenSavedAt: tokenFresh ? value.tokenSavedAt : 0,
+      scrollTop: Number.isFinite(value.scrollTop) ? Math.max(0, value.scrollTop) : 0,
+      stickToEnd: value.stickToEnd !== false,
+      sending: false,
+      error: "",
+      notice: value.interrupted ? "上次回答未完成，问题已保留在输入框中，可重新发送。" : "",
+    };
+  } catch {
+    try { storage?.removeItem(CHAT_HISTORY_KEY + section); } catch { /* Storage may be disabled. */ }
+    return null;
+  }
+}
+
+function writeChatHistory(storage, section, session, now = Date.now()) {
+  try {
+    if (!storage) return false;
+    const value = chatHistorySnapshot(section, session, now);
+    if (!value.messages.length && !value.draft) storage.removeItem(CHAT_HISTORY_KEY + section);
+    else storage.setItem(CHAT_HISTORY_KEY + section, JSON.stringify(value));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function appendAnswerInline(parent, text) {
+  // All content is added as text or a small set of inert formatting elements.
+  const pattern = /\\([\\`*_{}\[\]()#+\-.!|])|`([^`\n]+)`|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*/gu;
+  let offset = 0;
+  for (const match of text.matchAll(pattern)) {
+    parent.append(document.createTextNode(text.slice(offset, match.index)));
+    if (match[1]) parent.append(document.createTextNode(match[1]));
+    else if (match[2]) parent.append(element("code", { text: match[2] }));
+    else if (match[3] || match[4]) parent.append(element("strong", { text: match[3] || match[4] }));
+    else parent.append(element("em", { text: match[5] }));
+    offset = match.index + match[0].length;
+  }
+  parent.append(document.createTextNode(text.slice(offset)));
+}
+
+function answerTableCells(line) {
+  const text = line.trim();
+  if (!text.includes("|")) return null;
+  const cells = [];
+  let cell = "";
+  let inCode = false;
+  for (let index = 0; index < text.length; index += 1) {
+    const char = text[index];
+    if (char === "\\" && text[index + 1] === "|") { cell += "|"; index += 1; }
+    else if (char === "`") { inCode = !inCode; cell += char; }
+    else if (char === "|" && !inCode) { cells.push(cell.trim()); cell = ""; }
+    else cell += char;
+  }
+  cells.push(cell.trim());
+  if (text.startsWith("|")) cells.shift();
+  if (text.endsWith("|") && !text.endsWith("\\|")) cells.pop();
+  return cells.length >= 2 && cells.length <= 8 ? cells : null;
+}
+
+function answerTableAt(lines, index) {
+  const header = answerTableCells(lines[index] || "");
+  const divider = answerTableCells(lines[index + 1] || "");
+  return header && divider && header.length === divider.length && divider.every((cell) => /^:?-{3,}:?$/u.test(cell))
+    ? header : null;
+}
+
+function renderAnswerBody(answer) {
+  const body = element("div", { className: "message-body answer-content" });
+  const lines = String(answer).slice(0, 12_000).replace(/\r\n?/gu, "\n").split("\n");
+  const startsBlock = (index) => /^\s*(?:#{1,6}\s|[-+*]\s|\d+[.)]\s|>|`{3,}|~{3,})/u.test(lines[index] || "") || answerTableAt(lines, index);
+  for (let index = 0; index < lines.length;) {
+    const line = lines[index];
+    if (!line.trim()) { index += 1; continue; }
+    const fence = line.match(/^\s*(`{3,}|~{3,})(.*)$/u);
+    if (fence) {
+      const code = [];
+      index += 1;
+      while (index < lines.length && !new RegExp(`^\\s*${fence[1][0]}{${fence[1].length},}\\s*$`, "u").test(lines[index])) code.push(lines[index++]);
+      if (index < lines.length) index += 1;
+      body.append(element("pre", {}, [element("code", { text: code.join("\n") })]));
+      continue;
+    }
+    const headers = answerTableAt(lines, index);
+    if (headers) {
+      const wrap = element("div", { className: "answer-table-scroll", attributes: { role: "region", "aria-label": "回答表格，可左右滑动", tabindex: "0" } });
+      const table = element("table");
+      const head = element("tr");
+      for (const value of headers) { const cell = element("th", { attributes: { scope: "col" } }); appendAnswerInline(cell, value); head.append(cell); }
+      table.append(element("thead", {}, [head]));
+      const rows = element("tbody");
+      index += 2;
+      let count = 0;
+      while (index < lines.length && count < 100) {
+        const values = answerTableCells(lines[index]);
+        if (!values || values.length !== headers.length) break;
+        const row = element("tr");
+        for (const value of values) { const cell = element("td"); appendAnswerInline(cell, value); row.append(cell); }
+        rows.append(row); index += 1; count += 1;
+      }
+      table.append(rows); wrap.append(table); body.append(wrap);
+      continue;
+    }
+    const heading = line.match(/^\s*(#{1,6})\s+(.+?)\s*#*$/u);
+    if (heading) { const node = element(`h${Math.min(6, heading[1].length + 2)}`); appendAnswerInline(node, heading[2]); body.append(node); index += 1; continue; }
+    const listItem = line.match(/^\s*(?:([-+*])|(\d+)[.)])\s+(.+)$/u);
+    if (listItem) {
+      const ordered = Boolean(listItem[2]);
+      const list = element(ordered ? "ol" : "ul");
+      if (ordered && Number(listItem[2]) > 1 && Number(listItem[2]) < 10_000) list.setAttribute("start", listItem[2]);
+      while (index < lines.length) {
+        const item = lines[index].match(/^\s*(?:([-+*])|(\d+)[.)])\s+(.+)$/u);
+        if (!item || Boolean(item[2]) !== ordered) break;
+        const node = element("li"); appendAnswerInline(node, item[3]); list.append(node); index += 1;
+      }
+      body.append(list); continue;
+    }
+    if (/^\s*>/u.test(line)) {
+      const quote = [];
+      while (index < lines.length && /^\s*>/u.test(lines[index])) quote.push(lines[index++].replace(/^\s*>\s?/u, ""));
+      const node = element("blockquote"); appendAnswerInline(node, quote.join("\n")); body.append(node); continue;
+    }
+    const paragraph = [line];
+    index += 1;
+    while (index < lines.length && lines[index].trim() && !startsBlock(index)) paragraph.push(lines[index++]);
+    const node = element("p"); appendAnswerInline(node, paragraph.join("\n")); body.append(node);
+  }
+  return body;
+}
+
+
 function serviceLabel(service) {
   if (!service) return "正在连接…";
   if (!service.storageReady) return "资料服务暂不可用";
@@ -457,6 +644,11 @@ function createPublicApp() {
   document.documentElement.classList.add("public-chat-page");
   document.body.classList.add("public-chat-page");
 
+  let historyStorage = null;
+  try { historyStorage = window.localStorage; } catch { /* Chat works without browser storage. */ }
+  const historySaveTimers = new Map();
+  let historyDetail = null;
+
   const state = {
     section: topicIdForPath(window.location.pathname),
     networkReady: null,
@@ -470,6 +662,7 @@ function createPublicApp() {
       requestTopic: topic.requestTopic,
       messages: [],
       conversationToken: "",
+      tokenSavedAt: 0,
       draft: "",
       scrollTop: 0,
       stickToEnd: true,
@@ -491,6 +684,30 @@ function createPublicApp() {
       section: "",
     },
   };
+
+  for (const topic of TOPICS) {
+    const restored = readChatHistory(historyStorage, topic.id);
+    if (restored) Object.assign(state.sessions[topic.id], restored);
+  }
+
+  function persistSession(section = state.section) {
+    window.clearTimeout(historySaveTimers.get(section));
+    historySaveTimers.delete(section);
+    const saved = writeChatHistory(historyStorage, section, sessionFor(section));
+    if (historyDetail) historyDetail.textContent = saved
+      ? "对话和草稿仅保存在当前浏览器，保留 7 天。清空聊天记录会同时删除本机保存的当前栏目对话。"
+      : "当前浏览器无法保存对话，刷新后可能丢失。你仍可继续聊天或复制回答。";
+  }
+
+  function scheduleHistorySave(section = state.section) {
+    window.clearTimeout(historySaveTimers.get(section));
+    historySaveTimers.set(section, window.setTimeout(() => persistSession(section), 300));
+  }
+
+  function flushHistory() {
+    saveCurrentView();
+    for (const section of [...historySaveTimers.keys()]) persistSession(section);
+  }
 
   function topicFor(section = state.section) {
     return TOPICS.find((topic) => topic.id === section) || TOPICS[0];
@@ -623,7 +840,6 @@ function createPublicApp() {
   const drawerHeader = element("div", { className: "drawer-header" });
   const drawerTitle = element("div", { className: "drawer-title" }, [
     element("strong", { id: "topic-drawer-title", text: "ARTS Robotics" }),
-    element("span", { text: "选择主题" }),
   ]);
   const drawerClose = textButton("×", "drawer-close");
   drawerClose.setAttribute("aria-label", "关闭主题菜单");
@@ -631,7 +847,7 @@ function createPublicApp() {
 
   const topicList = element("nav", {
     className: "drawer-topic-list",
-    attributes: { "aria-label": "选择主题" },
+    attributes: { "aria-label": "聊天栏目" },
   });
   const topicLinks = new Map();
   for (const topic of TOPICS) {
@@ -821,6 +1037,14 @@ function createPublicApp() {
     resetCurrentConversation({ closeInfo: true });
   }, "chat-info-clear");
   chatInfoClearBlock.append(clearChatHistory);
+
+  historyDetail = element("p", {
+    className: "chat-history-detail",
+    text: historyStorage
+      ? "对话和草稿仅保存在当前浏览器，保留 7 天。清空聊天记录会同时删除本机保存的当前栏目对话。"
+      : "当前浏览器无法保存对话，刷新后可能丢失。你仍可继续聊天或复制回答。",
+  });
+  chatInfoClearBlock.append(historyDetail);
 
   chatInfoScroll.append(
     chatInfoMembers,
@@ -1185,11 +1409,13 @@ function createPublicApp() {
     if (session.sending || !hasResettableState(session)) return false;
     session.messages = [];
     session.conversationToken = "";
+    session.tokenSavedAt = 0;
     session.draft = "";
     session.scrollTop = 0;
     session.stickToEnd = true;
     session.error = "";
     session.notice = "";
+    persistSession();
     if (state.inquiry.section === state.section) {
       state.inquiry.summary = "";
       state.inquiry.includeConversation = false;
@@ -1218,6 +1444,7 @@ function createPublicApp() {
     session.scrollTop = messageScroll.scrollTop;
     session.stickToEnd = session.messages.length === 0 ||
       messageScroll.scrollHeight - messageScroll.clientHeight - messageScroll.scrollTop <= 24;
+    persistSession();
   }
 
   function syncTopicControls() {
@@ -1305,7 +1532,9 @@ function createPublicApp() {
     const answer = message.role === "assistant"
       ? userFacingAnswer(message.content)
       : String(message.content || "");
-    article.append(element("div", { className: "message-body", text: answer }));
+    article.append(message.role === "assistant"
+      ? renderAnswerBody(answer)
+      : element("div", { className: "message-body", text: answer }));
 
     if (message.role === "assistant") {
       const actions = element("div", { className: "message-actions" });
@@ -1512,6 +1741,7 @@ function createPublicApp() {
     session.messages.push({ role: "user", content: question });
     session.draft = "";
     session.stickToEnd = true;
+    persistSession(section);
     if (state.section === section) {
       questionInput.value = "";
       resizeQuestionInput();
@@ -1522,7 +1752,7 @@ function createPublicApp() {
 
     try {
       const payload = await requestJson("/api/chat", jsonOptions({
-        messages: (session.conversationToken ? session.messages.slice(-1) : session.messages.slice(-9)).map(({ role, content }) => ({ role, content })),
+        messages: session.messages.filter((message) => message.role === "user").slice(-2).map(({ role, content }) => ({ role, content })),
         topic: topic.requestTopic,
         ...(session.conversationToken ? { conversationToken: session.conversationToken } : {}),
       }));
@@ -1534,6 +1764,7 @@ function createPublicApp() {
         provider: payload.provider,
       };
       session.conversationToken = typeof payload.conversationToken === "string" ? payload.conversationToken : "";
+      session.tokenSavedAt = Date.now();
       session.messages.push(assistant);
       completed = true;
       return {
@@ -1557,6 +1788,7 @@ function createPublicApp() {
       throw error;
     } finally {
       session.sending = false;
+      persistSession(section);
       updateComposer();
       if (state.section === section) {
         questionInput.value = session.draft;
@@ -1760,9 +1992,11 @@ function createPublicApp() {
     session.scrollTop = messageScroll.scrollTop;
     session.stickToEnd = session.messages.length === 0 ||
       messageScroll.scrollHeight - messageScroll.clientHeight - messageScroll.scrollTop <= 24;
+    scheduleHistorySave();
   }, { passive: true });
   questionInput.addEventListener("input", () => {
     sessionFor().draft = questionInput.value;
+    scheduleHistorySave();
     resizeQuestionInput();
     updateComposer();
   });
@@ -1785,8 +2019,10 @@ function createPublicApp() {
     activateTopic(topicIdForPath(window.location.pathname), { announce: true });
   });
 
+  questionInput.value = sessionFor().draft;
   syncTopicControls();
-  renderMessages({ scrollMode: "start" });
+  syncFeedback();
+  renderMessages({ scrollMode: sessionFor().stickToEnd ? "end" : "restore" });
   resizeQuestionInput();
   syncChatViewport();
   updateComposer();
@@ -1806,7 +2042,7 @@ function createPublicApp() {
     syncFeedback();
   });
   document.addEventListener("visibilitychange", () => {
-    if (document.hidden) return;
+    if (document.hidden) { flushHistory(); return; }
     const statusRefreshDue =
       (systemStatusRefreshDueAt > 0 && Date.now() >= systemStatusRefreshDueAt) ||
       (systemStatusRefreshDueAt === 0 && Date.now() - systemStatusCheckedAt >= SYSTEM_STATUS_REFRESH_MS);
@@ -1819,6 +2055,8 @@ function createPublicApp() {
       void loadSuggestions({ force: true });
     }
   });
+
+  window.addEventListener("pagehide", flushHistory);
 
   const modelContext = document.modelContext;
   if (modelContext && typeof modelContext.registerTool === "function") {

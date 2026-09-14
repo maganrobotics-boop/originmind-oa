@@ -553,10 +553,10 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.match(script, /(?:window\.)?location\.pathname\s*===?\s*["']\/manage["']/u);
   assert.match(script, /\bconst\s+APP_NAME\s*=\s*["']ARTS Robotics AI Assistant["']\s*;/u);
   for (const section of [
-    "技术成果与产业化",
-    "科研合作与学术交流",
-    "源灵智能科技有限公司",
-    "智能无人系统创新协会",
+    "成果与应用",
+    "科研与合作",
+    "公司与产品",
+    "协会与活动",
   ]) {
     assert.ok(script.includes(section), section);
   }
