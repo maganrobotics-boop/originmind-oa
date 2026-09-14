@@ -1,8 +1,9 @@
+import { cleanPublicChatText } from "../../../../../chat-cloudflare/src/public-text.mjs";
 import { knowledgeSearchTerms, type RankedKnowledgeChunk } from "../../../../../lib/knowledge-policy";
 import type { PublicKnowledgeSuggestionCandidate } from "../../../../../lib/knowledge-store";
 
 export const PUBLIC_LAB_AI_MAX_CHUNKS = 6;
-export const PUBLIC_LAB_AI_MAX_SUGGESTIONS = 3;
+export const PUBLIC_LAB_AI_MAX_SUGGESTIONS = 4;
 export const PUBLIC_LAB_AI_MAX_EXCERPT_CHARS = 600;
 export const PUBLIC_LAB_AI_MAX_TOTAL_EXCERPT_CHARS = 3_000;
 export const PUBLIC_LAB_AI_MAX_TOTAL_TEXT_CHARS = 4_096;
@@ -126,8 +127,8 @@ export function buildPublicLabAiSuggestionsResponse(
   const suggestions: PublicLabAiSuggestion[] = [];
   const seenTitles = new Set<string>();
   for (const candidate of candidates) {
-    const title = boundedLine(candidate.title, 100);
-    const sectionTitle = boundedLine(candidate.sectionTitle, 100);
+    const title = cleanPublicChatText(boundedLine(candidate.title, 100));
+    const sectionTitle = cleanPublicChatText(boundedLine(candidate.sectionTitle, 100));
     const updatedAt = validDate(candidate.updatedAt);
     const normalizedTitle = title.toLocaleLowerCase("zh-CN");
     const titleTerms = knowledgeSearchTerms(title);

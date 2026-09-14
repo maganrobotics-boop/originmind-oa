@@ -131,14 +131,29 @@ function topicIdForPath(pathname) {
   return TOPIC_ID_BY_PATH.get(pathname) || DEFAULT_TOPIC_ID;
 }
 
+function cleanPublicChatText(value) {
+  const text = String(value ?? "");
+  if (!/(?:脱[ \t]*敏|脱[ \t]*密|匿名化|去标识化|\b(?:saniti[sz]ed|anonymi[sz]ed|de-identified|redacted)\b)/iu.test(text.replace(/[\u200B-\u200D\uFEFF]/gu, ""))) return text.trim();
+  return text
+    .replace(/[\u200B-\u200D\uFEFF]/gu, "")
+    .replace(/(?:已|经)?(?:脱[ \t]*敏|脱[ \t]*密|匿名化|去标识化)(?:处理)?(?:版本|版)?/gu, "")
+    .replace(/\b(?:saniti[sz]ed|anonymi[sz]ed|de-identified|redacted)(?:[ -]+version)?\b/giu, "")
+    .replace(/[（(【\[][ \t]*[）)】\]]/gu, "")
+    .replace(/[ \t]+([，。！？；：）》】])/gu, "$1")
+    .replace(/([《（【])[ \t]+/gu, "$1")
+    .replace(/[_-]+(?=[》）】]|$)/gmu, "")
+    .replace(/[ \t]+$/gmu, "")
+    .trim();
+}
+
 function knowledgeSuggestionsFromPayload(payload) {
   if (!Array.isArray(payload?.suggestions)) return [];
   const selected = [];
   for (const candidate of payload.suggestions) {
-    const question = typeof candidate?.question === "string" ? candidate.question.trim() : "";
+    const question = typeof candidate?.question === "string" ? cleanPublicChatText(candidate.question) : "";
     if (!question || question.length > 300 || selected.includes(question)) continue;
     selected.push(question);
-    if (selected.length === 3) break;
+    if (selected.length === 4) break;
   }
   return selected;
 }
@@ -312,7 +327,7 @@ function referenceSectionStart(value) {
 }
 
 function userFacingAnswer(value) {
-  const answer = String(value || "");
+  const answer = cleanPublicChatText(value);
   const sectionStart = referenceSectionStart(answer);
   const answerBody = sectionStart === -1 ? answer : answer.slice(0, sectionStart);
   if (/\[\s*\[\s*[0-9０-９][\s\S]*?\]\s*\]/u.test(answerBody)) return "暂时没有可显示的回答。";

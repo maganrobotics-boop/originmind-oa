@@ -1,3 +1,4 @@
+import { cleanPublicChatText } from "./public-text.mjs";
 import {
   OA_PUBLIC_RETRIEVE_URL,
   OA_PUBLIC_SUGGESTIONS_URL,
@@ -16,7 +17,7 @@ const TIMEOUT_MS = 12_000;
 // check into an expensive multi-term ranking query.
 const OA_PROBE_QUESTION = "oaretrievalprobe";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
-const OA_SUGGESTION_LIMIT = 3;
+const OA_SUGGESTION_LIMIT = 4;
 
 export function isWellFormedUnicode(value) {
   for (let index = 0; index < value.length; index += 1) {
@@ -48,7 +49,7 @@ export function normalizedQuestion(value) {
 }
 
 function normalizedKnowledgeLabel(value) {
-  return value.normalize("NFKC").replace(/\s+/gu, " ").trim().toLocaleLowerCase("zh-CN");
+  return cleanPublicChatText(value).normalize("NFKC").replace(/\s+/gu, " ").trim().toLocaleLowerCase("zh-CN");
 }
 
 export function suggestionKnowledgeReference(value) {
@@ -184,8 +185,8 @@ export function parseOaSuggestions(value) {
     const item = exactObject(candidate, ["id", "question", "updatedAt"]);
     const updatedAt = stringField(item.updatedAt, { max: 10, pattern: DATE_PATTERN });
     const parsed = {
-      id: stringField(item.id, { max: 1, pattern: /^[1-3]$/u }),
-      question: stringField(item.question, { trim: true, min: 2, max: 300 }),
+      id: stringField(item.id, { max: 1, pattern: /^[1-4]$/u }),
+      question: cleanPublicChatText(stringField(item.question, { trim: true, min: 2, max: 300 })),
       updatedAt,
     };
     const key = parsed.question.normalize("NFKC").toLocaleLowerCase("zh-CN");

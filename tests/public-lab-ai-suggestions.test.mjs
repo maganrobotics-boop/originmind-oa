@@ -143,7 +143,7 @@ test("suggestions reject invalid credentials, configuration, freeze, and query p
   assert.equal(globalThis[stateKey].storeCalls, 0);
 });
 
-test("success returns at most three exact, deterministic, answerable questions without internal data", async () => {
+test("success returns at most four exact, deterministic, answerable questions without internal data", async () => {
   const response = await route.GET(request());
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("access-control-allow-origin"), null);
@@ -282,4 +282,19 @@ test("storage query is latest-first, one-chunk-per-item, and restricted to appro
   assert.match(source, /ORDER BY i\.updated_at DESC, i\.id ASC/u);
   assert.match(source, /SELECT c\.id[\s\S]+LIMIT 1/u);
   assert.doesNotMatch(routeSource, /lab-ai-client|answerLabQuestion|fetch\s*\(/u);
+});
+
+test("OA generates up to four clean title-bound questions and deduplicates version labels", async () => {
+  globalThis[stateKey].candidates = [
+    { title: "矿井巡检（脱敏版）", sectionTitle: "导航（脱密版）", updatedAt: "2026-09-14" },
+    { title: "矿井巡检", sectionTitle: "重复章节", updatedAt: "2026-09-13" },
+    ...["机械臂控制", "视觉定位", "运动规划", "多机协作"].map((title) => ({ title, sectionTitle: "方法", updatedAt: "2026-09-12" })),
+  ];
+  const response = await route.GET(request());
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.suggestions.length, 4);
+  assert.deepEqual(body.suggestions.map((item) => item.id), ["1", "2", "3", "4"]);
+  assert.match(body.suggestions[0].question, /《矿井巡检》中的“导航”/u);
+  assert.doesNotMatch(JSON.stringify(body), /脱敏|脱密|多机协作|重复章节/u);
 });

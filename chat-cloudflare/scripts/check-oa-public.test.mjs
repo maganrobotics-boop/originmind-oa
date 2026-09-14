@@ -273,7 +273,7 @@ test("OA suggestions preflight authenticates, validates, and retrieves every sug
   }
 });
 
-test("OA suggestions preflight requires one to three strict bounded suggestions", async () => {
+test("OA suggestions preflight requires one to four strict bounded suggestions", async () => {
   const cases = [
     [{ suggestions: [] }, "suggestions_empty", 0],
     [{ ...validSuggestionsPayload, extra: true }, "suggestions_invalid_contract", null],
