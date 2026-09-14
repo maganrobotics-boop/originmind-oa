@@ -641,6 +641,8 @@ test("public chat keeps five compact live status lights below the fixed header t
   assert.match(script, /SYSTEM_STATUS_REFRESH_MS\s*=\s*60_000/u);
   assert.match(script, /fetch\(["']\/_health["']/u);
   assert.match(script, /requestJson\(["']\/api\/status["']/u);
+  assert.match(script, /timeoutMessage\s*=\s*["']请求超时，请稍后重试。["']/u);
+  assert.match(script, /adminRequest\(["']extract["'][\s\S]{0,360}?timeoutMessage:\s*["']文件处理超时，请压缩或拆分文件后重试。["']/u);
   assert.match(script, /service\.systemReady\s*===\s*true/u);
   assert.match(script, /service\?\.knowledgeReady\s*===\s*true\s*&&\s*service\?\.retrievalReady\s*===\s*true/u);
   assert.match(script, /function\s+reconcileChatOaStatus\s*\(/u);
