@@ -24,19 +24,19 @@ test("public display removes processing labels while keeping technical content a
   assert.equal(browser.userFacingAnswer("《巡检方案（脱敏版）》使用 ROS2。[1]"), "《巡检方案》使用 ROS2。");
 });
 
-test("four cleaned questions stay bound to original knowledge and fifth is excluded", () => {
-  const suggestions = Array.from({ length: 4 }, (_, i) => ({
+test("five cleaned questions stay bound to original knowledge and sixth is excluded", () => {
+  const suggestions = Array.from({ length: 5 }, (_, i) => ({
     id: String(i + 1), question: `《机器人课题${i + 1}（脱敏版）》有哪些值得关注的核心内容？`, updatedAt: "2026-09-14",
   }));
   const parsed = parseOaSuggestions({ suggestions });
-  assert.equal(parsed.length, 4);
+  assert.equal(parsed.length, 5);
   assert.doesNotMatch(JSON.stringify(parsed), /脱敏/u);
   for (let i = 0; i < parsed.length; i++) {
     assert.equal(suggestionMatchesKnowledge(parsed[i].question, { title: `机器人课题${i + 1}（脱敏版）` }), true);
     assert.equal(suggestionMatchesKnowledge(parsed[i].question, { title: "另一项技术" }), false);
   }
-  assert.throws(() => parseOaSuggestions({ suggestions: [...suggestions, { ...suggestions[0], id: "5" }] }));
-  const visible = browser.knowledgeSuggestionsFromPayload({ suggestions: [...suggestions, { question: "第五个问题？" }] });
-  assert.equal(visible.length, 4);
-  assert.doesNotMatch(visible.join(""), /脱敏|第五/u);
+  assert.throws(() => parseOaSuggestions({ suggestions: [...suggestions, { ...suggestions[0], id: "6" }] }));
+  const visible = browser.knowledgeSuggestionsFromPayload({ suggestions: [...suggestions, { question: "第六个问题？" }] });
+  assert.equal(visible.length, 5);
+  assert.doesNotMatch(visible.join(""), /脱敏|第六/u);
 });

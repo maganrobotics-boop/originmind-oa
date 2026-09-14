@@ -4,7 +4,12 @@ import test from "node:test";
 import { handleRequest } from "../src/app.mjs";
 import { OA_PUBLIC_SUGGESTIONS_URL } from "../src/constants.mjs";
 import { fallbackAnswer } from "../src/knowledge.mjs";
-import { naturalQuestions, suggestionRetrievalQuestion } from "../src/natural-suggestions.mjs";
+import {
+  naturalizeSuggestions,
+  naturalQuestions,
+  parseChatSuggestions,
+  suggestionRetrievalQuestion,
+} from "../src/natural-suggestions.mjs";
 import { decryptSecret, encryptSecret } from "../src/crypto.mjs";
 import { cleanPublicChatText } from "../src/public-text.mjs";
 import {
@@ -21,6 +26,46 @@ const SUGGESTIONS = Object.freeze([
   { id: "1", question: "《灵巧操作进展》有哪些值得关注的核心内容？", updatedAt: "2026-09-14" },
   { id: "2", question: "《OmindOS 巡检实践》有哪些值得关注的核心内容？", updatedAt: "2026-09-13" },
 ]);
+
+const SOURCE_FIXTURES = Object.freeze([
+  {
+    title: "灵巧操作进展",
+    excerpt: "触觉反馈能够帮助机器人在抓取物体时调整抓握力度。",
+  },
+  {
+    title: "井下定位方案",
+    excerpt: "无 GNSS 环境下，机器人通过激光雷达与惯性信息融合完成定位。",
+  },
+  {
+    title: "四足矿井巡检",
+    excerpt: "四足机器人能够在矿井和井下环境执行自主巡检任务。",
+  },
+  {
+    title: "三维环境建图",
+    excerpt: "机器人使用三维重建技术生成周围环境的三维地图。",
+  },
+  {
+    title: "机器人语音控制",
+    excerpt: "机器人接收语音指令后执行导航与操作任务。",
+  },
+]);
+
+const FIVE_SOURCE_SUGGESTIONS = Object.freeze(SOURCE_FIXTURES.map((fixture, index) => ({
+  id: String(index + 1),
+  question: `《${fixture.title}》有哪些值得关注的核心内容？`,
+  updatedAt: `2026-09-${String(14 - index).padStart(2, "0")}`,
+})));
+
+const CHAT_QUESTION_FIXTURES = Object.freeze([
+  "触觉反馈能怎样帮助机器人抓稳物体？",
+  "没有卫星信号时，机器人怎么定位？",
+  "四足机器人能在矿井里完成哪些巡检任务？",
+  "机器人怎样把周围环境重建成三维地图？",
+  "怎样让机器人听懂指令并执行任务？",
+  "机器人遇到故障后怎样恢复任务？",
+]);
+
+const SUGGESTION_TOKEN = `${"A".repeat(16)}.${"B".repeat(64)}`;
 
 function knowledgeResponse(init) {
   const reference = suggestionKnowledgeReference(JSON.parse(init.body).question);
@@ -65,6 +110,7 @@ function request(path, ip = "203.0.113.18") {
 
 test("OA suggestion parser accepts only the exact bounded contract", () => {
   assert.deepEqual(parseOaSuggestions({ suggestions: SUGGESTIONS }), SUGGESTIONS);
+  assert.deepEqual(parseOaSuggestions({ suggestions: FIVE_SOURCE_SUGGESTIONS }), FIVE_SOURCE_SUGGESTIONS);
 
   const invalid = [
     { suggestions: SUGGESTIONS, internal: true },
@@ -73,15 +119,36 @@ test("OA suggestion parser accepts only the exact bounded contract", () => {
     { suggestions: [{ ...SUGGESTIONS[0], updatedAt: "2026-02-30" }] },
     { suggestions: [{ ...SUGGESTIONS[0], question: "最近有哪些有趣内容？" }] },
     { suggestions: [SUGGESTIONS[0], { ...SUGGESTIONS[0], id: "2" }] },
-    { suggestions: Array.from({ length: 5 }, (_, index) => ({
-      id: String(index + 1),
-      question: `推荐问题 ${index + 1}`,
-      updatedAt: "2026-09-14",
-    })) },
+    { suggestions: [
+      ...FIVE_SOURCE_SUGGESTIONS,
+      { id: "6", question: "《任务故障恢复》有哪些值得关注的核心内容？", updatedAt: "2026-09-09" },
+    ] },
   ];
   for (const payload of invalid) {
     assert.throws(() => parseOaSuggestions(payload), /OA_RESPONSE_INVALID/u);
   }
+});
+
+test("Chat suggestion parser accepts five answerable questions and rejects a sixth", () => {
+  const five = CHAT_QUESTION_FIXTURES.slice(0, 5).map((question, index) => ({
+    id: String(index + 1),
+    question,
+    suggestionToken: SUGGESTION_TOKEN,
+    updatedAt: `2026-09-${String(14 - index).padStart(2, "0")}`,
+  }));
+  assert.deepEqual(parseChatSuggestions(five), five);
+  assert.throws(
+    () => parseChatSuggestions([
+      ...five,
+      {
+        id: "6",
+        question: CHAT_QUESTION_FIXTURES[5],
+        suggestionToken: SUGGESTION_TOKEN,
+        updatedAt: "2026-09-09",
+      },
+    ]),
+    /INVALID_SUGGESTIONS/u,
+  );
 });
 
 test("suggestion references bind the generated title and optional section", () => {
@@ -315,6 +382,109 @@ test("questions come from excerpt topics, never filename metadata or unsupported
   assert.equal(questions[0], "触觉反馈能怎样帮助机器人抓稳物体？");
   assert.doesNotMatch(questions.join(""), /Magan|20260914|PPT|脱敏|值得关注|《/u);
   assert.deepEqual(naturalQuestions([{ title: "矿井巡检.PPT", body: "暂无正文内容。" }]), []);
+});
+
+test("natural question wording is stable within one Beijing day and changes the next day", () => {
+  const documents = [{
+    title: "灵巧操作进展",
+    body: "触觉反馈能够帮助机器人在抓取物体时调整抓握力度。",
+  }];
+  const beforeMidnight = new Date("2026-09-14T15:59:59.999Z");
+  const sameBeijingDay = new Date("2026-09-14T03:00:00.000Z");
+  const afterMidnight = new Date("2026-09-14T16:00:00.000Z");
+  const first = naturalQuestions(documents, beforeMidnight);
+  assert.ok(first.length > 0);
+  assert.deepEqual(naturalQuestions(documents, sameBeijingDay), first);
+  assert.notDeepEqual(naturalQuestions(documents, afterMidnight), first);
+  for (const question of [...first, ...naturalQuestions(documents, afterMidnight)]) {
+    assert.doesNotMatch(question, /《|值得关注|\.(?:pptx?|pdf)|脱敏|脱密/iu);
+  }
+});
+
+test("naturalization emits five unique source-bound questions when OA has five answerable topics", async () => {
+  const context = {
+    env: {
+      APP_ENCRYPTION_KEY: "encryption-key-".padEnd(48, "e"),
+      PUBLIC_LAB_AI_SERVICE_TOKEN: SERVICE_TOKEN,
+    },
+    runtime: {
+      async fetch(_url, init) {
+        const reference = suggestionKnowledgeReference(JSON.parse(init.body).question);
+        const fixture = SOURCE_FIXTURES.find((candidate) => candidate.title === reference?.title);
+        assert.ok(fixture, `unexpected retrieval question: ${JSON.parse(init.body).question}`);
+        return Response.json({ chunks: [{
+          id: "1",
+          title: fixture.title,
+          category: "research",
+          sectionTitle: "",
+          paragraphRef: "第 1 段",
+          sourceLabel: "OA 公开知识",
+          updatedAt: "2026-09-14",
+          excerpt: fixture.excerpt,
+        }] });
+      },
+    },
+  };
+  const result = await naturalizeSuggestions(
+    { status: "connected", suggestions: FIVE_SOURCE_SUGGESTIONS },
+    context,
+    Date.now() + 15_000,
+    new Date("2026-09-14T08:00:00.000Z"),
+  );
+  assert.equal(result.status, "connected");
+  assert.equal(result.suggestions.length, 5);
+  assert.equal(new Set(result.suggestions.map((item) => item.question)).size, 5);
+  assert.deepEqual(result.suggestions.map((item) => item.id), ["1", "2", "3", "4", "5"]);
+  const sourceQuestions = [];
+  for (const item of result.suggestions) {
+    const sourceQuestion = await suggestionRetrievalQuestion(
+      item.suggestionToken,
+      item.question,
+      context.env.APP_ENCRYPTION_KEY,
+    );
+    assert.ok(FIVE_SOURCE_SUGGESTIONS.some((source) => source.question === sourceQuestion));
+    sourceQuestions.push(sourceQuestion);
+    assert.doesNotMatch(item.question, /《|值得关注|\.(?:pptx?|pdf)|脱敏|脱密/iu);
+  }
+  assert.equal(new Set(sourceQuestions).size, 5);
+});
+
+test("naturalization returns only available answerable questions and never pads to five", async () => {
+  const only = FIVE_SOURCE_SUGGESTIONS[0];
+  const fixture = SOURCE_FIXTURES[0];
+  const result = await naturalizeSuggestions(
+    { status: "connected", suggestions: [only] },
+    {
+      env: {
+        APP_ENCRYPTION_KEY: "encryption-key-".padEnd(48, "e"),
+        PUBLIC_LAB_AI_SERVICE_TOKEN: SERVICE_TOKEN,
+      },
+      runtime: {
+        fetch: async () => Response.json({ chunks: [{
+          id: "1",
+          title: fixture.title,
+          category: "research",
+          sectionTitle: "",
+          paragraphRef: "第 1 段",
+          sourceLabel: "OA 公开知识",
+          updatedAt: "2026-09-14",
+          excerpt: fixture.excerpt,
+        }] }),
+      },
+    },
+    Date.now() + 15_000,
+    new Date("2026-09-14T08:00:00.000Z"),
+  );
+  assert.equal(result.status, "connected");
+  assert.equal(result.suggestions.length, 1);
+  assert.equal(
+    await suggestionRetrievalQuestion(
+      result.suggestions[0].suggestionToken,
+      result.suggestions[0].question,
+      "encryption-key-".padEnd(48, "e"),
+    ),
+    only.question,
+  );
 });
 
 test("natural clicks bind to the original source without showing its upload filename", async (t) => {

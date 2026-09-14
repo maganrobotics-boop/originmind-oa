@@ -30,7 +30,12 @@ const SHELL_PATHS = new Set(["/", "/manage", ...TOPIC_PATHS]);
 const TOPIC_TRAILING_REDIRECTS = new Map(
   TOPIC_PATHS.map((pathname) => [`${pathname}/`, pathname]),
 );
-const DIRECT_ASSET_PATHS = new Set(["/favicon.svg", "/LICENSES.md"]);
+const DIRECT_ASSET_PATHS = new Set([
+  "/favicon.svg",
+  "/LICENSES.md",
+  "/manifest.webmanifest",
+  "/service-worker.js",
+]);
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
 export function classifyPath(pathname) {
@@ -88,6 +93,9 @@ function assetRequest(request, pathname) {
 }
 
 function assetCacheControl(pathname) {
+  if (pathname === "/service-worker.js") {
+    return "no-cache, no-store, must-revalidate";
+  }
   if (pathname.startsWith("/assets/")) {
     return "public, max-age=31536000, immutable";
   }

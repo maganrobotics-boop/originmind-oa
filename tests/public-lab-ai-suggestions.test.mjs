@@ -64,6 +64,7 @@ const vite = await createServer({
 
 const route = await vite.ssrLoadModule("/app/api/public/lab-ai/suggestions/route.ts");
 const rateLimit = await vite.ssrLoadModule("/app/api/public/lab-ai/_lib/rate-limit.ts");
+const responseContract = await vite.ssrLoadModule("/app/api/public/lab-ai/_lib/response-contract.ts");
 const policy = await vite.ssrLoadModule("/lib/knowledge-policy.ts");
 
 function request(headers = {}, url = "https://oa.omindos.ai/api/public/lab-ai/suggestions") {
@@ -74,6 +75,22 @@ function request(headers = {}, url = "https://oa.omindos.ai/api/public/lab-ai/su
       ...headers,
     },
   });
+}
+
+function dailyCandidates() {
+  return [
+    "机器人触觉感知",
+    "井下融合定位",
+    "四足自主巡检",
+    "三维环境重建",
+    "双臂协同操作",
+    "机器人故障恢复",
+    "语音任务执行",
+  ].map((title, index) => ({
+    title,
+    sectionTitle: "核心技术",
+    updatedAt: `2026-09-${String(14 - index).padStart(2, "0")}T12:00:00.000Z`,
+  }));
 }
 
 beforeEach(() => {
@@ -113,6 +130,16 @@ beforeEach(() => {
         sectionTitle: "本周新项目",
         updatedAt: "2026-09-11T12:34:56.000Z",
       },
+      {
+        title: "矿井巡检定位报告",
+        sectionTitle: "无卫星定位",
+        updatedAt: "2026-09-10T12:34:56.000Z",
+      },
+      {
+        title: "双臂协作实验",
+        sectionTitle: "协调控制",
+        updatedAt: "2026-09-09T12:34:56.000Z",
+      },
     ],
   };
 });
@@ -143,7 +170,7 @@ test("suggestions reject invalid credentials, configuration, freeze, and query p
   assert.equal(globalThis[stateKey].storeCalls, 0);
 });
 
-test("success returns at most four exact, deterministic, answerable questions without internal data", async () => {
+test("success returns at most five exact, answerable questions without internal data", async () => {
   const response = await route.GET(request());
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("access-control-allow-origin"), null);
@@ -151,14 +178,16 @@ test("success returns at most four exact, deterministic, answerable questions wi
   const raw = await response.text();
   const body = JSON.parse(raw);
   assert.deepEqual(Object.keys(body), ["suggestions"]);
-  assert.deepEqual(body, {
-    suggestions: [
-      { id: "1", question: "《具身智能周报》中的“视觉抓取”有哪些值得关注的内容？", updatedAt: "2026-09-14" },
-      { id: "2", question: "《协作机器人安全指南》有哪些值得关注的核心内容？", updatedAt: "2026-09-12" },
-      { id: "3", question: "《机器人开源项目观察》中的“本周新项目”有哪些值得关注的内容？", updatedAt: "2026-09-11" },
-    ],
-  });
-  assert.deepEqual(globalThis[stateKey].candidateLimits, [12]);
+  assert.equal(body.suggestions.length, 5);
+  assert.deepEqual(body.suggestions.map((suggestion) => suggestion.id), ["1", "2", "3", "4", "5"]);
+  assert.deepEqual(new Set(body.suggestions.map((suggestion) => suggestion.question.match(/^《([^》]+)》/u)?.[1])), new Set([
+    "具身智能周报",
+    "协作机器人安全指南",
+    "机器人开源项目观察",
+    "矿井巡检定位报告",
+    "双臂协作实验",
+  ]));
+  assert.deepEqual(globalThis[stateKey].candidateLimits, [20]);
   assert.equal(JSON.stringify(body).includes("must-not-leak"), false);
   assert.equal(JSON.stringify(body).includes("https://"), false);
   for (const suggestion of body.suggestions) {
@@ -184,6 +213,54 @@ test("success returns at most four exact, deterministic, answerable questions wi
       updatedAt: source.updatedAt,
     }], 1).length, 1);
   }
+});
+
+test("daily OA selection is stable within a Beijing day and rotates at Beijing midnight", () => {
+  const candidates = dailyCandidates();
+  const morning = new Date("2026-09-14T00:00:00.000Z");
+  const beforeMidnight = new Date("2026-09-14T15:59:59.999Z");
+  const afterMidnight = new Date("2026-09-14T16:00:00.000Z");
+
+  assert.equal(
+    responseContract.publicLabAiSuggestionDayOrdinal(morning),
+    responseContract.publicLabAiSuggestionDayOrdinal(beforeMidnight),
+  );
+  assert.equal(
+    responseContract.publicLabAiSuggestionDayOrdinal(afterMidnight),
+    responseContract.publicLabAiSuggestionDayOrdinal(beforeMidnight) + 1,
+  );
+
+  const first = responseContract.buildPublicLabAiSuggestionsResponse(candidates, morning);
+  const repeated = responseContract.buildPublicLabAiSuggestionsResponse(candidates, beforeMidnight);
+  const nextDay = responseContract.buildPublicLabAiSuggestionsResponse(candidates, afterMidnight);
+  assert.deepEqual(repeated, first);
+  assert.equal(first.suggestions.length, 5);
+  assert.equal(nextDay.suggestions.length, 5);
+  assert.deepEqual(first.suggestions.map((item) => item.id), ["1", "2", "3", "4", "5"]);
+  assert.deepEqual(nextDay.suggestions.map((item) => item.id), ["1", "2", "3", "4", "5"]);
+  assert.notDeepEqual(
+    new Set(nextDay.suggestions.map((item) => item.question)),
+    new Set(first.suggestions.map((item) => item.question)),
+  );
+  const candidateTitles = new Set(candidates.map((candidate) => candidate.title));
+  for (const suggestion of [...first.suggestions, ...nextDay.suggestions]) {
+    const title = suggestion.question.match(/^《([^》]+)》/u)?.[1];
+    assert.ok(candidateTitles.has(title));
+  }
+});
+
+test("daily OA selection returns fewer than five when fewer answerable sources exist", () => {
+  const candidates = dailyCandidates().slice(0, 2);
+  const result = responseContract.buildPublicLabAiSuggestionsResponse(
+    candidates,
+    new Date("2026-09-14T08:00:00.000Z"),
+  );
+  assert.equal(result.suggestions.length, 2);
+  assert.deepEqual(
+    new Set(result.suggestions.map((item) => item.question.match(/^《([^》]+)》/u)?.[1])),
+    new Set(candidates.map((candidate) => candidate.title)),
+  );
+  assert.deepEqual(result.suggestions.map((item) => item.id), ["1", "2"]);
 });
 
 test("sections without searchable terms fall back to a title-bound question", async () => {
@@ -284,7 +361,7 @@ test("storage query is latest-first, one-chunk-per-item, and restricted to appro
   assert.doesNotMatch(routeSource, /lab-ai-client|answerLabQuestion|fetch\s*\(/u);
 });
 
-test("OA generates up to four clean title-bound questions and deduplicates version labels", async () => {
+test("OA generates up to five clean title-bound questions and deduplicates version labels", async () => {
   globalThis[stateKey].candidates = [
     { title: "矿井巡检（脱敏版）", sectionTitle: "导航（脱密版）", updatedAt: "2026-09-14" },
     { title: "矿井巡检", sectionTitle: "重复章节", updatedAt: "2026-09-13" },
@@ -293,8 +370,9 @@ test("OA generates up to four clean title-bound questions and deduplicates versi
   const response = await route.GET(request());
   assert.equal(response.status, 200);
   const body = await response.json();
-  assert.equal(body.suggestions.length, 4);
-  assert.deepEqual(body.suggestions.map((item) => item.id), ["1", "2", "3", "4"]);
-  assert.match(body.suggestions[0].question, /《矿井巡检》中的“导航”/u);
-  assert.doesNotMatch(JSON.stringify(body), /脱敏|脱密|多机协作|重复章节/u);
+  assert.equal(body.suggestions.length, 5);
+  assert.deepEqual(body.suggestions.map((item) => item.id), ["1", "2", "3", "4", "5"]);
+  assert.ok(body.suggestions.some((item) => /《矿井巡检》中的“导航”/u.test(item.question)));
+  assert.ok(body.suggestions.some((item) => /《多机协作》/u.test(item.question)));
+  assert.doesNotMatch(JSON.stringify(body), /脱敏|脱密|重复章节/u);
 });

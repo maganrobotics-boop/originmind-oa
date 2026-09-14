@@ -10,6 +10,11 @@ The dependency-free browser source is maintained under `frontend/`. A small
 deterministic builder writes content-hashed JavaScript and CSS plus the resolved
 HTML shell under `public/`; those generated release assets are checked in.
 
+The same release includes a standalone web-app manifest, OriginMind-derived
+install icons and a root-scope service worker. The service worker caches only
+versioned static files; it never caches HTML, chat/API responses, health checks,
+authentication state or the management surface.
+
 Answers remain grounded in OA-approved public knowledge. Numbered citations are
 required and checked inside the Worker, then removed before the answer is
 returned or stored in signed conversation context. OA-public source records stay

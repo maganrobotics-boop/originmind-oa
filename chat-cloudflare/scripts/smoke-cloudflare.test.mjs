@@ -21,6 +21,9 @@ const suggestionEvidence = {
   suggestions: [
     { id: "1", question: recommendationQuestion, suggestionToken: recommendationToken, updatedAt: "2026-09-14" },
     { id: "2", question: "人和协作机器人一起工作时，怎样保障安全？", suggestionToken: recommendationToken, updatedAt: "2026-09-13" },
+    { id: "3", question: "没有卫星信号时，机器人怎么定位？", suggestionToken: recommendationToken, updatedAt: "2026-09-12" },
+    { id: "4", question: "机器人怎样把周围环境重建成三维地图？", suggestionToken: recommendationToken, updatedAt: "2026-09-11" },
+    { id: "5", question: "四足机器人能在矿井里完成哪些巡检任务？", suggestionToken: recommendationToken, updatedAt: "2026-09-10" },
   ],
   oaPublicStatus: "connected",
 };
@@ -60,7 +63,7 @@ test("release evidence accepts only the exact OA-backed Chat release", () => {
     provider: "workers-ai",
     model: "test-model",
     sources: 1,
-    suggestions: 2,
+    suggestions: 5,
     adminKdfCompatible: true,
   });
 });
@@ -73,6 +76,18 @@ test("suggestion evidence requires a nonempty exact connected OA contract", () =
     { suggestions: suggestionEvidence.suggestions, oaPublicStatus: "unavailable" },
     { ...suggestionEvidence, extra: true },
     { suggestions: [{ ...suggestionEvidence.suggestions[0], id: "2" }], oaPublicStatus: "connected" },
+    {
+      suggestions: [
+        ...suggestionEvidence.suggestions,
+        {
+          id: "6",
+          question: "机器人怎样自主规划路线并避开障碍？",
+          suggestionToken: recommendationToken,
+          updatedAt: "2026-09-09",
+        },
+      ],
+      oaPublicStatus: "connected",
+    },
   ]) {
     assert.throws(
       () => validateReleaseEvidence({ ...evidence, suggestions: payload }, releaseId),
@@ -222,7 +237,7 @@ test("administrator authentication runs once after retryable release checks sett
     provider: "workers-ai",
     model: "test-model",
     sources: 1,
-    suggestions: 2,
+    suggestions: 5,
   };
   const result = await smokeCloudflare("https://chat.example.com", {
     attempts: 3,

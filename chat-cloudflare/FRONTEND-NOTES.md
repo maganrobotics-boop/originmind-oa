@@ -13,6 +13,16 @@ characters of its SHA-256 digest, replaces the placeholders in
 `public/index.html`, and removes stale generated `.js` and `.css` files. Other
 public assets are not removed.
 
+Installable-web-app metadata is kept as audited release input under `public/`:
+
+- `manifest.webmanifest` describes the standalone app.
+- `service-worker.js` caches only same-origin, versioned files under `/assets/`.
+- `assets/pwa/` contains versioned 192 px, 512 px, maskable and Apple icons.
+
+The service worker deliberately does not handle the HTML shell, `/manage`,
+`/_health`, or any `/api/*` request. Conversation, authentication and
+administrator responses therefore never enter Cache Storage.
+
 The generated files under `public/` are committed release inputs. Before a
 release, run:
 
@@ -41,6 +51,8 @@ current source.
   remote scripts, or remote stylesheets.
 - JavaScript and CSS filenames are content-addressed, so `/assets/*` retains
   the one-year immutable cache policy. The HTML shell remains non-cacheable.
+- The stable service-worker URL is never cached, while the manifest uses a
+  short one-hour cache lifetime so installation metadata can be updated.
 
 The backend independently enforces authentication, request validation, draft
 visibility, OA-only public retrieval, rate limits, and model-output safety.

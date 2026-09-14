@@ -19,6 +19,15 @@ function digest(bytes) {
   return createHash("sha256").update(bytes).digest("hex").slice(0, 16);
 }
 
+function pngDimensions(bytes) {
+  assert.equal(bytes.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
+  assert.equal(bytes.subarray(12, 16).toString("ascii"), "IHDR");
+  return {
+    width: bytes.readUInt32BE(16),
+    height: bytes.readUInt32BE(20),
+  };
+}
+
 async function expectedFrontend() {
   const [template, app, style] = await Promise.all([
     readFile(path.join(frontendDir, "index.html"), "utf8"),
@@ -72,7 +81,7 @@ async function frontendOaStatusHelpers() {
   const end = script.indexOf("function createPublicApp", start);
   assert.ok(start >= 0 && end > start, "frontend OA status helpers must remain directly testable");
   return runInNewContext(
-    `${script.slice(start, end)}\n({ reconciledChatOaEvidence, systemStatusRefreshPlan, oaRetrievalStatusDetail, suggestionsRefreshNeeded });`,
+    `${script.slice(start, end)}\n({ reconciledChatOaEvidence, systemStatusRefreshPlan, oaRetrievalStatusDetail, beijingDayKey, suggestionsRefreshDelay, suggestionsRefreshNeeded });`,
     Object.create(null),
   );
 }
@@ -84,6 +93,17 @@ async function frontendSuggestionHelpers() {
   assert.ok(start >= 0 && end > start, "frontend suggestion normalization must remain directly testable");
   return runInNewContext(
     `${script.slice(start, end)}\nknowledgeSuggestionsFromPayload;`,
+    Object.create(null),
+  );
+}
+
+async function frontendTopicHelpers() {
+  const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
+  const start = script.indexOf("const GENERAL_CHAT_TOPIC");
+  const end = script.indexOf("function cleanPublicChatText", start);
+  assert.ok(start >= 0 && end > start, "frontend chat topics must remain directly testable");
+  return runInNewContext(
+    `${script.slice(start, end)}\n({ GENERAL_CHAT_TOPIC, TOPICS, CHAT_TOPICS, DEFAULT_TOPIC_ID, topicIdForPath });`,
     Object.create(null),
   );
 }
@@ -226,8 +246,19 @@ test("the deterministic build contains exactly the current content-hashed fronte
   assert.equal(expected.template.split("__STYLE_ASSET__").length - 1, 1);
 
   const top = (await readdir(publicDir)).sort();
-  assert.deepEqual(top, ["LICENSES.md", "_headers", "assets", "favicon.svg", "index.html"]);
-  assert.deepEqual((await readdir(assetDir)).sort(), [expected.appName, expected.styleName].sort());
+  assert.deepEqual(top, [
+    "LICENSES.md",
+    "_headers",
+    "assets",
+    "favicon.svg",
+    "index.html",
+    "manifest.webmanifest",
+    "service-worker.js",
+  ]);
+  assert.deepEqual(
+    (await readdir(assetDir)).sort(),
+    [expected.appName, "pwa", expected.styleName].sort(),
+  );
   assert.equal(await readFile(path.join(publicDir, "index.html"), "utf8"), expected.html);
   assert.deepEqual(await readFile(path.join(assetDir, expected.appName)), expected.app);
   assert.deepEqual(await readFile(path.join(assetDir, expected.styleName)), expected.style);
@@ -259,6 +290,11 @@ test("HTML uses only self-hosted generated assets and retains public metadata", 
   assert.match(html, /<meta\b[^>]*\bname=["']viewport["'][^>]*\bcontent=["'][^"']*\binteractive-widget=resizes-content\b[^"']*["']/iu);
   assert.match(html, /<meta\b[^>]*\bname=["']robots["'][^>]*\bcontent=["']noindex,nofollow["']/iu);
   assert.match(html, /<meta\b[^>]*\bname=["']description["']/iu);
+  assert.match(html, /<meta\b[^>]*\bname=["']theme-color["'][^>]*\bcontent=["']#ffffff["']/iu);
+  assert.match(html, /<meta\b[^>]*\bname=["']apple-mobile-web-app-capable["'][^>]*\bcontent=["']yes["']/iu);
+  assert.match(html, /<meta\b[^>]*\bname=["']apple-mobile-web-app-title["'][^>]*\bcontent=["']实验室助手["']/iu);
+  assert.match(html, /<link\b[^>]*\brel=["']manifest["'][^>]*\bhref=["']\/manifest\.webmanifest["']/iu);
+  assert.match(html, /<link\b[^>]*\brel=["']apple-touch-icon["'][^>]*\bhref=["']\/assets\/pwa\/apple-touch-icon-180-v1\.png["']/iu);
   assert.ok(html.includes("ARTS Robotics AI Assistant"));
   assert.ok(html.includes(`/assets/${expected.appName}`));
   assert.ok(html.includes(`/assets/${expected.styleName}`));
@@ -272,6 +308,123 @@ test("HTML uses only self-hosted generated assets and retains public metadata", 
   assert.doesNotMatch(html, /<script\b(?![^>]*\bsrc=)[^>]*>/iu);
   assert.doesNotMatch(html, /\son[a-z]+\s*=/iu);
   assert.ok([...scriptSources, ...styleSources].every((source) => source.startsWith("/assets/")));
+});
+
+test("installable web app metadata has complete versioned icons", async () => {
+  const manifest = JSON.parse(await readFile(path.join(publicDir, "manifest.webmanifest"), "utf8"));
+  assert.equal(manifest.id, "/");
+  assert.equal(manifest.name, "实验室助手");
+  assert.equal(manifest.short_name, "实验室助手");
+  assert.equal(manifest.start_url, "/");
+  assert.equal(manifest.scope, "/");
+  assert.equal(manifest.display, "standalone");
+  assert.equal(manifest.theme_color, "#ffffff");
+  assert.equal(manifest.prefer_related_applications, false);
+
+  const expectedIcons = new Map([
+    ["/assets/pwa/icon-192-v1.png", { size: "192x192", purpose: "any" }],
+    ["/assets/pwa/icon-512-v1.png", { size: "512x512", purpose: "any" }],
+    ["/assets/pwa/icon-maskable-512-v1.png", { size: "512x512", purpose: "maskable" }],
+  ]);
+  assert.equal(manifest.icons.length, expectedIcons.size);
+  for (const icon of manifest.icons) {
+    const expected = expectedIcons.get(icon.src);
+    assert.ok(expected, icon.src);
+    assert.equal(icon.sizes, expected.size);
+    assert.equal(icon.type, "image/png");
+    assert.equal(icon.purpose, expected.purpose);
+    const bytes = await readFile(path.join(publicDir, icon.src.slice(1)));
+    const [width, height] = expected.size.split("x").map(Number);
+    assert.deepEqual(pngDimensions(bytes), { width, height });
+  }
+
+  const appleIcon = await readFile(
+    path.join(publicDir, "assets/pwa/apple-touch-icon-180-v1.png"),
+  );
+  assert.deepEqual(pngDimensions(appleIcon), { width: 180, height: 180 });
+});
+
+test("service worker caches only same-origin versioned static assets", async () => {
+  const source = await readFile(path.join(publicDir, "service-worker.js"), "utf8");
+  const listeners = new Map();
+  const stored = new Map();
+  const networkCalls = [];
+  const response = {
+    ok: true,
+    type: "basic",
+    clone() { return this; },
+  };
+  runInNewContext(source, {
+    URL,
+    caches: {
+      keys: async () => [],
+      delete: async () => true,
+      open: async () => ({
+        match: async (request) => stored.get(request.url),
+        put: async (request, value) => { stored.set(request.url, value); },
+      }),
+    },
+    fetch: async (request) => {
+      networkCalls.push(request.url);
+      return response;
+    },
+    self: {
+      location: { origin: "https://chat.omindos.ai" },
+      clients: { claim: async () => undefined },
+      skipWaiting: () => undefined,
+      addEventListener: (type, handler) => { listeners.set(type, handler); },
+    },
+  });
+
+  const dispatchFetch = (url, options = {}) => {
+    let handled = null;
+    listeners.get("fetch")({
+      request: new Request(url, options),
+      respondWith(value) { handled = Promise.resolve(value); },
+    });
+    return handled;
+  };
+
+  const versioned = "https://chat.omindos.ai/assets/app-0123456789abcdef.js";
+  const firstVersioned = dispatchFetch(versioned);
+  assert.ok(firstVersioned);
+  await firstVersioned;
+  assert.equal(networkCalls.length, 1);
+  await dispatchFetch(versioned);
+  assert.equal(networkCalls.length, 1, "second request must use the static cache");
+
+  for (const url of [
+    "https://chat.omindos.ai/",
+    "https://chat.omindos.ai/manage",
+    "https://chat.omindos.ai/api/chat",
+    "https://chat.omindos.ai/_health",
+    "https://chat.omindos.ai/assets/app.js",
+    "https://chat.omindos.ai/assets/app-0123456789abcdef.js?changed=1",
+    "https://oa.omindos.ai/assets/app-0123456789abcdef.js",
+  ]) {
+    assert.equal(dispatchFetch(url), null, url);
+  }
+  assert.equal(
+    dispatchFetch(versioned, { method: "POST", body: "not cached" }),
+    null,
+  );
+  assert.equal(networkCalls.length, 1);
+});
+
+test("static header fallback keeps install metadata fresh", async () => {
+  const headers = await readFile(path.join(publicDir, "_headers"), "utf8");
+  assert.match(
+    headers,
+    /\/manifest\.webmanifest\s+Cache-Control:\s*public, max-age=3600/u,
+  );
+  assert.match(
+    headers,
+    /\/service-worker\.js\s+Cache-Control:\s*no-cache, no-store, must-revalidate\s+Service-Worker-Allowed:\s*\//u,
+  );
+  assert.match(
+    headers,
+    /\/assets\/\*\s+Cache-Control:\s*public, max-age=31536000, immutable/u,
+  );
 });
 
 test("frontend answer formatting hides citations without truncating ordinary source-like words", async () => {
@@ -545,6 +698,32 @@ test("a recommendation refresh due during a status probe runs as soon as status 
   assert.equal(helpers.suggestionsRefreshNeeded({ ...dueDuringProbe, ready: true }), true);
 });
 
+test("recommendations stay stable for a Beijing day and refresh at the next midnight", async () => {
+  const helpers = await frontendOaStatusHelpers();
+  const beforeMidnight = Date.UTC(2026, 8, 14, 15, 59, 30);
+  const midnight = Date.UTC(2026, 8, 14, 16, 0, 0);
+  assert.equal(helpers.beijingDayKey(beforeMidnight), "2026-09-14");
+  assert.equal(helpers.beijingDayKey(midnight), "2026-09-15");
+  assert.equal(helpers.suggestionsRefreshDelay(beforeMidnight), 30_000);
+  assert.equal(helpers.suggestionsRefreshDelay(midnight), 24 * 60 * 60_000);
+  assert.equal(helpers.suggestionsRefreshNeeded({
+    ready: true,
+    loaded: true,
+    loading: false,
+    pending: false,
+    fetchedAt: beforeMidnight - 60_000,
+    now: beforeMidnight,
+  }), false);
+  assert.equal(helpers.suggestionsRefreshNeeded({
+    ready: true,
+    loaded: true,
+    loading: false,
+    pending: false,
+    fetchedAt: beforeMidnight,
+    now: midnight,
+  }), true);
+});
+
 test("vanilla frontend preserves every same-origin API and visibility contract", async () => {
   const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
   for (const route of [
@@ -747,15 +926,29 @@ test("public chat persists multiple conversations and derives a bounded recent l
 });
 
 test("public chat presents four fixed knowledge domains in desktop and mobile sidebars", async () => {
-  const [script, style] = await Promise.all([
+  const [script, style, topicHelpers] = await Promise.all([
     readFile(path.join(frontendDir, "app.js"), "utf8"),
     readFile(path.join(frontendDir, "styles.css"), "utf8"),
+    frontendTopicHelpers(),
   ]);
   const topicBlock = script.slice(script.indexOf("const TOPICS = ["), script.indexOf("const DEFAULT_TOPIC_ID"));
   assert.deepEqual(
     [...topicBlock.matchAll(/\btitle:\s*["']([^"']+)["']/gu)].map((match) => match[1]),
     ["成果与应用", "科研与合作", "公司与产品", "协会与活动"],
   );
+  assert.match(script, /const GENERAL_CHAT_TOPIC\s*=\s*Object\.freeze\(\{[\s\S]{0,240}?id:\s*["']general["'][\s\S]{0,160}?path:\s*["']\/["'][\s\S]{0,160}?title:\s*["']聊天["'][\s\S]{0,160}?detail:\s*["']全部公开知识["']/u);
+  assert.match(script, /const CHAT_TOPICS\s*=\s*Object\.freeze\(\[GENERAL_CHAT_TOPIC,\s*\.\.\.TOPICS\]\)/u);
+  assert.equal(topicHelpers.DEFAULT_TOPIC_ID, "general");
+  assert.equal(topicHelpers.topicIdForPath("/"), "general");
+  assert.equal(topicHelpers.topicIdForPath("/technology"), "technology");
+  assert.equal(JSON.stringify([...topicHelpers.TOPICS].map((topic) => topic.id)), JSON.stringify([
+    "technology", "academic", "company", "association",
+  ]));
+  assert.equal(JSON.stringify([...topicHelpers.CHAT_TOPICS].map((topic) => topic.id)), JSON.stringify([
+    "general", "technology", "academic", "company", "association",
+  ]));
+  assert.ok(script.includes("const topic = CHAT_TOPICS.find((item) => item.id === section) || GENERAL_CHAT_TOPIC;"));
+  assert.match(script, /readChatConversations\(historyStorage,\s*CHAT_TOPICS\.map\(\(topic\) => topic\.id\)\)/u);
 
   assert.match(
     script,
@@ -797,7 +990,7 @@ test("public chat presents four fixed knowledge domains in desktop and mobile si
   );
 });
 
-test("the sidebar chat action opens a new-chat dialog with suggestions and a form", async () => {
+test("the sidebar chat action opens a general new-chat dialog with suggestions and a form", async () => {
   const [script, style] = await Promise.all([
     readFile(path.join(frontendDir, "app.js"), "utf8"),
     readFile(path.join(frontendDir, "styles.css"), "utf8"),
@@ -815,8 +1008,14 @@ test("the sidebar chat action opens a new-chat dialog with suggestions and a for
     script,
     /function openNewChat\([^)]*\)[\s\S]{0,900}?newChatDialog\.showModal\(\)/u,
   );
+  assert.match(script, /let newChatSection\s*=\s*GENERAL_CHAT_TOPIC\.id/u);
+  assert.match(
+    script,
+    /function openNewChat\([^)]*\)[\s\S]{0,360}?newChatSection\s*=\s*GENERAL_CHAT_TOPIC\.id[\s\S]{0,180}?newChatContextValue\.textContent\s*=\s*GENERAL_CHAT_TOPIC\.detail/u,
+  );
   assert.match(script, /className:\s*["']new-chat-suggestions["']/u);
   assert.match(script, /className:\s*["']new-chat-suggestion-list["']/u);
+  assert.match(script, /className:\s*["']new-chat-suggestion-caption["'][\s\S]{0,120}?今日推荐 · 基于公开知识，每日更新/u);
   assert.match(
     script,
     /const newChatForm\s*=\s*element\(["']form["'],\s*\{\s*className:\s*["']new-chat-form["']/u,
@@ -839,16 +1038,18 @@ test("the sidebar chat action opens a new-chat dialog with suggestions and a for
   );
 
   const shellStyle = style.slice(style.indexOf("/* ChatGPT-inspired application shell (final visual overrides). */"));
+  const mobileStyle = shellStyle.slice(
+    shellStyle.indexOf("@media (max-width: 899px)"),
+    shellStyle.indexOf("@media (min-width: 900px)", shellStyle.indexOf("@media (max-width: 899px)")),
+  );
   assert.match(shellStyle, /\.chat-app \.sidebar-bottom\s*\{[\s\S]{0,220}?margin-top:\s*auto/u);
   assert.match(shellStyle, /\.chat-app \.sidebar-chat-button\s*\{[\s\S]{0,240}?background:\s*var\(--chat-blue\)/u);
   assert.match(shellStyle, /\.new-chat-dialog\[open\]\s*\{[\s\S]{0,120}?display:\s*flex/u);
   assert.match(shellStyle, /\.new-chat-suggestion-list\s*\{[\s\S]{0,220}?flex-direction:\s*column[\s\S]{0,160}?justify-content:\s*flex-start[\s\S]{0,100}?margin-top:\s*auto/u);
-  assert.match(shellStyle, /\.new-chat-suggestion-list > button:nth-child\(n \+ 5\)[\s\S]{0,100}?display:\s*none/u);
+  assert.match(shellStyle, /\.new-chat-suggestion-caption\s*\{[\s\S]{0,180}?text-align:\s*left/u);
+  assert.match(shellStyle, /\.new-chat-suggestion-list > button:nth-child\(n \+ 6\)[\s\S]{0,100}?display:\s*none/u);
   assert.match(shellStyle, /\.new-chat-form\s*\{[\s\S]{0,100}?display:\s*flex/u);
-  assert.match(
-    shellStyle,
-    /@media \(max-width:\s*899px\)[\s\S]{0,1700}?\.new-chat-dialog\[open\]\s*\{[\s\S]{0,100}?align-items:\s*flex-end/u,
-  );
+  assert.match(mobileStyle, /\.new-chat-dialog\[open\]\s*\{[\s\S]{0,100}?align-items:\s*flex-end/u);
 });
 
 test("knowledge recommendations accept only bounded questions returned by the API", async () => {
@@ -862,10 +1063,11 @@ test("knowledge recommendations accept only bounded questions returned by the AP
         { question: "x".repeat(301) },
         { question: "知识库问题三？" },
         { question: "知识库问题四？" },
-        { question: "不会被选中的第五个问题？" },
+        { question: "知识库问题五？" },
+        { question: "不会被选中的第六个问题？" },
       ],
     })],
-    ["知识库问题一？", "知识库问题二？", "知识库问题三？", "知识库问题四？"],
+    ["知识库问题一？", "知识库问题二？", "知识库问题三？", "知识库问题四？", "知识库问题五？"],
   );
   assert.deepEqual([...normalize({ suggestions: ["静态字符串不属于接口契约", {}, null] })], []);
   assert.deepEqual([...normalize({ suggestions: [] })], []);
@@ -878,16 +1080,21 @@ test("public chat keeps a compact composer with vertically stacked knowledge sug
     readFile(path.join(frontendDir, "styles.css"), "utf8"),
   ]);
   const shellStyle = style.slice(style.indexOf("/* ChatGPT-inspired application shell (final visual overrides). */"));
+  const mobileStyle = shellStyle.slice(
+    shellStyle.indexOf("@media (max-width: 899px)"),
+    shellStyle.indexOf("@media (min-width: 900px)", shellStyle.indexOf("@media (max-width: 899px)")),
+  );
 
   assert.match(script, /className:\s*["']topic-title["']/u);
   assert.match(script, /textButton\(["']["'],\s*["']menu-button["']\)/u);
   assert.match(script, /rows:\s*["']1["']/u);
-  assert.match(script, /placeholder:\s*["']输入消息["']/u);
+  assert.match(script, /placeholder:\s*["']询问实验室大数据["']/u);
   assert.match(script, /textButton\(["']发送["'],\s*["']send-button["']\)/u);
   assert.match(script, /sendButton\.textContent\s*=\s*session\.sending\s*\?\s*["']回答中["']\s*:\s*["']发送["']/u);
   assert.ok(script.includes("正在检索并生成回答…"));
   assert.equal(script.includes("正在整理回答…"), false);
   assert.match(script, /className:\s*["']composer-suggestions["']/u);
+  assert.match(script, /className:\s*["']suggestion-caption["'][\s\S]{0,120}?今日推荐 · 基于公开知识，每日更新/u);
   assert.match(script, /suggestionPanel\.hidden\s*=\s*true/u);
   assert.match(script, /composerArea\.append\(errorRegion,\s*noticeRegion,\s*composer\)/u);
   assert.match(script, /conversation\.append\(messageScroll,\s*suggestionPanel,\s*composerArea\)/u);
@@ -898,14 +1105,15 @@ test("public chat keeps a compact composer with vertically stacked knowledge sug
   assert.match(script, /function recommendationsReady\(\) \{[\s\S]{0,180}?knowledgeRetrievalReady\(\)\s*&&\s*systemStatusController\s*===\s*null/u);
   assert.match(script, /function knowledgeRetrievalReady\(\) \{[\s\S]{0,220}?state\.networkReady\s*===\s*true[\s\S]{0,220}?state\.service\?\.knowledgeReady\s*===\s*true[\s\S]{0,220}?state\.service\?\.retrievalReady\s*===\s*true/u);
   assert.match(script, /requestJson\(["']\/api\/suggestions["'],\s*\{[\s\S]{0,180}?cache:\s*["']no-store["']/u);
-  assert.match(script, /SUGGESTIONS_REFRESH_MS\s*=\s*60_000/u);
+  assert.doesNotMatch(script, /SUGGESTIONS_REFRESH_MS\s*=\s*60_000/u);
+  assert.match(script, /function suggestionsRefreshDelay\([^)]*\)[\s\S]{0,320}?BEIJING_UTC_OFFSET_MS/u);
   assert.match(script, /if \(force\) \{[\s\S]{0,120}?state\.suggestions\s*=\s*\[\][\s\S]{0,120}?renderSuggestions\(\)/u);
   assert.match(script, /suggestionsRefreshDueAt[\s\S]{0,700}?suggestionsRefreshPending\s*=\s*true[\s\S]{0,100}?loadSuggestions\(\{ force: true \}\)/u);
   assert.match(script, /if \(!recommendationsReady\(\) \|\| state\.suggestionsLoading\) \{[\s\S]{0,180}?suggestionsRefreshPending\s*=\s*true/u);
   assert.match(script, /suggestionsRefreshNeeded\(\{[\s\S]{0,360}?pending:\s*suggestionsRefreshPending[\s\S]{0,360}?void loadSuggestions/u);
   assert.match(script, /current\s*=\s*knowledgeSuggestionsFromPayload\(payload\)/u);
   assert.match(script, /let current\s*=\s*\[\][\s\S]{0,420}?catch\s*\{[\s\S]{0,160}?Never replace verified knowledge with static guesses/u);
-  assert.match(script, /button\.append\(element\(["']span["'],\s*\{\s*text:\s*suggestion\s*\}\)\)/u);
+  assert.match(script, /button\.append\([\s\S]{0,220}?className:\s*["']suggestion-sparkle["'][\s\S]{0,180}?aria-hidden["']:\s*["']true["'][\s\S]{0,180}?element\(["']span["'],\s*\{\s*text:\s*suggestion\s*\}\)/u);
   assert.match(script, /button\.addEventListener\(["']click["'],[\s\S]{0,120}?dispatchSuggestion\(suggestion,\s*conversationId\)/u);
   const dispatchStart = script.indexOf("async function dispatchSuggestion");
   const dispatchEnd = script.indexOf("function scheduleSuggestionsRefresh", dispatchStart);
@@ -935,10 +1143,13 @@ test("public chat keeps a compact composer with vertically stacked knowledge sug
   assert.match(shellStyle, /\.chat-app\s+\.composer\s*\{[\s\S]{0,120}?display:\s*flex/u);
   assert.match(style, /\.chat-app\s+\.composer-suggestions\s*\{[\s\S]*?flex:\s*0 0 auto[\s\S]*?width:\s*100%/u);
   assert.match(shellStyle, /\.chat-app\s+\.suggestions\s*\{[\s\S]{0,260}?flex-direction:\s*column[\s\S]{0,180}?justify-content:\s*flex-start[\s\S]{0,260}?overflow-y:\s*auto[\s\S]{0,100}?flex-wrap:\s*nowrap/u);
-  assert.match(shellStyle, /\.chat-app\s+\.suggestion-button\s*\{[\s\S]{0,300}?flex:\s*0 0 auto[\s\S]{0,180}?min-height:\s*44px[\s\S]{0,180}?border-radius:\s*15px/u);
-  assert.match(shellStyle, /\.chat-app\s+\.suggestion-button:nth-child\(n \+ 5\)\s*\{[\s\S]{0,60}?display:\s*none/u);
+  assert.match(shellStyle, /\.chat-app\s+\.suggestion-caption\s*\{[\s\S]{0,220}?text-align:\s*left/u);
+  assert.match(shellStyle, /\.chat-app\s+\.suggestion-button\s*\{[\s\S]{0,520}?display:\s*grid[\s\S]{0,180}?width:\s*min\(100%,\s*680px\)[\s\S]{0,180}?min-height:\s*44px[\s\S]{0,220}?grid-template-columns:\s*24px minmax\(0,\s*1fr\)[\s\S]{0,260}?border:\s*0[\s\S]{0,100}?border-radius:\s*12px[\s\S]{0,260}?text-align:\s*left/u);
+  assert.match(shellStyle, /\.chat-app\s+\.suggestion-button:nth-child\(n \+ 6\)\s*\{[\s\S]{0,60}?display:\s*none/u);
+  assert.match(shellStyle, /\.chat-app\s+\.suggestions\s*\{[\s\S]{0,260}?align-items:\s*flex-start/u);
+  assert.match(mobileStyle, /\.chat-app \.suggestions\s*\{[\s\S]{0,120}?align-items:\s*flex-start/u);
   assert.match(shellStyle, /\.chat-app\s+\.composer:focus-within\s*\{[\s\S]{0,180}?outline:\s*2px solid #0b57d0/u);
-  assert.match(shellStyle, /\.chat-app\s+\.composer\s+textarea\s*\{[\s\S]{0,180}?min-height:\s*44px/u);
+  assert.match(shellStyle, /\.chat-app\s+\.composer\s+textarea\s*\{[\s\S]{0,180}?min-height:\s*50px/u);
   assert.match(shellStyle, /\.chat-app\s+\.send-button\s*\{[\s\S]{0,180}?height:\s*44px/u);
   assert.ok(script.includes('document.body.classList.add("public-chat-page")'));
   assert.ok(script.includes("window.visualViewport"));
@@ -1141,7 +1352,7 @@ test("public chat uses a ChatGPT-style two-column shell with a single-column mob
   }
   assert.match(shellStyle, /\.chat-app \.chat-sidebar\s*\{[\s\S]{0,220}?border-right:\s*1px solid var\(--chat-line\)[\s\S]{0,100}?background:\s*#f9f9f9/u);
   assert.match(shellStyle, /\.chat-app \.message-list\s*\{[\s\S]{0,120}?max-width:\s*var\(--chat-content-width\)/u);
-  assert.match(shellStyle, /\.chat-app \.composer\s*\{[\s\S]{0,260}?border-radius:\s*29px/u);
+  assert.match(shellStyle, /\.chat-app \.composer\s*\{[\s\S]{0,320}?min-height:\s*68px[\s\S]{0,220}?border-radius:\s*24px/u);
   assert.match(
     shellStyle,
     /@media \(max-width:\s*899px\)[\s\S]{0,320}?grid-template-areas:\s*[\r\n ]*["']header["'][\r\n ]*["']main["'][\s\S]{0,180}?grid-template-columns:\s*minmax\(0,\s*1fr\)/u,

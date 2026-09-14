@@ -13,6 +13,7 @@ import {
   normalizePublicServiceToken,
   parseWorkerSecretNames,
   selectExactDatabase,
+  sourceManifest,
   validateReleaseEnvironment,
   workersDevSubdomain,
 } from "./release-support.mjs";
@@ -37,6 +38,21 @@ function validEnvironment(overrides = {}) {
     ...overrides,
   };
 }
+
+test("release evidence includes every installable web app asset", async () => {
+  const manifest = await sourceManifest();
+  const paths = new Set(manifest.files.map((file) => file.path));
+  for (const path of [
+    "public/manifest.webmanifest",
+    "public/service-worker.js",
+    "public/assets/pwa/apple-touch-icon-180-v1.png",
+    "public/assets/pwa/icon-192-v1.png",
+    "public/assets/pwa/icon-512-v1.png",
+    "public/assets/pwa/icon-maskable-512-v1.png",
+  ]) {
+    assert.ok(paths.has(path), path);
+  }
+});
 
 test("password derivation stays within the Cloudflare production PBKDF2 ceiling", () => {
   assert.equal(RELEASE_PASSWORD_ITERATIONS, 100_000);

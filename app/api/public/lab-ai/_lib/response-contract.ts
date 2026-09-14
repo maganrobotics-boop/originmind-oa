@@ -3,7 +3,7 @@ import { knowledgeSearchTerms, type RankedKnowledgeChunk } from "../../../../../
 import type { PublicKnowledgeSuggestionCandidate } from "../../../../../lib/knowledge-store";
 
 export const PUBLIC_LAB_AI_MAX_CHUNKS = 6;
-export const PUBLIC_LAB_AI_MAX_SUGGESTIONS = 4;
+export const PUBLIC_LAB_AI_MAX_SUGGESTIONS = 5;
 export const PUBLIC_LAB_AI_MAX_EXCERPT_CHARS = 600;
 export const PUBLIC_LAB_AI_MAX_TOTAL_EXCERPT_CHARS = 3_000;
 export const PUBLIC_LAB_AI_MAX_TOTAL_TEXT_CHARS = 4_096;
@@ -29,6 +29,15 @@ type PublicLabAiSuggestion = {
 };
 
 export type PublicLabAiSuggestionsResponse = { suggestions: PublicLabAiSuggestion[] };
+
+const DAY_MS = 24 * 60 * 60 * 1_000;
+const BEIJING_UTC_OFFSET_MS = 8 * 60 * 60 * 1_000;
+
+export function publicLabAiSuggestionDayOrdinal(now = new Date()): number {
+  const timestamp = now.getTime();
+  if (!Number.isFinite(timestamp)) throw new RangeError("invalid public suggestion date");
+  return Math.floor((timestamp + BEIJING_UTC_OFFSET_MS) / DAY_MS);
+}
 
 function makeWellFormed(value: string): string {
   let result = "";
@@ -123,8 +132,9 @@ export function buildPublicLabAiRetrieveResponse(ranked: RankedKnowledgeChunk[])
 
 export function buildPublicLabAiSuggestionsResponse(
   candidates: readonly PublicKnowledgeSuggestionCandidate[],
+  now = new Date(),
 ): PublicLabAiSuggestionsResponse {
-  const suggestions: PublicLabAiSuggestion[] = [];
+  const eligible: Omit<PublicLabAiSuggestion, "id">[] = [];
   const seenTitles = new Set<string>();
   for (const candidate of candidates) {
     const title = cleanPublicChatText(boundedLine(candidate.title, 100));
@@ -142,9 +152,17 @@ export function buildPublicLabAiSuggestionsResponse(
     const questionTerms = new Set(knowledgeSearchTerms(question));
     if (question.length > 300 || !questionTerms.size || !titleTerms.some((term) => questionTerms.has(term))) continue;
     seenTitles.add(normalizedTitle);
-    suggestions.push({ id: String(suggestions.length + 1), question, updatedAt });
-    if (suggestions.length === PUBLIC_LAB_AI_MAX_SUGGESTIONS) break;
+    eligible.push({ question, updatedAt });
   }
+
+  if (!eligible.length) return { suggestions: [] };
+  const day = publicLabAiSuggestionDayOrdinal(now);
+  const offset = ((day % eligible.length) + eligible.length) % eligible.length;
+  const rotated = [...eligible.slice(offset), ...eligible.slice(0, offset)];
+  const suggestions = rotated.slice(0, PUBLIC_LAB_AI_MAX_SUGGESTIONS).map((suggestion, index) => ({
+    id: String(index + 1),
+    ...suggestion,
+  }));
   return { suggestions };
 }
 

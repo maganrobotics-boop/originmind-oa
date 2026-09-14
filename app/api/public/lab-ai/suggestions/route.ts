@@ -4,7 +4,7 @@ import { consumePublicLabAiSuggestionsRateLimit } from "../_lib/rate-limit";
 import { buildPublicLabAiSuggestionsResponse, publicLabAiJson } from "../_lib/response-contract";
 import { authorizePublicLabAiRequest } from "../_lib/service-auth";
 
-const SUGGESTION_CANDIDATE_LIMIT = 12;
+const SUGGESTION_CANDIDATE_LIMIT = 20;
 
 function errorResponse(error: string, status: number, headers?: HeadersInit): Response {
   return publicLabAiJson({ error }, { status, headers });
