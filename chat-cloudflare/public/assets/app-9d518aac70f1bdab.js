@@ -80,7 +80,7 @@ const TOPICS = [
     path: "/technology",
     requestTopic: "research",
     index: "01",
-    title: "技术成果与产业化",
+    title: "成果与应用",
     detail: "核心成果 · 应用转化",
     eyebrow: "TECHNOLOGY & IMPACT",
     heading: "从核心技术到真实场景",
@@ -99,7 +99,7 @@ const TOPICS = [
     path: "/research",
     requestTopic: "research",
     index: "02",
-    title: "科研合作与学术交流",
+    title: "科研与合作",
     detail: "国际合作 · 学术交流",
     eyebrow: "RESEARCH & EXCHANGE",
     heading: "与全球研究网络建立连接",
@@ -118,7 +118,7 @@ const TOPICS = [
     path: "/originmind",
     requestTopic: "business",
     index: "03",
-    title: "源灵智能科技有限公司",
+    title: "公司与产品",
     detail: "机器人产品 · OmindOS",
     eyebrow: "ORIGINMIND",
     heading: "让机器人硬件与 OmindOS 协同工作",
@@ -137,7 +137,7 @@ const TOPICS = [
     path: "/ius",
     requestTopic: "student",
     index: "04",
-    title: "智能无人系统创新协会",
+    title: "协会与活动",
     detail: "学生创新 · 科技实践",
     eyebrow: "STUDENT INNOVATION",
     heading: "让学生创新走进机器人前沿",
@@ -643,7 +643,6 @@ function createPublicApp() {
   const drawerHeader = element("div", { className: "drawer-header" });
   const drawerTitle = element("div", { className: "drawer-title" }, [
     element("strong", { id: "topic-drawer-title", text: "ARTS Robotics" }),
-    element("span", { text: "选择主题" }),
   ]);
   const drawerClose = textButton("×", "drawer-close");
   drawerClose.setAttribute("aria-label", "关闭主题菜单");
@@ -651,7 +650,7 @@ function createPublicApp() {
 
   const topicList = element("nav", {
     className: "drawer-topic-list",
-    attributes: { "aria-label": "选择主题" },
+    attributes: { "aria-label": "聊天栏目" },
   });
   const topicLinks = new Map();
   for (const topic of TOPICS) {
