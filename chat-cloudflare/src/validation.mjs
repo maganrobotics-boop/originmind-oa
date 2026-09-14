@@ -1,4 +1,9 @@
 import { INQUIRY_STATUSES, TOPICS } from "./constants.mjs";
+import {
+  ANALYTICS_SECTIONS,
+  PUBLIC_ANALYTICS_EVENTS,
+  isNaturalSuggestion,
+} from "./analytics.mjs";
 import { ValidationError } from "./errors.mjs";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -56,13 +61,53 @@ function turns(value, { min = 0, max }) {
 
 export function parseChatPayload(value) {
   const input = object(value);
-  exactKeys(input, ["messages", "topic"], ["conversationToken", "suggestionToken"]);
+  exactKeys(input, ["messages", "topic"], ["conversationToken", "suggestionToken", "analyticsSection"]);
   return {
     messages: turns(input.messages, { min: 1, max: 9 }),
     topic: oneOf(input.topic, TOPICS),
     conversationToken: input.conversationToken === undefined ? undefined : text(input.conversationToken, { max: 40_000 }),
     suggestionToken: input.suggestionToken === undefined ? undefined : text(input.suggestionToken, { min: 1, max: 4_000 }),
+    analyticsSection: input.analyticsSection === undefined
+      ? undefined
+      : oneOf(input.analyticsSection, ANALYTICS_SECTIONS),
   };
+}
+
+function publicAnalyticsEvent(value) {
+  const input = object(value);
+  const type = oneOf(input.type, PUBLIC_ANALYTICS_EVENTS);
+  const section = oneOf(input.section, ANALYTICS_SECTIONS);
+  const isSuggestion = type === "suggestion_impression" || type === "suggestion_click";
+  exactKeys(input, isSuggestion ? ["type", "section", "suggestion"] : ["type", "section"]);
+  if (isSuggestion && !isNaturalSuggestion(input.suggestion)) throw new ValidationError();
+  return {
+    type,
+    section,
+    ...(isSuggestion ? { suggestion: input.suggestion } : {}),
+  };
+}
+
+export function parseAnalyticsPayload(value) {
+  const input = object(value);
+  exactKeys(input, ["events"]);
+  if (!Array.isArray(input.events) || input.events.length < 1 || input.events.length > 5) {
+    throw new ValidationError();
+  }
+  const events = input.events.map(publicAnalyticsEvent);
+  const identities = events.map((event) => `${event.type}\u0000${event.section}\u0000${event.suggestion || ""}`);
+  if (new Set(identities).size !== identities.length) throw new ValidationError();
+  return { events };
+}
+
+export function parseAnalyticsDays(searchParams) {
+  const entries = [...searchParams.entries()];
+  if (entries.some(([key]) => key !== "days") || searchParams.getAll("days").length > 1) {
+    throw new ValidationError();
+  }
+  const value = searchParams.get("days");
+  if (value === null) return 7;
+  if (!/^(?:1|7|30)$/u.test(value)) throw new ValidationError();
+  return Number(value);
 }
 
 export function parseInquiryPayload(value) {

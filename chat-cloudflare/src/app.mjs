@@ -1,4 +1,5 @@
 import { APP_NAME, DEFAULT_MODEL, SECURITY_HEADERS, WORKERS_AI_MODEL } from "./constants.mjs";
+import { analyticsReport, recordAnalyticsEvents } from "./analytics.mjs";
 import {
   decryptSecret,
   encryptSecret,
@@ -31,6 +32,8 @@ import {
 } from "./oa-public.mjs";
 import {
   parseChatPayload,
+  parseAnalyticsDays,
+  parseAnalyticsPayload,
   parseDocumentPayload,
   parseDocumentSubmissionPayload,
   parseInquiryPayload,
@@ -47,6 +50,7 @@ const MODEL_STATUS_RETRY_MS = 30_000;
 const OA_STATUS_READY_TTL_MS = 30_000;
 const OA_STATUS_RETRY_MS = 5_000;
 const SUGGESTIONS_HOURLY_LIMIT = 6_000;
+const ANALYTICS_HOURLY_LIMIT = 1_000;
 const MODEL_DAILY_LIMIT = 300;
 const MODEL_STATUS_PROBE_DAILY_LIMIT = 300;
 const MODEL_STATUS_PROBE_BUDGET_MESSAGE = "MODEL_STATUS_PROBE_BUDGET_EXHAUSTED";
@@ -99,6 +103,10 @@ function clientAddress(request) {
   return value.length <= 64 && /^[0-9a-f:.]+$/iu.test(value) ? value : "anonymous";
 }
 
+function isReleaseSmokeRequest(request) {
+  return (request.headers.get("user-agent") || "").startsWith("OriginMind-Chat-Release-Smoke/");
+}
+
 function sessionToken(request) {
   const prefix = `${SESSION_COOKIE}=`;
   return (
@@ -113,6 +121,21 @@ function sessionToken(request) {
 
 function database(context) {
   return context.env.DB;
+}
+
+async function recordAnalyticsBestEffort(context, events) {
+  const task = recordAnalyticsEvents(database(context), events).catch(() => {
+    console.error("Analytics write failed", { eventCount: events.length });
+  });
+  if (typeof context.executionContext?.waitUntil === "function") {
+    try {
+      context.executionContext.waitUntil(task);
+      return;
+    } catch {
+      // Non-Workers test runtimes may expose an incomplete execution context.
+    }
+  }
+  await task;
 }
 
 async function ownerEmail(context) {
@@ -877,6 +900,12 @@ async function api(context) {
         oaPublicStatus: recommendationsReady ? "connected" : "unavailable",
       });
     }
+    if (path === "analytics" && method === "POST") {
+      await limit(context, "analytics", ANALYTICS_HOURLY_LIMIT);
+      const payload = parseAnalyticsPayload(await readJson(request, 4_000));
+      await recordAnalyticsBestEffort(context, payload.events);
+      return json({ accepted: true }, 202);
+    }
     if (path.startsWith("admin/")) await requireOwner(context);
     if (path === "chat" && method === "POST") {
       const payload = parseChatPayload(await readJson(request, 80_000));
@@ -888,6 +917,15 @@ async function api(context) {
         ? await suggestionRetrievalQuestion(payload.suggestionToken, last.content, context.env.APP_ENCRYPTION_KEY)
         : null;
       if (payload.suggestionToken && !sourceQuestion) throw new PublicError("推荐问题已更新，请重新选择。", 400);
+      const analyticsSection = payload.analyticsSection || "general";
+      const analyticsSource = payload.suggestionToken ? "suggestion" : "typed";
+      if (!isReleaseSmokeRequest(request)) {
+        await recordAnalyticsBestEffort(context, [{
+          type: "chat_submit",
+          section: analyticsSection,
+          source: analyticsSource,
+        }]);
+      }
       const retrievalHistory = history.length ? history : boundedUserMessages(payload.messages.slice(0, -1));
       const oaStartedAt = Date.now();
       let oa;
@@ -913,6 +951,13 @@ async function api(context) {
           result.answer,
           context.env.APP_ENCRYPTION_KEY,
         );
+        if (!isReleaseSmokeRequest(request)) {
+          await recordAnalyticsBestEffort(context, [{
+            type: "chat_success",
+            section: analyticsSection,
+            source: analyticsSource,
+          }]);
+        }
         return json({
           ...result,
           conversationToken: token,
@@ -1069,6 +1114,10 @@ async function api(context) {
         .bind(payload.requestId)
         .first();
       return json({ reference: stored.reference }, 201);
+    }
+    if (path === "admin/analytics" && method === "GET") {
+      const days = parseAnalyticsDays(new URL(request.url).searchParams);
+      return json(await analyticsReport(database(context), days));
     }
     if (path === "admin/config" && method === "GET") {
       const config = await getModelConfig(context);
