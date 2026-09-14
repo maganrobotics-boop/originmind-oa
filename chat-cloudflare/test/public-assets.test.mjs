@@ -65,6 +65,17 @@ async function frontendImportHelpers() {
   );
 }
 
+async function frontendOaStatusHelpers() {
+  const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
+  const start = script.indexOf("const SYSTEM_STATUS_REFRESH_MS");
+  const end = script.indexOf("function createPublicApp", start);
+  assert.ok(start >= 0 && end > start, "frontend OA status helpers must remain directly testable");
+  return runInNewContext(
+    `${script.slice(start, end)}\n({ reconciledChatOaEvidence, systemStatusRefreshPlan, oaRetrievalStatusDetail });`,
+    Object.create(null),
+  );
+}
+
 async function frontendReturnedImportHarness({
   ok,
   payload,
@@ -416,6 +427,88 @@ test("initial admin loading starts legacy OA reconciliation without awaiting it"
   assert.doesNotMatch(fetchAdminDataSource, /await reconcileUnknownDocumentStatuses\(\)/u);
 });
 
+test("OA status reconciliation ignores stale chat evidence and preserves structural readiness", async () => {
+  const helpers = await frontendOaStatusHelpers();
+  const green = {
+    storageReady: true,
+    modelReady: true,
+    qwenReady: true,
+    modelPending: false,
+    oaReady: true,
+    knowledgeReady: true,
+    retrievalReady: true,
+    oaPending: false,
+    budgetReady: true,
+    systemReady: true,
+  };
+
+  const failed = helpers.reconciledChatOaEvidence(
+    green,
+    { oaPublicStatus: "timeout", sources: [] },
+    4,
+    4,
+  );
+  assert.ok(failed);
+  assert.equal(failed.service.oaReady, true);
+  assert.equal(failed.service.knowledgeReady, true);
+  assert.equal(failed.service.retrievalReady, false);
+  assert.equal(failed.service.systemReady, false);
+  assert.equal(failed.service.oaFailureStatus, "timeout");
+  assert.equal(failed.error, "OA 知识检索响应超时");
+  assert.equal(helpers.oaRetrievalStatusDetail(failed.service), "OA 检索响应较慢");
+
+  const recovered = helpers.reconciledChatOaEvidence(
+    failed.service,
+    { oaPublicStatus: "connected", sources: [] },
+    5,
+    5,
+  );
+  assert.ok(recovered);
+  assert.equal(recovered.service.knowledgeReady, true);
+  assert.equal(recovered.service.retrievalReady, true);
+  assert.equal(recovered.service.systemReady, true);
+
+  const stale = helpers.reconciledChatOaEvidence(
+    recovered.service,
+    { oaPublicStatus: "connected", sources: [{ id: "oa:1" }] },
+    3,
+    4,
+  );
+  assert.equal(stale, null);
+
+  const fromPending = helpers.reconciledChatOaEvidence(
+    null,
+    { oaPublicStatus: "connected", sources: [{ id: "oa:1" }] },
+    5,
+    5,
+  );
+  assert.ok(fromPending);
+  assert.equal(fromPending.service.oaReady, true);
+  assert.equal(fromPending.service.knowledgeReady, true);
+  assert.equal(fromPending.service.retrievalReady, true);
+  assert.equal(fromPending.service.systemReady, false);
+});
+
+test("OA status retries back off to the normal refresh interval and reset after recovery", async () => {
+  const helpers = await frontendOaStatusHelpers();
+  const unhealthy = { systemReady: false, modelPending: false, oaPending: false };
+  let retryDelay = 5_000;
+  const observed = [];
+  for (let index = 0; index < 6; index += 1) {
+    const plan = helpers.systemStatusRefreshPlan(unhealthy, retryDelay);
+    observed.push(plan.delay);
+    retryDelay = plan.nextRetryDelay;
+  }
+  assert.equal(JSON.stringify(observed), JSON.stringify([5_000, 10_000, 20_000, 40_000, 60_000, 60_000]));
+
+  const healthy = helpers.systemStatusRefreshPlan(
+    { systemReady: true, modelPending: false, oaPending: false },
+    retryDelay,
+  );
+  assert.equal(healthy.delay, 60_000);
+  assert.equal(healthy.nextRetryDelay, 5_000);
+});
+
 test("vanilla frontend preserves every same-origin API and visibility contract", async () => {
   const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
   for (const route of [
@@ -642,6 +735,8 @@ test("public chat keeps five compact live status lights below the fixed header t
   assert.match(script, /className:\s*["']topic-header["'][\s\S]{0,160}?\[\s*topicTitle,\s*systemStatus,/u);
   assert.match(script, /header\.append\(menuButton,\s*topicHeader,\s*chatInfoButton/u);
   assert.match(script, /SYSTEM_STATUS_REFRESH_MS\s*=\s*60_000/u);
+  assert.match(script, /SYSTEM_STATUS_RETRY_MS\s*=\s*5_000/u);
+  assert.match(script, /SYSTEM_STATUS_TIMEOUT_MS\s*=\s*15_000/u);
   assert.match(script, /fetch\(["']\/_health["']/u);
   assert.match(script, /requestJson\(["']\/api\/status["']/u);
   assert.match(script, /timeoutMessage\s*=\s*["']请求超时，请稍后重试。["']/u);
@@ -649,10 +744,17 @@ test("public chat keeps five compact live status lights below the fixed header t
   assert.match(script, /service\.systemReady\s*===\s*true/u);
   assert.match(script, /service\?\.knowledgeReady\s*===\s*true\s*&&\s*service\?\.retrievalReady\s*===\s*true/u);
   assert.match(script, /function\s+reconcileChatOaStatus\s*\(/u);
-  assert.match(script, /reconcileChatOaStatus\(payload\)/u);
-  assert.match(script, /oaPublicStatus\s*!==\s*["']unavailable["'][\s\S]{0,100}?oaPublicStatus\s*!==\s*["']not_configured["']/u);
-  assert.match(script, /systemStatusEpoch\s*\+=\s*1[\s\S]{0,160}?systemStatusController\.abort\(\)[\s\S]{0,160}?systemStatusController\s*=\s*null/u);
-  assert.match(script, /reconcileChatOaStatus[\s\S]{0,900}?scheduleSystemStatusRefresh\(2_000\)/u);
+  assert.match(script, /const oaEvidenceEpoch\s*=\s*\+\+systemStatusEpoch/u);
+  assert.match(script, /reconcileChatOaStatus\(payload,\s*oaEvidenceEpoch\)/u);
+  assert.match(script, /["']connected["'][\s\S]{0,180}?["']auth_error["'][\s\S]{0,180}?["']rate_limited["'][\s\S]{0,180}?["']timeout["'][\s\S]{0,180}?["']invalid_response["']/u);
+  assert.match(script, /evidenceEpoch\s*!==\s*currentEpoch/u);
+  assert.match(script, /reconcileChatOaStatus[\s\S]{0,900}?scheduleNextSystemStatusRefresh\(\)/u);
+  assert.match(script, /nextRetryDelay:\s*Math\.min\(SYSTEM_STATUS_REFRESH_MS,\s*delay\s*\*\s*2\)/u);
+  assert.match(script, /if \(document\.hidden\)[\s\S]{0,120}?systemStatusRefreshDueAt\s*=\s*Date\.now\(\)/u);
+  assert.match(script, /Array\.isArray\(payload\.sources\)\s*&&\s*payload\.sources\.length\s*>\s*0/u);
+  assert.doesNotMatch(script, /OA 检索繁忙/u);
+  assert.doesNotMatch(script, /OA 公开知识暂不可用，请核对两端 Token 和 OA 部署状态/u);
+  assert.ok(script.includes("OA 检索检测超时，系统会自动重试；无需重复填写 Token。"));
   assert.match(script, /textButton\(\s*["']["']\s*,\s*["']system-status-strip["']\s*\)/u);
   assert.ok(script.includes('systemStatus.setAttribute("aria-controls", "system-status-details")'));
   assert.ok(script.includes('systemStatus.setAttribute("aria-expanded", "false")'));

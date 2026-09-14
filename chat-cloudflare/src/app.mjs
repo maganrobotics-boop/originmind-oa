@@ -35,7 +35,8 @@ const SESSION_SECONDS = 43_200;
 const STATUS_PROBE_LEASE_MS = 15_000;
 const MODEL_STATUS_READY_TTL_MS = 5 * 60_000;
 const MODEL_STATUS_RETRY_MS = 30_000;
-const OA_STATUS_TTL_MS = 30_000;
+const OA_STATUS_READY_TTL_MS = 30_000;
+const OA_STATUS_RETRY_MS = 5_000;
 const MODEL_DAILY_LIMIT = 300;
 const MODEL_STATUS_PROBE_DAILY_LIMIT = 300;
 const MODEL_STATUS_PROBE_BUDGET_MESSAGE = "MODEL_STATUS_PROBE_BUDGET_EXHAUSTED";
@@ -588,23 +589,6 @@ async function oaStatusIdentity(context) {
   ]));
 }
 
-async function recordOaStatus(context, result) {
-  const normalized = validatedOaStatus(result);
-  if (!normalized) return;
-  const identity = await oaStatusIdentity(context);
-  await database(context)
-    .prepare("INSERT INTO settings (id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value")
-    .bind(`system-status-oa-v2:${identity}`, JSON.stringify({
-      version: 1,
-      identity,
-      leaseId: null,
-      checkedAt: Date.now(),
-      leaseUntil: 0,
-      result: normalized,
-    }))
-    .run();
-}
-
 async function currentModelStatus(context, config, active) {
   const identity = await modelStatusIdentity(context, config, active);
   return cachedStatusProbe(
@@ -629,20 +613,21 @@ async function currentOaStatus(context) {
       identity,
       fallback: { oaReady: false, knowledgeReady: false, retrievalReady: false },
       validateResult: validatedOaStatus,
-      ttlForResult: () => OA_STATUS_TTL_MS,
+      ttlForResult: (result) => result.oaReady && result.knowledgeReady && result.retrievalReady
+        ? OA_STATUS_READY_TTL_MS
+        : OA_STATUS_RETRY_MS,
     },
     async () => {
-      const result = await inspectOaPublicKnowledge(context);
-      const oaReady = result.status === "connected";
+      const [result, retrievalStatus] = await Promise.all([
+        inspectOaPublicKnowledge(context),
+        probeOaPublicKnowledge(context),
+      ]);
+      const oaReady = result.status === "connected" || retrievalStatus === "connected";
       const knowledgeReady = oaReady && result.documentCount > 0;
-      if (!knowledgeReady || result.retrievalReady !== true) {
-        return { oaReady, knowledgeReady, retrievalReady: false };
-      }
-      const retrievalStatus = await probeOaPublicKnowledge(context);
       return {
         oaReady,
         knowledgeReady,
-        retrievalReady: retrievalStatus === "connected",
+        retrievalReady: knowledgeReady && result.retrievalReady === true && retrievalStatus === "connected",
       };
     },
   );
@@ -873,13 +858,6 @@ async function api(context) {
         oa = await retrieveOa(retrievalQuestion(last.content, history), context);
       } finally {
         chatTiming.oa = Date.now() - oaStartedAt;
-      }
-      if (oa.status === "unavailable" || oa.status === "not_configured") {
-        try {
-          await recordOaStatus(context, { oaReady: false, knowledgeReady: false, retrievalReady: false });
-        } catch {
-          // The answer must still fail closed even if status evidence cannot be updated.
-        }
       }
       const chatResult = async (result) => {
         const token = await conversationToken(
