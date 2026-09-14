@@ -646,6 +646,8 @@ test("public chat keeps five compact live status lights below the fixed header t
   assert.match(script, /function\s+reconcileChatOaStatus\s*\(/u);
   assert.match(script, /reconcileChatOaStatus\(payload\)/u);
   assert.match(script, /oaPublicStatus\s*!==\s*["']unavailable["'][\s\S]{0,100}?oaPublicStatus\s*!==\s*["']not_configured["']/u);
+  assert.match(script, /systemStatusEpoch\s*\+=\s*1[\s\S]{0,160}?systemStatusController\.abort\(\)[\s\S]{0,160}?systemStatusController\s*=\s*null/u);
+  assert.match(script, /reconcileChatOaStatus[\s\S]{0,900}?scheduleSystemStatusRefresh\(2_000\)/u);
   assert.match(script, /textButton\(\s*["']["']\s*,\s*["']system-status-strip["']\s*\)/u);
   assert.ok(script.includes('systemStatus.setAttribute("aria-controls", "system-status-details")'));
   assert.ok(script.includes('systemStatus.setAttribute("aria-expanded", "false")'));
