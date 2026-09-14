@@ -267,15 +267,19 @@ function setRegion(region, message) {
 }
 
 async function requestJson(path, options = {}) {
+  const {
+    timeoutMessage = "请求超时，请稍后重试。",
+    ...requestOptions
+  } = options;
   let response;
   try {
     response = await fetch(path, {
       credentials: "same-origin",
-      ...options,
+      ...requestOptions,
     });
   } catch (error) {
     if (error?.name === "TimeoutError" || error?.name === "AbortError") {
-      throw new Error("处理超时，请压缩或拆分文件后重试。");
+      throw new Error(timeoutMessage);
     }
     throw new Error("暂时无法连接服务，请稍后重试。");
   }
@@ -2346,6 +2350,7 @@ function createAdminApp() {
             },
             body: file,
             signal: AbortSignal.timeout(120_000),
+            timeoutMessage: "文件处理超时，请压缩或拆分文件后重试。",
           });
           if (typeof result.text !== "string") throw new Error("文件解析结果异常，请稍后重试。");
           text = result.text;
