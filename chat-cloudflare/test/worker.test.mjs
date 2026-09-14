@@ -242,7 +242,11 @@ test("Workers AI gets only two bounded user turns and never client assistant tex
   assert.ok(nonSystem.every((message) => message.role === "user"));
   assert.ok(nonSystem.reduce((sum, message) => sum + message.content.length, 0) <= 3_000);
   assert.doesNotMatch(JSON.stringify(captured.input), /CLIENT_ASSISTANT_MUST_NOT_REACH_MODEL/u);
-  assert.match(captured.input.messages[0].content, /先直接回答问题/u);
+  assert.match(captured.input.messages[0].content, /OriginMind × ARTS Robotics 研发与对外咨询助手/u);
+  assert.match(captured.input.messages[0].content, /先给结论/u);
+  assert.match(captured.input.messages[0].content, /严格区分 OriginMind、ARTS Robotics 与联合研发材料/u);
+  assert.match(captured.input.messages[0].content, /不把计划说成已完成/u);
+  assert.match(captured.input.messages[0].content, /目前知识库没有找到足够依据/u);
   assert.match(captured.input.messages[0].content, /不要单列“参考资料”/u);
   const daily = await env.DB.prepare("SELECT count FROM limits WHERE key LIKE 'model-day:%'").first();
   assert.equal(Number(daily.count), 1);
