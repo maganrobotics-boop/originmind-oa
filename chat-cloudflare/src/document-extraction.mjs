@@ -1,7 +1,7 @@
 import { PublicError } from "./errors.mjs";
 
 export const MAX_DOCUMENT_UPLOAD_BYTES = 10 * 1024 * 1024;
-export const MAX_EXTRACTED_DOCUMENT_CHARACTERS = 30_000;
+export const MAX_EXTRACTED_DOCUMENT_BYTES = 5 * 1024 * 1024;
 
 const FORMATS = Object.freeze({
   "application/pdf": Object.freeze({ extensions: Object.freeze(["pdf"]), kind: "PDF" }),
@@ -104,8 +104,8 @@ export function normalizeExtractedDocument(value) {
   if (text.length < 10) {
     throw new PublicError("未识别到足够内容，请换一份清晰文件或手动填写正文。", 422);
   }
-  if (text.length > MAX_EXTRACTED_DOCUMENT_CHARACTERS) {
-    throw new PublicError("解析成功，但内容超过 30000 字，请拆分文件后再上传。", 422);
+  if (new TextEncoder().encode(text).byteLength > MAX_EXTRACTED_DOCUMENT_BYTES) {
+    throw new PublicError("解析成功，但正文超过 5 MB，请压缩或拆分文件后再上传。", 413);
   }
   return text;
 }

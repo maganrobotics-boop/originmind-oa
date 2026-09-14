@@ -8,7 +8,7 @@ const OA_CHAT_IMPORT_URL = "https://oa.omindos.ai/api/knowledge/import-chat";
 const OA_CHAT_IMPORT_STATUS_URL = "https://oa.omindos.ai/api/knowledge/import-chat/status";
 const MAX_TEXT_IMPORT_BYTES = 5 * 1024 * 1024;
 const MAX_BINARY_IMPORT_BYTES = 10 * 1024 * 1024;
-const MAX_CHAT_DRAFT_CHARACTERS = 30_000;
+const CHAT_DIRECT_OA_THRESHOLD_CHARACTERS = 30_000;
 const MAX_OA_STORAGE_FRAGMENT_CHARACTERS = 20_000;
 const SAFE_RETURNED_KNOWLEDGE_ITEM_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const IMPORT_MIME_BY_EXTENSION = Object.freeze({
@@ -1764,7 +1764,7 @@ function createAdminApp() {
       ));
     }
     if (returnedKnowledgeItemId) clearReturnedKnowledgeContext(returnedKnowledgeItemId);
-    const isLargeDocument = draft.body.length > MAX_CHAT_DRAFT_CHARACTERS;
+    const isLargeDocument = draft.body.length > CHAT_DIRECT_OA_THRESHOLD_CHARACTERS;
     state.notice = returnedKnowledgeItemId
       ? `已更新原 OA 条目并重新进入待审核状态（正文存为 ${receipt.partCount} 个片段）。Chat 未保留原文件或正文草稿。`
       : receipt.items.every((item) => item.status === "pending")
@@ -2315,7 +2315,6 @@ function createAdminApp() {
           if (typeof result.text !== "string") throw new Error("文件解析结果异常，请稍后重试。");
           text = result.text;
         }
-        if (!isText && text.length > MAX_CHAT_DRAFT_CHARACTERS) throw new Error("每条资料最多 30000 字");
         if (text.trim().length < 10) throw new Error("未识别到足够内容，请手动填写正文。");
         if (!state.draft.title) {
           state.draft.title = file.name
@@ -2325,12 +2324,13 @@ function createAdminApp() {
         }
         state.draft.body = text;
         imported = true;
+        const importedKind = isText ? "文本" : extension === "pdf" ? "PDF" : "图片";
         state.notice = state.returnedKnowledgeItemId
           ? `修改后的${isText ? "文本" : extension === "pdf" ? "PDF" : "图片"}已导入。Chat 不保存原文件或正文；本次仅替换正文，标题、分类、资料日期、来源链接和可见范围沿用原 OA 条目。`
+          : text.length > CHAT_DIRECT_OA_THRESHOLD_CHARACTERS
+          ? `${importedKind}已导入（${text.length} 字）。Chat 不保存原文件或大型正文草稿；提交时将直接发送 OA，作为 1 条资料审核，并存为预计至少 ${estimatedOaStorageFragmentCount(text)} 个片段（每个不超过 20000 字）。`
           : isText
-          ? text.length > MAX_CHAT_DRAFT_CHARACTERS
-            ? `文本已导入（${text.length} 字）。Chat 不保存原文件；提交时将直接发送 OA，作为 1 条资料审核，并存为预计至少 ${estimatedOaStorageFragmentCount(text)} 个片段（每个不超过 20000 字）。`
-            : "文本已导入。Chat 不保存原文件，请核对后保存草稿。"
+          ? "文本已导入。Chat 不保存原文件，请核对后保存草稿。"
           : `${extension === "pdf" ? "PDF" : "图片"}已由 Cloudflare AI 临时解析（${text.length} 字），本站未保存原件。请核对识别结果后提交。`;
       } catch (error) {
         state.error = error instanceof Error ? error.message : "读取失败";
@@ -2344,12 +2344,12 @@ function createAdminApp() {
       fileInput,
       element("span", {
         className: "small-note",
-        text: "TXT、Markdown 单个文件最多 5 MB，1.6 MB 文件可以直接导入；Chat 不保存原文件。超过 30000 字时不保存为 Chat 正文草稿，而是直接提交 OA，OA 作为 1 条资料审核，并拆成每个不超过 20000 字的存储片段。PDF、扫描件和图片会发送至 Cloudflare AI 临时解析，本站不保存原件；单个文件不超过 10 MB，解析正文最多 30000 字，识别可能有误，请提交前核对。",
+        text: "TXT、Markdown 单个文件最多 5 MB，1.6 MB 文件可以直接导入；PDF、扫描件和图片单个文件最多 10 MB，会发送至 Cloudflare AI 临时解析，本站不保存原件。解析正文不设 30000 字上限；大型正文会直接提交 OA，OA 作为 1 条资料统一审核，并自动拆成每个不超过 20000 字的存储片段。识别可能有误，请提交前核对。",
       }),
     );
 
     const actions = element("div", { className: "admin-buttons" });
-    const directOaImport = Boolean(state.returnedKnowledgeItemId) || state.draft.body.length > MAX_CHAT_DRAFT_CHARACTERS;
+    const directOaImport = Boolean(state.returnedKnowledgeItemId) || state.draft.body.length > CHAT_DIRECT_OA_THRESHOLD_CHARACTERS;
     const save = textButton(
       state.busy === "document"
         ? directOaImport ? "正在直接提交…" : "正在保存并提交…"
@@ -2379,7 +2379,7 @@ function createAdminApp() {
         text: state.returnedKnowledgeItemId
           ? "退回大文档会直接更新原 OA 条目：本次仅替换正文，标题、分类、资料日期、来源链接和可见范围沿用原 OA 条目；Chat 不保存正文草稿，失败时在当前页面保留正文和条目编号，OA 接收成功后才清空。"
           : directOaImport
-            ? "正文超过 30000 字：Chat 不保存正文草稿；提交失败时会在当前页面保留正文和导入编号，OA 接收成功后才清空。"
+            ? "大型正文不在 Chat 保存草稿：提交失败时会在当前页面保留正文和导入编号，OA 接收成功后才清空。"
           : "提交失败时保留 Chat 草稿，可从下方列表重试；重复提交同一版本不会重复建单。",
       }),
       actions,
@@ -2394,10 +2394,10 @@ function createAdminApp() {
         if (normalizedBody.trim().length < 10) throw new Error("正文至少需要 10 个字符。");
         state.draft.body = normalizedBody;
         const returnedKnowledgeItemId = state.returnedKnowledgeItemId;
-        if (!returnedKnowledgeItemId && state.draft.id && normalizedBody.length > MAX_CHAT_DRAFT_CHARACTERS) {
-          throw new Error("已有 Chat 草稿不能直接改为超过 30000 字。请取消编辑后，将大文档作为新资料直接提交 OA。");
+        if (!returnedKnowledgeItemId && state.draft.id && normalizedBody.length > CHAT_DIRECT_OA_THRESHOLD_CHARACTERS) {
+          throw new Error("已有 Chat 草稿不能直接改为大型正文。请取消编辑后，将大文档作为新资料直接提交 OA。");
         }
-        if (returnedKnowledgeItemId || normalizedBody.length > MAX_CHAT_DRAFT_CHARACTERS) {
+        if (returnedKnowledgeItemId || normalizedBody.length > CHAT_DIRECT_OA_THRESHOLD_CHARACTERS) {
           const id = state.draft.id || state.draft.submissionRequestId || makeRequestId();
           state.draft.submissionRequestId = id;
           await submitDocumentToOa({ ...state.draft, id }, {

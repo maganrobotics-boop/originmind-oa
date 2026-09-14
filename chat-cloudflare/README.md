@@ -26,9 +26,11 @@ in the API response as release evidence but are not part of the visible answer.
 - The authenticated management page accepts TXT, Markdown, PDF, JPEG, PNG and
   WebP. PDF and image files (up to 10 MiB) are sent to Cloudflare Workers AI and
   converted transiently through its `toMarkdown` binding. The site does not
-  retain the original binary; the returned text is capped at 30,000 characters
-  and must be reviewed by a human. Saving still creates a private Chat draft,
-  and OA approval remains mandatory before internal or public retrieval.
+  retain the original binary. Parsed text is no longer capped at 30,000
+  characters; the 5 MiB UTF-8 safety ceiling remains aligned with OA import.
+  Large documents bypass Chat draft storage, enter OA as one review item, and
+  are split into storage parts of at most 20,000 characters. Human review and OA
+  approval remain mandatory before internal or public retrieval.
 - Public Chat responses remain text-only. File ingestion does not add PDF or
   image generation to visitor-facing answers.
 - The public path works before an administrator password is provisioned.

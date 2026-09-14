@@ -3,6 +3,7 @@ import test from "node:test";
 
 import {
   MAX_DOCUMENT_UPLOAD_BYTES,
+  MAX_EXTRACTED_DOCUMENT_BYTES,
   extractDocument,
   normalizeExtractedDocument,
   validateDocumentUpload,
@@ -82,7 +83,7 @@ test("document upload validation rejects empty and oversized files", () => {
   );
 });
 
-test("extracted document text is normalized and strictly bounded", () => {
+test("extracted document text is normalized without a 30000-character ceiling", () => {
   assert.equal(
     normalizeExtractedDocument("  第一行自动识别文字\r\n第二行\u0000正文内容  "),
     "第一行自动识别文字\n第二行正文内容",
@@ -91,9 +92,12 @@ test("extracted document text is normalized and strictly bounded", () => {
     () => normalizeExtractedDocument("太短"),
     (error) => error.status === 422,
   );
+  const longText = "文".repeat(30_001);
+  assert.equal(normalizeExtractedDocument(longText), longText);
+  assert.equal(MAX_EXTRACTED_DOCUMENT_BYTES, 5 * 1024 * 1024);
   assert.throws(
-    () => normalizeExtractedDocument("文".repeat(30_001)),
-    (error) => error.status === 422 && /30000/u.test(error.message),
+    () => normalizeExtractedDocument("文".repeat(Math.floor(MAX_EXTRACTED_DOCUMENT_BYTES / 3) + 1)),
+    (error) => error.status === 413 && /5 MB/u.test(error.message),
   );
 });
 
