@@ -130,7 +130,7 @@ export async function retrieveOa(question, context) {
   if (!PUBLIC_LAB_AI_SERVICE_TOKEN_PATTERN.test(token)) {
     return { status: "not_configured", documents: [] };
   }
-  if (normalized.length < 2) return { status: "unavailable", documents: [] };
+  if (normalized.length < 2) return { status: "invalid_question", documents: [] };
   try {
     const init = {
       method: "POST",
