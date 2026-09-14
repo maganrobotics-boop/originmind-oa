@@ -70,7 +70,7 @@ async function frontendImportHelpers() {
   const end = script.indexOf("const TOPICS", start);
   assert.ok(start >= 0 && end > start, "frontend import helpers must remain directly testable");
   return runInNewContext(
-    `${script.slice(start, end)}\n({ MAX_TEXT_IMPORT_BYTES, CHAT_DIRECT_OA_THRESHOLD_CHARACTERS, MAX_OA_STORAGE_FRAGMENT_CHARACTERS, normalizeImportedText, decodeImportedUtf8, utf8ByteLength, estimatedOaStorageFragmentCount, oaImportReceipt, returnedKnowledgeItemIdFromSearch, withoutReturnedKnowledgeItemQuery });`,
+    `${script.slice(start, end)}\n({ MAX_TEXT_IMPORT_BYTES, MAX_BINARY_IMPORT_BYTES, MAX_BATCH_IMPORT_FILES, MAX_BATCH_IMPORT_BYTES, BATCH_IMPORT_CONCURRENCY, importFilePath, classifyImportFile, ignoredImportFile, prepareImportFiles, safeMarkdownImportLabel, importedSection, combineImportedSections, suggestedBatchTitle, CHAT_DIRECT_OA_THRESHOLD_CHARACTERS, MAX_OA_STORAGE_FRAGMENT_CHARACTERS, normalizeImportedText, decodeImportedUtf8, utf8ByteLength, estimatedOaStorageFragmentCount, oaImportReceipt, returnedKnowledgeItemIdFromSearch, withoutReturnedKnowledgeItemQuery });`,
     { TextDecoder, TextEncoder, URL, URLSearchParams },
   );
 }
@@ -560,6 +560,63 @@ test("text imports use normalized fatal UTF-8 decoding and a five MiB byte cap",
   );
 });
 
+test("batch import helpers validate, sort and combine files deterministically", async () => {
+  const helpers = await frontendImportHelpers();
+  assert.equal(helpers.MAX_BINARY_IMPORT_BYTES, 10 * 1024 * 1024);
+  assert.equal(helpers.MAX_BATCH_IMPORT_FILES, 100);
+  assert.equal(helpers.MAX_BATCH_IMPORT_BYTES, 500 * 1024 * 1024);
+  assert.equal(helpers.BATCH_IMPORT_CONCURRENCY, 3);
+
+  const files = [
+    { name: "figure_10.png", webkitRelativePath: "论文/images/figure_10.png", size: 200 },
+    { name: "paper.md", webkitRelativePath: "论文/paper.md", size: 300 },
+    { name: "figure_2.png", webkitRelativePath: "论文/images/figure_2.png", size: 100 },
+  ];
+  const descriptors = helpers.prepareImportFiles(files);
+  assert.deepEqual(
+    Array.from(descriptors, (item) => item.path),
+    ["论文/images/figure_2.png", "论文/images/figure_10.png", "论文/paper.md"],
+  );
+  assert.equal(descriptors[0].kind, "图片");
+  assert.equal(descriptors[2].kind, "Markdown");
+  assert.equal(helpers.suggestedBatchTitle(descriptors), "论文");
+  assert.equal(helpers.ignoredImportFile({ name: ".DS_Store" }), true);
+  assert.equal(helpers.ignoredImportFile({ name: "photo.png", webkitRelativePath: "__MACOSX/photo.png" }), true);
+  assert.equal(
+    helpers.prepareImportFiles([{ name: ".DS_Store", size: 10 }, { name: "photo.png", size: 10 }]).length,
+    1,
+  );
+
+  const body = helpers.combineImportedSections([
+    { descriptor: descriptors[0], text: "图二识别出来的有效文字内容。" },
+    { descriptor: descriptors[1], duplicate: true },
+    { descriptor: descriptors[2], text: "# 正文\r\n\r\n论文中的有效正文内容。" },
+  ], true);
+  assert.match(body, /^## 图片：论文\/images\/figure_2\.png/u);
+  assert.match(body, /---\n\n## Markdown：论文\/paper\.md/u);
+  assert.doesNotMatch(body, /figure_10/u);
+  assert.equal(helpers.safeMarkdownImportLabel("a#<b>`c.png"), "a＃bc.png");
+
+  assert.throws(
+    () => helpers.prepareImportFiles([{ name: "bad.svg", size: 50 }]),
+    /仅支持/u,
+  );
+  assert.throws(
+    () => helpers.prepareImportFiles([
+      { name: "same.png", webkitRelativePath: "A/same.png", size: 50 },
+      { name: "SAME.PNG", webkitRelativePath: "a/SAME.PNG", size: 50 },
+    ]),
+    /重复文件路径/u,
+  );
+  assert.throws(
+    () => helpers.prepareImportFiles(Array.from({ length: 101 }, (_, index) => ({
+      name: `${index}.png`,
+      size: 1,
+    }))),
+    /每批最多导入 100 个/u,
+  );
+});
+
 test("returned-import context survives failure and is cleared only after OA acknowledges the revision", async () => {
   const failed = await frontendReturnedImportHarness({ ok: false, payload: { error: "暂时失败" } });
   await assert.rejects(() => failed.api.submitDocumentToOa(failed.draft, {
@@ -857,11 +914,13 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.ok(script.includes("本站不保存原件"));
   assert.ok(script.includes("解析正文不设 30000 字上限"));
   assert.ok(script.includes("TXT、Markdown 单个文件最多 5 MB"));
-  assert.ok(script.includes("1.6 MB 文件可以直接导入"));
+  assert.ok(script.includes("每批最多 100 个、总计 500 MB"));
+  assert.ok(script.includes("最多 3 个并行任务"));
+  assert.ok(script.includes("合并为一条 Markdown 正文"));
   assert.ok(script.includes("OA 作为 1 条资料统一审核"));
   assert.ok(script.includes("每个不超过 20000 字"));
   assert.ok(script.includes("OA 接收成功后才清空"));
-  assert.ok(script.includes("导入新文件将替换当前正文"));
+  assert.ok(script.includes("批量导入将替换当前正文"));
   assert.ok(script.includes("请重新上传修改后的完整文件"));
   assert.ok(script.includes("成功提交后会更新原条目并保留审计链"));
   assert.ok(script.includes("本次仅替换正文，标题、分类、资料日期、来源链接和可见范围沿用原 OA 条目"));
@@ -869,11 +928,15 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
     assert.match(script, new RegExp(`${control.replace(".", "\\.")}\\.disabled\\s*=\\s*Boolean\\(state\\.busy\\)`, "u"));
   }
   assert.match(script, /\.slice\(0,\s*120\)/u);
-  assert.match(script, /focusImportedField\(imported\s*\?\s*["']document-body["']\s*:\s*["']document-file["']\)/u);
-  assert.match(script, /adminRequest\(["']extract["'][\s\S]*?body:\s*file/u);
-  assert.match(script, /"X-File-Name":\s*encodeURIComponent\(file\.name\)/u);
+  assert.match(script, /multiple:\s*true/u);
+  assert.match(script, /webkitdirectory:\s*true/u);
+  assert.match(script, /className:\s*["']import-progress["']/u);
+  assert.match(script, /重试失败项/u);
+  assert.match(script, /focusImportedField\(imported\s*\?\s*["']document-body["']/u);
+  assert.match(script, /adminRequest\(["']extract["'][\s\S]*?body:\s*descriptor\.file/u);
+  assert.match(script, /"X-File-Name":\s*encodeURIComponent\(descriptor\.file\.name\)/u);
   assert.match(script, /new TextDecoder\(["']utf-8["'],\s*\{\s*fatal:\s*true\s*\}\)/u);
-  assert.match(script, /decodeImportedUtf8\(await file\.arrayBuffer\(\)\)/u);
+  assert.match(script, /decodeImportedUtf8\(await descriptor\.file\.arrayBuffer\(\)\)/u);
   assert.doesNotMatch(script, /await file\.text\(\)/u);
   assert.doesNotMatch(script, /!isText\s*&&\s*text\.length\s*>\s*CHAT_DIRECT_OA_THRESHOLD_CHARACTERS/u);
   assert.doesNotMatch(script, /id:\s*["']document-body["'][\s\S]{0,160}maxlength:\s*["']30000["']/u);

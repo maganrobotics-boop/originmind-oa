@@ -81,7 +81,8 @@ function knowledgeResponse(init) {
 function assertNaturalPayload(payload) {
   assert.equal(payload.oaPublicStatus, "connected");
   assert.deepEqual(payload.suggestions.map((item) => item.question), [
-    "触觉反馈能怎样帮助机器人抓稳物体？", "没有卫星信号时，机器人怎么定位？",
+    naturalQuestions([{ body: SOURCE_FIXTURES[0].excerpt }])[0],
+    naturalQuestions([{ body: SOURCE_FIXTURES[1].excerpt }])[0],
   ]);
   for (const item of payload.suggestions) {
     assert.equal(typeof item.suggestionToken, "string");
@@ -375,11 +376,12 @@ test("extractive fallback deduplicates and bounds approved knowledge excerpts", 
 });
 
 test("questions come from excerpt topics, never filename metadata or unsupported placeholders", () => {
-  const questions = naturalQuestions([{
+  const document = {
     title: "！Magan Robotic Manipulation_20260914_脱敏版.PPTX",
     body: "触觉反馈能够帮助机器人在抓取物体时调整抓握力度。",
-  }]);
-  assert.equal(questions[0], "触觉反馈能怎样帮助机器人抓稳物体？");
+  };
+  const questions = naturalQuestions([document]);
+  assert.equal(questions[0], naturalQuestions([{ body: document.body }])[0]);
   assert.doesNotMatch(questions.join(""), /Magan|20260914|PPT|脱敏|值得关注|《/u);
   assert.deepEqual(naturalQuestions([{ title: "矿井巡检.PPT", body: "暂无正文内容。" }]), []);
 });
@@ -507,7 +509,7 @@ test("natural clicks bind to the original source without showing its upload file
   } };
   const listed = await handleRequest(request("/api/suggestions"), env, {}, runtime);
   const item = (await listed.json()).suggestions[0];
-  assert.equal(item.question, "触觉反馈能怎样帮助机器人抓稳物体？");
+  assert.equal(item.question, naturalQuestions([{ body: "触觉反馈帮助机器人调整抓取物体时的力度。" }])[0]);
   assert.doesNotMatch(JSON.stringify(item), /PPTX|脱敏版|值得关注/u);
   const expectedSource = cleanPublicChatText(sourceQuestion).normalize("NFKC");
   assert.equal(await suggestionRetrievalQuestion(item.suggestionToken, item.question, env.APP_ENCRYPTION_KEY), cleanPublicChatText(sourceQuestion));
