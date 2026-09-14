@@ -108,6 +108,25 @@ async function frontendTopicHelpers() {
   );
 }
 
+async function frontendAnalyticsHelpers() {
+  const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
+  const start = script.indexOf("const PUBLIC_ANALYTICS_EVENT_TYPES");
+  const end = script.indexOf("function makeRequestId", start);
+  assert.ok(start >= 0 && end > start, "frontend analytics queue must remain directly testable");
+  return runInNewContext(
+    `${script.slice(start, end)}\n({ createAnalyticsQueue, PUBLIC_ANALYTICS_MAX_BATCH_SIZE });`,
+    {
+      CHAT_TOPICS: [
+        { id: "general" },
+        { id: "technology" },
+        { id: "academic" },
+        { id: "company" },
+        { id: "association" },
+      ],
+    },
+  );
+}
+
 async function frontendConversationHelpers() {
   const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
   const start = script.indexOf("const CHAT_HISTORY_KEY");
@@ -239,6 +258,68 @@ async function frontendReturnedImportHarness({
   });
   return { api, calls, draft, state };
 }
+
+test("public analytics batches only anonymous allowlisted events in groups of at most five", async () => {
+  const { createAnalyticsQueue, PUBLIC_ANALYTICS_MAX_BATCH_SIZE } = await frontendAnalyticsHelpers();
+  const requests = [];
+  const analytics = createAnalyticsQueue((url, options) => {
+    requests.push({ url, options });
+    return Promise.resolve({ ok: true });
+  });
+
+  assert.equal(PUBLIC_ANALYTICS_MAX_BATCH_SIZE, 5);
+  assert.equal(analytics.track("unknown", { section: "general" }), false);
+  assert.equal(analytics.track("page_view", { section: "private" }), false);
+  assert.equal(analytics.track("suggestion_click", { section: "general" }), false);
+  assert.equal(analytics.track("page_view", {
+    section: "general",
+    question: "不得上传的用户问题",
+    answer: "不得上传的回答",
+    conversationId: "local-only",
+  }), true);
+  for (const suggestion of [
+    "实验室目前有哪些机器人设备？",
+    "实验室主要研究哪些机器人方向？",
+    "四足机器人能在矿井里完成哪些巡检任务？",
+    "OriginMind 怎样组织机器人的技能和任务？",
+    "协会有哪些机器人实践活动？",
+  ]) {
+    assert.equal(analytics.track("suggestion_impression", { section: "general", suggestion }), true);
+  }
+  await new Promise((resolve) => setImmediate(resolve));
+
+  assert.deepEqual(requests.map(({ url }) => url), ["/api/analytics", "/api/analytics"]);
+  const batches = requests.map(({ options }) => JSON.parse(options.body).events);
+  assert.deepEqual(batches.map((events) => events.length), [5, 1]);
+  assert.equal(requests.every(({ options }) => (
+    options.method === "POST" && options.credentials === "same-origin" && options.keepalive === true
+  )), true);
+  assert.deepEqual({ ...batches[0][0] }, { type: "page_view", section: "general" });
+  assert.equal(JSON.stringify(batches).includes("用户问题"), false);
+  assert.equal(JSON.stringify(batches).includes("conversationId"), false);
+});
+
+test("analytics UI and event hooks retain the agreed privacy and period contract", async () => {
+  const [script, style] = await Promise.all([
+    readFile(path.join(frontendDir, "app.js"), "utf8"),
+    readFile(path.join(frontendDir, "styles.css"), "utf8"),
+  ]);
+  assert.match(script, /analytics\.track\("page_view",\s*\{ section \}\)/u);
+  assert.match(script, /analytics\.track\("new_chat",\s*\{ section: newChatSection \}\)/u);
+  assert.match(script, /analytics\.track\("install_success",\s*\{ section: state\.section \}\)/u);
+  assert.match(script, /analytics\.track\("suggestion_impression",[\s\S]{0,180}?suggestion:\s*metadata\.suggestion/u);
+  assert.match(script, /analytics\.track\("suggestion_click",[\s\S]{0,180}?suggestion:\s*question/u);
+  assert.match(script, /analyticsSection:\s*session\.section/u);
+  assert.match(script, /adminRequest\(`analytics\?days=\$\{days\}`\)/u);
+  assert.match(script, /\[\[1,\s*"今天"\],\s*\[7,\s*"近 7 天"\],\s*\[30,\s*"近 30 天"\]\]/u);
+  assert.match(script, /tabButton\("analytics",\s*"数据统计"\)/u);
+  for (const label of ["页面浏览", "提问次数", "推荐点击率", "响应成功率", "安装成功", "逐日趋势", "主题表现", "热门推荐"]) {
+    assert.ok(script.includes(label), label);
+  }
+  assert.match(style, /\.analytics-kpi-grid\s*\{[\s\S]{0,180}?grid-template-columns:\s*repeat\(auto-fit,/u);
+  assert.match(style, /\.analytics-table-wrap\s*\{[\s\S]{0,180}?overflow-x:\s*auto/u);
+  assert.match(style, /@media \(max-width: 820px\)[\s\S]{0,220}?\.analytics-kpi-grid/u);
+});
 
 test("the deterministic build contains exactly the current content-hashed frontend", async () => {
   const expected = await expectedFrontend();

@@ -322,6 +322,64 @@ function jsonOptions(body, method = "POST") {
   };
 }
 
+const PUBLIC_ANALYTICS_EVENT_TYPES = Object.freeze([
+  "page_view",
+  "suggestion_impression",
+  "suggestion_click",
+  "new_chat",
+  "install_success",
+]);
+const PUBLIC_ANALYTICS_EVENT_TYPE_SET = new Set(PUBLIC_ANALYTICS_EVENT_TYPES);
+const PUBLIC_ANALYTICS_RECOMMENDATION_TYPES = new Set(["suggestion_impression", "suggestion_click"]);
+const PUBLIC_ANALYTICS_MAX_BATCH_SIZE = 5;
+
+function createAnalyticsQueue(fetcher = fetch) {
+  const queue = [];
+  let flushScheduled = false;
+
+  function flush() {
+    flushScheduled = false;
+    while (queue.length) {
+      const events = queue.splice(0, PUBLIC_ANALYTICS_MAX_BATCH_SIZE);
+      try {
+        const request = fetcher("/api/analytics", {
+          method: "POST",
+          credentials: "same-origin",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ events }),
+          keepalive: true,
+        });
+        Promise.resolve(request).catch(() => {});
+      } catch {
+        // Anonymous product analytics must never interrupt the public chat.
+      }
+    }
+  }
+
+  function scheduleFlush() {
+    if (flushScheduled) return;
+    flushScheduled = true;
+    Promise.resolve().then(flush);
+  }
+
+  function track(type, { section, suggestion } = {}) {
+    if (!PUBLIC_ANALYTICS_EVENT_TYPE_SET.has(type)) return false;
+    const normalizedSection = String(section || "").trim();
+    if (!CHAT_TOPICS.some((topic) => topic.id === normalizedSection)) return false;
+    const event = { type, section: normalizedSection };
+    if (PUBLIC_ANALYTICS_RECOMMENDATION_TYPES.has(type)) {
+      const normalizedSuggestion = String(suggestion || "").trim();
+      if (!normalizedSuggestion || normalizedSuggestion.length > 300) return false;
+      event.suggestion = normalizedSuggestion;
+    }
+    queue.push(event);
+    scheduleFlush();
+    return true;
+  }
+
+  return { track, flush };
+}
+
 function makeRequestId() {
   if (typeof crypto.randomUUID === "function") return crypto.randomUUID();
   const bytes = crypto.getRandomValues(new Uint8Array(16));
@@ -387,6 +445,7 @@ function userFacingAnswer(value) {
 
 const CHAT_HISTORY_KEY = "arts-public-chat-history-v1:";
 const CHAT_CONVERSATIONS_KEY = "arts-public-chat-conversations-v2";
+const CHAT_INSTALL_ANALYTICS_KEY = "arts-public-chat-install-analytics-v1";
 const CHAT_HISTORY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CHAT_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
 const CHAT_HISTORY_MAX_CHARS = 80_000;
@@ -928,6 +987,118 @@ function createPublicApp() {
     },
   };
 
+  const analytics = createAnalyticsQueue();
+  const mainSuggestionImpressions = new Set();
+  const newChatSuggestionImpressions = new Set();
+  const suggestionObservation = new WeakMap();
+  let lastAnalyticsSection = "";
+  let installSuccessTracked = false;
+  const suggestionObserver = typeof window.IntersectionObserver === "function"
+    ? new window.IntersectionObserver((entries) => {
+      for (const entry of entries) {
+        if (entry.target?.isConnected === false) {
+          suggestionObserver.unobserve(entry.target);
+          suggestionObservation.delete(entry.target);
+          continue;
+        }
+        if (!entry.isIntersecting || entry.intersectionRatio < 0.5) continue;
+        const metadata = suggestionObservation.get(entry.target);
+        if (metadata && recordSuggestionImpression(entry.target, metadata)) {
+          suggestionObserver.unobserve(entry.target);
+          suggestionObservation.delete(entry.target);
+        }
+      }
+    }, { threshold: 0.5 })
+    : null;
+
+  function trackPageView(section = state.section) {
+    if (section === lastAnalyticsSection) return;
+    lastAnalyticsSection = section;
+    analytics.track("page_view", { section });
+  }
+
+  function trackInstallSuccessOnce() {
+    if (installSuccessTracked) return;
+    try {
+      if (historyStorage?.getItem(CHAT_INSTALL_ANALYTICS_KEY) === "1") {
+        installSuccessTracked = true;
+        return;
+      }
+    } catch {
+      // An unavailable local store only affects cross-launch deduplication.
+    }
+    if (!analytics.track("install_success", { section: state.section })) return;
+    installSuccessTracked = true;
+    try { historyStorage?.setItem(CHAT_INSTALL_ANALYTICS_KEY, "1"); } catch { /* Keep installation usable. */ }
+  }
+
+  function suggestionNodeVisible(node) {
+    if (document.hidden === true || node?.isConnected === false) return false;
+    if (typeof node?.getBoundingClientRect !== "function") return true;
+    const rect = node.getBoundingClientRect();
+    const viewportWidth = window.innerWidth || document.documentElement?.clientWidth || 0;
+    const viewportHeight = window.innerHeight || document.documentElement?.clientHeight || 0;
+    return rect.width > 0 && rect.height > 0 && rect.right > 0 && rect.bottom > 0 &&
+      rect.left < viewportWidth && rect.top < viewportHeight;
+  }
+
+  function recordSuggestionImpression(node, metadata) {
+    if (!suggestionNodeVisible(node)) return false;
+    if (metadata.surface === "composer") {
+      const session = conversationFor(metadata.conversationId);
+      if (state.activeConversationId !== metadata.conversationId || suggestionPanel.hidden ||
+          !session || session.messages.length > 0 || session.sending ||
+          !state.suggestions.includes(metadata.suggestion)) return false;
+      const key = `${beijingDayKey(Date.now())}:${metadata.conversationId}:${metadata.suggestion}`;
+      if (mainSuggestionImpressions.has(key)) return true;
+      mainSuggestionImpressions.add(key);
+    } else {
+      if (!newChatDialog.open || metadata.dialogEpoch !== newChatDialogEpoch ||
+          newChatSuggestionPanel.hidden || !state.suggestions.includes(metadata.suggestion)) return false;
+      const key = `${metadata.dialogEpoch}:${metadata.suggestion}`;
+      if (newChatSuggestionImpressions.has(key)) return true;
+      newChatSuggestionImpressions.add(key);
+    }
+    analytics.track("suggestion_impression", {
+      section: metadata.section,
+      suggestion: metadata.suggestion,
+    });
+    return true;
+  }
+
+  function observeSuggestionImpression(node, metadata) {
+    suggestionObservation.set(node, metadata);
+    if (suggestionObserver) {
+      suggestionObserver.observe(node);
+      return;
+    }
+    window.requestAnimationFrame(() => { recordSuggestionImpression(node, metadata); });
+  }
+
+  function clearSuggestionList(list) {
+    if (suggestionObserver) {
+      for (const node of list.children) {
+        suggestionObserver.unobserve(node);
+        suggestionObservation.delete(node);
+      }
+    }
+    list.replaceChildren();
+  }
+
+  function observeOpenNewChatSuggestions(dialogEpoch) {
+    if (!newChatDialog.open || dialogEpoch !== newChatDialogEpoch || newChatSuggestionPanel.hidden) return;
+    for (const [index, button] of Array.from(newChatSuggestionList.children).entries()) {
+      const suggestion = state.suggestions[index];
+      if (!suggestion) continue;
+      observeSuggestionImpression(button, {
+        surface: "new_chat",
+        section: newChatSection,
+        suggestion,
+        dialogEpoch,
+      });
+    }
+  }
+
   if (migratedLegacyHistory && writeChatConversations(
     historyStorage,
     state.conversations,
@@ -1391,6 +1562,7 @@ function createPublicApp() {
     window.requestAnimationFrame(() => {
       newChatInput.focus({ preventScroll: true });
       syncChatViewport();
+      observeOpenNewChatSuggestions(newChatDialogEpoch);
     });
   }
 
@@ -1522,6 +1694,7 @@ function createPublicApp() {
   window.addEventListener("appinstalled", () => {
     deferredInstallPrompt = null;
     installedWebApp = true;
+    trackInstallSuccessOnce();
     updateInstallControls();
     closeInstallDialog();
     topicStatus.textContent = "实验室助手已安装到桌面";
@@ -2036,10 +2209,12 @@ function createPublicApp() {
   function activateConversation(conversationId, { historyMode = "none", announce = false } = {}) {
     const conversation = conversationFor(conversationId);
     if (!conversation) return false;
+    const previousSection = state.section;
     const changed = state.activeConversationId !== conversation.id;
     if (changed) saveCurrentView();
     state.activeConversationId = conversation.id;
     state.section = conversation.section;
+    if (previousSection !== state.section) trackPageView(state.section);
     const topic = topicFor(conversation.section);
     if (historyMode === "push" && (changed || window.location.pathname !== topic.path)) {
       window.history.pushState({ topic: topic.id, conversationId: conversation.id }, "", topic.path);
@@ -2064,6 +2239,7 @@ function createPublicApp() {
   function startNewChatQuestion(rawQuestion, suggestionToken = "") {
     const question = String(rawQuestion || "").trim();
     if (!question) return false;
+    analytics.track("new_chat", { section: newChatSection });
     const conversation = createConversation(newChatSection);
     closeNewChat();
     activateConversation(conversation.id, { historyMode: "push" });
@@ -2231,7 +2407,7 @@ function createPublicApp() {
     const conversationId = state.activeConversationId;
     const session = conversationFor(conversationId);
     suggestionPanel.hidden = !recommendationsReady() || session.messages.length > 0 || session.sending || state.suggestions.length === 0;
-    suggestionList.replaceChildren();
+    clearSuggestionList(suggestionList);
     suggestionList.setAttribute("aria-label", "根据近期入库知识生成的推荐话题");
     if (!suggestionPanel.hidden) {
       for (const suggestion of state.suggestions) {
@@ -2247,6 +2423,12 @@ function createPublicApp() {
         );
         button.addEventListener("click", () => { void dispatchSuggestion(suggestion, conversationId); });
         suggestionList.append(button);
+        observeSuggestionImpression(button, {
+          surface: "composer",
+          section: session.section,
+          suggestion,
+          conversationId,
+        });
       }
     }
     renderNewChatSuggestions();
@@ -2255,7 +2437,7 @@ function createPublicApp() {
   function renderNewChatSuggestions() {
     const ready = recommendationsReady() && !state.suggestionsLoading && state.suggestions.length > 0;
     newChatSuggestionPanel.hidden = !ready;
-    newChatSuggestionList.replaceChildren();
+    clearSuggestionList(newChatSuggestionList);
     if (!ready) return;
     const dialogEpoch = newChatDialogEpoch;
     for (const suggestion of state.suggestions) {
@@ -2277,6 +2459,9 @@ function createPublicApp() {
       });
       newChatSuggestionList.append(button);
     }
+    if (newChatDialog.open) {
+      window.requestAnimationFrame(() => { observeOpenNewChatSuggestions(dialogEpoch); });
+    }
   }
 
   async function dispatchSuggestion(rawQuestion, conversationId, options = {}) {
@@ -2285,6 +2470,12 @@ function createPublicApp() {
     const target = startNew ? null : conversationFor(conversationId);
     const sourceDraft = startNew ? newChatInput.value : target?.draft;
     if (!question || !recommendationsReady() || state.suggestionsLoading || (!startNew && (!target || target.sending))) return;
+    if (typeof analytics !== "undefined") {
+      analytics.track("suggestion_click", {
+        section: startNew ? options.section || newChatSection : target.section,
+        suggestion: question,
+      });
+    }
     if (suggestionsRefreshTimer !== null) window.clearTimeout(suggestionsRefreshTimer);
     suggestionsRefreshTimer = null;
     suggestionsRefreshDueAt = 0;
@@ -2493,6 +2684,7 @@ function createPublicApp() {
       const payload = await requestJson("/api/chat", jsonOptions({
         messages: session.messages.filter((message) => message.role === "user").slice(-2).map(({ role, content }) => ({ role, content })),
         topic: topic.requestTopic,
+        analyticsSection: session.section,
         ...(session.conversationToken ? { conversationToken: session.conversationToken } : {}),
         ...(suggestionToken ? { suggestionToken } : {}),
       }));
@@ -2748,6 +2940,7 @@ function createPublicApp() {
   questionInput.addEventListener("focus", syncChatViewport);
   questionInput.addEventListener("blur", syncChatViewport);
   window.addEventListener("resize", syncChatViewport, { passive: true });
+  window.addEventListener("pagehide", analytics.flush, { passive: true });
   window.visualViewport?.addEventListener("resize", syncChatViewport, { passive: true });
   window.visualViewport?.addEventListener("scroll", syncChatViewport, { passive: true });
   questionInput.addEventListener("keydown", (event) => {
@@ -2777,6 +2970,8 @@ function createPublicApp() {
   );
 
   questionInput.value = sessionFor().draft;
+  trackPageView(state.section);
+  if (installedWebApp) trackInstallSuccessOnce();
   syncTopicControls();
   renderRecentConversations();
   syncFeedback();
@@ -2885,9 +3080,15 @@ function createAdminApp() {
     oaStatusSyncing: false,
     oaStatusSyncQueued: false,
     inquiries: [],
+    analytics: null,
+    analyticsDays: 7,
+    analyticsLoadedDays: 0,
+    analyticsLoading: false,
+    analyticsError: "",
     draft: emptyDraft(),
     returnedKnowledgeItemId: returnedKnowledgeItemIdFromSearch(window.location.search),
   };
+  let analyticsRequestEpoch = 0;
 
   function emptyDraft() {
     return {
@@ -3144,6 +3345,34 @@ function createAdminApp() {
     }
   }
 
+  async function loadAnalytics(days = state.analyticsDays) {
+    if (![1, 7, 30].includes(days)) return;
+    const epoch = ++analyticsRequestEpoch;
+    state.analyticsDays = days;
+    state.analyticsLoading = true;
+    state.analyticsError = "";
+    renderAdminShell();
+    try {
+      const payload = await adminRequest(`analytics?days=${days}`);
+      if (epoch !== analyticsRequestEpoch) return;
+      state.analytics = payload;
+      state.analyticsLoadedDays = days;
+    } catch (error) {
+      if (epoch !== analyticsRequestEpoch) return;
+      state.analyticsError = error instanceof Error ? error.message : "读取统计数据失败";
+    } finally {
+      if (epoch === analyticsRequestEpoch) {
+        state.analyticsLoading = false;
+        renderAdminShell();
+      }
+    }
+  }
+
+  function ensureAnalyticsData() {
+    if (state.analyticsLoading || (state.analytics && state.analyticsLoadedDays === state.analyticsDays)) return;
+    void loadAnalytics(state.analyticsDays);
+  }
+
   async function runAdminAction(key, action) {
     if (state.busy) return;
     state.busy = key;
@@ -3280,16 +3509,18 @@ function createAdminApp() {
       state.activeTab = id;
       renderAdminShell();
       document.getElementById(`admin-tab-${id}`)?.focus();
+      if (id === "analytics") ensureAnalyticsData();
     });
     button.addEventListener("keydown", (event) => {
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
-      const ids = ["inquiries", "documents", "model"];
+      const ids = ["analytics", "inquiries", "documents", "model"];
       const offset = event.key === "ArrowRight" ? 1 : -1;
       const next = (ids.indexOf(id) + offset + ids.length) % ids.length;
       state.activeTab = ids[next];
       renderAdminShell();
       document.getElementById(`admin-tab-${ids[next]}`)?.focus();
+      if (state.activeTab === "analytics") ensureAnalyticsData();
     });
     return button;
   }
@@ -3879,6 +4110,176 @@ function createAdminApp() {
     return panel;
   }
 
+  function analyticsCount(value) {
+    const number = Number(value);
+    return Number.isFinite(number) && number >= 0
+      ? Math.round(number).toLocaleString("zh-CN")
+      : "0";
+  }
+
+  function analyticsRateValue(value) {
+    const number = Number(value);
+    return `${(Number.isFinite(number) && number >= 0 ? number : 0).toFixed(1)}%`;
+  }
+
+  function analyticsSectionLabel(section) {
+    return CHAT_TOPICS.find((topic) => topic.id === section)?.title || String(section || "未分类");
+  }
+
+  function analyticsMetricCard(label, value, meta) {
+    return element("article", { className: "analytics-kpi-card" }, [
+      element("p", { className: "analytics-kpi-label", text: label }),
+      element("p", { className: "analytics-kpi-value", text: value }),
+      element("p", { className: "analytics-kpi-meta", text: meta }),
+    ]);
+  }
+
+  function analyticsTable(label, headers, rows) {
+    if (!rows.length) return element("div", { className: "admin-empty", text: "当前周期暂无数据。" });
+    const table = element("table", { className: "analytics-table" });
+    const head = element("thead");
+    const headRow = element("tr");
+    for (const header of headers) {
+      headRow.append(element("th", { text: header, attributes: { scope: "col" } }));
+    }
+    head.append(headRow);
+    const body = element("tbody");
+    for (const row of rows) {
+      const rowNode = element("tr");
+      for (const value of row) rowNode.append(element("td", { text: value }));
+      body.append(rowNode);
+    }
+    table.append(head, body);
+    return element("div", {
+      className: "analytics-table-wrap",
+      attributes: { role: "region", "aria-label": label, tabindex: "0" },
+    }, [table]);
+  }
+
+  function renderAnalyticsPanel() {
+    const panel = adminPanel("analytics", "admin-card analytics-panel");
+    const header = element("div", { className: "analytics-panel-header" });
+    header.append(element("div", { className: "analytics-panel-copy" }, [
+      element("p", { className: "eyebrow", text: "ANALYTICS" }),
+      element("h2", { text: "数据统计" }),
+      element("p", { text: "匿名汇总网站使用趋势；点击率按所选时段的点击次数除以曝光次数计算，不记录访客问题、回答或个人信息。数据可能受设备、浏览器、网络及异常流量影响。" }),
+    ]));
+    const range = element("div", {
+      className: "analytics-range",
+      attributes: { role: "group", "aria-label": "统计周期" },
+    });
+    for (const [days, label] of [[1, "今天"], [7, "近 7 天"], [30, "近 30 天"]]) {
+      const button = textButton(label, "analytics-range-button");
+      button.setAttribute("aria-pressed", state.analyticsDays === days ? "true" : "false");
+      button.disabled = state.analyticsLoading && state.analyticsDays === days;
+      button.addEventListener("click", () => {
+        if (state.analyticsDays === days && state.analyticsLoadedDays === days && state.analytics) return;
+        void loadAnalytics(days);
+      });
+      range.append(button);
+    }
+    header.append(range);
+    panel.append(header);
+
+    if (state.analyticsLoading && (!state.analytics || state.analyticsLoadedDays !== state.analyticsDays)) {
+      panel.append(element("p", {
+        className: "thinking analytics-loading",
+        attributes: { role: "status", "aria-live": "polite" },
+      }, [icon("◌", "spin"), "正在读取统计数据…"]));
+      return panel;
+    }
+    if (state.analyticsError) {
+      const retry = textButton("重新加载", "secondary-button");
+      retry.addEventListener("click", () => { void loadAnalytics(state.analyticsDays); });
+      panel.append(
+        element("p", { className: "error", text: state.analyticsError, attributes: { role: "alert" } }),
+        retry,
+      );
+      return panel;
+    }
+
+    const data = state.analytics;
+    if (!data) {
+      panel.append(element("div", { className: "admin-empty", text: "选择周期后查看统计数据。" }));
+      return panel;
+    }
+    const totals = data.totals || {};
+    const rates = data.rates || {};
+    const period = data.period || {};
+    const periodLabel = period.from && period.to
+      ? `${period.from} 至 ${period.to} · 北京时间`
+      : `${state.analyticsDays === 1 ? "今天" : `近 ${state.analyticsDays} 天`} · 北京时间`;
+    const kpis = element("div", { className: "analytics-kpi-grid" });
+    kpis.append(
+      analyticsMetricCard("页面浏览", analyticsCount(totals.pageViews), periodLabel),
+      analyticsMetricCard("提问次数", analyticsCount(totals.chatSubmits), `成功回答 ${analyticsCount(totals.chatSuccesses)} 次`),
+      analyticsMetricCard(
+        "推荐点击率",
+        analyticsRateValue(rates.suggestionCtr),
+        `${analyticsCount(totals.suggestionClicks)} 次点击 / ${analyticsCount(totals.suggestionImpressions)} 次曝光`,
+      ),
+      analyticsMetricCard(
+        "响应成功率",
+        analyticsRateValue(rates.chatSuccessRate),
+        `${analyticsCount(totals.chatSuccesses)} 次成功 / ${analyticsCount(totals.chatSubmits)} 次提问`,
+      ),
+      analyticsMetricCard("安装成功", analyticsCount(totals.installs), `新建聊天 ${analyticsCount(totals.newChats)} 次`),
+    );
+    panel.append(kpis);
+
+    const details = element("div", { className: "analytics-detail-grid" });
+    const dailyCard = element("section", { className: "analytics-detail-card analytics-daily-card" });
+    dailyCard.append(
+      element("h3", { text: "逐日趋势" }),
+      analyticsTable("逐日统计", ["日期", "浏览", "新聊天", "提问", "成功", "推荐曝光", "推荐点击", "点击率", "安装"],
+        (Array.isArray(data.series) ? data.series : []).map((day) => [
+          String(day.day || ""),
+          analyticsCount(day.pageViews),
+          analyticsCount(day.newChats),
+          analyticsCount(day.chatSubmits),
+          analyticsCount(day.chatSuccesses),
+          analyticsCount(day.suggestionImpressions),
+          analyticsCount(day.suggestionClicks),
+          analyticsRateValue(day.suggestionImpressions
+            ? Number(day.suggestionClicks || 0) / Number(day.suggestionImpressions) * 100
+            : 0),
+          analyticsCount(day.installs),
+        ])),
+    );
+
+    const sectionCard = element("section", { className: "analytics-detail-card" });
+    sectionCard.append(
+      element("h3", { text: "主题表现" }),
+      analyticsTable("主题表现", ["主题", "浏览", "提问", "推荐曝光", "推荐点击", "点击率"],
+        (Array.isArray(data.sections) ? data.sections : []).map((item) => [
+          analyticsSectionLabel(item.section),
+          analyticsCount(item.pageViews),
+          analyticsCount(item.chatSubmits),
+          analyticsCount(item.suggestionImpressions),
+          analyticsCount(item.suggestionClicks),
+          analyticsRateValue(item.suggestionImpressions
+            ? Number(item.suggestionClicks || 0) / Number(item.suggestionImpressions) * 100
+            : 0),
+        ])),
+    );
+    details.append(dailyCard, sectionCard);
+    panel.append(details);
+
+    const suggestionCard = element("section", { className: "analytics-detail-card analytics-suggestion-card" });
+    suggestionCard.append(
+      element("h3", { text: "热门推荐" }),
+      analyticsTable("热门推荐", ["推荐问题", "曝光", "点击", "点击率"],
+        (Array.isArray(data.topSuggestions) ? data.topSuggestions : []).map((item) => [
+          String(item.suggestion || ""),
+          analyticsCount(item.impressions),
+          analyticsCount(item.clicks),
+          analyticsRateValue(item.ctr),
+        ])),
+    );
+    panel.append(suggestionCard);
+    return panel;
+  }
+
   function renderAdminShell() {
     if (!state.signedIn) {
       renderLogin();
@@ -3892,12 +4293,20 @@ function createAdminApp() {
       element("div", {}, [
         element("p", { className: "eyebrow", text: "OPERATIONS CONSOLE" }),
         element("h1", { text: `${APP_NAME} · 管理` }),
-        element("p", { text: "查看 OA 连接，维护待审核草稿，处理咨询与模型配置。" }),
+        element("p", { text: "查看网站统计与 OA 连接，维护待审核草稿，处理咨询与模型配置。" }),
       ]),
     );
-    const refresh = textButton(state.busy === "refresh" ? "正在刷新…" : "刷新", "secondary-button refresh-button");
-    refresh.disabled = Boolean(state.busy) || state.loading;
+    const refreshingAnalytics = state.activeTab === "analytics" && state.analyticsLoading;
+    const refresh = textButton(
+      state.busy === "refresh" || refreshingAnalytics ? "正在刷新…" : "刷新",
+      "secondary-button refresh-button",
+    );
+    refresh.disabled = Boolean(state.busy) || state.loading || refreshingAnalytics;
     refresh.addEventListener("click", () => {
+      if (state.activeTab === "analytics") {
+        void loadAnalytics(state.analyticsDays);
+        return;
+      }
       void runAdminAction("refresh", async () => {
         await fetchAdminData(false);
         state.notice = "管理数据已刷新。";
@@ -3934,11 +4343,13 @@ function createAdminApp() {
       });
       const pendingCount = state.inquiries.filter((inquiry) => inquiry.status === "pending").length;
       tabs.append(
+        tabButton("analytics", "数据统计"),
         tabButton("inquiries", "咨询", pendingCount),
         tabButton("documents", "知识资料"),
         tabButton("model", "模型接入"),
       );
       shell.append(tabs);
+      if (state.activeTab === "analytics") shell.append(renderAnalyticsPanel());
       if (state.activeTab === "model") shell.append(renderModelPanel());
       if (state.activeTab === "documents") shell.append(renderDocumentsPanel());
       if (state.activeTab === "inquiries") shell.append(renderInquiriesPanel());

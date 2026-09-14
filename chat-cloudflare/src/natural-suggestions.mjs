@@ -95,6 +95,10 @@ const QUESTIONS = [
 
 const QUESTION_TEXTS = new Set(QUESTIONS.flatMap(([, variants]) => variants));
 
+export function isNaturalSuggestionQuestion(value) {
+  return typeof value === "string" && QUESTION_TEXTS.has(value);
+}
+
 export function suggestionDayOrdinal(now = new Date()) {
   const timestamp = now.getTime();
   if (!Number.isFinite(timestamp)) throw new RangeError("INVALID_SUGGESTION_DATE");
