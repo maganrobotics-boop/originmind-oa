@@ -6,7 +6,14 @@ import {
 
 const MAX_QUESTION_LENGTH = 500;
 const MAX_RESPONSE_BYTES = 16 * 1024;
-const TIMEOUT_MS = 3_000;
+// Large public-knowledge searches can legitimately exceed the former 3-second
+// cutoff. Keep this below the release preflight's 15-second deadline while
+// leaving enough room for production D1 variance.
+const TIMEOUT_MS = 12_000;
+// The status probe only needs to exercise authentication, rate limiting, D1,
+// and the response contract. A rare single term avoids turning every health
+// check into an expensive multi-term ranking query.
+const OA_PROBE_QUESTION = "oaretrievalprobe";
 const DATE_PATTERN = /^\d{4}-\d{2}-\d{2}$/u;
 
 export function isWellFormedUnicode(value) {
@@ -87,6 +94,18 @@ function validDate(value) {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
 }
 
+function responseFailureStatus(response) {
+  if (response.status === 401 || response.status === 403) return "auth_error";
+  if (response.status === 429) return "rate_limited";
+  return "unavailable";
+}
+
+function requestFailureStatus(error) {
+  const name = error instanceof Error ? error.name : "";
+  const message = error instanceof Error ? error.message : "";
+  return name === "TimeoutError" || /timeout|timed out/iu.test(message) ? "timeout" : "unavailable";
+}
+
 export function parseOaResult(value) {
   const input = exactObject(value, ["chunks"]);
   if (!Array.isArray(input.chunks) || input.chunks.length > 6) throw new Error("OA_RESPONSE_INVALID");
@@ -149,8 +168,14 @@ export async function retrieveOa(question, context) {
       ? await service.fetch(new Request(OA_PUBLIC_RETRIEVE_URL, init))
       : await context.runtime.fetch(OA_PUBLIC_RETRIEVE_URL, init);
     const mediaType = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
-    if (!response.ok || mediaType !== "application/json") return { status: "unavailable", documents: [] };
-    const chunks = parseOaResult(await boundedJson(response));
+    if (!response.ok) return { status: responseFailureStatus(response), documents: [] };
+    if (mediaType !== "application/json") return { status: "invalid_response", documents: [] };
+    let chunks;
+    try {
+      chunks = parseOaResult(await boundedJson(response));
+    } catch {
+      return { status: "invalid_response", documents: [] };
+    }
     return {
       status: "connected",
       documents: chunks.map((item) => ({
@@ -167,8 +192,8 @@ export async function retrieveOa(question, context) {
         origin: "oa_public",
       })),
     };
-  } catch {
-    return { status: "unavailable", documents: [] };
+  } catch (error) {
+    return { status: requestFailureStatus(error), documents: [] };
   }
 }
 
@@ -195,8 +220,14 @@ export async function inspectOaPublicKnowledge(context) {
       ? await service.fetch(new Request(OA_PUBLIC_STATUS_URL, init))
       : await context.runtime.fetch(OA_PUBLIC_STATUS_URL, init);
     const mediaType = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
-    if (!response.ok || mediaType !== "application/json") return { status: "unavailable", documentCount: 0 };
-    const value = exactObject(await boundedJson(response), ["oaReady", "publicKnowledgeReady", "retrievalReady"]);
+    if (!response.ok) return { status: responseFailureStatus(response), documentCount: 0 };
+    if (mediaType !== "application/json") return { status: "invalid_response", documentCount: 0 };
+    let value;
+    try {
+      value = exactObject(await boundedJson(response), ["oaReady", "publicKnowledgeReady", "retrievalReady"]);
+    } catch {
+      return { status: "invalid_response", documentCount: 0 };
+    }
     if (
       value.oaReady !== true ||
       typeof value.publicKnowledgeReady !== "boolean" ||
@@ -209,11 +240,11 @@ export async function inspectOaPublicKnowledge(context) {
       documentCount: value.publicKnowledgeReady ? 1 : 0,
       retrievalReady: value.retrievalReady,
     };
-  } catch {
-    return { status: "unavailable", documentCount: 0 };
+  } catch (error) {
+    return { status: requestFailureStatus(error), documentCount: 0 };
   }
 }
 
 export async function probeOaPublicKnowledge(context) {
-  return (await retrieveOa("公开知识连接检测", context)).status;
+  return (await retrieveOa(OA_PROBE_QUESTION, context)).status;
 }
