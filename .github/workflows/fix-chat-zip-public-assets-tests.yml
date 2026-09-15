@@ -1,0 +1,49 @@
+name: Fix Chat ZIP public asset tests manually
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: true
+      - name: Sync public asset expectations
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('chat-cloudflare/test/public-assets.test.mjs')
+          s = p.read_text()
+          old = '''    "service-worker.js",\n  ]);'''
+          new = '''    "service-worker.js",\n    "zip-import-addon.js",\n  ]);'''
+          if old not in s:
+              raise SystemExit('top-level public asset expectation not found')
+          s = s.replace(old, new, 1)
+          old = 'assert.deepEqual(scriptSources, [`/assets/${expected.appName}`]);'
+          new = 'assert.deepEqual(scriptSources, [`/assets/${expected.appName}`, "/zip-import-addon.js"]);'
+          if old not in s:
+              raise SystemExit('script source expectation not found')
+          s = s.replace(old, new, 1)
+          old = 'assert.ok([...scriptSources, ...styleSources].every((source) => source.startsWith("/assets/")));'
+          new = 'assert.ok([...scriptSources, ...styleSources].every((source) => source.startsWith("/assets/") || source === "/zip-import-addon.js"));'
+          if old not in s:
+              raise SystemExit('self-hosted asset expectation not found')
+          s = s.replace(old, new, 1)
+          p.write_text(s)
+      - name: Install and test
+        run: |
+          npm ci --prefix chat-cloudflare
+          npm --prefix chat-cloudflare run check
+      - name: Commit test sync
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add chat-cloudflare/test/public-assets.test.mjs
+          git commit -m "test(chat): allow ZIP import public asset"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
