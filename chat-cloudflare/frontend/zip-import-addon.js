@@ -222,7 +222,7 @@ function refreshKnowledgeUploadUi() {
   }
 }
 
-document.addEventListener("change", (event) => { void interceptZipSelection(event); }, true);
+window.unpackKnowledgeZip = unpackKnowledgeZip;
 const observer = new MutationObserver(refreshKnowledgeUploadUi);
 observer.observe(document.documentElement, { childList: true, subtree: true });
 refreshKnowledgeUploadUi();

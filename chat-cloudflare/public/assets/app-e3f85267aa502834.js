@@ -8,6 +8,7 @@ const OA_CHAT_IMPORT_URL = "https://oa.omindos.ai/api/knowledge/import-chat";
 const OA_CHAT_IMPORT_STATUS_URL = "https://oa.omindos.ai/api/knowledge/import-chat/status";
 const MAX_TEXT_IMPORT_BYTES = 5 * 1024 * 1024;
 const MAX_BINARY_IMPORT_BYTES = 10 * 1024 * 1024;
+const MAX_ZIP_IMPORT_BYTES = 50 * 1024 * 1024;
 const MAX_BATCH_IMPORT_FILES = 100;
 const MAX_BATCH_IMPORT_BYTES = 500 * 1024 * 1024;
 const BATCH_IMPORT_CONCURRENCY = 3;
@@ -43,18 +44,21 @@ function classifyImportFile(file) {
   const path = importFilePath(file);
   const extension = path.split(".").at(-1)?.toLowerCase() || "";
   const isText = extension === "txt" || extension === "md";
+  const isZip = extension === "zip";
   const mimeType = IMPORT_MIME_BY_EXTENSION[extension] || "";
-  if (!isText && !mimeType) {
-    throw new Error(`${path}：仅支持 TXT、Markdown、PDF、JPG、PNG 和 WebP 文件。`);
+  if (!isText && !mimeType && !isZip) {
+    throw new Error(`${path}：仅支持 MD、ZIP、TXT、PDF、JPG、PNG 和 WebP 文件。`);
   }
   const size = Number(file?.size);
   if (!Number.isFinite(size) || size <= 0) throw new Error(`${path}：文件为空。`);
-  const maximum = isText ? MAX_TEXT_IMPORT_BYTES : MAX_BINARY_IMPORT_BYTES;
+  const maximum = isZip ? MAX_ZIP_IMPORT_BYTES : isText ? MAX_TEXT_IMPORT_BYTES : MAX_BINARY_IMPORT_BYTES;
   if (size > maximum) {
     throw new Error(
-      isText
-        ? `${path}：TXT、Markdown 文件不能超过 5 MB。`
-        : `${path}：PDF 或图片不能超过 10 MB，请压缩或拆分后重试。`,
+      isZip
+        ? `${path}：ZIP 知识包不能超过 50 MB，请压缩图片或拆分资料。`
+        : isText
+          ? `${path}：TXT、Markdown 文件不能超过 5 MB。`
+          : `${path}：PDF 或图片不能超过 10 MB，请压缩或拆分后重试。`,
     );
   }
   return {
@@ -62,8 +66,9 @@ function classifyImportFile(file) {
     path,
     extension,
     isText,
+    isZip,
     mimeType,
-    kind: isText ? (extension === "md" ? "Markdown" : "文本") : extension === "pdf" ? "PDF" : "图片",
+    kind: isZip ? "ZIP 知识包" : isText ? (extension === "md" ? "Markdown" : "文本") : extension === "pdf" ? "PDF" : "图片",
   };
 }
 
@@ -116,7 +121,7 @@ function combineImportedSections(results, forceSections = false) {
 
 function suggestedBatchTitle(descriptors) {
   if (descriptors.length === 1) {
-    return descriptors[0].path.replace(/\.(?:txt|md|pdf|jpe?g|png|webp)$/iu, "").trim().slice(0, 120);
+    return descriptors[0].path.replace(/\.(?:txt|md|zip|pdf|jpe?g|png|webp)$/iu, "").trim().slice(0, 120);
   }
   const roots = new Set(descriptors
     .map((descriptor) => descriptor.path.includes("/") ? descriptor.path.split("/", 1)[0] : "")
@@ -3225,6 +3230,19 @@ function createAdminApp() {
   }
 
   async function extractImportFile(descriptor) {
+    if (descriptor.isZip) {
+      if (typeof window.unpackKnowledgeZip !== "function") {
+        throw new Error("ZIP 解析组件未加载，请刷新页面后重试。");
+      }
+      const packageFiles = await window.unpackKnowledgeZip(descriptor.file);
+      const indexFile = packageFiles.find((file) => String(file.name || "").toLowerCase() === "index.md");
+      if (!indexFile) throw new Error("ZIP 必须包含根目录 index.md。");
+      const text = decodeImportedUtf8(await indexFile.arrayBuffer());
+      if (utf8ByteLength(text) > MAX_TEXT_IMPORT_BYTES) {
+        throw new Error("ZIP 中 index.md 正文不能超过 5 MB（按 UTF-8 计算）。");
+      }
+      return text;
+    }
     if (descriptor.isText) {
       const text = decodeImportedUtf8(await descriptor.file.arrayBuffer());
       if (utf8ByteLength(text) > MAX_TEXT_IMPORT_BYTES) {
@@ -3996,7 +4014,7 @@ function createAdminApp() {
       attributes: {
         type: "file",
         multiple: true,
-        accept: ".txt,.md,.pdf,.jpg,.jpeg,.png,.webp,text/plain,text/markdown,application/pdf,image/jpeg,image/png,image/webp",
+        accept: ".md,.zip,.txt,.pdf,.jpg,.jpeg,.png,.webp,text/markdown,application/zip,application/x-zip-compressed,text/plain,application/pdf,image/jpeg,image/png,image/webp",
       },
     });
     const folderLabel = element("label", { attributes: { for: "document-folder" } });
