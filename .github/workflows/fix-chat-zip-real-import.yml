@@ -1,0 +1,109 @@
+name: Fix Chat ZIP real import manually
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout selected branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: true
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: chat-cloudflare/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --prefix chat-cloudflare
+
+      - name: Patch ZIP import into primary app
+        shell: python
+        run: |
+          from pathlib import Path
+
+          app = Path("chat-cloudflare/frontend/app.js")
+          text = app.read_text(encoding="utf-8")
+
+          replacements = [
+              (
+                  'const MAX_BINARY_IMPORT_BYTES = 10 * 1024 * 1024;\n',
+                  'const MAX_BINARY_IMPORT_BYTES = 10 * 1024 * 1024;\nconst MAX_ZIP_IMPORT_BYTES = 50 * 1024 * 1024;\n',
+              ),
+              (
+                  '  const isText = extension === "txt" || extension === "md";\n  const mimeType = IMPORT_MIME_BY_EXTENSION[extension] || "";\n  if (!isText && !mimeType) {\n    throw new Error(`${path}：仅支持 TXT、Markdown、PDF、JPG、PNG 和 WebP 文件。`);\n  }\n',
+                  '  const isText = extension === "txt" || extension === "md";\n  const isZip = extension === "zip";\n  const mimeType = IMPORT_MIME_BY_EXTENSION[extension] || "";\n  if (!isText && !mimeType && !isZip) {\n    throw new Error(`${path}：仅支持 MD、ZIP、TXT、PDF、JPG、PNG 和 WebP 文件。`);\n  }\n',
+              ),
+              (
+                  '  const maximum = isText ? MAX_TEXT_IMPORT_BYTES : MAX_BINARY_IMPORT_BYTES;\n  if (size > maximum) {\n    throw new Error(\n      isText\n        ? `${path}：TXT、Markdown 文件不能超过 5 MB。`\n        : `${path}：PDF 或图片不能超过 10 MB，请压缩或拆分后重试。`,\n    );\n  }\n',
+                  '  const maximum = isZip ? MAX_ZIP_IMPORT_BYTES : isText ? MAX_TEXT_IMPORT_BYTES : MAX_BINARY_IMPORT_BYTES;\n  if (size > maximum) {\n    throw new Error(\n      isZip\n        ? `${path}：ZIP 知识包不能超过 50 MB，请压缩图片或拆分资料。`\n        : isText\n          ? `${path}：TXT、Markdown 文件不能超过 5 MB。`\n          : `${path}：PDF 或图片不能超过 10 MB，请压缩或拆分后重试。`,\n    );\n  }\n',
+              ),
+              (
+                  '    isText,\n    mimeType,\n    kind: isText ? (extension === "md" ? "Markdown" : "文本") : extension === "pdf" ? "PDF" : "图片",\n',
+                  '    isText,\n    isZip,\n    mimeType,\n    kind: isZip ? "ZIP 知识包" : isText ? (extension === "md" ? "Markdown" : "文本") : extension === "pdf" ? "PDF" : "图片",\n',
+              ),
+              (
+                  '    return descriptors[0].path.replace(/\\.(?:txt|md|pdf|jpe?g|png|webp)$/iu, "").trim().slice(0, 120);\n',
+                  '    return descriptors[0].path.replace(/\\.(?:txt|md|zip|pdf|jpe?g|png|webp)$/iu, "").trim().slice(0, 120);\n',
+              ),
+              (
+                  '  async function extractImportFile(descriptor) {\n    if (descriptor.isText) {\n',
+                  '  async function extractImportFile(descriptor) {\n    if (descriptor.isZip) {\n      if (typeof window.unpackKnowledgeZip !== "function") {\n        throw new Error("ZIP 解析组件未加载，请刷新页面后重试。");\n      }\n      const packageFiles = await window.unpackKnowledgeZip(descriptor.file);\n      const indexFile = packageFiles.find((file) => String(file.name || "").toLowerCase() === "index.md");\n      if (!indexFile) throw new Error("ZIP 必须包含根目录 index.md。");\n      const text = decodeImportedUtf8(await indexFile.arrayBuffer());\n      if (utf8ByteLength(text) > MAX_TEXT_IMPORT_BYTES) {\n        throw new Error("ZIP 中 index.md 正文不能超过 5 MB（按 UTF-8 计算）。");\n      }\n      return text;\n    }\n    if (descriptor.isText) {\n',
+              ),
+              (
+                  '        accept: ".txt,.md,.pdf,.jpg,.jpeg,.png,.webp,text/plain,text/markdown,application/pdf,image/jpeg,image/png,image/webp",\n',
+                  '        accept: ".md,.zip,.txt,.pdf,.jpg,.jpeg,.png,.webp,text/markdown,application/zip,application/x-zip-compressed,text/plain,application/pdf,image/jpeg,image/png,image/webp",\n',
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f"Expected app.js fragment not found:\n{old[:180]}")
+              text = text.replace(old, new, 1)
+
+          app.write_text(text, encoding="utf-8")
+
+          addon = Path("chat-cloudflare/frontend/zip-import-addon.js")
+          z = addon.read_text(encoding="utf-8")
+          marker = 'document.addEventListener("change", (event) => { void interceptZipSelection(event); }, true);\n'
+          if marker not in z:
+              raise SystemExit("ZIP addon change interceptor marker not found")
+          z = z.replace(marker, 'window.unpackKnowledgeZip = unpackKnowledgeZip;\n', 1)
+          addon.write_text(z, encoding="utf-8")
+
+      - name: Build frontend artifacts
+        run: npm --prefix chat-cloudflare run build:frontend
+
+      - name: Run full Chat checks
+        run: npm --prefix chat-cloudflare run check
+
+      - name: Verify ZIP primary-path contract
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -F 'const isZip = extension === "zip";' chat-cloudflare/frontend/app.js
+          grep -F 'window.unpackKnowledgeZip' chat-cloudflare/frontend/app.js
+          grep -F 'window.unpackKnowledgeZip = unpackKnowledgeZip;' chat-cloudflare/frontend/zip-import-addon.js
+          grep -F '.md,.zip,.txt' chat-cloudflare/frontend/app.js
+
+      - name: Commit verified repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add chat-cloudflare/frontend/app.js chat-cloudflare/frontend/zip-import-addon.js chat-cloudflare/public
+          if git diff --cached --quiet; then
+            echo "ZIP import repair is already current."
+            exit 0
+          fi
+          git commit -m "fix(chat): import ZIP package as one Markdown draft"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
