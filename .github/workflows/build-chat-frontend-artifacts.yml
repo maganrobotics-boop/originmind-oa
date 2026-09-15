@@ -1,0 +1,46 @@
+name: Build Chat frontend artifacts manually
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Checkout selected branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: true
+
+      - name: Set up Node
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: chat-cloudflare/package-lock.json
+
+      - name: Install locked dependencies
+        run: npm ci --prefix chat-cloudflare
+
+      - name: Build frontend artifacts
+        run: npm --prefix chat-cloudflare run build:frontend
+
+      - name: Verify frontend artifacts
+        run: npm --prefix chat-cloudflare run check:frontend
+
+      - name: Commit generated artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add chat-cloudflare/public/index.html chat-cloudflare/public/assets chat-cloudflare/public/zip-import-addon.js
+          if git diff --cached --quiet; then
+            echo "Frontend artifacts are already current."
+            exit 0
+          fi
+          git commit -m "build(chat): refresh frontend artifacts"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
