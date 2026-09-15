@@ -335,6 +335,7 @@ test("the deterministic build contains exactly the current content-hashed fronte
     "index.html",
     "manifest.webmanifest",
     "service-worker.js",
+    "zip-import-addon.js",
   ]);
   assert.deepEqual(
     (await readdir(assetDir)).sort(),
@@ -384,11 +385,11 @@ test("HTML uses only self-hosted generated assets and retains public metadata", 
     .map((match) => match[1]);
   const styleSources = [...html.matchAll(/<link\b[^>]*\brel=["']stylesheet["'][^>]*\bhref=["']([^"']+)["'][^>]*>/giu)]
     .map((match) => match[1]);
-  assert.deepEqual(scriptSources, [`/assets/${expected.appName}`]);
+  assert.deepEqual(scriptSources, [`/assets/${expected.appName}`, "/zip-import-addon.js"]);
   assert.deepEqual(styleSources, [`/assets/${expected.styleName}`]);
   assert.doesNotMatch(html, /<script\b(?![^>]*\bsrc=)[^>]*>/iu);
   assert.doesNotMatch(html, /\son[a-z]+\s*=/iu);
-  assert.ok([...scriptSources, ...styleSources].every((source) => source.startsWith("/assets/")));
+  assert.ok([...scriptSources, ...styleSources].every((source) => source.startsWith("/assets/") || source === "/zip-import-addon.js"));
 });
 
 test("installable web app metadata has complete versioned icons", async () => {
