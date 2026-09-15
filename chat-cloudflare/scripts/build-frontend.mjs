@@ -13,6 +13,7 @@ const SOURCE_PATHS = Object.freeze({
   html: join(FRONTEND_DIRECTORY, "index.html"),
   app: join(FRONTEND_DIRECTORY, "app.js"),
   style: join(FRONTEND_DIRECTORY, "styles.css"),
+  zipImportAddon: join(FRONTEND_DIRECTORY, "zip-import-addon.js"),
 });
 
 const PLACEHOLDERS = Object.freeze({
@@ -33,10 +34,11 @@ function replaceExactlyOnce(template, placeholder, replacement) {
 }
 
 async function expectedBuild() {
-  const [template, app, style] = await Promise.all([
+  const [template, app, style, zipImportAddon] = await Promise.all([
     readFile(SOURCE_PATHS.html, "utf8"),
     readFile(SOURCE_PATHS.app),
     readFile(SOURCE_PATHS.style),
+    readFile(SOURCE_PATHS.zipImportAddon),
   ]);
   const appName = `app-${digest(app)}.js`;
   const styleName = `styles-${digest(style)}.css`;
@@ -47,6 +49,7 @@ async function expectedBuild() {
   }
   return {
     html: Buffer.from(html, "utf8"),
+    rootFiles: new Map([["zip-import-addon.js", zipImportAddon]]),
     assets: new Map([
       [appName, app],
       [styleName, style],
@@ -82,6 +85,9 @@ async function checkBuild(expected) {
   if (!(await equalFile(join(PUBLIC_DIRECTORY, "index.html"), expected.html))) {
     problems.push("public/index.html is stale");
   }
+  for (const [name, bytes] of expected.rootFiles) {
+    if (!(await equalFile(join(PUBLIC_DIRECTORY, name), bytes))) problems.push(`public/${name} is missing or stale`);
+  }
   for (const [name, bytes] of expected.assets) {
     if (!(await equalFile(join(PUBLIC_ASSET_DIRECTORY, name), bytes))) {
       problems.push(`public/assets/${name} is missing or stale`);
@@ -101,6 +107,7 @@ async function checkBuild(expected) {
 
 async function writeBuild(expected) {
   await mkdir(PUBLIC_ASSET_DIRECTORY, { recursive: true });
+  for (const [name, bytes] of expected.rootFiles) await writeFile(join(PUBLIC_DIRECTORY, name), bytes);
   for (const [name, bytes] of expected.assets) {
     await writeFile(join(PUBLIC_ASSET_DIRECTORY, name), bytes);
   }
