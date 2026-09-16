@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
-import { readFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import { REVIEWED_KNOWLEDGE_MIGRATIONS } from "../lib/production-release.mjs";
@@ -70,24 +71,37 @@ function runWrangler({ wrangler }, args) {
   }
 }
 
+async function runSql(context, statement) {
+  context.statementCounter += 1;
+  const statementPath = join(context.tempDir, `statement-${String(context.statementCounter).padStart(4, "0")}.sql`);
+  await writeFile(statementPath, `${statement.trim()}\n`);
+  runWrangler(context, ["d1", "execute", "DB", "--remote", "--json", "--config", context.config, "--file", statementPath]);
+}
+
 const options = parseArguments(process.argv.slice(2));
-const context = { wrangler: resolve(options.wrangler), config: resolve(options.config) };
+const context = {
+  wrangler: resolve(options.wrangler),
+  config: resolve(options.config),
+  tempDir: await mkdtemp(join(tmpdir(), "originmind-oa-d1-migration-")),
+  statementCounter: 0,
+};
 const migrationsDir = resolve(options["migrations-dir"]);
 
-for (const name of pendingNames(options.state)) {
-  if (!/^\d{4}_[A-Za-z0-9_]+\.sql$/u.test(name)) throw new Error("Unsafe migration name");
-  const sql = await readFile(resolve(migrationsDir, name), "utf8");
-  const digest = createHash("sha256").update(sql).digest("hex");
-  if (digest !== REVIEWED_KNOWLEDGE_MIGRATIONS[name]) throw new Error(`${name} does not match the reviewed SHA-256`);
+try {
+  for (const name of pendingNames(options.state)) {
+    if (!/^\d{4}_[A-Za-z0-9_]+\.sql$/u.test(name)) throw new Error("Unsafe migration name");
+    const sql = await readFile(resolve(migrationsDir, name), "utf8");
+    const digest = createHash("sha256").update(sql).digest("hex");
+    if (digest !== REVIEWED_KNOWLEDGE_MIGRATIONS[name]) throw new Error(`${name} does not match the reviewed SHA-256`);
 
-  for (const statement of splitStatements(sql)) {
-    runWrangler(context, ["d1", "execute", "DB", "--remote", "--json", "--config", context.config, "--command", statement]);
+    for (const statement of splitStatements(sql)) {
+      await runSql(context, statement);
+    }
+
+    const id = Number(name.slice(0, 4)) + 1;
+    await runSql(context, `INSERT INTO d1_migrations (id, name) VALUES (${id}, ${sqlString(name)})`);
+    process.stdout.write(`Applied production migration ${name}\n`);
   }
-
-  const id = Number(name.slice(0, 4)) + 1;
-  runWrangler(context, [
-    "d1", "execute", "DB", "--remote", "--json", "--config", context.config,
-    "--command", `INSERT INTO d1_migrations (id, name) VALUES (${id}, ${sqlString(name)})`,
-  ]);
-  process.stdout.write(`Applied production migration ${name}\n`);
+} finally {
+  await rm(context.tempDir, { recursive: true, force: true });
 }
