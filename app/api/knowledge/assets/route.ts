@@ -29,8 +29,9 @@ export async function PUT(request: Request) {
   if (body.byteLength > MAX_ASSET_BYTES) return reply({ error: "单张图片不能超过 8 MB。" }, 413);
   try {
     const db = await getDb();
-    if (!(await authorizeKnowledgeAssetRevision(db, actor, itemId, revisionId))) return reply({ error: "当前账号无权向该知识版本上传图片。" }, 403);
-    const stored = await stageKnowledgeAsset(db, await getKnowledgeAssetsBucket(), { itemId, revisionId, uploadToken, path, mimeType, body });
+    const database = db.$client;
+    if (!(await authorizeKnowledgeAssetRevision(database, actor, itemId, revisionId))) return reply({ error: "当前账号无权向该知识版本上传图片。" }, 403);
+    const stored = await stageKnowledgeAsset(database, await getKnowledgeAssetsBucket(), { itemId, revisionId, uploadToken, path, mimeType, body });
     return reply({ received: true, asset: stored }, 201);
   } catch (error) {
     return reply({ error: error instanceof Error ? error.message : "图片上传失败。" }, 400);
