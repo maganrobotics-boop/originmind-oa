@@ -12,7 +12,7 @@ jobs:
     env:
       CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CHAT_HOST: chat.omindos.ai
-      CHAT_WORKER: arts-robotics-chat-production
+      CHAT_WORKER: originmind-public-chat-production
     steps:
       - name: Diagnose and restore the Chat Worker route
         shell: bash
