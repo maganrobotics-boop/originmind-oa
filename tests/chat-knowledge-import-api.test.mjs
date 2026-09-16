@@ -26,14 +26,30 @@ const vite = await createServer({
       }`;
       if (id === "\0chat-import-db") return "export async function getDb() { return {}; }";
       if (id === "\0chat-import-rate") return `export async function consumeWriteRateLimit() { globalThis.${stateKey}.events.push('rate'); globalThis.${stateKey}.rateCalls += 1; return globalThis.${stateKey}.allowed; }`;
-      if (id === "\0chat-import-store") return `export async function createChatImportedKnowledgeItem(actor, submission, hash, id, parts) {
-        globalThis.${stateKey}.writes.push({actor,submission,hash,id,parts});
-        return {id,title:submission.title,status:'pending',visibility:'internal',contentPartCount:parts?.length || 1};
+      if (id === "\0chat-import-store") return `function serializeItem(item) {
+        return {id:item.id,title:item.title,status:item.status,visibility:item.visibility,currentRevisionNo:item.current_revision_no,contentPartCount:item.content_part_count};
+      }
+      export async function createChatImportedKnowledgeItem(actor, submission, hash, id, parts) {
+        const state = globalThis.${stateKey};
+        if (state.existing?.id === id) {
+          const existing = state.existing;
+          return existing.submitter_member_id === actor.memberId && existing.submitter_email.toLowerCase() === actor.email.toLowerCase() && existing.content_hash === hash ? serializeItem(existing) : null;
+        }
+        state.writes.push({actor,submission,hash,id,parts});
+        state.existing = {
+          id, title:submission.title, category:submission.category, source_label:submission.sourceLabel, source_url:submission.sourceUrl,
+          status:'pending', revision_status:'pending', visibility:'internal', current_revision_no:1,
+          current_revision_id:'created-revision-id', active_revision_id:null, content_hash:hash,
+          content_part_count:parts?.length || 1, submitter_member_id:actor.memberId, submitter_email:actor.email,
+        };
+        return serializeItem(state.existing);
       }
       export async function findKnowledgeItem(id, actor) {
         globalThis.${stateKey}.events.push('find');
         globalThis.${stateKey}.finds.push({id,actor});
         if (globalThis.${stateKey}.findFails) throw new Error('lookup failed');
+        if (globalThis.${stateKey}.findMissing) return null;
+        if (globalThis.${stateKey}.findMissingRevision) return { ...globalThis.${stateKey}.existing, current_revision_id:null };
         return globalThis.${stateKey}.existing;
       }
       export async function knowledgeRevisionHashExists(id, hash) {
@@ -43,25 +59,23 @@ const vite = await createServer({
       }
       export async function resubmitKnowledgeItem(existing, actor, submission, hash, parts) {
         globalThis.${stateKey}.resubmits.push({existing,actor,submission,hash,parts});
-        if (globalThis.${stateKey}.resubmitFailsAsCommitted) {
-          globalThis.${stateKey}.existing = {
-            ...existing,
-            title: submission.title,
-            category: submission.category,
-            source_label: submission.sourceLabel,
-            source_url: submission.sourceUrl,
-            status: 'pending',
-            revision_status: 'pending',
-            current_revision_no: Number(existing.current_revision_no) + 1,
-            current_revision_id: 'committed-revision-id',
-            active_revision_id: null,
-            content_hash: hash,
-            content_part_count: parts?.length || 1,
-          };
-          return null;
-        }
         if (globalThis.${stateKey}.resubmitFails) return null;
-        return {id:existing.id,title:submission.title,status:'pending',visibility:existing.visibility,currentRevisionNo:Number(existing.current_revision_no) + 1,contentPartCount:parts?.length || 1};
+        globalThis.${stateKey}.existing = {
+          ...existing,
+          title: submission.title,
+          category: submission.category,
+          source_label: submission.sourceLabel,
+          source_url: submission.sourceUrl,
+          status: 'pending',
+          revision_status: 'pending',
+          current_revision_no: Number(existing.current_revision_no) + 1,
+          current_revision_id: 'committed-revision-id',
+          active_revision_id: null,
+          content_hash: hash,
+          content_part_count: parts?.length || 1,
+        };
+        if (globalThis.${stateKey}.resubmitFailsAsCommitted) return null;
+        return serializeItem(globalThis.${stateKey}.existing);
       }`;
       return null;
     },
@@ -103,7 +117,7 @@ function returnedItem(overrides = {}) {
   };
 }
 beforeEach(() => {
-  globalThis[stateKey] = { allowed: true, rateCalls: 0, events: [], writes: [], finds: [], findFails: false, authOptions: [], hashChecks: [], hashExists: false, resubmits: [], resubmitFails: false, resubmitFailsAsCommitted: false, existing: null, authorized: {
+  globalThis[stateKey] = { allowed: true, rateCalls: 0, events: [], writes: [], finds: [], findFails: false, findMissing: false, findMissingRevision: false, authOptions: [], hashChecks: [], hashExists: false, resubmits: [], resubmitFails: false, resubmitFailsAsCommitted: false, existing: null, authorized: {
     user: { displayName: "OA 成员", email: "member@example.com" }, memberId: "member-id", accountUserId: "oa-account-id", memberMutationRevision: "member-revision", ndaCompleted: true, isAdmin: false,
   } };
 });
@@ -134,12 +148,39 @@ test("an admitted OA session submits one pending internal item using the real OA
   const result = await response.json();
   assert.equal(result.item.status, "pending");
   assert.equal(result.item.visibility, "internal");
+  assert.equal(result.item.currentRevisionNo, 1);
   assert.equal(result.partCount, 1);
+  assert.equal(result.assetUpload.revisionId, globalThis[stateKey].existing.current_revision_id);
+  assert.match(result.assetUpload.uploadToken, /^[0-9a-f-]{36}$/u);
   assert.equal(globalThis[stateKey].writes.length, 1);
   assert.equal(globalThis[stateKey].rateCalls, 1);
   assert.equal(globalThis[stateKey].writes[0].actor.accountUserId, "oa-account-id");
   assert.equal(result.item.submitterEmail, undefined);
 });
+
+for (const lookupFailure of ["findMissing", "findMissingRevision", "findFails"]) {
+  test(`a committed import fails closed on ${lookupFailure} and retries without duplicating the item`, async () => {
+    globalThis[stateKey][lookupFailure] = true;
+    const failed = await route.POST(request());
+    assert.equal(failed.status, 503);
+    const failedResult = await failed.json();
+    assert.equal(failedResult.received, undefined);
+    assert.equal(failedResult.assetUpload, undefined);
+    assert.equal(globalThis[stateKey].writes.length, 1);
+    const committed = globalThis[stateKey].existing;
+
+    globalThis[stateKey][lookupFailure] = false;
+    const retried = await route.POST(request());
+    assert.equal(retried.status, 201);
+    const result = await retried.json();
+    assert.equal(result.item.id, committed.id);
+    assert.equal(result.item.currentRevisionNo, 1);
+    assert.equal(result.assetUpload.revisionId, committed.current_revision_id);
+    assert.match(result.assetUpload.uploadToken, /^[0-9a-f-]{36}$/u);
+    assert.equal(globalThis[stateKey].writes.length, 1);
+    assert.equal(globalThis[stateKey].existing, committed);
+  });
+}
 
 test("a large Chat document becomes one OA item with multipart content and one rate-limit use", async () => {
   const body = Array.from({ length: 24_000 }, (_, index) => `## 章节 ${index + 1}\n\n这是需要统一审核的正文段落 ${index + 1}。\n\n`).join("");
@@ -173,7 +214,8 @@ test("client approval and identity injection and rate-limited imports cannot cre
 
 test("a returned multipart import updates the same item to revision +1 with one rate-limit use", async () => {
   const returnedKnowledgeItemId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
-  globalThis[stateKey].existing = returnedItem();
+  const previousRevision = returnedItem();
+  globalThis[stateKey].existing = previousRevision;
   const changedDocument = {
     ...document,
     title: "新文件名",
@@ -189,8 +231,10 @@ test("a returned multipart import updates the same item to revision +1 with one 
   assert.equal(result.item.status, "pending");
   assert.equal(result.item.visibility, "public");
   assert.equal(result.item.currentRevisionNo, 5);
+  assert.equal(result.assetUpload.revisionId, globalThis[stateKey].existing.current_revision_id);
+  assert.notEqual(result.assetUpload.revisionId, previousRevision.current_revision_id);
   assert.equal(globalThis[stateKey].resubmits.length, 1);
-  assert.equal(globalThis[stateKey].resubmits[0].existing, globalThis[stateKey].existing);
+  assert.equal(globalThis[stateKey].resubmits[0].existing, previousRevision);
   assert.equal(globalThis[stateKey].resubmits[0].parts.join(""), globalThis[stateKey].resubmits[0].submission.content);
   assert.deepEqual({
     title: globalThis[stateKey].resubmits[0].submission.title,

@@ -218,6 +218,27 @@
       "when": 1789272000000,
       "tag": "0030_large_knowledge_revision_parts",
       "breakpoints": true
+    },
+    {
+      "idx": 31,
+      "version": "6",
+      "when": 1789444800000,
+      "tag": "0031_knowledge_assets",
+      "breakpoints": true
+    },
+    {
+      "idx": 32,
+      "version": "6",
+      "when": 1789444860000,
+      "tag": "0032_knowledge_asset_upload_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 33,
+      "version": "6",
+      "when": 1789444920000,
+      "tag": "0033_knowledge_asset_finalization",
+      "breakpoints": true
     }
   ]
 }

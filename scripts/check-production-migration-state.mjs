@@ -2,6 +2,7 @@ import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import {
+  REVIEWED_KNOWLEDGE_MIGRATIONS,
   productionKnowledgeDefinitions,
   validateProductionMigrationManifest,
   validateProductionMigrationState,
@@ -30,33 +31,18 @@ const drizzleRoot = resolve(options["migrations-dir"]);
 const migrationEntries = await readdir(drizzleRoot, { withFileTypes: true });
 const sqlEntries = migrationEntries.filter((entry) => entry.name.endsWith(".sql"));
 if (sqlEntries.some((entry) => !entry.isFile())) throw new Error("Every production migration must be a regular file, not a symlink or special file");
-const migrationSqlByName = Object.fromEntries(await Promise.all([
-  "0026_rich_jocasta.sql",
-  "0027_careless_winter_soldier.sql",
-  "0028_needy_microchip.sql",
-  "0029_knowledge_visibility_reclassification.sql",
-  "0030_large_knowledge_revision_parts.sql",
-].map(async (name) => [name, await readFile(resolve(drizzleRoot, name), "utf8")])));
+const migrationSqlByName = Object.fromEntries(await Promise.all(
+  Object.keys(REVIEWED_KNOWLEDGE_MIGRATIONS).map(async (name) => [name, await readFile(resolve(drizzleRoot, name), "utf8")]),
+));
 const expectedMigrationNames = validateProductionMigrationManifest({
   migrationNames: sqlEntries.map((entry) => entry.name).sort(),
   migrationSqlByName,
 });
-const migration26KnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName, ["0026_rich_jocasta.sql"]);
-const migration27KnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName, [
-  "0026_rich_jocasta.sql",
-  "0027_careless_winter_soldier.sql",
-]);
-const migration28KnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName, [
-  "0026_rich_jocasta.sql",
-  "0027_careless_winter_soldier.sql",
-  "0028_needy_microchip.sql",
-]);
-const migration29KnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName, [
-  "0026_rich_jocasta.sql",
-  "0027_careless_winter_soldier.sql",
-  "0028_needy_microchip.sql",
-  "0029_knowledge_visibility_reclassification.sql",
-]);
+const reviewedNames = Object.keys(REVIEWED_KNOWLEDGE_MIGRATIONS);
+const knowledgeDefinitionsByMigration = Object.fromEntries(reviewedNames.map((name, index) => [
+  Number(name.slice(0, 4)),
+  productionKnowledgeDefinitions(migrationSqlByName, reviewedNames.slice(0, index + 1)),
+]));
 const expectedKnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName);
 const [ledgerPayload, freezePayload, schemaPayload] = await Promise.all([
   readFile(resolve(options.ledger), "utf8").then(JSON.parse),
@@ -77,9 +63,6 @@ const state = validateProductionMigrationState({
     "table:notification_outbox",
   ].sort(),
   expectedKnowledgeDefinitions,
-  migration26KnowledgeDefinitions,
-  migration27KnowledgeDefinitions,
-  migration28KnowledgeDefinitions,
-  migration29KnowledgeDefinitions,
+  knowledgeDefinitionsByMigration,
 });
 process.stdout.write(`${state}\n`);

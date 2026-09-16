@@ -1,4 +1,5 @@
 import { getDb } from "../../../../db";
+import { assertKnowledgeRevisionAssetsReady } from "../../../../lib/knowledge-assets";
 import { readBoundedJsonObject } from "../../../../lib/bounded-json-request";
 import {
   hashKnowledgeSubmission,
@@ -175,6 +176,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return privateJson({ error: "退回、拒绝或下架时请填写至少 2 个字符的原因。" }, { status: 400 });
     }
     const db = await getDb();
+    if (reviewAction === "approve" && existing.current_revision_id) {
+      try {
+        await assertKnowledgeRevisionAssetsReady(db.$client, existing.id, existing.current_revision_id);
+      } catch (error) {
+        return privateJson({ error: error instanceof Error ? error.message : "知识图片尚未完整上传。" }, { status: 409 });
+      }
+    }
     if (!(await consumeWriteRateLimit(db, { actorSubject: access.actor.accountUserId, scope: "knowledge_review", limit: MAX_KNOWLEDGE_WRITES_PER_MINUTE }))) {
       return privateJson({ error: "知识审核操作过于频繁，请稍后再试。" }, { status: 429, headers: { "retry-after": "60" } });
     }

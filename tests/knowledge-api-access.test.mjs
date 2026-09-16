@@ -73,6 +73,7 @@ const vite = await createServer({
     resolveId(source) {
       if (/(^|\/)api\/_lib\/auth$/u.test(source) || /(^|\/)\.\.\/\.\.\/_lib\/auth$/u.test(source)) return "\0knowledge-api-auth";
       if (/lib\/knowledge-store$/u.test(source)) return "\0knowledge-api-store";
+      if (/lib\/knowledge-assets$/u.test(source)) return "\0knowledge-api-assets";
       if (/lib\/write-rate-limit$/u.test(source)) return "\0knowledge-api-rate-limit";
       if (/^(?:\.\.\/)+db$/u.test(source)) return "\0knowledge-api-db";
       return null;
@@ -99,11 +100,17 @@ const vite = await createServer({
         export async function resubmitKnowledgeItem() { throw new Error("not used"); }
         export async function getKnowledgeItemDetail() { return null; }
       `;
+      if (id === "\0knowledge-api-assets") return `
+        export async function assertKnowledgeRevisionAssetsReady(database, itemId, revisionId) {
+          globalThis.${stateKey}.assetChecks.push({ database, itemId, revisionId });
+          if (globalThis.${stateKey}.assetCheckError) throw new Error(globalThis.${stateKey}.assetCheckError);
+        }
+      `;
       if (id === "\0knowledge-api-rate-limit") return `
         export async function consumeWriteRateLimit() { return true; }
       `;
       if (id === "\0knowledge-api-db") return `
-        export async function getDb() { return {}; }
+        export async function getDb() { return { $client: "mock-d1" }; }
       `;
       return null;
     },
@@ -128,6 +135,8 @@ beforeEach(() => {
     findCalls: 0,
     reviewCalls: [],
     visibilityCalls: [],
+    assetChecks: [],
+    assetCheckError: "",
   };
 });
 
@@ -151,6 +160,21 @@ test("所有知识 PATCH 动作强制要求精确 mutationRevision", async () =>
   assert.equal(globalThis[stateKey].reviewCalls[0].action, "approve");
   assert.equal(globalThis[stateKey].reviewCalls[0].visibility, "internal");
   assert.equal(globalThis[stateKey].reviewCalls[0].publicConfirmation, undefined);
+});
+
+test("批准前检查当前版本引用的知识图片是否已完整上传", async () => {
+  globalThis[stateKey].assetCheckError = "知识图片尚未完整上传：assets/missing.png";
+  const blocked = await detailRoute.PATCH(patch({ action: "approve", mutationRevision: "item-mutation-1", visibility: "internal" }), params);
+  assert.equal(blocked.status, 409);
+  assert.match((await blocked.json()).error, /assets\/missing\.png/u);
+  assert.deepEqual(globalThis[stateKey].assetChecks, [{ database: "mock-d1", itemId: globalThis[stateKey].existing.id, revisionId: globalThis[stateKey].existing.current_revision_id }]);
+  assert.equal(globalThis[stateKey].reviewCalls.length, 0);
+
+  globalThis[stateKey].assetCheckError = "";
+  const approved = await detailRoute.PATCH(patch({ action: "approve", mutationRevision: "item-mutation-1", visibility: "internal" }), params);
+  assert.equal(approved.status, 200);
+  assert.equal(globalThis[stateKey].assetChecks.length, 2);
+  assert.equal(globalThis[stateKey].reviewCalls.length, 1);
 });
 
 test("批准知识必须显式选择合法可见范围且在读取数据库前拒绝错误输入", async () => {

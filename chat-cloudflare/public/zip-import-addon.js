@@ -6,7 +6,7 @@ const ZIP_END_OF_CENTRAL_DIRECTORY = 0x06054b50;
 const ZIP_MAX_ENTRIES = 100;
 const ZIP_MAX_COMPRESSED_BYTES = 50 * 1024 * 1024;
 const ZIP_MAX_UNCOMPRESSED_BYTES = 100 * 1024 * 1024;
-const ZIP_ALLOWED_ASSET = /^(?:assets\/(?:[^/]+\/)*[^/]+\.(?:jpe?g|png|webp))$/iu;
+const ZIP_ALLOWED_ASSET = /^assets\/[A-Za-z0-9][A-Za-z0-9._/-]*\.(?:webp|png|jpe?g)$/iu;
 const ZIP_INDEX = "index.md";
 
 function zipError(message) {
