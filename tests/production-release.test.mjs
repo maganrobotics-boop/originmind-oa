@@ -310,7 +310,7 @@ import { appendFileSync, readFileSync } from "node:fs";
 const args = process.argv.slice(2);
 const fileIndex = args.indexOf("--file");
 const sql = fileIndex >= 0 ? readFileSync(args[fileIndex + 1], "utf8") : "";
-appendFileSync(process.env.WRANGLER_LOG, \`${JSON.stringify({ args, sql })}\\n\`);
+appendFileSync(process.env.WRANGLER_LOG, JSON.stringify({ args, sql }) + "\\n");
 process.stdout.write(JSON.stringify([{ success: true, results: [] }]));
 `);
     await chmod(wranglerPath, 0o755);
