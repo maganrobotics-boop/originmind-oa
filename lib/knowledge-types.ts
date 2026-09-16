@@ -70,6 +70,13 @@ export type KnowledgeRevision = {
   retiredAt?: string;
 };
 
+export type KnowledgeAsset = {
+  path: string;
+  mimeType: string;
+  byteSize: number;
+  url: string;
+};
+
 export type KnowledgeEvent = {
   id: string | number;
   action: string;
@@ -103,6 +110,7 @@ export type KnowledgeListResponse = {
 export type KnowledgeDetailResponse = {
   item?: KnowledgeItem;
   revisions?: KnowledgeRevision[];
+  assets?: KnowledgeAsset[];
   events?: KnowledgeEvent[];
   error?: string;
 };
