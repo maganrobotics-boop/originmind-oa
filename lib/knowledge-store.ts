@@ -1225,6 +1225,7 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
     SELECT
       ROW_NUMBER() OVER (ORDER BY limited.updated_at DESC, limited.item_id ASC, limited.chunk_no ASC) AS public_chunk_no,
       DENSE_RANK() OVER (ORDER BY limited.item_id ASC) AS public_item_no,
+      c.item_id AS asset_item_id, c.revision_id AS asset_revision_id,
       r.title, r.category, r.source_label, c.section_title, c.paragraph_ref,
       c.content, c.search_text, limited.updated_at
     FROM limited_candidates AS limited
@@ -1237,6 +1238,8 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
   `).bind(...terms, KNOWLEDGE_SEARCH_CANDIDATE_LIMIT).all<{
     public_chunk_no: number;
     public_item_no: number;
+    asset_item_id: string;
+    asset_revision_id: string;
     title: string;
     category: string;
     source_label: string;
@@ -1262,6 +1265,7 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
     SELECT
       ROW_NUMBER() OVER (ORDER BY limited.updated_at DESC, limited.item_id ASC, limited.chunk_no ASC) AS public_chunk_no,
       DENSE_RANK() OVER (ORDER BY limited.item_id ASC) AS public_item_no,
+      c.item_id AS asset_item_id, c.revision_id AS asset_revision_id,
       r.title, r.category, r.source_label, c.section_title, c.paragraph_ref,
       c.content, c.search_text, limited.updated_at
     FROM limited_candidates AS limited
@@ -1272,6 +1276,8 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
   `).bind(KNOWLEDGE_SEARCH_CANDIDATE_LIMIT).all<{
     public_chunk_no: number;
     public_item_no: number;
+    asset_item_id: string;
+    asset_revision_id: string;
     title: string;
     category: string;
     source_label: string;
@@ -1289,6 +1295,7 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
     category: row.category,
     sourceLabel: row.source_label,
     sourceUrl: "",
+    assetScope: { itemId: row.asset_item_id, revisionId: row.asset_revision_id },
     sectionTitle: row.section_title,
     paragraphRef: row.paragraph_ref,
     content: row.content,

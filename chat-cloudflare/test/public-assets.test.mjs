@@ -129,11 +129,13 @@ async function frontendAnalyticsHelpers() {
 
 async function frontendConversationHelpers() {
   const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
-  const start = script.indexOf("const CHAT_HISTORY_KEY");
+  const cleanTextStart = script.indexOf("function cleanPublicChatText");
+  const cleanTextEnd = script.indexOf("function knowledgeSuggestionsFromPayload", cleanTextStart);
+  const start = script.indexOf("function validatedAnswerImages");
   const end = script.indexOf("function appendAnswerInline", start);
-  assert.ok(start >= 0 && end > start, "frontend conversation helpers must remain directly testable");
+  assert.ok(cleanTextStart >= 0 && cleanTextEnd > cleanTextStart && start >= 0 && end > start, "frontend conversation helpers must remain directly testable");
   return runInNewContext(
-    `${script.slice(start, end)}\n({ CHAT_CONVERSATIONS_KEY, CHAT_CONVERSATION_LIMIT, CHAT_RECENT_LIMIT, chatConversationTitle, chatConversationsSnapshot, writeChatConversations, readChatConversations, recentChatConversations });`,
+    `${script.slice(cleanTextStart, cleanTextEnd)}\n${script.slice(start, end)}\n({ CHAT_CONVERSATIONS_KEY, CHAT_CONVERSATION_LIMIT, CHAT_RECENT_LIMIT, chatConversationTitle, chatConversationsSnapshot, writeChatConversations, readChatConversations, recentChatConversations });`,
     { userFacingAnswer: (value) => String(value || "") },
   );
 }
@@ -145,6 +147,7 @@ async function frontendReturnedImportHarness({
   initialOaSubmissionState = "unsubmitted",
   failSubmittedPatchCount = 0,
   deferStatus = false,
+  statusPayload = { submitted: false },
 }) {
   const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
   const start = script.indexOf("function clearReturnedKnowledgeContext");
@@ -183,8 +186,11 @@ async function frontendReturnedImportHarness({
     initialized: false,
     activeTab: "inquiries",
   };
+  const storedDocuments = new Map([[draft.id, { ...draft }]]);
   let remainingSubmittedPatchFailures = failSubmittedPatchCount;
-  const api = runInNewContext(`${script.slice(start, end)}\n({ submitDocumentToOa, fetchAdminData });`, {
+  const emptyDraftStart = script.indexOf("function emptyDraft()");
+  const emptyDraftEnd = script.indexOf("function adminRequest(", emptyDraftStart);
+  const api = runInNewContext(`${script.slice(emptyDraftStart, emptyDraftEnd)}\n${script.slice(start, end)}\n({ submitDocumentToOa, fetchAdminData, reconcileUnknownDocumentStatuses });`, {
     state,
     OA_CHAT_IMPORT_URL: "https://oa.omindos.ai/api/knowledge/import-chat",
     OA_CHAT_IMPORT_STATUS_URL: "https://oa.omindos.ai/api/knowledge/import-chat/status",
@@ -199,7 +205,7 @@ async function frontendReturnedImportHarness({
         if (deferStatus) return new Promise(() => {});
         return {
           ok: true,
-          json: async () => ({ documentId: request.document.id, submitted: false }),
+          json: async () => ({ documentId: request.document.id, ...statusPayload }),
         };
       }
       calls.requestUrl = url;
@@ -216,7 +222,7 @@ async function frontendReturnedImportHarness({
     adminRequest: async (endpoint, options = {}) => {
       if (!options.method) {
         if (endpoint === "config") return { keyConfigured: false };
-        if (endpoint === "documents") return { documents: state.documents };
+        if (endpoint === "documents") return { documents: [...storedDocuments.values()] };
         if (endpoint === "inquiries") return { inquiries: [] };
       }
       const request = {
@@ -230,15 +236,17 @@ async function frontendReturnedImportHarness({
         remainingSubmittedPatchFailures -= 1;
         throw new Error("Chat PATCH failed");
       }
-      const current = state.documents.find((document) => document.id === request.body?.id) || draft;
+      const current = storedDocuments.get(request.body?.id) || draft;
+      const updated = current.oaSubmissionState === "submitted" ? current : {
+        ...current,
+        oaSubmissionState: request.body?.submissionState || current.oaSubmissionState,
+        oaItemId: request.body?.oaItemId || "",
+        oaSubmittedAt: "2026-09-13T06:00:00.000Z",
+      };
+      storedDocuments.set(updated.id, updated);
       return {
         saved: true,
-        document: {
-          ...current,
-          oaSubmissionState: request.body?.submissionState || current.oaSubmissionState,
-          oaItemId: request.body?.oaItemId || "",
-          oaSubmittedAt: "2026-09-13T06:00:00.000Z",
-        },
+        document: updated,
       };
     },
     oaImportReceipt: (result) => ({ items: result.item ? [result.item] : [], partCount: Number(result.partCount) || 1 }),
@@ -256,7 +264,7 @@ async function frontendReturnedImportHarness({
     },
     renderAdminShell: () => { calls.renders += 1; },
   });
-  return { api, calls, draft, state };
+  return { api, calls, draft, state, storedDocuments };
 }
 
 test("public analytics batches only anonymous allowlisted events in groups of at most five", async () => {
@@ -672,8 +680,9 @@ test("local drafts never inherit an unrelated returned-import context", async ()
     },
   });
   assert.deepEqual(local.calls.events, ["chat:unknown", "oa:import", "chat:submitted"]);
-  assert.equal(local.state.documents[0].oaSubmissionState, "submitted");
-  assert.equal(local.state.documents[0].oaItemId, oaItemId);
+  assert.equal(local.state.documents.length, 0);
+  assert.equal(local.storedDocuments.get(local.draft.id).oaSubmissionState, "submitted");
+  assert.equal(local.storedDocuments.get(local.draft.id).oaItemId, oaItemId);
   assert.equal(local.state.returnedKnowledgeItemId, "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee");
   assert.equal(local.calls.replacedUrl, "");
 
@@ -718,6 +727,67 @@ test("a failed final Chat PATCH leaves the draft unknown and starts OA reconcili
   assert.equal(uncertain.state.documents[0].oaSubmissionState, "unknown");
   assert.equal(uncertain.state.oaStatusSyncRequired, true);
   assert.equal(uncertain.state.oaStatusSyncing, true);
+});
+
+test("OA receipt immediately removes a pending draft and its editor while preserving its saved receipt", async () => {
+  const oaItemId = "22222222-3333-4444-8555-666666666666";
+  const accepted = await frontendReturnedImportHarness({
+    ok: true,
+    payload: { item: { id: oaItemId, status: "pending" }, partCount: 1 },
+    returnedKnowledgeItemId: "",
+  });
+  accepted.state.draft = { ...accepted.draft };
+  accepted.state.importJob = { total: 1 };
+  accepted.state.failedImportFiles = ["failed.png"];
+  await accepted.api.submitDocumentToOa(accepted.draft);
+  assert.equal(accepted.state.documents.length, 0);
+  assert.equal(accepted.state.draft.id, "");
+  assert.equal(accepted.state.draft.body, "");
+  assert.equal(accepted.state.importJob, null);
+  assert.equal(accepted.state.failedImportFiles.length, 0);
+  assert.equal(accepted.storedDocuments.get(accepted.draft.id).body, accepted.draft.body);
+  assert.equal(accepted.storedDocuments.get(accepted.draft.id).oaItemId, oaItemId);
+
+  // An older API response may still include the retained row: refresh must hide it too.
+  await accepted.api.fetchAdminData();
+  assert.equal(accepted.state.documents.length, 0);
+
+  // A stale submit action receives the saved receipt without importing or displaying it again.
+  accepted.state.documents = [{ ...accepted.draft }];
+  await accepted.api.submitDocumentToOa(accepted.draft);
+  assert.equal(accepted.state.documents.length, 0);
+  assert.equal(accepted.calls.importRequests.length, 1);
+});
+
+test("OA status reconciliation removes confirmed imports and keeps unknown or unsubmitted drafts", async () => {
+  const confirmed = await frontendReturnedImportHarness({
+    ok: true,
+    payload: {},
+    returnedKnowledgeItemId: "",
+    initialOaSubmissionState: "unknown",
+    statusPayload: { submitted: true, item: { id: "22222222-3333-4444-8555-666666666666", status: "pending" } },
+  });
+  await confirmed.api.reconcileUnknownDocumentStatuses();
+  assert.equal(confirmed.state.documents.length, 0);
+  assert.equal(confirmed.state.oaStatusSyncRequired, false);
+  assert.equal(confirmed.calls.importRequests.length, 0);
+  assert.equal(confirmed.storedDocuments.get(confirmed.draft.id).oaSubmissionState, "submitted");
+
+  const absent = await frontendReturnedImportHarness({
+    ok: true, payload: {}, returnedKnowledgeItemId: "", initialOaSubmissionState: "unknown",
+  });
+  await absent.api.reconcileUnknownDocumentStatuses();
+  assert.equal(absent.state.documents.length, 1);
+  assert.equal(absent.state.documents[0].oaSubmissionState, "unsubmitted");
+
+  const invalid = await frontendReturnedImportHarness({
+    ok: true, payload: {}, returnedKnowledgeItemId: "", initialOaSubmissionState: "unknown",
+    statusPayload: { submitted: true, item: { id: "invalid" } },
+  });
+  await invalid.api.reconcileUnknownDocumentStatuses();
+  assert.equal(invalid.state.documents.length, 1);
+  assert.equal(invalid.state.documents[0].oaSubmissionState, "unknown");
+  assert.equal(invalid.state.oaStatusSyncRequired, true);
 });
 
 test("initial admin loading starts legacy OA reconciliation without awaiting it", async () => {
@@ -965,7 +1035,7 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.equal(submitToOa.match(/clearReturnedKnowledgeContext\(returnedKnowledgeItemId\)/gu)?.length, 1);
   assert.ok(submitToOa.indexOf("clearReturnedKnowledgeContext(returnedKnowledgeItemId)") > submitToOa.indexOf("const oaItemId"));
   assert.match(script, /state\.returnedKnowledgeItemId = "";[\s\S]*?history\.replaceState[\s\S]*?withoutReturnedKnowledgeItemQuery/u);
-  assert.match(script, /if \(state\.returnedKnowledgeItemId\) \{[\s\S]*?本地草稿已暂时隐藏，不能编辑或提交[\s\S]*?\} else if \(!state\.documents\.length\)/u);
+  assert.match(script, /if \(state\.returnedKnowledgeItemId\) \{[\s\S]*?本地草稿已暂时隐藏，不能编辑或提交[\s\S]*?\} else if \(!visibleDrafts\.length\)/u);
   assert.match(script, /submitDocumentToOa\(document\)\);/u);
   const externalApis = [...script.matchAll(/https?:\/\/[^\s"'`]+\/api\/[^\s"'`]+/giu)].map((match) => match[0]);
   assert.deepEqual(externalApis, [
@@ -985,18 +1055,18 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.doesNotMatch(script, /\bpublished\s*:\s*(?:1|true)\b/u);
 });
 
-test("document rows show exact persisted OA labels and submit only unsubmitted drafts", async () => {
+test("document rows and count omit submitted drafts and allow only unsubmitted drafts to submit", async () => {
   const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
   const start = script.indexOf("function renderDocumentsPanel");
   const end = script.indexOf("function parseTranscript", start);
   assert.ok(start >= 0 && end > start, "document panel must remain directly testable");
   const panel = script.slice(start, end);
 
-  assert.match(
-    panel,
-    /const submissionLabel = submissionState === "submitted"\s*\? "OA 待审核"\s*: submissionState === "unsubmitted"\s*\? "待提交 OA 审核"/u,
-  );
-  assert.equal((panel.match(/["']OA 待审核["']/gu) || []).length, 1);
+  assert.match(panel, /const visibleDrafts = state\.documents\.filter\(\(document\) => document\.oaSubmissionState !== "submitted"\)/u);
+  assert.match(panel, /待提交草稿 · \$\{visibleDrafts\.length\}/u);
+  assert.match(panel, /for \(const document of visibleDrafts\)/u);
+  assert.match(panel, /const submissionLabel = submissionState === "unsubmitted" \? "待提交 OA 审核" : "待核对 OA 状态"/u);
+  assert.equal((panel.match(/["']OA 待审核["']/gu) || []).length, 0);
   assert.equal((panel.match(/["']待提交 OA 审核["']/gu) || []).length, 1);
 
   const guardStart = panel.indexOf('if (submissionState === "unsubmitted")');

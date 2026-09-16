@@ -530,7 +530,14 @@ function referenceSectionStart(value) {
 }
 
 function userFacingAnswer(value) {
-  const answer = cleanPublicChatText(value);
+  // Protect image labels (such as 图1) from the internal citation-number filter.
+  // Loading an image still requires the separate server-provided allowlist.
+  const imageMarkdown = [];
+  const answer = cleanPublicChatText(value).replace(/!\[([^\]\n]{0,300})\]\((https:\/\/oa\.omindos\.ai\/api\/public\/lab-ai\/assets\/[0-9a-f-]{36})\)/gu, (match) => {
+    const token = `\uE000${imageMarkdown.length}\uE001`;
+    imageMarkdown.push(match);
+    return token;
+  });
   const sectionStart = referenceSectionStart(answer);
   const answerBody = sectionStart === -1 ? answer : answer.slice(0, sectionStart);
   if (/\[\s*\[\s*[0-9０-９][\s\S]*?\]\s*\]/u.test(answerBody)) return "暂时没有可显示的回答。";
@@ -552,7 +559,43 @@ function userFacingAnswer(value) {
     /(?:^|[^\p{L}\p{N}_*`#~-])(?:参考|引用|出处)(?:列表|清单)?(?:如下(?:所示)?)?[ \t]*(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*[:：]/iu.test(withoutReferences) ||
     /(?:^|[^\p{L}\p{N}_-])(?:references?|sources?|citations?|bibliography|works[ \t]+cited)(?:[ \t]+list)?[ \t]*[:：]/iu.test(withoutReferences) ||
     referenceSectionStart(withoutReferences) !== -1;
-  return withoutReferences && !hasResidualMarker ? withoutReferences : "暂时没有可显示的回答。";
+  return withoutReferences && !hasResidualMarker
+    ? withoutReferences.replace(/\uE000(\d+)\uE001/gu, (match, index) => imageMarkdown[Number(index)] ?? match)
+    : "暂时没有可显示的回答。";
+}
+
+function validatedAnswerImages(images) {
+  const result = [];
+  const seen = new Set();
+  for (const image of (Array.isArray(images) ? images : []).slice(0, 6)) {
+    if (!image || typeof image.url !== "string" ||
+        !/^https:\/\/oa\.omindos\.ai\/api\/public\/lab-ai\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(image.url) ||
+        seen.has(image.url)) continue;
+    seen.add(image.url);
+    result.push({ url: image.url, alt: cleanPublicChatText(typeof image.alt === "string" ? image.alt.slice(0, 300) : "知识库配图") });
+  }
+  return result;
+}
+
+function inquiryTranscript(messages) {
+  const result = [];
+  let remaining = 30_000;
+  const suffix = "\n（长回答节选，完整内容保留在聊天记录中。）";
+  for (const message of (Array.isArray(messages) ? messages : []).slice(-12).reverse()) {
+    if (!message || !["user", "assistant"].includes(message.role) || typeof message.content !== "string") continue;
+    const limit = Math.min(12_000, remaining);
+    if (limit <= suffix.length) break;
+    let content = message.content;
+    if (content.length > limit) {
+      let end = limit - suffix.length;
+      if (/[\uD800-\uDBFF]/u.test(content[end - 1])) end -= 1;
+      content = content.slice(0, end) + suffix;
+    }
+    if (!content.trim()) continue;
+    result.unshift({ role: message.role, content });
+    remaining -= content.length;
+  }
+  return result;
 }
 
 const CHAT_HISTORY_KEY = "arts-public-chat-history-v1:";
@@ -560,7 +603,7 @@ const CHAT_CONVERSATIONS_KEY = "arts-public-chat-conversations-v2";
 const CHAT_INSTALL_ANALYTICS_KEY = "arts-public-chat-install-analytics-v1";
 const CHAT_HISTORY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const CHAT_TOKEN_TTL_MS = 12 * 60 * 60 * 1000;
-const CHAT_HISTORY_MAX_CHARS = 80_000;
+const CHAT_HISTORY_MAX_CHARS = 400_000;
 const CHAT_HISTORY_MAX_MESSAGES = 40;
 const CHAT_CONVERSATION_LIMIT = 20;
 const CHAT_RECENT_LIMIT = 8;
@@ -572,9 +615,10 @@ function boundedChatMessages(messages) {
   let remaining = CHAT_HISTORY_MAX_CHARS;
   for (const item of (Array.isArray(messages) ? messages : []).slice(-CHAT_HISTORY_MAX_MESSAGES).reverse()) {
     if (!item || !["user", "assistant"].includes(item.role) || typeof item.content !== "string") continue;
-    const content = item.content.slice(0, item.role === "user" ? 2000 : 12_000);
+    const content = item.role === "user" ? item.content.slice(0, 2000) : item.content;
     if (!content.trim() || content.length > remaining) break;
-    result.unshift({ role: item.role, content });
+    const images = item.role === "assistant" ? validatedAnswerImages(item.images) : [];
+    result.unshift({ role: item.role, content, ...(images.length ? { images } : {}) });
     remaining -= content.length;
   }
   while (result[0]?.role === "assistant") result.shift();
@@ -606,7 +650,7 @@ function readChatHistory(storage, section, now = Date.now()) {
         !Number.isFinite(value.savedAt) || value.savedAt > now || now - value.savedAt >= CHAT_HISTORY_TTL_MS ||
         !Array.isArray(value.messages) || value.messages.length > CHAT_HISTORY_MAX_MESSAGES ||
         value.messages.some((item) => !item || !["user", "assistant"].includes(item.role) ||
-          typeof item.content !== "string" || item.content.length > (item.role === "user" ? 2000 : 12_000)) ||
+          typeof item.content !== "string" || item.content.length > (item.role === "user" ? 2000 : CHAT_HISTORY_MAX_CHARS)) ||
         typeof value.draft !== "string" || value.draft.length > 2000) throw new Error("Invalid history");
     const tokenFresh = Number.isFinite(value.tokenSavedAt) && value.tokenSavedAt > 0 &&
       value.tokenSavedAt <= now && now - value.tokenSavedAt < CHAT_TOKEN_TTL_MS;
@@ -615,6 +659,7 @@ function readChatHistory(storage, section, now = Date.now()) {
       messages: boundedChatMessages(value.messages).map((item) => ({
         role: item.role,
         content: item.role === "assistant" ? userFacingAnswer(item.content) : item.content,
+        ...(item.images?.length ? { images: item.images } : {}),
       })),
       draft: value.draft,
       conversationToken: tokenFresh && typeof value.conversationToken === "string" && value.conversationToken.length <= 40_000
@@ -728,13 +773,14 @@ function readChatConversations(storage, allowedSections, now = Date.now()) {
           now - item.updatedAt >= CHAT_HISTORY_TTL_MS || !Array.isArray(item.messages) ||
           item.messages.length > CHAT_HISTORY_MAX_MESSAGES ||
           item.messages.some((message) => !message || !["user", "assistant"].includes(message.role) ||
-            typeof message.content !== "string" || message.content.length > (message.role === "user" ? 2000 : 12_000)) ||
+            typeof message.content !== "string" || message.content.length > (message.role === "user" ? 2000 : CHAT_HISTORY_MAX_CHARS)) ||
           typeof item.draft !== "string" || item.draft.length > 2000) continue;
       const tokenFresh = Number.isFinite(item.tokenSavedAt) && item.tokenSavedAt > 0 &&
         item.tokenSavedAt <= now && now - item.tokenSavedAt < CHAT_TOKEN_TTL_MS;
       const messages = boundedChatMessages(item.messages).map((message) => ({
         role: message.role,
         content: message.role === "assistant" ? userFacingAnswer(message.content) : message.content,
+        ...(message.images?.length ? { images: message.images } : {}),
       }));
       const interrupted = item.interrupted === true;
       conversations.push({
@@ -780,16 +826,32 @@ function recentChatConversations(conversations) {
     .slice(0, CHAT_RECENT_LIMIT);
 }
 
-function appendAnswerInline(parent, text) {
+function answerImageNode(image, inline = false) {
+  const wrapper = element(inline ? "span" : "figure", { className: "answer-image" });
+  const link = element("a", { attributes: { href: image.url, target: "_blank", rel: "noopener noreferrer", "aria-label": `查看原图：${image.alt || "知识库配图"}` } });
+  const picture = element("img", { attributes: { src: image.url, alt: image.alt || "知识库配图", loading: "lazy", decoding: "async", referrerpolicy: "no-referrer" } });
+  link.append(picture);
+  const caption = element(inline ? "span" : "figcaption", { className: "answer-image-caption", text: image.alt || "知识库配图" });
+  picture.addEventListener("error", () => {
+    link.hidden = true;
+    caption.textContent = `${image.alt || "知识库配图"}（图片暂不可用）`;
+  }, { once: true });
+  wrapper.append(link, caption);
+  return wrapper;
+}
+
+function appendAnswerInline(parent, text, images = new Map()) {
   // All content is added as text or a small set of inert formatting elements.
-  const pattern = /\\([\\`*_{}\[\]()#+\-.!|])|`([^`\n]+)`|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*/gu;
+  const pattern = /\\([\\`*_{}\[\]()#+\-.!|])|`([^`\n]+)`|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*|!\[([^\]\n]{0,300})\]\(([^\s)]+)\)/gu;
   let offset = 0;
   for (const match of text.matchAll(pattern)) {
     parent.append(document.createTextNode(text.slice(offset, match.index)));
     if (match[1]) parent.append(document.createTextNode(match[1]));
     else if (match[2]) parent.append(element("code", { text: match[2] }));
     else if (match[3] || match[4]) parent.append(element("strong", { text: match[3] || match[4] }));
-    else parent.append(element("em", { text: match[5] }));
+    else if (match[5]) parent.append(element("em", { text: match[5] }));
+    else if (images.has(match[7])) parent.append(answerImageNode(images.get(match[7]), true));
+    else parent.append(document.createTextNode(match[0]));
     offset = match.index + match[0].length;
   }
   parent.append(document.createTextNode(text.slice(offset)));
@@ -821,13 +883,20 @@ function answerTableAt(lines, index) {
     ? header : null;
 }
 
-function renderAnswerBody(answer) {
+function renderAnswerBody(answer, allowedImages = []) {
   const body = element("div", { className: "message-body answer-content" });
-  const lines = String(answer).slice(0, 12_000).replace(/\r\n?/gu, "\n").split("\n");
-  const startsBlock = (index) => /^\s*(?:#{1,6}\s|[-+*]\s|\d+[.)]\s|>|`{3,}|~{3,})/u.test(lines[index] || "") || answerTableAt(lines, index);
+  const images = new Map(validatedAnswerImages(allowedImages).map((image) => [image.url, image]));
+  const lines = String(answer).replace(/\r\n?/gu, "\n").split("\n");
+  const imageAt = (index) => {
+    const match = (lines[index] || "").trim().match(/^!\[([^\]\n]{0,300})\]\(([^\s)]+)\)$/u);
+    return match ? images.get(match[2]) : null;
+  };
+  const startsBlock = (index) => /^\s*(?:#{1,6}\s|[-+*]\s|\d+[.)]\s|>|`{3,}|~{3,})/u.test(lines[index] || "") || answerTableAt(lines, index) || imageAt(index);
   for (let index = 0; index < lines.length;) {
     const line = lines[index];
     if (!line.trim()) { index += 1; continue; }
+    const picture = imageAt(index);
+    if (picture) { body.append(answerImageNode(picture)); index += 1; continue; }
     const fence = line.match(/^\s*(`{3,}|~{3,})(.*)$/u);
     if (fence) {
       const code = [];
@@ -842,7 +911,7 @@ function renderAnswerBody(answer) {
       const wrap = element("div", { className: "answer-table-scroll", attributes: { role: "region", "aria-label": "回答表格，可左右滑动", tabindex: "0" } });
       const table = element("table");
       const head = element("tr");
-      for (const value of headers) { const cell = element("th", { attributes: { scope: "col" } }); appendAnswerInline(cell, value); head.append(cell); }
+      for (const value of headers) { const cell = element("th", { attributes: { scope: "col" } }); appendAnswerInline(cell, value, images); head.append(cell); }
       table.append(element("thead", {}, [head]));
       const rows = element("tbody");
       index += 2;
@@ -851,14 +920,14 @@ function renderAnswerBody(answer) {
         const values = answerTableCells(lines[index]);
         if (!values || values.length !== headers.length) break;
         const row = element("tr");
-        for (const value of values) { const cell = element("td"); appendAnswerInline(cell, value); row.append(cell); }
+        for (const value of values) { const cell = element("td"); appendAnswerInline(cell, value, images); row.append(cell); }
         rows.append(row); index += 1; count += 1;
       }
       table.append(rows); wrap.append(table); body.append(wrap);
       continue;
     }
     const heading = line.match(/^\s*(#{1,6})\s+(.+?)\s*#*$/u);
-    if (heading) { const node = element(`h${Math.min(6, heading[1].length + 2)}`); appendAnswerInline(node, heading[2]); body.append(node); index += 1; continue; }
+    if (heading) { const node = element(`h${Math.min(6, heading[1].length + 2)}`); appendAnswerInline(node, heading[2], images); body.append(node); index += 1; continue; }
     const listItem = line.match(/^\s*(?:([-+*])|(\d+)[.)])\s+(.+)$/u);
     if (listItem) {
       const ordered = Boolean(listItem[2]);
@@ -867,19 +936,19 @@ function renderAnswerBody(answer) {
       while (index < lines.length) {
         const item = lines[index].match(/^\s*(?:([-+*])|(\d+)[.)])\s+(.+)$/u);
         if (!item || Boolean(item[2]) !== ordered) break;
-        const node = element("li"); appendAnswerInline(node, item[3]); list.append(node); index += 1;
+        const node = element("li"); appendAnswerInline(node, item[3], images); list.append(node); index += 1;
       }
       body.append(list); continue;
     }
     if (/^\s*>/u.test(line)) {
       const quote = [];
       while (index < lines.length && /^\s*>/u.test(lines[index])) quote.push(lines[index++].replace(/^\s*>\s?/u, ""));
-      const node = element("blockquote"); appendAnswerInline(node, quote.join("\n")); body.append(node); continue;
+      const node = element("blockquote"); appendAnswerInline(node, quote.join("\n"), images); body.append(node); continue;
     }
     const paragraph = [line];
     index += 1;
     while (index < lines.length && lines[index].trim() && !startsBlock(index)) paragraph.push(lines[index++]);
-    const node = element("p"); appendAnswerInline(node, paragraph.join("\n")); body.append(node);
+    const node = element("p"); appendAnswerInline(node, paragraph.join("\n"), images); body.append(node);
   }
   return body;
 }
@@ -2489,7 +2558,7 @@ function createPublicApp() {
       ? userFacingAnswer(message.content)
       : String(message.content || "");
     article.append(message.role === "assistant"
-      ? renderAnswerBody(answer)
+      ? renderAnswerBody(answer, message.images)
       : element("div", { className: "message-body", text: answer }));
 
     if (message.role === "assistant") {
@@ -2804,6 +2873,7 @@ function createPublicApp() {
       const assistant = {
         role: "assistant",
         content: userFacingAnswer(payload.answer),
+        images: validatedAnswerImages(payload.images),
         mode: payload.mode,
         provider: payload.provider,
       };
@@ -2941,7 +3011,7 @@ function createPublicApp() {
     const include = element("input", { attributes: { type: "checkbox" } });
     include.checked = inquiry.includeConversation;
     include.addEventListener("change", (event) => { inquiry.includeConversation = event.currentTarget.checked; });
-    includeLabel.append(include, element("span", { text: "附上本次最近的对话，便于了解背景" }));
+    includeLabel.append(include, element("span", { text: "附上最近的对话，长回答会节选，便于了解背景" }));
 
     const consentLabel = element("label", { className: "check-label" });
     const consent = element("input", { attributes: { type: "checkbox", required: true } });
@@ -2994,7 +3064,7 @@ function createPublicApp() {
         consent: inquiry.consent,
         includeConversation: inquiry.includeConversation,
         transcript: inquiry.includeConversation
-          ? session.messages.slice(-12).map(({ role, content }) => ({ role, content }))
+          ? inquiryTranscript(session.messages)
           : [],
       }));
       inquiry.reference = String(payload.reference || "");
@@ -3375,6 +3445,17 @@ function createAdminApp() {
     void reconcileUnknownDocumentStatuses();
   }
 
+  function applyDocumentSubmissionState(persistedDocument) {
+    state.documents = state.documents
+      .map((document) => document.id === persistedDocument.id ? { ...document, ...persistedDocument } : document)
+      .filter((document) => document.oaSubmissionState !== "submitted");
+    if (persistedDocument.oaSubmissionState === "submitted" && state.draft?.id === persistedDocument.id) {
+      state.draft = emptyDraft();
+      state.importJob = null;
+      state.failedImportFiles = [];
+    }
+  }
+
   async function submitDocumentToOa(draft, { retainedAsChatDraft = true, submissionContext = null } = {}) {
     const returnedKnowledgeItemId = submissionContext?.returnedKnowledgeItemId || "";
     if (submissionContext && !SAFE_RETURNED_KNOWLEDGE_ITEM_ID.test(returnedKnowledgeItemId)) {
@@ -3406,9 +3487,7 @@ function createAdminApp() {
           && !SAFE_RETURNED_KNOWLEDGE_ITEM_ID.test(String(checkpointDocument.oaItemId || "")))) {
         throw new Error("Chat 提交状态返回异常，尚未发送至 OA。请刷新后重试。");
       }
-      state.documents = state.documents.map((document) => (
-        document.id === draft.id ? { ...document, ...checkpointDocument } : document
-      ));
+      applyDocumentSubmissionState(checkpointDocument);
       if (checkpointDocument.oaSubmissionState === "submitted") {
         state.notice = "该版本资料已提交 OA，重复操作不会新增条目。请打开 OA 查看当前审核状态。";
         return;
@@ -3480,9 +3559,7 @@ function createAdminApp() {
         void reconcileUnknownDocumentStatuses();
         throw new Error("OA 已接收，但 Chat 提交状态返回异常。请刷新后重试；重复提交不会新增条目。");
       }
-      state.documents = state.documents.map((document) => (
-        document.id === draft.id ? { ...document, ...persistedDocument } : document
-      ));
+      applyDocumentSubmissionState(persistedDocument);
     }
     if (returnedKnowledgeItemId) clearReturnedKnowledgeContext(returnedKnowledgeItemId);
     const isLargeDocument = draft.body.length > CHAT_DIRECT_OA_THRESHOLD_CHARACTERS;
@@ -3536,9 +3613,7 @@ function createAdminApp() {
       || (result.submitted && String(persistedDocument.oaItemId || "").toLowerCase() !== oaItemId.toLowerCase())) {
       throw new Error("Chat 提交状态返回异常。");
     }
-    state.documents = state.documents.map((candidate) => (
-      candidate.id === document.id ? { ...candidate, ...persistedDocument } : candidate
-    ));
+    applyDocumentSubmissionState(persistedDocument);
   }
 
   async function reconcileUnknownDocumentStatuses() {
@@ -3585,7 +3660,9 @@ function createAdminApp() {
       ...configPayload,
       apiKey: "",
     };
-    state.documents = Array.isArray(documentPayload.documents) ? documentPayload.documents : [];
+    state.documents = Array.isArray(documentPayload.documents)
+      ? documentPayload.documents.filter((document) => document.oaSubmissionState !== "submitted")
+      : [];
     if (!state.documents.some((document) => document.oaSubmissionState === "unknown")) {
       state.oaStatusSyncRequired = false;
     }
@@ -4168,7 +4245,9 @@ function createAdminApp() {
           published: 0,
         }));
         const payload = await adminRequest("documents");
-        state.documents = Array.isArray(payload.documents) ? payload.documents : [];
+        state.documents = Array.isArray(payload.documents)
+          ? payload.documents.filter((document) => document.oaSubmissionState !== "submitted")
+          : [];
         state.draft = emptyDraft();
         const savedDocument = state.documents.find((document) => document.id === saved.id);
         if (!savedDocument) throw new Error("资料已保存，但暂时无法读取，请刷新后重试。");
@@ -4179,10 +4258,12 @@ function createAdminApp() {
     });
     editor.append(form);
 
+    const visibleDrafts = state.documents.filter((document) => document.oaSubmissionState !== "submitted");
     const list = element("section", { className: "admin-card document-list" });
     list.append(
       element("p", { className: "eyebrow", text: "LOCAL DRAFTS" }),
-      element("h2", { text: `资料列表 · ${state.documents.length}` }),
+      element("h2", { text: `待提交草稿 · ${visibleDrafts.length}` }),
+      element("p", { className: "small-note", text: "已进入 OA 的资料不再显示，请在 OA 查看和处理。" }),
       externalLink("打开 OA 登录／查看待审核", OA_KNOWLEDGE_URL, "primary-link"),
     );
     if (state.oaStatusSyncRequired) {
@@ -4196,22 +4277,14 @@ function createAdminApp() {
         className: "admin-empty",
         text: "当前正在重提 OA 退回资料。为避免把本地旧草稿误写入原条目，本地草稿已暂时隐藏，不能编辑或提交；本次重提完成后会自动恢复。",
       }));
-    } else if (!state.documents.length) {
-      list.append(element("div", { className: "admin-empty", text: "暂时没有待审核草稿。" }));
+    } else if (!visibleDrafts.length) {
+      list.append(element("div", { className: "admin-empty", text: "暂时没有待提交草稿。" }));
     } else {
-      for (const document of state.documents) {
+      for (const document of visibleDrafts) {
         const article = element("article", { className: "admin-item" });
         const head = element("div", { className: "admin-item-head" });
-        const submissionState = document.oaSubmissionState === "submitted"
-          ? "submitted"
-          : document.oaSubmissionState === "unsubmitted"
-            ? "unsubmitted"
-            : "unknown";
-        const submissionLabel = submissionState === "submitted"
-          ? "OA 待审核"
-          : submissionState === "unsubmitted"
-            ? "待提交 OA 审核"
-            : "待核对 OA 状态";
+        const submissionState = document.oaSubmissionState === "unsubmitted" ? "unsubmitted" : "unknown";
+        const submissionLabel = submissionState === "unsubmitted" ? "待提交 OA 审核" : "待核对 OA 状态";
         head.append(
           element("div", {}, [
             element("h3", { text: String(document.title || "未命名资料") }),
@@ -4248,7 +4321,7 @@ function createAdminApp() {
           head.append(submit);
         } else {
           head.append(externalLink(
-            submissionState === "submitted" ? "查看 OA" : "登录 OA 核对",
+            "登录 OA 核对",
             OA_KNOWLEDGE_URL,
             "secondary-button small-button",
           ));

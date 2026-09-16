@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
+import { parseInquiryPayload } from "../src/validation.mjs";
 
 const source = await readFile(new URL("../frontend/app.js", import.meta.url), "utf8");
 class TestNode {
   constructor(tag = "#text", text = "") { this.tag = tag; this.text = text; this.children = []; this.attributes = {}; }
   append(...nodes) { this.children.push(...nodes.map((node) => node instanceof TestNode ? node : new TestNode("#text", String(node)))); }
   setAttribute(name, value) { this.attributes[name] = String(value); }
+  addEventListener(name, callback) { (this.listeners ||= {})[name] = callback; }
   set textContent(value) { this.text = String(value); this.children = []; }
   get textContent() { return this.text + this.children.map((child) => child.textContent).join(""); }
 }
@@ -20,7 +22,7 @@ const api = runInNewContext(`
   ({ CHAT_HISTORY_KEY, CHAT_CONVERSATIONS_KEY, CHAT_HISTORY_TTL_MS, CHAT_TOKEN_TTL_MS,
      CHAT_RECENT_LIMIT, readChatHistory, writeChatHistory, chatHistorySnapshot,
      chatConversationTitle, chatConversationsSnapshot, writeChatConversations,
-     readChatConversations, recentChatConversations, renderAnswerBody, userFacingAnswer });
+     readChatConversations, recentChatConversations, renderAnswerBody, userFacingAnswer, inquiryTranscript });
 `, { document, Node: TestNode });
 const installHelperApi = runInNewContext(`
   ${section("function isStandaloneWebApp", "const TOPIC_LABELS")}
@@ -212,6 +214,77 @@ test("code, escaped pipes and malformed tables retain their text", () => {
   assert.equal(nodes(body, "td")[1].textContent, "x|y");
   assert.match(body.textContent, /不完整/u);
   assert.match(body.textContent, /单列/u);
+});
+
+const approvedImageUrl = "https://oa.omindos.ai/api/public/lab-ai/assets/550e8400-e29b-41d4-a716-446655440000";
+
+test("long answers render and survive refresh in full with approved images", () => {
+  const answer = `${"这是完整的技术说明。".repeat(2500)}\n\n![图1](${approvedImageUrl})\n\n最后一段也必须保留。`;
+  const images = [{ url: approvedImageUrl, alt: "机器人系统结构图" }];
+  const store = storage();
+  const record = conversation("longanswer1", "technology", {
+    messages: [{ role: "user", content: "详细说明系统" }, { role: "assistant", content: answer, images }],
+  });
+  assert.equal(api.writeChatConversations(store, [record], record.id, now), true);
+  const restored = api.readChatConversations(store, allowedSections, now + 1000).conversations[0].messages[1];
+  assert.equal(restored.content, answer);
+  assert.deepEqual(JSON.parse(JSON.stringify(restored.images)), images);
+  const body = api.renderAnswerBody(restored.content, restored.images);
+  assert.match(body.textContent, /最后一段也必须保留。$/u);
+  const picture = nodes(body, "img")[0];
+  assert.equal(picture.attributes.src, approvedImageUrl);
+  assert.equal(picture.attributes.alt, "机器人系统结构图");
+  assert.equal(picture.attributes.loading, "lazy");
+  assert.equal(picture.attributes.referrerpolicy, "no-referrer");
+  assert.equal(nodes(body, "a")[0].attributes.rel, "noopener noreferrer");
+  picture.listeners.error();
+  assert.equal(nodes(body, "a")[0].hidden, true);
+  assert.match(nodes(body, "figcaption")[0].textContent, /图片暂不可用/u);
+});
+
+test("image rendering requires exact public endpoint and server allowlist", () => {
+  const denied = [
+    "https://example.test/tracker.png", "data:image/png;base64,AA", "javascript:alert(1)",
+    `${approvedImageUrl}?token=secret`, `${approvedImageUrl}/extra`,
+    approvedImageUrl.replace("oa.omindos.ai", "oa.omindos.ai.evil.test"),
+    "https://oa.omindos.ai/api/knowledge/assets/private",
+  ];
+  for (const url of denied) {
+    const body = api.renderAnswerBody(`![图片](${url})`, [{ url, alt: "不可信图片" }]);
+    assert.equal(nodes(body, "img").length, 0, url);
+    assert.equal(nodes(body, "a").length, 0, url);
+  }
+  assert.equal(nodes(api.renderAnswerBody(`![图片](${approvedImageUrl})`), "img").length, 0);
+  const differentUrl = approvedImageUrl.replace(/000$/u, "001");
+  assert.equal(nodes(api.renderAnswerBody(`![图片](${differentUrl})`, [{ url: approvedImageUrl, alt: "图片" }]), "img").length, 0);
+  const inline = api.renderAnswerBody(`系统见下图 ![图1](${approvedImageUrl})，如图所示。`, [{ url: approvedImageUrl, alt: "结构图" }]);
+  assert.equal(nodes(inline, "img").length, 1);
+});
+
+test("numeric image captions do not trigger citation cleanup or load inside code", () => {
+  const markdown = `结构示意。[1]\n\n![图1](${approvedImageUrl})`;
+  const cleaned = api.userFacingAnswer(markdown);
+  assert.equal(cleaned, `结构示意。\n\n![图1](${approvedImageUrl})`);
+  const code = api.renderAnswerBody(`\`\`\`md\n![图1](${approvedImageUrl})\n\`\`\``, [{ url: approvedImageUrl, alt: "结构图" }]);
+  assert.equal(nodes(code, "img").length, 0);
+  assert.match(nodes(code, "pre")[0].textContent, /!\[图1\]/u);
+});
+
+test("long answers can still be attached to inquiries as explicitly labelled excerpts", () => {
+  const full = "机器人😀".repeat(10_000);
+  const messages = Array.from({ length: 12 }, (_, index) => ({ role: index % 2 ? "assistant" : "user", content: index % 2 ? full : "请详细说明" }));
+  const transcript = api.inquiryTranscript(messages);
+  const payload = {
+    requestId: "550e8400-e29b-41d4-a716-446655440000", name: "访客", organisation: "实验室",
+    contact: "hello@example.test", topic: "research", summary: "希望进一步沟通机器人研究",
+    consent: true, includeConversation: true, transcript,
+  };
+  assert.ok(Buffer.byteLength(JSON.stringify(payload)) < 150_000);
+  assert.ok(transcript.length > 0);
+  assert.ok(transcript.every((message) => message.content.length <= 12_000 && message.content.isWellFormed()));
+  assert.match(transcript.at(-1).content, /长回答节选/u);
+  assert.equal(messages.at(-1).content, full);
+  assert.doesNotThrow(() => parseInquiryPayload(payload));
 });
 
 test("install helpers detect standalone and Apple mobile environments", () => {

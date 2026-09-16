@@ -253,7 +253,7 @@ test("Workers AI gets only two bounded user turns and never client assistant tex
   assert.equal(result.body.answer, "团队主要研究机器人灵巧操作。");
   assert.equal(captured.model, WORKERS_AI_MODEL);
   assert.equal(captured.input.stream, false);
-  assert.equal(captured.input.max_tokens, 700);
+  assert.equal(captured.input.max_tokens, 16_384);
   const nonSystem = captured.input.messages.slice(1);
   assert.ok(nonSystem.length <= 2);
   assert.ok(nonSystem.every((message) => message.role === "user"));
@@ -459,7 +459,7 @@ test("verified Bailian config overrides Workers AI and uses hardened fetch optio
   assert.equal(modelFetch.init.cache, "no-store");
   assert.equal(modelFetch.init.credentials, "omit");
   assert.equal(JSON.parse(modelFetch.init.body).stream, false);
-  assert.equal(JSON.parse(modelFetch.init.body).max_tokens, 700);
+  assert.equal(Object.hasOwn(JSON.parse(modelFetch.init.body), "max_tokens"), false);
 });
 
 test("model timing includes a failed Bailian attempt and its Workers fallback", async (t) => {
@@ -585,7 +585,7 @@ test("the document submission migration preserves legacy rows as unknown", (t) =
   });
 });
 
-test("Chat document OA submission state persists across refresh and is CAS protected", async (t) => {
+test("Chat hides submitted OA drafts after refresh while retaining receipts and CAS protection", async (t) => {
   const env = makeEnvironment();
   t.after(() => env.DB.close());
   const token = "8".repeat(64);
@@ -681,10 +681,7 @@ test("Chat document OA submission state persists across refresh and is CAS prote
     origin: null,
   }), env, {}, runtime()));
   assert.equal(refreshed.status, 200);
-  assert.equal(refreshed.body.documents[0].oaSubmissionState, "submitted");
-  assert.equal(refreshed.body.documents[0].oaItemId, oaItemId);
-  assert.equal(refreshed.body.documents[0].oaSubmittedAt, submittedAt);
-  assert.equal(refreshed.body.documents[0].draftRevision, 2);
+  assert.deepEqual(refreshed.body.documents, []);
 
   const repeatedReceipt = await responseJson(await handleRequest(apiRequest("/api/admin/documents", {
     method: "PATCH",
@@ -875,7 +872,7 @@ test("Chat document unknown checkpoints persist and resolve through revision CAS
   const finalStates = Object.fromEntries(
     finalRefresh.body.documents.map((document) => [document.id, document.oaSubmissionState]),
   );
-  assert.equal(finalStates[submittedDocumentId], "submitted");
+  assert.equal(Object.hasOwn(finalStates, submittedDocumentId), false);
   assert.equal(finalStates[unsubmittedDocumentId], "unsubmitted");
 });
 
@@ -1134,10 +1131,10 @@ test("rate-limit identity uses the dedicated HMAC secret", () => {
   assert.doesNotMatch(source, /hmacHex\(\s*context\.env\.APP_ENCRYPTION_KEY/u);
 });
 
-test("chat model defaults cap response length and Bailian wait time", () => {
+test("chat permits detailed answers while keeping a bounded provider wait", () => {
   const source = readFileSync(new URL("../src/app.mjs", import.meta.url), "utf8");
-  assert.match(source, /modelCall\(context, config, messages, maxTokens = 700, timeoutMs = 20_000\)/u);
-  assert.match(source, /workersAiCall\(context, messages, maxTokens = 700\)/u);
+  assert.match(source, /modelCall\(context, config, messages, maxTokens, timeoutMs = 120_000\)/u);
+  assert.match(source, /workersAiCall\(context, messages, maxTokens = 16_384\)/u);
 });
 
 test("chat keeps the 25 requests per IP per hour limit", async (t) => {
