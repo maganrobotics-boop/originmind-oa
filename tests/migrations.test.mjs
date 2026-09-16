@@ -94,7 +94,7 @@ test("migration journal keeps one continuous snapshot chain", () => {
 });
 
 test("production-shaped v32 data safely migrates through the GitHub identity migration", () => {
-  assert.equal(migrationFiles.at(-1), "0030_large_knowledge_revision_parts.sql");
+  assert.equal(migrationFiles[30], "0030_large_knowledge_revision_parts.sql");
   const db = new DatabaseSync(":memory:");
   applyMigrationRange(db, 0, 7);
 
@@ -198,7 +198,7 @@ test("production-shaped v32 data safely migrates through the GitHub identity mig
 
 test("knowledge visibility migration defaults legacy approvals to internal without dropping security triggers", () => {
   const visibilityMigrationIndex = migrationFiles.indexOf("0028_needy_microchip.sql");
-  assert.equal(visibilityMigrationIndex, migrationFiles.length - 3);
+  assert.equal(visibilityMigrationIndex, 28);
   const db = new DatabaseSync(":memory:");
   applyMigrationRange(db, 0, visibilityMigrationIndex);
 
@@ -271,7 +271,7 @@ test("knowledge visibility migration defaults legacy approvals to internal witho
 
 test("knowledge visibility reclassification migration preserves content and permits only guarded active scope changes", () => {
   const reclassificationMigrationIndex = migrationFiles.indexOf("0029_knowledge_visibility_reclassification.sql");
-  assert.equal(reclassificationMigrationIndex, migrationFiles.length - 2);
+  assert.equal(reclassificationMigrationIndex, 29);
   const db = new DatabaseSync(":memory:");
   applyMigrationRange(db, 0, reclassificationMigrationIndex);
   const createdAt = "2026-09-10T00:00:00.000Z";

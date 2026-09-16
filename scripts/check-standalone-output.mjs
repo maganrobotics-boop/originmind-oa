@@ -1,6 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
+import { REVIEWED_KNOWLEDGE_MIGRATIONS } from "../lib/production-release.mjs";
 import { deploymentTarget, productionTarget, requiredStandaloneSecrets } from "../lib/standalone-config.mjs";
 
 const target = process.argv[2] || "";
@@ -87,11 +88,9 @@ else assertProductionOutput();
 await access(resolve(dirname(outputPath), config.main));
 await access(resolve(dirname(outputPath), config.assets.directory));
 if (target === "production") {
-  await access(resolve(dirname(outputPath), database.migrations_dir, "0026_rich_jocasta.sql"));
-  await access(resolve(dirname(outputPath), database.migrations_dir, "0027_careless_winter_soldier.sql"));
-  await access(resolve(dirname(outputPath), database.migrations_dir, "0028_needy_microchip.sql"));
-  await access(resolve(dirname(outputPath), database.migrations_dir, "0029_knowledge_visibility_reclassification.sql"));
-  await access(resolve(dirname(outputPath), database.migrations_dir, "0030_large_knowledge_revision_parts.sql"));
+  for (const name of Object.keys(REVIEWED_KNOWLEDGE_MIGRATIONS)) {
+    await access(resolve(dirname(outputPath), database.migrations_dir, name));
+  }
 }
 
 process.stdout.write(`Verified ${target} standalone Worker output.\n`);

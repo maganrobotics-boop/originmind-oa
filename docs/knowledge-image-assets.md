@@ -1,5 +1,44 @@
 # Knowledge image assets
 
+## Release status — 2026-09-16
+
+This document describes the target acceptance contract. The ZIP image feature
+has **not** passed end-to-end acceptance and is not ready for production release.
+
+At GitHub main `ae2af6a67317530d2a3c48a67c4899e950ea1241`, Chat CI passed but OA CI
+failed 12 tests (four import API fixtures and eight migration/metadata checks).
+The repair branch fixes those checks and the asset persistence/finalization
+defects without rewriting migrations 0031 or 0032. An additive 0033 migration is
+required to permit only guarded staged-to-ready transitions; advancing the old
+0030 release gate to 0032 alone cannot make uploads work.
+
+The following acceptance gaps remain separate release blockers:
+
+- Chat's ZIP importer returns only `index.md` text and discards the parsed image
+  files. Its OA submission path does not consume `assetUpload`, upload images,
+  or finalize the manifest before marking the draft submitted.
+- Import receipts issue a new upload token each time. Resuming a partial upload
+  must preserve or recover its original session; helper retries with the same
+  token do not establish resumability across a fresh import receipt.
+- The standalone production configuration does not bind `KNOWLEDGE_ASSETS` to
+  an R2 bucket. The intended production bucket must be identified and validated.
+- OA review, authorized image serving, retrieval asset references, and Chat
+  image display/model input are still absent. Upload-helper tests do not prove
+  those paths or approval-time completeness.
+- The actual production D1 ledger/schema and recovery bookmark have not been
+  inspected by this repair. Release must retain exact target confirmation,
+  reviewed migration hashes, before/after schema checks, and recovery evidence.
+
+The legacy database relocation export/import contract remains pinned to 0030
+and rejects newer ledgers. It must not be used as an image-aware backup; it does
+not export R2 objects. This repair does not broaden that separate migration tool.
+
+Before release, validate a two-image ZIP through the acceptance sequence below,
+including an interrupted upload/retry, same-item receipt, incomplete-upload
+approval rejection, revision isolation, and internal/public visibility checks.
+Green unit tests alone are insufficient. Merge and deployment require explicit
+user approval.
+
 ## Goal
 
 A ZIP knowledge package remains one OA knowledge item:

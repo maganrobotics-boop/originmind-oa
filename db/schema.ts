@@ -352,6 +352,31 @@ export const knowledgeRevisionParts = sqliteTable(
   ],
 );
 
+// SQL migrations also enforce asset integrity and the staged-to-ready transition.
+export const knowledgeRevisionAssets = sqliteTable(
+  "knowledge_revision_assets",
+  {
+    id: text("id").primaryKey(),
+    itemId: text("item_id").notNull(),
+    revisionId: text("revision_id").notNull(),
+    assetPath: text("asset_path").notNull(),
+    storageKey: text("storage_key").notNull(),
+    mimeType: text("mime_type").notNull(),
+    byteSize: integer("byte_size").notNull(),
+    sha256: text("sha256").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    uploadToken: text("upload_token").notNull().default(""),
+    // The inline CHECK in immutable migration 0032 restricts these two states.
+    uploadState: text("upload_state").$type<"staged" | "ready">().notNull().default("ready"),
+  },
+  (table) => [
+    uniqueIndex("knowledge_revision_assets_revision_path_unique").on(table.revisionId, table.assetPath),
+    uniqueIndex("knowledge_revision_assets_storage_key_unique").on(table.storageKey),
+    index("knowledge_revision_assets_item_revision_idx").on(table.itemId, table.revisionId, table.assetPath),
+    index("knowledge_revision_assets_upload_idx").on(table.revisionId, table.uploadToken, table.uploadState),
+  ],
+);
+
 export const knowledgeChunks = sqliteTable(
   "knowledge_chunks",
   {
