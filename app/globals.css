@@ -864,6 +864,11 @@ button:focus-visible, a:focus-visible, input:focus-visible, textarea:focus-visib
 .knowledge-review-detail section > p { margin: 7px 0 0; color: #64767d; font-size: 12px; line-height: 1.7; }
 .knowledge-review-detail section > p .knowledge-visibility { margin-right: 5px; vertical-align: middle; }
 .knowledge-review-content { max-height: 310px; margin-top: 8px; padding: 12px; border: 1px solid #e4eaec; border-radius: 7px; overflow-y: auto; color: #3f555e; background: #fff; font-size: 11px; line-height: 1.8; white-space: pre-wrap; overflow-wrap: anywhere; }
+.knowledge-asset-grid { margin-top: 8px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.knowledge-asset-preview { margin: 0; padding: 8px; border: 1px solid #e4eaec; border-radius: 7px; background: #fff; }
+.knowledge-asset-preview img { width: 100%; max-height: 180px; object-fit: contain; border-radius: 5px; background: #f7faf9; }
+.knowledge-asset-preview figcaption { margin-top: 6px; display: grid; gap: 2px; color: #50676f; font-size: 11px; overflow-wrap: anywhere; }
+.knowledge-asset-preview figcaption small { color: #7a8d93; }
 .knowledge-review-blocked { padding: 8px 9px; border-radius: 7px; display: flex; align-items: center; gap: 6px; color: #9b5c4a !important; background: #fff3ef; }
 .knowledge-source-link { width: fit-content; margin-top: 7px; display: inline-flex; color: #2d6c59; font-size: 11px; font-weight: 700; text-decoration: underline; text-underline-offset: 3px; }
 .knowledge-history { border: 1px solid #dfe8ea; border-radius: 9px; background: #fff; }
