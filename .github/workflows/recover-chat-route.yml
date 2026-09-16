@@ -1,5 +1,4 @@
 name: Recover Chat production route
-
 on:
   workflow_dispatch:
 
@@ -20,26 +19,26 @@ jobs:
         shell: bash
         run: |
           node <<'NODE'
-          const account = process.env.CF_ACCOUNT_ID;
-          const token = process.env.CF_API_TOKEN;
-          const host = process.env.CHAT_HOST;
-          const worker = process.env.CHAT_WORKER;
-          if (!account || !token) throw new Error('Missing Cloudflare production credentials');
-          const api = 'https://api.cloudflare.com/client/v4/accounts/' + account + '/workers/routes';
-          const headers = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
-          const listed = await fetch(api, { headers });
-          const routes = await listed.json();
-          if (!listed.ok || !routes.success) throw new Error('Cannot list Worker routes: HTTP ' + listed.status);
-          const pattern = host + '/*';
-          const route = routes.result.find((item) => item.pattern === pattern);
-          if (route) {
-            const changed = await fetch(api + '/' + route.id, { method: 'PUT', headers, body: JSON.stringify({ pattern, script: worker }) });
-            if (!changed.ok) throw new Error('Cannot update Chat route: HTTP ' + changed.status);
-          } else {
-            const sibling = routes.result.find((item) => item.zone_id && /(^|\\.)omindos\\.ai\\/\\*$/u.test(item.pattern));
-            if (!sibling) throw new Error('No omindos.ai Worker route is available to recover the zone binding');
-            const created = await fetch(api, { method: 'POST', headers, body: JSON.stringify({ pattern, script: worker, zone_id: sibling.zone_id }) });
-            if (!created.ok) throw new Error('Cannot create Chat route: HTTP ' + created.status);
-          }
-          console.log('Chat Worker route restored.');
+          (async () => {
+            const account = process.env.CF_ACCOUNT_ID;
+            const token = process.env.CF_API_TOKEN;
+            const host = process.env.CHAT_HOST;
+            const worker = process.env.CHAT_WORKER;
+            if (!account || !token) throw new Error('Missing Cloudflare production credentials');
+            const headers = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
+            const zoneResponse = await fetch('https://api.cloudflare.com/client/v4/zones?name=omindos.ai', { headers });
+            const zonePayload = await zoneResponse.json();
+            if (!zoneResponse.ok || !zonePayload.success || !zonePayload.result.length) throw new Error('Cannot resolve omindos.ai zone: HTTP ' + zoneResponse.status);
+            const api = 'https://api.cloudflare.com/client/v4/accounts/' + account + '/workers/routes';
+            const listed = await fetch(api, { headers });
+            const routes = await listed.json();
+            if (!listed.ok || !routes.success) throw new Error('Cannot list Worker routes: HTTP ' + listed.status);
+            const pattern = host + '/*';
+            const route = routes.result.find((item) => item.pattern === pattern);
+            const changed = route
+              ? await fetch(api + '/' + route.id, { method: 'PUT', headers, body: JSON.stringify({ pattern, script: worker }) })
+              : await fetch(api, { method: 'POST', headers, body: JSON.stringify({ pattern, script: worker, zone_id: zonePayload.result[0].id }) });
+            if (!changed.ok) throw new Error('Cannot apply Chat route: HTTP ' + changed.status);
+            console.log('Chat Worker route restored.');
+          })().catch((error) => { console.error(error.stack || error.message); process.exit(1); });
           NODE
