@@ -3,6 +3,19 @@ const ALLOWED_MIME = new Set(["image/webp", "image/png", "image/jpeg"]);
 export const MAX_KNOWLEDGE_ASSET_BYTES = 8 * 1024 * 1024;
 export const MAX_KNOWLEDGE_ASSETS = 128;
 
+const MARKDOWN_IMAGE_REFERENCE = /!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))(?:\s+["'][^"']*["'])?\s*\)/gu;
+
+export function referencedKnowledgeAssetPaths(markdown: string): string[] {
+  const references = new Set<string>();
+  for (const match of String(markdown || "").matchAll(MARKDOWN_IMAGE_REFERENCE)) {
+    const raw = String(match[1] || match[2] || "").split(/[?#]/u, 1)[0];
+    let decoded = raw;
+    try { decoded = decodeURIComponent(raw); } catch { /* keep raw path */ }
+    if (/^assets\//iu.test(decoded)) references.add(normalizeKnowledgeAssetPath(decoded));
+  }
+  return [...references].sort((left, right) => left.localeCompare(right));
+}
+
 export type KnowledgeAssetInput = {
   path: string;
   mimeType: string;
@@ -146,4 +159,25 @@ export async function listKnowledgeRevisionAssets(database: D1Database, revision
     id: row.id, itemId: row.item_id, revisionId: row.revision_id, assetPath: row.asset_path,
     mimeType: row.mime_type, byteSize: Number(row.byte_size), storageKey: row.storage_key,
   }));
+}
+
+
+export async function assertKnowledgeRevisionAssetsReady(database: D1Database, itemId: string, revisionId: string): Promise<void> {
+  const contentResult = await database.prepare(`
+    SELECT content FROM knowledge_revisions WHERE item_id = ? AND id = ?
+  `).bind(itemId, revisionId).first<{ content: string | null }>();
+  const partResult = await database.prepare(`
+    SELECT content FROM knowledge_revision_parts WHERE item_id = ? AND revision_id = ? ORDER BY part_no
+  `).bind(itemId, revisionId).all<{ content: string }>();
+  const markdown = [contentResult?.content || "", ...(partResult.results || []).map((row) => row.content || "")].join("\n");
+  const expected = referencedKnowledgeAssetPaths(markdown);
+  if (!expected.length) return;
+  const rows = await database.prepare(`
+    SELECT asset_path FROM knowledge_revision_assets
+    WHERE item_id = ? AND revision_id = ? AND upload_state = 'ready'
+    ORDER BY asset_path
+  `).bind(itemId, revisionId).all<{ asset_path: string }>();
+  const actual = new Set((rows.results || []).map((row) => normalizeKnowledgeAssetPath(row.asset_path)));
+  const missing = expected.filter((path) => !actual.has(path));
+  if (missing.length) throw new Error(`知识图片尚未完整上传：${missing.join(", ")}`);
 }

@@ -3216,6 +3216,7 @@ function createAdminApp() {
       draftRevision: null,
       oaSubmissionState: "unsubmitted",
       submissionRequestId: "",
+      knowledgeAssets: [],
     };
   }
 
@@ -3241,14 +3242,17 @@ function createAdminApp() {
       if (utf8ByteLength(text) > MAX_TEXT_IMPORT_BYTES) {
         throw new Error("ZIP 中 index.md 正文不能超过 5 MB（按 UTF-8 计算）。");
       }
-      return text;
+      const assets = packageFiles
+        .filter((file) => String(file.name || "").toLowerCase() !== "index.md")
+        .map((file) => ({ path: String(file.name || ""), file }));
+      return { text, assets };
     }
     if (descriptor.isText) {
       const text = decodeImportedUtf8(await descriptor.file.arrayBuffer());
       if (utf8ByteLength(text) > MAX_TEXT_IMPORT_BYTES) {
         throw new Error("规范化后的 TXT、Markdown 正文不能超过 5 MB（按 UTF-8 计算）。");
       }
-      return text;
+      return { text, assets: [] };
     }
     const result = await adminRequest("extract", {
       method: "POST",
@@ -3261,7 +3265,46 @@ function createAdminApp() {
       timeoutMessage: "文件处理超时，请压缩或拆分文件后重试。",
     });
     if (typeof result.text !== "string") throw new Error("文件解析结果异常，请稍后重试。");
-    return result.text;
+    return { text: result.text, assets: [] };
+  }
+
+  async function uploadKnowledgeAssetsToOa(assetUpload, assets) {
+    if (!assets.length) return;
+    if (!assetUpload || !assetUpload.revisionId || !assetUpload.uploadToken) {
+      throw new Error("OA 已接收正文，但未返回图片上传会话。请重试。");
+    }
+    const expectedPaths = assets.map((asset) => asset.path);
+    for (const asset of assets) {
+      const response = await fetch("https://oa.omindos.ai/api/knowledge/assets", {
+        method: "PUT",
+        credentials: "include",
+        headers: {
+          "Content-Type": asset.file.type || "application/octet-stream",
+          "X-Knowledge-Item-Id": assetUpload.itemId,
+          "X-Knowledge-Revision-Id": assetUpload.revisionId,
+          "X-Knowledge-Upload-Token": assetUpload.uploadToken,
+          "X-Knowledge-Asset-Path": asset.path,
+        },
+        body: asset.file,
+        signal: AbortSignal.timeout(120_000),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(result.error || `图片上传失败：${asset.path}`);
+    }
+    const finalizeResponse = await fetch("https://oa.omindos.ai/api/knowledge/assets/finalize", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        itemId: assetUpload.itemId,
+        revisionId: assetUpload.revisionId,
+        uploadToken: assetUpload.uploadToken,
+        expectedPaths,
+      }),
+      signal: AbortSignal.timeout(120_000),
+    });
+    const finalizeResult = await finalizeResponse.json().catch(() => ({}));
+    if (!finalizeResponse.ok) throw new Error(finalizeResult.error || "图片清单未能完成确认，请重试。");
   }
 
   async function importDocumentFiles(files, { source = "files", retry = false } = {}) {
@@ -3313,11 +3356,11 @@ function createAdminApp() {
           } else {
             const task = extractImportFile(descriptor);
             digestTasks.set(digest, task);
-            const text = await task;
-            if (normalizeImportedText(text).trim().length < 10) {
+            const extracted = await task;
+            if (normalizeImportedText(extracted.text).trim().length < 10) {
               throw new Error("未识别到足够内容，请换一份清晰文件或手动填写正文。");
             }
-            results[index] = { descriptor, text };
+            results[index] = { descriptor, text: extracted.text, assets: extracted.assets || [] };
             state.importJob.succeeded += 1;
           }
         } catch (error) {
@@ -3345,6 +3388,11 @@ function createAdminApp() {
         throw new Error("批量识别后的正文超过 5 MB，请减少本批文件数量后重试。");
       }
       state.draft.body = nextBody;
+      const assetResults = results.filter((result) => result?.assets?.length);
+      state.draft.knowledgeAssets = assetResults.length === 1 && descriptors.length === 1 ? assetResults[0].assets : [];
+      if (assetResults.length && !state.draft.knowledgeAssets.length) {
+        throw new Error("包含图片的 ZIP 知识包请单独导入并提交，避免多份资料图片路径冲突。");
+      }
       if (!state.draft.title) state.draft.title = suggestedBatchTitle(descriptors);
       state.failedImportFiles = state.importJob.failures.map((failure) => failure.file);
       const successCopy = `成功 ${state.importJob.succeeded} 个`;
@@ -3456,6 +3504,10 @@ function createAdminApp() {
       }
       throw new Error(`OA 未返回有效接收记录，${retryCopy}，请刷新后重试。`);
     }
+    const knowledgeAssets = Array.isArray(draft.knowledgeAssets) ? draft.knowledgeAssets : [];
+    if (knowledgeAssets.length) {
+      await uploadKnowledgeAssetsToOa({ ...(result.assetUpload || {}), itemId: oaItemId }, knowledgeAssets);
+    }
     if (retainedAsChatDraft) {
       let persisted;
       try {
@@ -3490,8 +3542,8 @@ function createAdminApp() {
       ? `已更新原 OA 条目并重新进入待审核状态（正文存为 ${receipt.partCount} 个片段）。Chat 未保留原文件或正文草稿。`
       : receipt.items.every((item) => item.status === "pending")
       ? isLargeDocument
-        ? `已提交 OA，作为 1 条资料待审，并存为 ${receipt.partCount} 个片段（每个不超过 20000 字）。Chat 未保留原文件或正文草稿。`
-        : `已提交 OA 待审（${receipt.items.length} 条）。在 OA“实验室 AI”的待审核列表中处理，对内或公开由审核时选择。`
+        ? `已提交 OA，作为 1 条资料待审，并存为 ${receipt.partCount} 个片段（每个不超过 20000 字）${knowledgeAssets.length ? `，图片 ${knowledgeAssets.length} 张已上传` : ""}。Chat 未保留原文件或正文草稿。`
+        : `已提交 OA 待审（${receipt.items.length} 条）${knowledgeAssets.length ? `，图片 ${knowledgeAssets.length} 张已上传` : ""}。在 OA“实验室 AI”的待审核列表中处理，对内或公开由审核时选择。`
       : "OA 已接收过该版本资料，重复提交不会新增条目。请打开 OA 查看当前审核状态。";
   }
 

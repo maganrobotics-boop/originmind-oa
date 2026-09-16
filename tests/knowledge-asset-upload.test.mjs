@@ -10,7 +10,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const vite = await createServer({ appType: "custom", configFile: false, root, optimizeDeps: { noDiscovery: true }, server: { middlewareMode: true, hmr: false } });
 after(() => vite.close());
 const { stageKnowledgeAsset, finalizeKnowledgeAssets } = await vite.ssrLoadModule("/lib/knowledge-asset-upload.ts");
-const { persistKnowledgeAssets, listKnowledgeRevisionAssets } = await vite.ssrLoadModule("/lib/knowledge-assets.ts");
+const { persistKnowledgeAssets, listKnowledgeRevisionAssets, referencedKnowledgeAssetPaths, assertKnowledgeRevisionAssetsReady } = await vite.ssrLoadModule("/lib/knowledge-assets.ts");
 const migrations = await Promise.all(["0031_knowledge_assets", "0032_knowledge_asset_upload_state", "0033_knowledge_asset_finalization"].map((name) => readFile(new URL(`../drizzle/${name}.sql`, import.meta.url), "utf8")));
 
 class D1Statement {
@@ -59,9 +59,10 @@ function fixture(t, through = 3) {
   sqlite.exec(`
     CREATE TABLE migration_control (id TEXT PRIMARY KEY, deactivated_at TEXT);
     CREATE TABLE knowledge_items (id TEXT PRIMARY KEY, current_revision_id TEXT, status TEXT);
-    CREATE TABLE knowledge_revisions (id TEXT PRIMARY KEY, item_id TEXT, status TEXT);
+    CREATE TABLE knowledge_revisions (id TEXT PRIMARY KEY, item_id TEXT, status TEXT, content TEXT DEFAULT '');
+    CREATE TABLE knowledge_revision_parts (revision_id TEXT, item_id TEXT, part_no INTEGER, content TEXT);
     INSERT INTO knowledge_items VALUES ('item', 'revision', 'pending');
-    INSERT INTO knowledge_revisions VALUES ('revision', 'item', 'pending');
+    INSERT INTO knowledge_revisions VALUES ('revision', 'item', 'pending', '');
   `);
   for (const migration of migrations.slice(0, through)) sqlite.exec(migration);
   const database = { sqlite, prepare(sql) { return new D1Statement(this, sql); } };
@@ -197,4 +198,19 @@ test("direct persistence writes SHA256 and a failed retry never deletes earlier 
   assert.equal(assetRow(sqlite).id, first[0].id);
   assert.equal(assetRow(sqlite).sha256.length, 64);
   assert.equal(bucket.writes, 1);
+});
+
+
+test("knowledge approval asset readiness follows markdown references across revision parts", async (t) => {
+  const { sqlite, database, bucket } = fixture(t);
+  sqlite.prepare("UPDATE knowledge_revisions SET content = ? WHERE id = 'revision'").run("# 图文资料\n![图一](assets/figure.png)\n![带空格](<assets/second_image.webp>)");
+  sqlite.prepare("INSERT INTO knowledge_revision_parts VALUES ('revision', 'item', 2, ?)").run("补充段落 ![图二](assets/extra.jpg?cache=1)");
+  assert.deepEqual(referencedKnowledgeAssetPaths("![a](assets/figure.png) ![b](<assets/second_image.webp>)"), ["assets/figure.png", "assets/second_image.webp"]);
+  await assert.rejects(assertKnowledgeRevisionAssetsReady(database, "item", "revision"), /assets\/figure\.png/);
+  await stageKnowledgeAsset(database, bucket, input());
+  await stageKnowledgeAsset(database, bucket, input({ path: "assets/second_image.webp", mimeType: "image/webp", body: Uint8Array.from([1, 2, 3]).buffer }));
+  await stageKnowledgeAsset(database, bucket, input({ path: "assets/extra.jpg", mimeType: "image/jpeg", body: Uint8Array.from([4, 5, 6]).buffer }));
+  await assert.rejects(assertKnowledgeRevisionAssetsReady(database, "item", "revision"), /尚未完整上传/);
+  await finalizeKnowledgeAssets(database, manifest({ expectedPaths: ["assets/figure.png", "assets/second_image.webp", "assets/extra.jpg"] }));
+  await assertKnowledgeRevisionAssetsReady(database, "item", "revision");
 });
