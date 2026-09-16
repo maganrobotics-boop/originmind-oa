@@ -70,7 +70,6 @@ function readZipEntries(arrayBuffer) {
     const nameEnd = nameStart + nameLength;
     if (nameEnd + extraLength + commentLength > view.byteLength) throw zipError("ZIP 文件名或扩展字段无效。");
     if ((flags & 0x0001) !== 0) throw zipError("暂不支持加密 ZIP 文件。");
-    if ((flags & 0x0800) === 0) throw zipError("ZIP 内文件名必须使用 UTF-8 编码。");
     if (method !== 0 && method !== 8) throw zipError("ZIP 仅支持 Store 或 Deflate 压缩方式。");
     const name = normalizeZipPath(decodeZipName(new Uint8Array(arrayBuffer, nameStart, nameLength)));
     if (name.endsWith("/")) {
@@ -174,7 +173,6 @@ function setInputFiles(input, files) {
 function enhanceZipInput(input) {
   if (!(input instanceof HTMLInputElement) || input.dataset.zipKnowledgeEnhanced === "1") return;
   input.dataset.zipKnowledgeEnhanced = "1";
-  input.setAttribute("accept", ".md,.zip,text/markdown,application/zip,application/x-zip-compressed");
   const label = document.querySelector(`label[for="${CSS.escape(input.id)}"]`);
   if (label && !label.dataset.zipKnowledgeLabel) {
     label.dataset.zipKnowledgeLabel = "1";
