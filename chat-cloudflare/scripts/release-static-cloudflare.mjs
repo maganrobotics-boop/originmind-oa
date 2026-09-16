@@ -96,6 +96,8 @@ const productionConfig = buildWranglerConfig({
   production: true,
   releaseId: environment.releaseId,
 });
+delete productionConfig.routes;
+productionConfig.workers_dev = false;
 await writeJson(productionConfigPath, productionConfig);
 await writeJson(join(evidenceRoot, "target.json"), {
   format: "originmind-chat-static-release-target-v1",
@@ -107,14 +109,15 @@ await writeJson(join(evidenceRoot, "target.json"), {
   releaseId: environment.releaseId,
   secretMutation: false,
   dnsMutation: false,
+  routeMutation: false,
   d1Migration: false,
 });
 
-progress("Checking the production Wrangler target without publishing.");
+progress("Checking the production Wrangler target without publishing or touching routes.");
 await mkdir(join(releaseRoot, "dry-run-production"), { recursive: true, mode: 0o700 });
 await runWrangler(["deploy", "--dry-run", "--strict", "--config", productionConfigPath, "--outdir", join(releaseRoot, "dry-run-production")], { secrets: secretValues });
 
-progress("Deploying Chat Worker and static assets without changing secrets, DNS, or D1 migrations.");
+progress("Deploying Chat Worker and static assets without changing routes, secrets, DNS, or D1 migrations.");
 const deploy = await runWrangler([
   "deploy",
   "--strict",
