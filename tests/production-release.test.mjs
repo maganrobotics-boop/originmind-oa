@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
@@ -290,6 +290,48 @@ test("migration CLI validates all reviewed immutable migration files", async () 
     const changed = run();
     assert.notEqual(changed.status, 0);
     assert.match(changed.stderr, /reviewed SHA-256/u);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test("production migration apply CLI sends SQL through files for D1 trigger bodies", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "originmind-oa-production-apply-"));
+  try {
+    const migrationsDirectory = join(directory, "drizzle");
+    await cp(join(projectRoot, "drizzle"), migrationsDirectory, { recursive: true });
+    const configPath = join(directory, "wrangler.json");
+    const wranglerPath = join(directory, "wrangler.mjs");
+    const logPath = join(directory, "wrangler-calls.jsonl");
+    await writeFile(configPath, "{}\n");
+    await writeFile(wranglerPath, `#!/usr/bin/env node
+import { appendFileSync, readFileSync } from "node:fs";
+
+const args = process.argv.slice(2);
+const fileIndex = args.indexOf("--file");
+const sql = fileIndex >= 0 ? readFileSync(args[fileIndex + 1], "utf8") : "";
+appendFileSync(process.env.WRANGLER_LOG, \`${JSON.stringify({ args, sql })}\\n\`);
+process.stdout.write(JSON.stringify([{ success: true, results: [] }]));
+`);
+    await chmod(wranglerPath, 0o755);
+    const run = spawnSync(process.execPath, [
+      join(projectRoot, "scripts", "apply-production-d1-migrations.mjs"),
+      "--state", "pending-0031",
+      "--migrations-dir", migrationsDirectory,
+      "--config", configPath,
+      "--wrangler", wranglerPath,
+    ], {
+      encoding: "utf8",
+      env: { ...process.env, WRANGLER_LOG: logPath },
+    });
+    assert.equal(run.status, 0, run.stderr);
+    assert.match(run.stdout, /Applied production migration 0031_knowledge_assets\.sql/u);
+    const calls = (await readFile(logPath, "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    assert.ok(calls.length > 1);
+    assert.ok(calls.every((call) => call.args.includes("--file")));
+    assert.ok(calls.every((call) => !call.args.includes("--command")));
+    assert.ok(calls.some((call) => /CREATE TRIGGER `knowledge_revision_assets_validate_insert`[\s\S]+BEGIN[\s\S]+END;/u.test(call.sql)));
+    assert.ok(calls.at(-1).sql.includes("INSERT INTO d1_migrations"));
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
