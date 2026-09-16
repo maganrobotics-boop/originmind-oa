@@ -179,7 +179,7 @@ function enhanceZipInput(input) {
   if (label && !label.dataset.zipKnowledgeLabel) {
     label.dataset.zipKnowledgeLabel = "1";
     const textNode = [...label.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim());
-    if (textNode) textNode.textContent = "选择资料（支持 MD、ZIP）";
+    if (textNode) textNode.textContent = "选择 ZIP / 文件";
   }
 }
 
@@ -217,12 +217,13 @@ function refreshKnowledgeUploadUi() {
     const text = hint.textContent || "";
     if (/TXT|Markdown|PDF|JPG|PNG|WebP/u.test(text) && !hint.dataset.zipKnowledgeHint) {
       hint.dataset.zipKnowledgeHint = "1";
-      hint.textContent = "支持 MD、ZIP。纯文字资料使用 MD；包含图片的资料使用 ZIP（Markdown + assets）。";
+      hint.textContent = "可直接选择 ZIP；也可选择已解压的文件夹。ZIP 内放 index.md 和 assets 图片。";
     }
   }
 }
 
 window.unpackKnowledgeZip = unpackKnowledgeZip;
+document.addEventListener("change", (event) => { void interceptZipSelection(event); }, true);
 const observer = new MutationObserver(refreshKnowledgeUploadUi);
 observer.observe(document.documentElement, { childList: true, subtree: true });
 refreshKnowledgeUploadUi();

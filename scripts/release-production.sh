@@ -122,12 +122,13 @@ website_database_path="${private_root}/website-database.json"
 secrets_path="${private_root}/secret-names.json"
 deployments_path="${private_root}/deployments.json"
 versions_path="${private_root}/versions.json"
+r2_buckets_path="${private_root}/r2-buckets.json"
 bookmark_path="${private_root}/d1-bookmark.json"
 cleanup_private_files() {
   unset CLOUDFLARE_API_TOKEN PUBLIC_LAB_AI_SERVICE_TOKEN
   cloudflare_api_token=""
   public_lab_ai_service_token=""
-  rm -f "${identity_path}" "${database_path}" "${website_database_path}" "${secrets_path}" "${deployments_path}" "${versions_path}" "${bookmark_path}"
+  rm -f "${identity_path}" "${database_path}" "${website_database_path}" "${secrets_path}" "${deployments_path}" "${versions_path}" "${r2_buckets_path}" "${bookmark_path}"
   rmdir "${private_root}" 2>/dev/null || true
 }
 trap cleanup_private_files EXIT
@@ -135,6 +136,12 @@ trap cleanup_private_files EXIT
 # Read-only provider checks. The secret-list API returns names and types only;
 # every response is redirected so provider details stay out of release logs.
 run_wrangler whoami --json > "${identity_path}"
+run_wrangler r2 bucket list --json > "${r2_buckets_path}"
+if ! node -e 'const fs = require("node:fs"); const buckets = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const expected = process.argv[2]; process.exit(Array.isArray(buckets) && buckets.some((bucket) => bucket && bucket.name === expected) ? 0 : 1);' "${r2_buckets_path}" "${OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME}"; then
+  run_wrangler r2 bucket create "${OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME}" --config "${config_path}" >/dev/null
+  run_wrangler r2 bucket list --json > "${r2_buckets_path}"
+  node -e 'const fs = require("node:fs"); const buckets = JSON.parse(fs.readFileSync(process.argv[1], "utf8")); const expected = process.argv[2]; if (!Array.isArray(buckets) || !buckets.some((bucket) => bucket && bucket.name === expected)) throw new Error("Production R2 bucket was not created or is not visible.");' "${r2_buckets_path}" "${OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME}"
+fi
 run_wrangler d1 info "${expected_database_name}" --json --config "${config_path}" > "${database_path}"
 run_wrangler d1 info "${expected_website_database_name}" --json --config "${config_path}" > "${website_database_path}"
 run_wrangler secret list --format json --config "${config_path}" > "${secrets_path}"

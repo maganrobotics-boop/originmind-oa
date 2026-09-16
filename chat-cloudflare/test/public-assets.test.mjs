@@ -1513,6 +1513,18 @@ test("public chat uses a ChatGPT-style two-column shell with a single-column mob
   );
 });
 
+test("ZIP knowledge addon exposes direct ZIP selection on the file input", async () => {
+  const script = await readFile(path.join(frontendDir, "zip-import-addon.js"), "utf8");
+  const publicScript = await readFile(path.join(publicDir, "zip-import-addon.js"), "utf8");
+
+  assert.equal(publicScript, script);
+  assert.match(script, /window\.unpackKnowledgeZip = unpackKnowledgeZip;/u);
+  assert.match(script, /document\.addEventListener\("change", \(event\) => \{ void interceptZipSelection\(event\); \}, true\);/u);
+  assert.match(script, /input\.id !== "document-file"/u);
+  assert.match(script, /选择 ZIP \/ 文件/u);
+  assert.match(script, /可直接选择 ZIP；也可选择已解压的文件夹/u);
+});
+
 test("frontend source avoids executable HTML and dynamic-code sinks", async () => {
   const [script, style] = await Promise.all([
     readFile(path.join(frontendDir, "app.js"), "utf8"),
