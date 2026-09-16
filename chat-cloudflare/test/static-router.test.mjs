@@ -32,6 +32,7 @@ function mockEnvironment() {
             "/LICENSES.md",
             "/manifest.webmanifest",
             "/service-worker.js",
+            "/zip-import-addon.js",
             "/assets/app-0123456789abcdef.js",
             "/assets/styles-0123456789abcdef.css",
             "/assets/pwa/icon-192-v1.png",
@@ -80,6 +81,7 @@ test("path classifier is exact and does not turn unknown paths into the SPA", ()
   assert.equal(classifyPath("/LICENSES.md"), RouteKind.ASSET);
   assert.equal(classifyPath("/manifest.webmanifest"), RouteKind.ASSET);
   assert.equal(classifyPath("/service-worker.js"), RouteKind.ASSET);
+  assert.equal(classifyPath("/zip-import-addon.js"), RouteKind.ASSET);
   assert.equal(classifyPath("/unknown"), RouteKind.NOT_FOUND);
 });
 
@@ -193,6 +195,7 @@ test("unsafe methods cannot retrieve the shell or static assets", async () => {
     "/favicon.svg",
     "/manifest.webmanifest",
     "/service-worker.js",
+    "/zip-import-addon.js",
   ]) {
     const response = await routeStaticRequest(
       new Request(`https://chat.omindos.ai${path}`, { method: "POST" }),
@@ -225,7 +228,7 @@ test("hashed assets are immutable while auxiliary assets use a short TTL", async
   assert.equal(icon.status, 200);
   assertHardened(icon, "public, max-age=31536000, immutable");
 
-  for (const path of ["/favicon.svg", "/LICENSES.md", "/manifest.webmanifest"]) {
+  for (const path of ["/favicon.svg", "/LICENSES.md", "/manifest.webmanifest", "/zip-import-addon.js"]) {
     const response = await routeStaticRequest(
       new Request(`https://chat.omindos.ai${path}`),
       env,

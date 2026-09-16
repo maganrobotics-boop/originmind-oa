@@ -35,6 +35,7 @@ const DIRECT_ASSET_PATHS = new Set([
   "/LICENSES.md",
   "/manifest.webmanifest",
   "/service-worker.js",
+  "/zip-import-addon.js",
 ]);
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
 
