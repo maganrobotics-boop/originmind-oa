@@ -15,30 +15,42 @@ jobs:
       CHAT_HOST: chat.omindos.ai
       CHAT_WORKER: arts-robotics-chat-production
     steps:
-      - name: Restore the Chat Worker route without DNS mutation
+      - name: Diagnose and restore the Chat Worker route
         shell: bash
         run: |
           node <<'NODE'
+          const fs = require('node:fs');
           (async () => {
             const account = process.env.CF_ACCOUNT_ID;
             const token = process.env.CF_API_TOKEN;
             const host = process.env.CHAT_HOST;
             const worker = process.env.CHAT_WORKER;
-            if (!account || !token) throw new Error('Missing Cloudflare production credentials');
             const headers = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
-            const zoneResponse = await fetch('https://api.cloudflare.com/client/v4/zones?name=omindos.ai', { headers });
-            const zonePayload = await zoneResponse.json();
-            if (!zoneResponse.ok || !zonePayload.success || !zonePayload.result.length) throw new Error('Cannot resolve omindos.ai zone: HTTP ' + zoneResponse.status);
-            const api = 'https://api.cloudflare.com/client/v4/accounts/' + account + '/workers/routes';
-            const listed = await fetch(api, { headers });
-            const routes = await listed.json();
-            if (!listed.ok || !routes.success) throw new Error('Cannot list Worker routes: HTTP ' + listed.status);
-            const pattern = host + '/*';
-            const route = routes.result.find((item) => item.pattern === pattern);
-            const changed = route
-              ? await fetch(api + '/' + route.id, { method: 'PUT', headers, body: JSON.stringify({ pattern, script: worker }) })
-              : await fetch(api, { method: 'POST', headers, body: JSON.stringify({ pattern, script: worker, zone_id: zonePayload.result[0].id }) });
-            if (!changed.ok) throw new Error('Cannot apply Chat route: HTTP ' + changed.status);
-            console.log('Chat Worker route restored.');
-          })().catch((error) => { console.error(error.stack || error.message); process.exit(1); });
+            const report = [];
+            const call = async (label, url, options = {}) => {
+              const response = await fetch(url, { headers, ...options });
+              let body = {};
+              try { body = await response.json(); } catch {}
+              report.push(label + ': HTTP ' + response.status + (body.errors ? ' — ' + body.errors.map((e) => e.code + ' ' + e.message).join('; ') : ''));
+              return { response, body };
+            };
+            try {
+              const zone = await call('Zone lookup', 'https://api.cloudflare.com/client/v4/zones?name=omindos.ai');
+              if (!zone.response.ok || !zone.body.success || !zone.body.result.length) throw new Error('Zone lookup failed');
+              const api = 'https://api.cloudflare.com/client/v4/accounts/' + account + '/workers/routes';
+              const listed = await call('Route list', api);
+              if (!listed.response.ok || !listed.body.success) throw new Error('Route list failed');
+              const pattern = host + '/*';
+              const route = listed.body.result.find((item) => item.pattern === pattern);
+              const changed = route
+                ? await call('Route update', api + '/' + route.id, { method: 'PUT', body: JSON.stringify({ pattern, script: worker }) })
+                : await call('Route create', api, { method: 'POST', body: JSON.stringify({ pattern, script: worker, zone_id: zone.body.result[0].id }) });
+              if (!changed.response.ok || !changed.body.success) throw new Error('Route write failed');
+              report.push('Result: Chat Worker route restored.');
+            } catch (error) {
+              report.push('Result: ' + error.message);
+            }
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '## Chat route recovery\n\n' + report.map((line) => '- ' + line).join('\n') + '\n');
+            if (!report.includes('Result: Chat Worker route restored.')) process.exit(1);
+          })();
           NODE
