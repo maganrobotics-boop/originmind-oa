@@ -473,6 +473,7 @@ test("workflow and shell expose the token only to a confirmed manual main releas
   assert.match(deployJob, /vars\.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID/u);
   assert.match(deployJob, /vars\.OA_PRODUCTION_PUBLIC_ORIGIN/u);
   assert.match(deployJob, /vars\.OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME/u);
+  assert.match(deployJob, /originmind-oa-knowledge-assets-production/u);
   assert.equal([...workflow.matchAll(/^\s+CLOUDFLARE_API_TOKEN:/gmu)].length, 1);
   assert.equal([...workflow.matchAll(/^\s+PUBLIC_LAB_AI_SERVICE_TOKEN:/gmu)].length, 1);
   assert.doesNotMatch(`${workflow}\n${releaseScript}`, /oa\.omindos\.ai|41e8b3404be24e1dd288556d77ffc951|34af7e92-7da5-47cd-b7c0-1270e157c0e6/u);
@@ -593,6 +594,9 @@ test("workflow and shell expose the token only to a confirmed manual main releas
   assert.ok(releaseScript.indexOf("target-before.json") < releaseScript.indexOf("secret put PUBLIC_LAB_AI_SERVICE_TOKEN"));
   assert.ok(releaseScript.indexOf("check-production-migration-state.mjs\" before") < releaseScript.indexOf("secret put PUBLIC_LAB_AI_SERVICE_TOKEN"));
   assert.ok(releaseScript.indexOf("target-secret-configured.json") < releaseScript.indexOf("deploy --dry-run --strict"));
+  assert.match(releaseScript, /r2 bucket list --json/u);
+  assert.match(releaseScript, /r2 bucket create "\$\{OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME\}"/u);
+  assert.ok(releaseScript.indexOf("r2 bucket list --json") < releaseScript.indexOf("d1 info \"\$\{expected_database_name\}"));
   assert.match(releaseScript, /d1 time-travel info DB/u);
   assert.equal([...releaseScript.matchAll(/apply-production-d1-migrations\.mjs/gu)].length, 1);
   assert.ok(releaseScript.indexOf("repair-production-d1-asset-migration.mjs") < releaseScript.indexOf("check-production-migration-state.mjs\" before"));
