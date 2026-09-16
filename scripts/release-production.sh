@@ -196,7 +196,11 @@ run_wrangler d1 time-travel info DB --json --config "${config_path}" > "${bookma
 node "${script_dir}/check-production-d1-bookmark.mjs" "${bookmark_path}" "${release_root}/d1-bookmark-before.json"
 
 if [[ "${migration_state}" == pending-* ]]; then
-  run_wrangler d1 migrations apply DB --remote --config "${config_path}"
+  CI=1 CLOUDFLARE_API_TOKEN="${cloudflare_api_token}" node "${script_dir}/apply-production-d1-migrations.mjs" \
+    --state "${migration_state}" \
+    --migrations-dir "${release_root}/drizzle" \
+    --config "${config_path}" \
+    --wrangler "${wrangler}"
 elif [[ "${migration_state}" != "applied" ]]; then
   echo "Production migration state is not safe to release." >&2
   exit 65
