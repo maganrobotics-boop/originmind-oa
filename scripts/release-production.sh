@@ -156,6 +156,15 @@ schema_query="SELECT type, name, sql FROM sqlite_master WHERE name GLOB 'knowled
 run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${ledger_query}" > "${release_root}/migration-ledger-before.json"
 run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${freeze_query}" > "${release_root}/migration-freeze-before.json"
 run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${schema_query}" > "${release_root}/schema-before.json"
+CI=1 CLOUDFLARE_API_TOKEN="${cloudflare_api_token}" node "${script_dir}/repair-production-d1-asset-migration.mjs" \
+  --ledger "${release_root}/migration-ledger-before.json" \
+  --freeze "${release_root}/migration-freeze-before.json" \
+  --schema "${release_root}/schema-before.json" \
+  --config "${config_path}" \
+  --wrangler "${wrangler}"
+run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${ledger_query}" > "${release_root}/migration-ledger-before.json"
+run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${freeze_query}" > "${release_root}/migration-freeze-before.json"
+run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${schema_query}" > "${release_root}/schema-before.json"
 migration_state="$(node "${script_dir}/check-production-migration-state.mjs" before \
   --ledger "${release_root}/migration-ledger-before.json" \
   --freeze "${release_root}/migration-freeze-before.json" \

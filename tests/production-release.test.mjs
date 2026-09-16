@@ -30,6 +30,7 @@ const migrationSqlByName = Object.fromEntries(await Promise.all(
 const releaseScript = await readFile(join(projectRoot, "scripts", "release-production.sh"), "utf8");
 const smokeScript = await readFile(join(projectRoot, "scripts", "verify-production-live.mjs"), "utf8");
 const workflow = await readFile(join(projectRoot, ".github", "workflows", "deploy-oa.yml"), "utf8");
+const productionAssetRepairScript = await readFile(join(projectRoot, "scripts", "repair-production-d1-asset-migration.mjs"), "utf8");
 
 const validProductionEnvironment = Object.freeze({
   OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID: "0123456789abcdef0123456789abcdef",
@@ -337,6 +338,15 @@ process.stdout.write(JSON.stringify([{ success: true, results: [] }]));
   }
 });
 
+test("partial asset migration repair is constrained to empty reviewed asset objects", () => {
+  assert.match(productionAssetRepairScript, /0030_large_knowledge_revision_parts\.sql/u);
+  assert.match(productionAssetRepairScript, /SELECT COUNT\(\*\) AS asset_rows FROM knowledge_revision_assets/u);
+  assert.match(productionAssetRepairScript, /knowledge_revision_assets is not empty/u);
+  assert.match(productionAssetRepairScript, /DROP \$\{noun\}/u);
+  assert.match(productionAssetRepairScript, /knowledge_revision_assets_pending_insert/u);
+  assert.match(productionAssetRepairScript, /knowledge_revision_assets_validate_insert/u);
+  assert.doesNotMatch(productionAssetRepairScript, /DROP TABLE knowledge_items/u);
+});
 test("D1 recovery bookmark must be bounded and safe", () => {
   assert.equal(validateD1Bookmark({ bookmark: "00000000-00000000-00000000-00000000" }), "00000000-00000000-00000000-00000000");
   assert.throws(() => validateD1Bookmark({}), /safe recovery bookmark/u);
@@ -581,6 +591,7 @@ test("workflow and shell expose the token only to a confirmed manual main releas
   assert.ok(releaseScript.indexOf("target-secret-configured.json") < releaseScript.indexOf("deploy --dry-run --strict"));
   assert.match(releaseScript, /d1 time-travel info DB/u);
   assert.equal([...releaseScript.matchAll(/apply-production-d1-migrations\.mjs/gu)].length, 1);
+  assert.ok(releaseScript.indexOf("repair-production-d1-asset-migration.mjs") < releaseScript.indexOf("check-production-migration-state.mjs\" before"));
   assert.ok(releaseScript.indexOf("d1 time-travel info DB") < releaseScript.indexOf("apply-production-d1-migrations.mjs"));
   assert.ok(releaseScript.indexOf("apply-production-d1-migrations.mjs") < releaseScript.indexOf("check-production-migration-state.mjs\" after"));
   assert.doesNotMatch(releaseScript, /d1 migrations apply DB/u);
