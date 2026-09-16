@@ -594,11 +594,9 @@ test("workflow and shell expose the token only to a confirmed manual main releas
   assert.ok(releaseScript.indexOf("target-before.json") < releaseScript.indexOf("secret put PUBLIC_LAB_AI_SERVICE_TOKEN"));
   assert.ok(releaseScript.indexOf("check-production-migration-state.mjs\" before") < releaseScript.indexOf("secret put PUBLIC_LAB_AI_SERVICE_TOKEN"));
   assert.ok(releaseScript.indexOf("target-secret-configured.json") < releaseScript.indexOf("deploy --dry-run --strict"));
-  assert.match(releaseScript, /r2 bucket list > "\$\{r2_buckets_path\}"/u);
-  assert.match(releaseScript, /grep -Eq "\(\^\|\[\[:space:\]\]\)\$\{OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME\}/u);
-  assert.match(releaseScript, /r2 bucket create "\$\{OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME\}"/u);
-  assert.doesNotMatch(releaseScript, /r2 bucket list --json/u);
-  assert.ok(releaseScript.indexOf("r2 bucket list >") < releaseScript.indexOf("d1 info \"\$\{expected_database_name\}"));
+  assert.doesNotMatch(releaseScript, /r2 bucket (?:list|create)/u);
+  assert.match(releaseScript, /R2 bucket is validated by the Worker deploy\/dry-run binding/u);
+  assert.ok(releaseScript.indexOf("whoami --json") < releaseScript.indexOf("d1 info \"\$\{expected_database_name\}"));
   assert.match(releaseScript, /d1 time-travel info DB/u);
   assert.equal([...releaseScript.matchAll(/apply-production-d1-migrations\.mjs/gu)].length, 1);
   assert.ok(releaseScript.indexOf("repair-production-d1-asset-migration.mjs") < releaseScript.indexOf("check-production-migration-state.mjs\" before"));
