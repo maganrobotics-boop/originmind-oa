@@ -26,9 +26,12 @@ function decodeZipName(bytes) {
 function normalizeZipPath(path) {
   const value = String(path || "").replace(/\\/gu, "/").replace(/^\.\//u, "");
   if (!value || value.startsWith("/") || /^[A-Za-z]:\//u.test(value)) throw zipError("ZIP 内存在不安全的文件路径。");
-  const segments = value.split("/");
+  const directory = value.endsWith("/");
+  const body = directory ? value.slice(0, -1) : value;
+  if (!body) throw zipError("ZIP 内存在不安全的文件路径。");
+  const segments = body.split("/");
   if (segments.some((segment) => !segment || segment === "." || segment === "..")) throw zipError("ZIP 内存在不安全的文件路径。");
-  return value;
+  return directory ? `${body}/` : body;
 }
 
 function findEndOfCentralDirectory(view) {
