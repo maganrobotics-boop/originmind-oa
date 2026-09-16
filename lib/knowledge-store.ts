@@ -21,6 +21,7 @@ import {
   type KnowledgeListOptions,
   type KnowledgeListSort,
 } from "./knowledge-types";
+import { listKnowledgeRevisionAssets } from "./knowledge-assets";
 
 const KNOWLEDGE_LIST_LIMIT = 100;
 // Retrieval ranks at most six chunks. Keep the candidate pool large enough for
@@ -703,9 +704,18 @@ export async function getKnowledgeItemDetail(id: string, actor: KnowledgeActor, 
     await assertMultipartContentHash(hydrated);
     return serializeRevision(hydrated);
   }));
+  const assets = item.current_revision_id
+    ? (await listKnowledgeRevisionAssets(database, item.current_revision_id)).map((asset) => ({
+      path: asset.assetPath,
+      mimeType: asset.mimeType,
+      byteSize: asset.byteSize,
+      url: `/api/knowledge/${encodeURIComponent(item.id)}/assets/${asset.assetPath.split("/").map(encodeURIComponent).join("/")}`,
+    }))
+    : [];
   return {
     item: { ...serializeItem(item), ...itemCapabilities(item, actor, canReview) },
     revisions,
+    assets,
     events: resultRows(eventsResult as D1Result<KnowledgeEventRow>).map(serializeEvent),
   };
 }
