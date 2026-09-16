@@ -164,12 +164,6 @@ async function unpackKnowledgeZip(file) {
   return files;
 }
 
-function setInputFiles(input, files) {
-  const transfer = new DataTransfer();
-  for (const file of files) transfer.items.add(file);
-  input.files = transfer.files;
-}
-
 function enhanceZipInput(input) {
   if (!(input instanceof HTMLInputElement) || input.dataset.zipKnowledgeEnhanced === "1") return;
   input.dataset.zipKnowledgeEnhanced = "1";
@@ -177,34 +171,7 @@ function enhanceZipInput(input) {
   if (label && !label.dataset.zipKnowledgeLabel) {
     label.dataset.zipKnowledgeLabel = "1";
     const textNode = [...label.childNodes].find((node) => node.nodeType === Node.TEXT_NODE && node.textContent?.trim());
-    if (textNode) textNode.textContent = "选择 ZIP / 文件";
-  }
-}
-
-async function interceptZipSelection(event) {
-  const input = event.target;
-  if (!(input instanceof HTMLInputElement) || input.id !== "document-file" || input.dataset.zipKnowledgeDispatch === "1") return;
-  enhanceZipInput(input);
-  const selected = Array.from(input.files || []);
-  const zipFiles = selected.filter((file) => file.name.toLowerCase().endsWith(".zip"));
-  if (!zipFiles.length) return;
-  event.preventDefault();
-  event.stopImmediatePropagation();
-  if (selected.length !== 1 || zipFiles.length !== 1) {
-    window.alert("ZIP 知识包请单独上传；纯文字资料直接上传 MD。");
-    input.value = "";
-    return;
-  }
-  try {
-    const files = await unpackKnowledgeZip(zipFiles[0]);
-    setInputFiles(input, files);
-    input.dataset.zipKnowledgeDispatch = "1";
-    input.dispatchEvent(new Event("change", { bubbles: true }));
-  } catch (error) {
-    window.alert(error instanceof Error ? error.message : "ZIP 解析失败，请检查知识包结构。");
-    input.value = "";
-  } finally {
-    delete input.dataset.zipKnowledgeDispatch;
+    if (textNode) textNode.textContent = "选择资料（支持 MD、ZIP）";
   }
 }
 
@@ -215,13 +182,12 @@ function refreshKnowledgeUploadUi() {
     const text = hint.textContent || "";
     if (/TXT|Markdown|PDF|JPG|PNG|WebP/u.test(text) && !hint.dataset.zipKnowledgeHint) {
       hint.dataset.zipKnowledgeHint = "1";
-      hint.textContent = "可直接选择 ZIP；也可选择已解压的文件夹。ZIP 内放 index.md 和 assets 图片。";
+      hint.textContent = "支持 MD、ZIP。纯文字资料使用 MD；包含图片的资料使用 ZIP（Markdown + assets）。";
     }
   }
 }
 
 window.unpackKnowledgeZip = unpackKnowledgeZip;
-document.addEventListener("change", (event) => { void interceptZipSelection(event); }, true);
 const observer = new MutationObserver(refreshKnowledgeUploadUi);
 observer.observe(document.documentElement, { childList: true, subtree: true });
 refreshKnowledgeUploadUi();
