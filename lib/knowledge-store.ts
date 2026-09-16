@@ -38,6 +38,22 @@ const KNOWLEDGE_TITLE_COLLATOR = new Intl.Collator("zh-CN-u-co-pinyin", {
 // invocation. Packing at most 1.5 MB/256 rows leaves headroom for JSON and
 // keeps a worst-case 5 MiB Markdown approval comfortably below that budget.
 const JSON_BULK_MAX_ROWS = 256;
+
+async function listKnowledgeDetailAssets(database: D1Database, itemId: string, revisionId: string) {
+  try {
+    return (await listKnowledgeRevisionAssets(database, revisionId)).map((asset) => ({
+      path: asset.assetPath,
+      mimeType: asset.mimeType,
+      byteSize: asset.byteSize,
+      url: `/api/knowledge/${encodeURIComponent(itemId)}/assets/${asset.assetPath.split("/").map(encodeURIComponent).join("/")}`,
+    }));
+  } catch (error) {
+    if (error instanceof Error && /no such table: knowledge_revision_assets/i.test(error.message)) {
+      return [];
+    }
+    throw error;
+  }
+}
 const JSON_BULK_MAX_BYTES = 1_500_000;
 
 function searchTermRowsSql(termCount: number): string {
@@ -705,12 +721,7 @@ export async function getKnowledgeItemDetail(id: string, actor: KnowledgeActor, 
     return serializeRevision(hydrated);
   }));
   const assets = item.current_revision_id
-    ? (await listKnowledgeRevisionAssets(database, item.current_revision_id)).map((asset) => ({
-      path: asset.assetPath,
-      mimeType: asset.mimeType,
-      byteSize: asset.byteSize,
-      url: `/api/knowledge/${encodeURIComponent(item.id)}/assets/${asset.assetPath.split("/").map(encodeURIComponent).join("/")}`,
-    }))
+    ? await listKnowledgeDetailAssets(database, item.id, item.current_revision_id)
     : [];
   return {
     item: { ...serializeItem(item), ...itemCapabilities(item, actor, canReview) },
