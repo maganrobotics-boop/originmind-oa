@@ -72,6 +72,11 @@ function assertProductionOutput() {
     || websiteDatabase?.database_id !== expected.websiteDatabaseId
     || websiteDatabase?.migrations_dir
   ) throw new Error("Standalone WEBSITE_DB binding does not match the authorized website database");
+  const knowledgeAssetsBucket = (Array.isArray(config.r2_buckets) ? config.r2_buckets : [])
+    .find((entry) => entry.binding === "KNOWLEDGE_ASSETS");
+  if (knowledgeAssetsBucket?.bucket_name !== expected.knowledgeAssetsBucketName) {
+    throw new Error("Standalone KNOWLEDGE_ASSETS R2 binding does not match the authorized production bucket");
+  }
   if (config.vars?.OA_PUBLIC_ORIGIN !== expected.publicOrigin || Object.keys(config.vars || {}).length !== 1) {
     throw new Error("Production public origin is not the only source-controlled runtime variable");
   }

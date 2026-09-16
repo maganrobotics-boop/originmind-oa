@@ -39,6 +39,7 @@ const validProductionEnvironment = Object.freeze({
   OA_PRODUCTION_D1_DATABASE_ID: "3f2504e0-4f89-41d3-9a0c-0305e82c3301",
   OA_PRODUCTION_WEBSITE_D1_DATABASE_NAME: "website-visits",
   OA_PRODUCTION_WEBSITE_D1_DATABASE_ID: "68f91d4c-0b3a-4a92-b879-f355177a67f8",
+  OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME: "originmind-oa-knowledge-assets-production",
   OA_PRODUCTION_PUBLIC_ORIGIN: "https://oa.example.com",
   OA_PRODUCTION_CRON: "* * * * *",
 });
@@ -446,6 +447,8 @@ test("compiled production config preserves provider-managed state", async () => 
     for (const mutate of [
       (config) => { config.account_id = "ffffffffffffffffffffffffffffffff"; },
       (config) => { config.d1_databases[0].database_id = "00000000-0000-4000-8000-000000000000"; },
+      (config) => { config.r2_buckets[0].bucket_name = "wrong-production-bucket"; },
+      (config) => { config.r2_buckets = []; },
       (config) => { config.vars.EXTRA = "drift"; },
       (config) => { config.keep_vars = false; },
       (config) => { config.routes = [{ pattern: "oa.example.com", custom_domain: true }]; },
@@ -469,6 +472,7 @@ test("workflow and shell expose the token only to a confirmed manual main releas
   assert.match(deployJob, /github\.ref == 'refs\/heads\/main'/u);
   assert.match(deployJob, /vars\.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID/u);
   assert.match(deployJob, /vars\.OA_PRODUCTION_PUBLIC_ORIGIN/u);
+  assert.match(deployJob, /vars\.OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME/u);
   assert.equal([...workflow.matchAll(/^\s+CLOUDFLARE_API_TOKEN:/gmu)].length, 1);
   assert.equal([...workflow.matchAll(/^\s+PUBLIC_LAB_AI_SERVICE_TOKEN:/gmu)].length, 1);
   assert.doesNotMatch(`${workflow}\n${releaseScript}`, /oa\.omindos\.ai|41e8b3404be24e1dd288556d77ffc951|34af7e92-7da5-47cd-b7c0-1270e157c0e6/u);

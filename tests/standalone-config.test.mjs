@@ -28,6 +28,7 @@ const validProductionEnvironment = {
   OA_PRODUCTION_D1_DATABASE_ID: "7d9e6679-7425-40de-944b-e07fc1f90ae7",
   OA_PRODUCTION_WEBSITE_D1_DATABASE_NAME: "website-visits",
   OA_PRODUCTION_WEBSITE_D1_DATABASE_ID: "1b4e28ba-2fa1-41d2-883f-41d12ac61b91",
+  OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME: "originmind-oa-knowledge-assets-production",
   OA_PRODUCTION_PUBLIC_ORIGIN: "https://oa.example.com",
   OA_PRODUCTION_CRON: "* * * * *",
 };
@@ -124,6 +125,8 @@ test("standalone production config comes only from injected identifiers and pres
   assert.equal(config.d1_databases[0].database_id, expected.databaseId);
   assert.equal(config.d1_databases[1].database_name, expected.websiteDatabaseName);
   assert.equal(config.d1_databases[1].database_id, expected.websiteDatabaseId);
+  assert.equal(config.r2_buckets[0].binding, "KNOWLEDGE_ASSETS");
+  assert.equal(config.r2_buckets[0].bucket_name, expected.knowledgeAssetsBucketName);
   assert.equal(config.vars.OA_PUBLIC_ORIGIN, expected.publicOrigin);
   assert.equal(config.keep_vars, true);
   assert.equal(config.workers_dev, false);
@@ -145,4 +148,12 @@ test("standalone production config comes only from injected identifiers and pres
     ...validProductionEnvironment,
     OA_PRODUCTION_CRON: "not a cron",
   }), /five-field/u);
+  assert.throws(() => buildStandaloneConfig("production", {
+    ...validProductionEnvironment,
+    OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME: "",
+  }), /OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME/u);
+  assert.throws(() => buildStandaloneConfig("production", {
+    ...validProductionEnvironment,
+    OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME: "Invalid_Bucket_Name",
+  }), /safe Cloudflare name/u);
 });
