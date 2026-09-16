@@ -990,6 +990,14 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.doesNotMatch(script, /\bpublished\s*:\s*(?:1|true)\b/u);
 });
 
+
+test("ZIP helper keeps the main file picker open to images and accepts normal ZIP filenames", async () => {
+  const source = await readFile(path.join(frontendDir, "zip-import-addon.js"), "utf8");
+  assert.doesNotMatch(source, /setAttribute\(["']accept["'],\s*["']\.md,\.zip/u);
+  assert.doesNotMatch(source, /flags\s*&\s*0x0800[\s\S]{0,80}ZIP 内文件名必须使用 UTF-8 编码/u);
+  assert.match(source, /decodeZipName\(new Uint8Array\(arrayBuffer,\s*nameStart,\s*nameLength\)\)/u);
+});
+
 test("document rows show exact persisted OA labels and submit only unsubmitted drafts", async () => {
   const script = await readFile(path.join(frontendDir, "app.js"), "utf8");
   const start = script.indexOf("function renderDocumentsPanel");
