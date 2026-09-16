@@ -990,10 +990,11 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.doesNotMatch(script, /\bpublished\s*:\s*(?:1|true)\b/u);
 });
 
-
 test("ZIP helper keeps the main file picker open to images and accepts normal ZIP filenames", async () => {
   const source = await readFile(path.join(frontendDir, "zip-import-addon.js"), "utf8");
   assert.doesNotMatch(source, /setAttribute\(["']accept["'],\s*["']\.md,\.zip/u);
+  assert.doesNotMatch(source, /addEventListener\(["']change["']/u);
+  assert.doesNotMatch(source, /stopImmediatePropagation|dispatchEvent\(new Event\(["']change["']/u);
   assert.doesNotMatch(source, /flags\s*&\s*0x0800[\s\S]{0,80}ZIP 内文件名必须使用 UTF-8 编码/u);
   assert.match(source, /decodeZipName\(new Uint8Array\(arrayBuffer,\s*nameStart,\s*nameLength\)\)/u);
 });
@@ -1519,18 +1520,6 @@ test("public chat uses a ChatGPT-style two-column shell with a single-column mob
     shellStyle,
     /@media \(max-width:\s*899px\)[\s\S]{0,800}?\.chat-app \.site-header \.menu-button\s*\{[\s\S]{0,80}?display:\s*grid/u,
   );
-});
-
-test("ZIP knowledge addon exposes direct ZIP selection on the file input", async () => {
-  const script = await readFile(path.join(frontendDir, "zip-import-addon.js"), "utf8");
-  const publicScript = await readFile(path.join(publicDir, "zip-import-addon.js"), "utf8");
-
-  assert.equal(publicScript, script);
-  assert.match(script, /window\.unpackKnowledgeZip = unpackKnowledgeZip;/u);
-  assert.match(script, /document\.addEventListener\("change", \(event\) => \{ void interceptZipSelection\(event\); \}, true\);/u);
-  assert.match(script, /input\.id !== "document-file"/u);
-  assert.match(script, /选择 ZIP \/ 文件/u);
-  assert.match(script, /可直接选择 ZIP；也可选择已解压的文件夹/u);
 });
 
 test("frontend source avoids executable HTML and dynamic-code sinks", async () => {
