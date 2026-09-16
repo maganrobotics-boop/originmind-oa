@@ -21,8 +21,9 @@ export async function POST(request: Request) {
   if (typeof itemId !== "string" || typeof revisionId !== "string" || typeof uploadToken !== "string" || !Array.isArray(expectedPaths) || expectedPaths.some((p) => typeof p !== "string")) return reply({ error: "图片清单参数不完整。" }, 400);
   try {
     const db = await getDb();
-    if (!(await authorizeKnowledgeAssetRevision(db, actor, itemId, revisionId))) return reply({ error: "当前账号无权完成该知识版本的图片上传。" }, 403);
-    const result = await finalizeKnowledgeAssets(db, { itemId, revisionId, uploadToken, expectedPaths: expectedPaths as string[] });
+    const database = db.$client;
+    if (!(await authorizeKnowledgeAssetRevision(database, actor, itemId, revisionId))) return reply({ error: "当前账号无权完成该知识版本的图片上传。" }, 403);
+    const result = await finalizeKnowledgeAssets(database, { itemId, revisionId, uploadToken, expectedPaths: expectedPaths as string[] });
     return reply({ received: true, ...result });
   } catch (error) {
     return reply({ error: error instanceof Error ? error.message : "图片尚未完整上传。" }, 409);
