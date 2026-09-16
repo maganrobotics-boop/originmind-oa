@@ -538,7 +538,10 @@ test("workflow and shell expose the token only to a confirmed manual main releas
   assert.ok(releaseScript.indexOf("check-production-migration-state.mjs\" before") < releaseScript.indexOf("secret put PUBLIC_LAB_AI_SERVICE_TOKEN"));
   assert.ok(releaseScript.indexOf("target-secret-configured.json") < releaseScript.indexOf("deploy --dry-run --strict"));
   assert.match(releaseScript, /d1 time-travel info DB/u);
-  assert.equal([...releaseScript.matchAll(/d1 migrations apply DB/g)].length, 1);
+  assert.equal([...releaseScript.matchAll(/apply-production-d1-migrations\.mjs/gu)].length, 1);
+  assert.ok(releaseScript.indexOf("d1 time-travel info DB") < releaseScript.indexOf("apply-production-d1-migrations.mjs"));
+  assert.ok(releaseScript.indexOf("apply-production-d1-migrations.mjs") < releaseScript.indexOf("check-production-migration-state.mjs\" after"));
+  assert.doesNotMatch(releaseScript, /d1 migrations apply DB/u);
   assert.doesNotMatch(releaseScript, /run_wrangler\s+(?:rollback|d1 time-travel restore)\b/u);
 });
 
