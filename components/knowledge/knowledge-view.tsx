@@ -41,6 +41,7 @@ import { KNOWLEDGE_LIST_QUERY_MAX_LENGTH } from "@/lib/knowledge-types";
 import { PUBLIC_KNOWLEDGE_CONFIRMATION } from "@/lib/knowledge-policy";
 import type {
   KnowledgeAction,
+  KnowledgeAsset,
   KnowledgeAskResponse,
   KnowledgeCitation,
   KnowledgeDetailResponse,
@@ -56,7 +57,7 @@ import type {
 type KnowledgeTab = "ask" | "submit" | "mine" | "review" | "manage";
 type KnowledgeDraft = { title: string; category: string; summary: string; content: string; sourceLabel: string; sourceUrl: string };
 type AskTurn = { id: string; question: string; answer: string; citations: KnowledgeCitation[]; mode?: string };
-type ReviewDetail = Required<Pick<KnowledgeDetailResponse, "revisions" | "events">> & { item: KnowledgeItem };
+type ReviewDetail = Required<Pick<KnowledgeDetailResponse, "revisions" | "events">> & { item: KnowledgeItem; assets?: KnowledgeAsset[] };
 
 const knowledgeManageSortOptions: ReadonlyArray<{ value: KnowledgeListSort; label: string }> = [
   { value: "updated_desc", label: "最近更新" },
@@ -375,6 +376,14 @@ function KnowledgeHistory({ detail }: { detail: ReviewDetail }) {
   </details>;
 }
 
+function KnowledgeAssetPreview({ assets }: { assets: KnowledgeAsset[] }) {
+  if (!assets.length) return null;
+  return <section><h3>图片附件</h3><div className="knowledge-asset-grid">{assets.map((asset) => <figure className="knowledge-asset-preview" key={asset.path}>
+    <img src={asset.url} alt={asset.path} loading="lazy" />
+    <figcaption><span>{asset.path}</span><small>{asset.mimeType} · {(asset.byteSize / 1024).toFixed(1)} KB</small></figcaption>
+  </figure>)}</div></section>;
+}
+
 function KnowledgeReviewDialog({ detail, open, loading, error, note, setNote, visibility, setVisibility, publicConfirmation, setPublicConfirmation, actioning, onOpenChange, onRetry, onAction }: { detail: ReviewDetail | null; open: boolean; loading: boolean; error: string; note: string; setNote: (value: string) => void; visibility: KnowledgeVisibility | ""; setVisibility: (value: KnowledgeVisibility) => void; publicConfirmation: string; setPublicConfirmation: (value: string) => void; actioning: KnowledgeAction | null; onOpenChange: (open: boolean) => void; onRetry: () => void; onAction: (action: Extract<KnowledgeAction, "approve" | "return" | "reject" | "set_visibility">, visibility?: KnowledgeVisibility, publicConfirmation?: string) => void }) {
   const revision = detail ? currentRevision(detail) : undefined;
   const reviewContent = revision?.content || detail?.item.content || "";
@@ -393,6 +402,7 @@ function KnowledgeReviewDialog({ detail, open, loading, error, note, setNote, vi
       {(revision?.summary || detail.item.summary) && <section><h3>摘要</h3><p>{revision?.summary || detail.item.summary}</p></section>}
       {detail.item.contentPartCount && detail.item.contentPartCount > 1 && <section><h3>导入方式</h3><p><KnowledgeMultipartReviewMeta item={detail.item} /></p></section>}
       <section><h3>知识正文</h3><div className="knowledge-review-content">{reviewContent || "当前版本没有可显示的正文。"}</div>{!reviewContent && <p className="knowledge-review-blocked"><AlertTriangle className="size-4" />正文未完整加载，不能执行审核。请重新加载。</p>}</section>
+      <KnowledgeAssetPreview assets={detail.assets || []} />
       {(revision?.sourceLabel || detail.item.sourceLabel || sourceUrl) && <section><h3>来源</h3><p>{revision?.sourceLabel || detail.item.sourceLabel || "投稿人提供的参考链接"}</p>{sourceUrl && <a className="knowledge-source-link" href={sourceUrl} target="_blank" rel="noreferrer">打开来源链接</a>}</section>}
       {!actionable && savedVisibility && <section><h3>当前可见范围</h3><p><KnowledgeVisibilityBadge item={detail.item} />{savedVisibility === "public" ? " 已供 chat.omindos.ai 的 ARTS Robotics AI assistant 检索使用。" : " 仅已登录并完成准入与保密签署的成员可在 OA 内检索。"}</p></section>}
       <KnowledgeHistory detail={detail} />
