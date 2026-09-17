@@ -642,6 +642,38 @@ function protectAnswerTechnicalText(value, { code = true } = {}) {
 // END SHARED ANSWER TOKENS
 
 // BEGIN SHARED ANSWER PRESENTATION
+// Recover only unambiguous, pipe-bounded rows with a real Markdown divider.
+// Empty/escaped cells and malformed rows remain untouched; never guess cells.
+function restoreFlattenedAnswerTables(value) {
+  return value.split("\n").map((line) => {
+    if (!/\|[ \t]*:?-{3,}:?[ \t]*\|/u.test(line)) return line;
+    const rows = line.split(/\|[ \t]*\|/u);
+    if (rows.length < 3) return line;
+    for (let index = 1; index < rows.length; index += 1) {
+      const divider = rows[index].split("|").map((cell) => cell.trim());
+      if (divider.length < 2 || divider.length > 8 || !divider.every((cell) => /^:?-{3,}:?$/u.test(cell))) continue;
+      const firstPipe = rows[index - 1].indexOf("|");
+      if (firstPipe < 0) continue;
+      const prefix = rows[index - 1].slice(0, firstPipe).trim();
+      const header = rows[index - 1].slice(firstPipe + 1).split("|").map((cell) => cell.trim());
+      if (header.length !== divider.length || header.some((cell) => !cell || /\\|\uE000/u.test(cell))) continue;
+      const output = [`| ${header.join(" | ")} |`, `| ${divider.join(" | ")} |`];
+      let last = index;
+      for (let row = index + 1; row < rows.length; row += 1) {
+        const cells = rows[row].replace(/\|[ \t]*$/u, "").split("|").map((cell) => cell.trim());
+        if (cells.length !== header.length || cells.some((cell) => !cell || /\\|\uE000/u.test(cell))) break;
+        output.push(`| ${cells.join(" | ")} |`); last = row;
+      }
+      if (last === index) continue;
+      // A single table only; leave any unparsed suffix visible, not reassigned.
+      const before = rows.slice(0, index - 1).join("||");
+      const after = rows.slice(last + 1).join("||");
+      return [before, prefix, output.join("\n"), after].filter(Boolean).join("\n\n");
+    }
+    return line;
+  }).join("\n");
+}
+
 // Keep this function identical in frontend/app.js. Clean only presentation:
 // evidence, source IDs, citations, and stored OA documents remain unchanged.
 function cleanAnswerPresentation(value, { title = "", document = false } = {}) {
@@ -662,7 +694,9 @@ function cleanAnswerPresentation(value, { title = "", document = false } = {}) {
   const sourceLine = new RegExp(`${linePrefix}${sourceName}(?:\\*\\*)?[ \\t]*[:：]`, "u");
   const flattenedMetadata = new RegExp(`>[ \\t]*(?:${metaName}|${sourceName})[ \\t]*[:：]`, "u").test(text);
 
-  if (legacy || flattenedMetadata) {
+  const collapsedBlocks = /[^\n][ \t]+#{2,6}[ \t]+\S/u.test(text) ||
+    /\|[ \t]*\|[ \t]*:?-{3,}:?[ \t]*\|/u.test(text);
+  if (legacy || flattenedMetadata || collapsedBlocks) {
     // Older retrieval replies put '- # title > version ... ## section' on one line.
     // Recreate block boundaries before discarding document headers.
     text = text.replace(/^[ \t]*[-+*•][ \t]+(?=#{1,6}[ \t])/gmu, "")
@@ -670,16 +704,24 @@ function cleanAnswerPresentation(value, { title = "", document = false } = {}) {
       .replace(new RegExp(`[ \\t]*>[ \\t]*(?=(?:${metaName}|${sourceName})[ \\t]*[:：])`, "gu"), "\n")
       .replace(/(#{1,6}[ \t]+[一二三四五六七八九十百\d]+[、.．][^\s#]{1,32})[ \t]+(?=\S)/gu, "$1\n\n");
   }
+  text = restoreFlattenedAnswerTables(text);
+  // Slides often join a numbered page title to its body after the English
+  // page label. Split at that explicit boundary rather than guessing words.
+  text = text.replace(/^(#{1,6}[ \t]+第[ \t]*\d+[ \t]*页[^\n()（）]{0,70}[（(][A-Z][A-Z \d-]{2,60}[)）])[ \t]*(?=\S)/gmu, "$1\n\n");
   const lines = text.split("\n");
   const normalizeTitle = (s) => String(s).normalize("NFKC").replace(/\*\*/gu, "")
     .replace(/\s+/gu, " ").trim().toLocaleLowerCase("zh-CN");
   const knownTitle = normalizeTitle(title).split(" · ")[0];
   const metaCount = lines.filter((line) => metaLine.test(line)).length;
-  const headerMode = document || legacy || flattenedMetadata || (metaCount >= 2 && lines.some((line) => /^(?:[ \t]*>[ \t]*)?(?:更新时间|更新日期|文档版本|资料版本)[ \t]*[:：]/u.test(line)));
+  const headerMode = document || legacy || flattenedMetadata || collapsedBlocks || (metaCount >= 2 && lines.some((line) => /^(?:[ \t]*>[ \t]*)?(?:更新时间|更新日期|文档版本|资料版本)[ \t]*[:：]/u.test(line)));
   const output = [];
   for (let index = 0; index < lines.length; index += 1) {
     let line = lines[index];
     if (sourceLine.test(line)) continue;
+    // Only whole metadata lines are suppressed. Restriction notices remain
+    // in source data and must never be treated as public-sharing permission.
+    if (headerMode && /^[ \t]*(?:>[ \t]*)?(?:页脚|视觉说明)[ \t]*[:：]/u.test(line)) continue;
+    if (/^[ \t]*参考(?:公司|实验室)(?:主页|官网)(?:的)?(?:介绍和描述|介绍|描述)[。.]?[ \t]*$/u.test(line)) continue;
     if (headerMode && metaLine.test(line)) continue;
     if (/^[ \t]*(?:[-+*•][ \t]+)?(?:本(?:文|段|回答|内容)|以上内容|上述内容)?(?:引自|摘自|出自)[ \t]*[《“「][^\n]+[》”」][。.]?[ \t]*$/u.test(line)) continue;
     const heading = line.match(/^[ \t]*#{1,6}[ \t]+(.+?)[ \t]*#*[ \t]*$/u);
@@ -687,6 +729,8 @@ function cleanAnswerPresentation(value, { title = "", document = false } = {}) {
       const matchesTitle = knownTitle && normalizeTitle(heading[1]) === knownTitle;
       const followedByMetadata = /^\s*#[ \t]+/u.test(line) && metaLine.test(lines.slice(index + 1).find((next) => next.trim()) || "");
       if ((document && matchesTitle) || (headerMode && followedByMetadata)) continue;
+      // A collapsed page must not turn hundreds of body characters bold.
+      if (heading[1].length > 100) line = heading[1];
     }
     // Remove an attribution lead, but keep its actual conclusion and [n] evidence.
     line = line.replace(/^(?:根据|依据|据)[ \t]*《[^》\n]+》(?:中(?:的)?(?:介绍|说明|记载|内容|描述)|(?:记载|介绍|说明|显示|指出))?[ \t]*[，,:：][ \t]*/u, "")
@@ -1092,6 +1136,22 @@ function answerEmphasisEnd(text, start, marker) {
   return -1;
 }
 
+function answerDisplayLinkAt(text, index) {
+  const image = text.startsWith("![", index);
+  const start = image ? index + 1 : index;
+  if (text[start] !== "[") return null;
+  const labelEnd = text.indexOf("](", start + 1);
+  if (labelEnd < 0 || labelEnd - start > 500 || /[\n\r]/u.test(text.slice(start, labelEnd))) return null;
+  let nesting = 1;
+  for (let end = labelEnd + 2; end < Math.min(text.length, labelEnd + 2050); end += 1) {
+    if (text[end] === "\\") { end += 1; continue; }
+    if (text[end] === "(") nesting += 1;
+    if (text[end] === ")" && --nesting === 0) return { label: text.slice(start + 1, labelEnd), image, end: end + 1 };
+    if (text[end] === "\n") return null;
+  }
+  return null;
+}
+
 function appendAnswerInline(parent, text, technical = null, depth = 0, budget = { count: 0, characters: 0 }) {
   // Model HTML, links, and images remain inert text. Only our nodes and KaTeX
   // with trust:false can create markup; formulas are protected before emphasis.
@@ -1105,6 +1165,12 @@ function appendAnswerInline(parent, text, technical = null, depth = 0, budget = 
   for (let index = 0; index < text.length;) {
     const math = answerMaskedMathAt(text, index, technical);
     if (math) { flush(); parent.append(renderAnswerMath(math.token, budget)); index = math.end; continue; }
+    const link = answerDisplayLinkAt(text, index);
+    if (link) {
+      flush();
+      if (link.label) appendAnswerInline(parent, link.label, technical, depth + 1, budget);
+      index = link.end; continue;
+    }
     if (text[index] === "`") {
       const code = answerCodeTokenAt(text, index);
       if (code?.content !== undefined) {

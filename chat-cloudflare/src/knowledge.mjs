@@ -1,3 +1,4 @@
+import { protectAnswerTechnicalText } from "./answer-math.mjs";
 import { PublicError } from "./errors.mjs";
 import { cleanAnswerPresentation, boundedKnowledgeExcerpt } from "./answer-presentation.mjs";
 
@@ -20,6 +21,10 @@ export function fallbackAnswer(documents) {
   const excerpts = [];
   const seen = new Set();
   for (const document of documents) {
+    const raw = protectAnswerTechnicalText(document?.body ?? "").text;
+    // A failed synthesis is not permission to dump a slide deck (or its
+    // distribution notices) as an answer. Keep clean, useful excerpts only.
+    if (/(?:^|[ \t\n])#{1,6}[ \t]+第[ \t]*\d+[ \t]*页|(?:^|[\n 。])(?:页脚|视觉说明)[ \t]*[:：]|仅供[^\n]{0,60}(?:交流|内部使用)|未经许可请勿转发/u.test(raw)) continue;
     const clean = typeof document?.body === "string"
       ? cleanAnswerPresentation(document.body, { title: document.title, document: true })
       : "";
@@ -28,6 +33,9 @@ export function fallbackAnswer(documents) {
     seen.add(key);
     excerpts.push(boundedKnowledgeExcerpt(clean));
     if (excerpts.length === 3) break;
+  }
+  if (!excerpts.length && documents.length) {
+    return "这次未能生成完整答复，请重试。为避免把未经整理的文档片段当作回答，暂不直接展示这些片段。";
   }
   if (!excerpts.length) {
     return "目前没有足够信息回答这个问题。你可以补充具体方向、对象或时间范围。";

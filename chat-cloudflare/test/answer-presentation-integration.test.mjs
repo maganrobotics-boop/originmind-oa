@@ -84,3 +84,37 @@ for (const mode of ["ai", "retrieval"]) {
     assert.doesNotMatch(prompt, /> 版本：V1.0/u);
   });
 }
+
+
+test("restores collapsed table and headings without the old metadata trigger", () => {
+  const old = "公司从事机器人研发。 ## 功能介绍\n\n| 场景 | 功能 | |---|---| | 金属矿 | 巡检 | | 工厂 | 运输 |";
+  const clean = api.userFacingAnswer(old);
+  const rendered = api.renderAnswerBody(clean);
+  assert.equal(nodes(rendered, "table").length, 1);
+  assert.equal(nodes(rendered, "td").length, 4);
+  assert.doesNotMatch(rendered.textContent, /##|\|/u);
+  assert.match(rendered.textContent, /公司从事机器人研发/u);
+  assert.equal(api.userFacingAnswer(clean), clean);
+});
+
+test("a flattened slide body does not become a giant bold heading", () => {
+  const old = "## 第 12 页商业化(COMMERCIALIZATION 12) " + "先完成样机测试，再验证现场可靠性。".repeat(20);
+  const rendered = api.renderAnswerBody(api.userFacingAnswer(old));
+  assert.ok(nodes(rendered, "h4").every((node) => node.textContent.length < 100));
+  assert.ok(nodes(rendered, "p").some((node) => node.textContent.length > 100));
+});
+
+test("Markdown links display readable labels but never activate model URLs", () => {
+  const rendered = api.renderAnswerBody("[官网](https://example.test/path_(a))、[联系](mailto:a@example.test)、[错误](javascript:alert(1))。\\n\\n`[原文](https://example.test)`");
+  assert.equal(nodes(rendered, "a").length, 0);
+  assert.equal(nodes(rendered, "img").length, 0);
+  assert.match(rendered.textContent, /官网、联系、错误。/u);
+  assert.doesNotMatch(rendered.textContent, /mailto:|javascript:/u);
+  assert.match(nodes(rendered, "code")[0].textContent, /https:\/\/example/u);
+});
+
+test("raw investor-slide fallback is not passed off as a company introduction", () => {
+  const answer = fallbackAnswer([{title:"示例公司", body:"## 第 1 页封面(INVESTOR BRIEF) 示例企业。 仅供投资人交流未经许可请勿转发。"}]);
+  assert.match(answer, /未能生成完整答复/u);
+  assert.doesNotMatch(answer, /INVESTOR|第 1 页|示例企业|投资人/u);
+});

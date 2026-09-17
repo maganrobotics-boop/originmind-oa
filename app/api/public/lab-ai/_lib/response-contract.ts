@@ -1,3 +1,4 @@
+import { answerCodeTokenAt, answerMathTokenAt } from "../../../../../chat-cloudflare/src/answer-math.mjs";
 import { cleanPublicChatText } from "../../../../../chat-cloudflare/src/public-text.mjs";
 import { knowledgeSearchTerms, type RankedKnowledgeChunk } from "../../../../../lib/knowledge-policy";
 import type { PublicKnowledgeSuggestionCandidate } from "../../../../../lib/knowledge-store";
@@ -75,11 +76,35 @@ function boundedLine(value: string, maxLength: number): string {
   return safePrefix(normalized, maxLength).trimEnd();
 }
 
+// Labels are single-line; document bodies are not. Flattening Markdown here
+// destroys headings/tables before either the model or the renderer sees them.
+function normalizedContent(value: string): string {
+  return makeWellFormed(value).replace(/\r\n?/gu, "\n")
+    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, " ").trim();
+}
+
 function boundedExcerpt(value: string, maxLength: number): string {
-  const normalized = boundedLine(value, Number.MAX_SAFE_INTEGER);
+  const normalized = normalizedContent(value);
   if (normalized.length <= maxLength) return normalized;
   if (maxLength <= 1) return "…";
-  return `${safePrefix(normalized, maxLength - 1).trimEnd()}…`;
+  let end = safePrefix(normalized, maxLength - 1).length;
+  // Never send an unclosed formula or code token solely because the transport
+  // budget ends inside it. Keep the same strict character and byte ceilings.
+  let boundary = 0;
+  for (let index = 0; index < end;) {
+    const token = (normalized[index] === "`" || normalized[index] === "~" ? answerCodeTokenAt(normalized, index) : null)
+      || (normalized[index] === "\\" || normalized[index] === "$" ? answerMathTokenAt(normalized, index) : null);
+    if (token) {
+      if (token.end > end) { end = index; break; }
+      index = token.end;
+    } else {
+      if (normalized[index] === "\n") boundary = index;
+      else if (/[。！？]/u.test(normalized[index])) boundary = index + 1;
+      index += 1;
+    }
+  }
+  const prefix = normalized.slice(0, boundary > end / 2 ? boundary : end);
+  return `${prefix.trimEnd()}…`;
 }
 
 function validDate(value: string): string | null {
@@ -97,7 +122,7 @@ export function buildPublicLabAiRetrieveResponse(ranked: RankedKnowledgeChunk[],
   const candidates = ranked.slice(0, PUBLIC_LAB_AI_MAX_CHUNKS).flatMap((chunk, index) => {
     const title = boundedLine(chunk.title, 100);
     const category = boundedLine(chunk.category, 40);
-    const content = boundedLine(chunk.content, Number.MAX_SAFE_INTEGER);
+    const content = normalizedContent(chunk.content);
     const updatedAt = validDate(chunk.updatedAt);
     if (title.length < 2 || !category || !content || !updatedAt) return [];
     return [{
