@@ -23,13 +23,13 @@ function fixture() {
     CREATE TABLE knowledge_items (id TEXT, status TEXT, visibility TEXT, active_revision_id TEXT);
     CREATE TABLE knowledge_revisions (id TEXT, item_id TEXT, status TEXT);
     CREATE TABLE knowledge_chunks (item_id TEXT, revision_id TEXT, chunk_no INTEGER, content TEXT, section_title TEXT, is_active INTEGER);
-    CREATE TABLE knowledge_assets (id TEXT, item_id TEXT, revision_id TEXT, asset_path TEXT, mime_type TEXT, byte_size INTEGER, storage_key TEXT, upload_state TEXT);
+    CREATE TABLE knowledge_revision_assets (id TEXT, item_id TEXT, revision_id TEXT, asset_path TEXT, mime_type TEXT, byte_size INTEGER, storage_key TEXT, upload_state TEXT);
     CREATE TABLE migration_control (deactivated_at TEXT);
     INSERT INTO knowledge_items VALUES ('private-item','active','public','private-revision');
     INSERT INTO knowledge_revisions VALUES ('private-revision','private-item','active');
     INSERT INTO knowledge_chunks VALUES ('private-item','private-revision',2,'![小车正视与侧视](assets/figure1.png)','实验平台',1);
   `);
-  sqlite.prepare("INSERT INTO knowledge_assets VALUES (?, 'private-item','private-revision','assets/figure1.png','image/png',?,'private/r2/key','ready')").run(assetId, png.length);
+  sqlite.prepare("INSERT INTO knowledge_revision_assets VALUES (?, 'private-item','private-revision','assets/figure1.png','image/png',?,'private/r2/key','ready')").run(assetId, png.length);
   const database = { prepare(sql) {
     return { bind(...bindings) { return {
       all: async () => ({ results: sqlite.prepare(sql).all(...bindings) }),
@@ -75,7 +75,7 @@ for (const [name, mutation] of [
   ["internal item", "UPDATE knowledge_items SET visibility='internal'"],
   ["pending revision", "UPDATE knowledge_revisions SET status='pending'"],
   ["superseded revision", "UPDATE knowledge_items SET active_revision_id='new-revision'"],
-  ["unfinished upload", "UPDATE knowledge_assets SET upload_state='uploading'"],
+  ["unfinished upload", "UPDATE knowledge_revision_assets SET upload_state='staged'"],
 ]) {
   test(`image discovery and an already issued token both reject ${name}`, async () => {
     const f = fixture();
@@ -99,7 +99,7 @@ test("public asset reads recheck migration freeze and current byte metadata, nev
     assert.deepEqual(new Uint8Array(await first.arrayBuffer()), png);
     f.sqlite.exec("INSERT INTO migration_control VALUES (NULL)");
     assert.equal(await readPublicKnowledgeAsset(token, secret, f.database, f.bucket), null);
-    f.sqlite.exec("DELETE FROM migration_control; UPDATE knowledge_assets SET byte_size=12");
+    f.sqlite.exec("DELETE FROM migration_control; UPDATE knowledge_revision_assets SET byte_size=12");
     assert.equal(await readPublicKnowledgeAsset(token, secret, f.database, f.bucket), null);
   } finally { f.sqlite.close(); }
 });
