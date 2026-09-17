@@ -1,3 +1,5 @@
+import { knowledgeImageReferences } from "./knowledge-image-references.mjs";
+
 const SAFE_ASSET_PATH = /^assets\/[A-Za-z0-9][A-Za-z0-9._/-]*\.(?:webp|png|jpe?g)$/i;
 const ALLOWED_MIME = new Set(["image/webp", "image/png", "image/jpeg"]);
 export const MAX_KNOWLEDGE_ASSET_BYTES = 8 * 1024 * 1024;
@@ -7,12 +9,15 @@ const MARKDOWN_IMAGE_REFERENCE = /!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))(?:\s+[
 
 export function referencedKnowledgeAssetPaths(markdown: string): string[] {
   const references = new Set<string>();
+  // Preserve the existing Markdown path validation, including invalid-path errors.
   for (const match of String(markdown || "").matchAll(MARKDOWN_IMAGE_REFERENCE)) {
     const raw = String(match[1] || match[2] || "").split(/[?#]/u, 1)[0];
     let decoded = raw;
     try { decoded = decodeURIComponent(raw); } catch { /* keep raw path */ }
     if (/^assets\//iu.test(decoded)) references.add(normalizeKnowledgeAssetPath(decoded));
   }
+  // Word/Pandoc exports keep <img> tags inside Markdown; these also require uploaded bytes.
+  for (const path of knowledgeImageReferences(markdown).keys()) references.add(path);
   return [...references].sort((left, right) => left.localeCompare(right));
 }
 
@@ -128,7 +133,7 @@ export async function persistKnowledgeAsset(
   const row = await readRow();
   if (!row) throw new Error("knowledge asset metadata was not saved");
   assertMatches(row);
-  return { id: row.id, itemId, revisionId, assetPath: asset.path, mimeType: asset.mimeType, byteSize: asset.bytes.byteLength, storageKey };
+  return { id: row.id, itemId, revisionId, assetPath: row.asset_path, mimeType: row.mime_type, byteSize: asset.bytes.byteLength, storageKey };
 }
 
 export async function persistKnowledgeAssets(
@@ -160,7 +165,6 @@ export async function listKnowledgeRevisionAssets(database: D1Database, revision
     mimeType: row.mime_type, byteSize: Number(row.byte_size), storageKey: row.storage_key,
   }));
 }
-
 
 export async function assertKnowledgeRevisionAssetsReady(database: D1Database, itemId: string, revisionId: string): Promise<void> {
   const contentResult = await database.prepare(`
