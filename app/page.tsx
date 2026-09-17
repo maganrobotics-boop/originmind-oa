@@ -2033,6 +2033,7 @@ function RulesView() {
 export default function Home() {
   const [activeView, setActiveView] = useState<ViewKey>("knowledge");
   const [knowledgeTab, setKnowledgeTab] = useState<KnowledgeTab>("ask");
+  const [chatActionsTarget, setChatActionsTarget] = useState<HTMLDivElement | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   useEffect(() => { try { setSidebarCollapsed(localStorage.getItem("oa.sidebar.collapsed") === "true"); } catch { /* optional preference */ } }, []);
   const toggleSidebar = () => setSidebarCollapsed(current => {
@@ -2449,11 +2450,11 @@ export default function Home() {
           {activeView === "knowledge" && knowledgeTab === "ask" && <OaChatStatus />}
           <div className="topbar-actions">
             <div className="topbar-date">{todayLabel}</div>
-            <button type="button" className="oa-topbar-user" onClick={() => navigate("profile")} aria-label="打开个人设置"><UserRound className="size-4" />{session.user?.displayName || "成员"}</button>
+            {activeView === "knowledge" && knowledgeTab === "ask" ? <div className="oa-chat-menu-host" ref={setChatActionsTarget} /> : <button type="button" className="oa-topbar-user" onClick={() => navigate("profile")} aria-label="打开个人设置"><UserRound className="size-4" />{session.user?.displayName || "成员"}</button>}
             <ChatHub currentUser={session.user} currentRole={session.role} isAdmin={session.isAdmin} />
           </div>
         </header>
-        <div className="oa-knowledge-pane" hidden={activeView !== "knowledge"}><KnowledgeView canReviewKnowledge={Boolean(session.canReviewKnowledge)} activeSection={knowledgeTab} onSectionChange={setKnowledgeTab} /></div>
+        <div className="oa-knowledge-pane" hidden={activeView !== "knowledge"}><KnowledgeView canReviewKnowledge={Boolean(session.canReviewKnowledge)} activeSection={knowledgeTab} onSectionChange={setKnowledgeTab} chatActionsTarget={chatActionsTarget} /></div>
         {activeView === "notifications" ? <NotificationStatus /> : activeView === "oem" ? <OemInbox /> : activeView === "members" ? <MembersView currentEmail={session.user?.email} /> : activeView === "people" ? <PeopleView currentUser={session.user} /> : activeView === "knowledge" ? null : activeView === "profile" ? <ProfileSettingsView currentUser={session.user} currentRole={session.role} isAdmin={Boolean(session.isAdmin)} migrationExportEnabled={session.migrationExportEnabled} migrationUnfreezeEnabled={session.migrationUnfreezeEnabled} onIdentityChanged={(fullName, avatarDataUrl) => { setMyAvatarDataUrl(avatarDataUrl); setSession((current) => current?.user ? { ...current, user: { ...current.user, displayName: fullName } } : current); }} /> : activeView === "rules" ? <RulesView /> : activeView === "requests" ? <RequestsView approvals={approvals} filteredApprovals={filteredApprovals} myPendingApprovals={myPendingApprovals} dataReady={dataReady} activeFilter={activeFilter} setActiveFilter={setActiveFilter} showMineOnly={showMineOnly} onClearMine={() => setShowMineOnly(false)} onOpen={openApproval} /> : <>
           <section className="page-heading dashboard-heading">
             <div>
@@ -2464,15 +2465,6 @@ export default function Home() {
             <div className="heading-actions"><button className="secondary-action" onClick={() => setActiveView("rules")}><SlidersHorizontal className="size-4" />查看规则</button><Button className="primary-button new-button" onClick={openNewRequest}><Plus className="size-4" />新建审核</Button></div>
           </section>
           <div className="oa-guide-banner"><div><strong>让你的工作有记录，申请有进度，成果可查阅。</strong><p>完成阶段成果、需要采购或申请月度劳务时，从“新建审核”开始。</p></div><a href="/guide">项目章程与使用指南 <ArrowUpRight className="size-4" /></a></div>
-          <button type="button" className="dashboard-ai-entry" onClick={() => navigate("knowledge")} aria-label="进入 OA 内部实验室 AI">
-            <span className="dashboard-ai-entry-icon"><Bot className="size-5" /></span>
-            <span className="dashboard-ai-entry-copy">
-              <span className="dashboard-ai-entry-kicker">OA 内部知识问答</span>
-              <strong>实验室 AI（内部）</strong>
-              <span>在 OA 内提问、提交知识，并由审核人选择对内或对外公开。</span>
-            </span>
-            <span className="dashboard-ai-entry-action">进入内部 AI <ArrowUpRight className="size-4" /></span>
-          </button>
           <section className="stats-grid">
             <button type="button" className="stat-card stat-card-action stat-card-approved" onClick={() => setMetricPanel("approved")} aria-label="查看本月已通过的文档"><div className="stat-label">本月已通过</div><div className="stat-value">{monthlyApproved.length}<span>条</span></div><div className="stat-foot positive"><span className="stat-icon"><Check className="size-4" /></span><span>点击查看已完成审批文档</span><ArrowUpRight className="stat-action-arrow size-4" /></div></button>
             <button type="button" className="stat-card stat-card-action stat-card-archive" onClick={() => setMetricPanel("archive")} aria-label="查看归档完整率详情"><div className="stat-label">归档完整率</div><div className="stat-value">{archiveRatio}<span>%</span></div><div className="stat-foot positive"><span className="stat-icon"><Archive className="size-4" /></span><span>点击查看归档统计</span><ArrowUpRight className="stat-action-arrow size-4" /></div></button>
