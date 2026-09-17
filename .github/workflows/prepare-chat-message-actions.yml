@@ -9,6 +9,7 @@ on:
       - 'chat-cloudflare/test/message-actions.test.mjs'
       - 'chat-cloudflare/scripts/check-message-actions-browser.mjs'
       - 'chat-cloudflare/scripts/prepare-message-actions.mjs'
+      - 'chat-cloudflare/scripts/update-message-action-tests.mjs'
 permissions:
   contents: write
 concurrency:
@@ -27,7 +28,9 @@ jobs:
         with:
           node-version: '24'
       - name: Apply inspected frontend integration
-        run: node chat-cloudflare/scripts/prepare-message-actions.mjs
+        run: |
+          node chat-cloudflare/scripts/prepare-message-actions.mjs
+          node chat-cloudflare/scripts/update-message-action-tests.mjs
       - name: Install locked dependencies and rebuild
         run: |
           npm ci --prefix chat-cloudflare
@@ -51,7 +54,7 @@ jobs:
           set -euo pipefail
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add chat-cloudflare/frontend chat-cloudflare/scripts/build-frontend.mjs chat-cloudflare/scripts/check-message-actions-browser.mjs chat-cloudflare/test/message-actions.test.mjs chat-cloudflare/package.json chat-cloudflare/public .github/workflows/check-chat-cloudflare.yml
+          git add chat-cloudflare/frontend chat-cloudflare/scripts/build-frontend.mjs chat-cloudflare/scripts/check-message-actions-browser.mjs chat-cloudflare/test chat-cloudflare/package.json chat-cloudflare/public .github/workflows/check-chat-cloudflare.yml
           if ! git diff --cached --quiet; then
             git commit -m 'feat(chat): add answer actions, public source label and question editing'
             git push origin HEAD:feat/chat-message-actions-20260917
