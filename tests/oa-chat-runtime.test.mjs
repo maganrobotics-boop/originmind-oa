@@ -6,6 +6,7 @@ import { signOaChatRequest } from '../chat-cloudflare/src/oa-chat-bridge.mjs';
 
 const stateKey = '__oaChatRuntimeBindingTest';
 const originalFetch = globalThis.fetch;
+const originalWarn = console.warn;
 globalThis[stateKey] = {};
 const root = fileURLToPath(new URL('..', import.meta.url));
 const vite = await createServer({ appType:'custom', configFile:false, root,
@@ -27,19 +28,30 @@ const vite = await createServer({ appType:'custom', configFile:false, root,
 });
 const client = await vite.ssrLoadModule('/lib/oa-chat-client.ts');
 beforeEach(() => {
-  globalThis[stateKey] = { env:{PUBLIC_LAB_AI_SERVICE_TOKEN:'s'.repeat(43)}, calls:[], reply:{received:true,bridgeReady:true,modelReady:true,budgetReady:true,answer:'**完整回答**。',mode:'ai'} };
-  globalThis.fetch = async (url, init) => {
-    globalThis[stateKey].calls.push({url,init});
-    return Response.json(globalThis[stateKey].reply);
+  globalThis[stateKey] = { env:{PUBLIC_LAB_AI_SERVICE_TOKEN:'s'.repeat(43)}, calls:[], publicCalls:0, warnings:[], reply:{received:true,bridgeReady:true,modelReady:true,budgetReady:true,answer:'**完整回答**。',mode:'ai'} };
+  const state = globalThis[stateKey];
+  console.warn = (...args) => state.warnings.push(args);
+  globalThis.fetch = async () => {
+    state.publicCalls++;
+    throw new Error('Same-zone public-network fetch must not be used');
+  };
+  state.env.CHAT_SERVICE = {
+    async fetch(url, init) {
+      assert.equal(this, state.env.CHAT_SERVICE);
+      state.calls.push({url,init});
+      if (state.error) throw state.error;
+      return state.response || Response.json(state.reply);
+    },
   };
 });
-after(async () => { globalThis.fetch=originalFetch; delete globalThis[stateKey]; await vite.close(); });
+after(async () => { globalThis.fetch=originalFetch; console.warn=originalWarn; delete globalThis[stateKey]; await vite.close(); });
 const chunk = { itemId:'11111111-2222-4333-8444-555555555555',revisionId:'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',title:'内部测试资料',content:'内部测试正文，不得拼接成未经模型生成的答复。',updatedAt:'2026-09-17',category:'research',sectionTitle:'测试',paragraphRef:'1' };
 
-test('OA signs with the actual Worker binding and sends neither cookies nor an exposed service token', async () => {
+test('OA uses the signed service binding even when same-zone public fetch is unavailable', async () => {
   assert.deepEqual(await client.oaChatModelStatus(),{bridgeReady:true,modelReady:true,budgetReady:true});
   const {url,init}=globalThis[stateKey].calls[0];
   assert.equal(url,'https://chat.omindos.ai/api/internal/oa-answer');
+  assert.equal(globalThis[stateKey].publicCalls,0);
   assert.equal(init.cache,'no-store'); assert.equal(init.redirect,'error'); assert.equal(init.credentials,'omit');
   assert.equal(init.headers.cookie,undefined); assert.equal(init.headers.origin,undefined);
   assert.deepEqual(JSON.parse(init.body),{operation:'status'});
@@ -72,4 +84,50 @@ test('no authorized evidence means no model request', async () => {
 test('oversized model answers are rejected rather than silently truncated', async () => {
   globalThis[stateKey].reply.answer='甲'.repeat(12001);
   await assert.rejects(client.answerOaChatQuestion('请说明测试结果',[chunk]),/CHAT_BRIDGE_INVALID_ANSWER/u);
+});
+
+
+test('missing service binding fails closed without a public-network fallback', async () => {
+  delete globalThis[stateKey].env.CHAT_SERVICE;
+  assert.deepEqual(await client.oaChatModelStatus(),{bridgeReady:false,modelReady:false,budgetReady:false});
+  const result = await client.answerOaChatQuestion('请说明测试结果',[chunk]);
+  assert.equal(result.fallbackReason,'shared_model_unavailable');
+  assert.deepEqual(result.citations,[]); assert.deepEqual(result.images,[]);
+  assert.equal(globalThis[stateKey].publicCalls,0); assert.equal(globalThis[stateKey].calls.length,0);
+  assert.deepEqual(globalThis[stateKey].warnings,[['OA_CHAT_BRIDGE_FAILURE','CHAT_BRIDGE_SERVICE_BINDING_MISSING']]);
+});
+
+for (const status of [401,403,404,429,503]) {
+  test(`service HTTP ${status} produces only a safe diagnostic and never retries publicly`, async () => {
+    const state = globalThis[stateKey];
+    state.response = new Response(`private: ${chunk.content} ${state.env.PUBLIC_LAB_AI_SERVICE_TOKEN}`,{status});
+    const result = await client.answerOaChatQuestion('请说明测试结果',[chunk]);
+    assert.equal(result.fallbackReason,'shared_model_unavailable');
+    assert.deepEqual(state.warnings,[['OA_CHAT_BRIDGE_FAILURE',`CHAT_BRIDGE_HTTP_${status}`]]);
+    assert.ok(!JSON.stringify(result).includes(chunk.content));
+    assert.equal(state.calls.length,1); assert.equal(state.publicCalls,0);
+  });
+}
+
+test('transport errors and timeouts never log private upstream exception messages', async () => {
+  const state = globalThis[stateKey];
+  for (const name of ['Error','TimeoutError','AbortError']) {
+    state.error = new Error(`private ${chunk.content} ${state.env.PUBLIC_LAB_AI_SERVICE_TOKEN}`);
+    state.error.name = name;
+    const result = await client.answerOaChatQuestion('请说明测试结果',[chunk]);
+    assert.equal(result.fallbackReason,'shared_model_unavailable');
+    assert.deepEqual(state.warnings.at(-1),['OA_CHAT_BRIDGE_FAILURE',name === 'Error' ? 'CHAT_BRIDGE_TRANSPORT_ERROR' : 'CHAT_BRIDGE_TIMEOUT']);
+  }
+  assert.equal(state.publicCalls,0);
+});
+
+test('invalid JSON or an unacknowledged bridge response cannot count as a generated answer', async () => {
+  const state = globalThis[stateKey];
+  for (const body of ['null','{}','{"received":false}','private invalid json']) {
+    state.response = new Response(body,{headers:{'content-type':'application/json'}});
+    const result = await client.answerOaChatQuestion('请说明测试结果',[chunk]);
+    assert.equal(result.fallbackReason,'shared_model_unavailable');
+    assert.deepEqual(state.warnings.at(-1),['OA_CHAT_BRIDGE_FAILURE','CHAT_BRIDGE_INVALID_RESPONSE']);
+  }
+  assert.equal(state.publicCalls,0);
 });
