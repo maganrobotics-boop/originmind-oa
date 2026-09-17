@@ -26,8 +26,8 @@ const nodes = (root, tag) => [...(root.tag === tag ? [root] : []), ...root.child
 const raw = "# 科研方向介绍\n> 版本：V1.0\n> 更新时间：2026年9月\n> 适用范围：宣传\n\n## 一、自主移动\n\n**重点**是定位与导航。\n\n## 二、智能操作\n\n通过反馈完成操作。";
 
 test("browser and Worker use identical answer-presentation rules", async () => {
-  const module = await readFile(new URL("../src/answer-presentation.mjs", import.meta.url), "utf8");
-  const expected = module.replace('import { protectAnswerTechnicalText } from "./answer-math.mjs";\n', "").replaceAll("export function ", "function ").trim();
+  const presentationSource = await readFile(new URL("../src/answer-presentation.mjs", import.meta.url), "utf8");
+  const expected = presentationSource.replace('import { protectAnswerTechnicalText } from "./answer-math.mjs";\n', "").replaceAll("export function ", "function ").trim();
   assert.equal(section("// BEGIN SHARED ANSWER PRESENTATION", "// END SHARED ANSWER PRESENTATION")
     .replace("// BEGIN SHARED ANSWER PRESENTATION", "").trim(), expected);
 });
