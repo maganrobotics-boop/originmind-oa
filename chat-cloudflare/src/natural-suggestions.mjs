@@ -1,5 +1,6 @@
 import { decryptSecret, encryptSecret } from "./crypto.mjs";
 import { retrieveOa, suggestionKnowledgeReference, suggestionMatchesKnowledge } from "./oa-public.mjs";
+import { OVERVIEW_QUESTIONS, overviewQuestions, suggestionEvidenceText } from "./suggestion-excerpts.mjs";
 
 const PURPOSE = "arts-public-suggestion-v1";
 const TOKEN_TTL_MS = 10 * 60_000;
@@ -9,7 +10,8 @@ const BEIJING_UTC_OFFSET_MS = 8 * 60 * 60 * 1_000;
 
 // Ask about concepts present in approved excerpts. Never interpolate upload
 // titles, filenames, or arbitrary source text into a visitor-facing question.
-// Specific questions take priority; unrecognized material is simply omitted.
+// Specific questions take priority; substantive unfamiliar topics get only a
+// source-bound overview, never invented facts or unconditional filler.
 const QUESTIONS = [
   [[/无\s*(?:GNSS|GPS)|没有卫星信号|无卫星信号/iu, /定位/u], [
     "没有卫星信号时，机器人怎么定位？",
@@ -93,7 +95,7 @@ const QUESTIONS = [
   ]],
 ];
 
-const QUESTION_TEXTS = new Set(QUESTIONS.flatMap(([, variants]) => variants));
+const QUESTION_TEXTS = new Set([...QUESTIONS.flatMap(([, variants]) => variants), ...OVERVIEW_QUESTIONS]);
 
 export function isNaturalSuggestionQuestion(value) {
   return typeof value === "string" && QUESTION_TEXTS.has(value);
@@ -106,14 +108,11 @@ export function suggestionDayOrdinal(now = new Date()) {
 }
 
 export function naturalQuestions(documents, now = new Date()) {
-  const excerpts = documents.map((document) => String(document.body || "")
-    .normalize("NFKC")
-    .split(/\n/u)
-    .filter((line) => !/\.(?:pptx?|pdf|docx?|md)\b|文件名|源文件|脱敏|脱密/iu.test(line))
-    .join(" "));
+  const excerpts = documents.map((document) => suggestionEvidenceText(document.body));
   const day = suggestionDayOrdinal(now);
-  return QUESTIONS.filter(([patterns]) => excerpts.some((excerpt) => patterns.every((pattern) => pattern.test(excerpt))))
+  const questions = QUESTIONS.filter(([patterns]) => excerpts.some((excerpt) => patterns.every((pattern) => pattern.test(excerpt))))
     .map(([, variants]) => variants[((day % variants.length) + variants.length) % variants.length]);
+  return questions.length ? questions : overviewQuestions(excerpts, day);
 }
 
 export function parseChatSuggestions(value) {
@@ -137,16 +136,19 @@ export async function naturalizeSuggestions(result, context, deadline = Date.now
   if (result.status !== "connected") return result;
   const candidates = await Promise.all(result.suggestions.map(async (suggestion) => {
     const retrieved = await retrieveOa(suggestion.question, context, Math.max(1, deadline - Date.now()));
-    if (retrieved.status !== "connected") return null;
+    if (retrieved.status !== "connected") return { suggestion, status: retrieved.status, questions: [] };
     const documents = retrieved.documents.filter((document) => suggestionMatchesKnowledge(suggestion.question, document));
-    return { suggestion, questions: naturalQuestions(documents, now) };
+    return { suggestion, status: "connected", questions: naturalQuestions(documents, now) };
   }));
+  // Keep specific questions ahead of the optional source-bound overview.
+  candidates.sort((left, right) => Number(OVERVIEW_QUESTIONS.includes(left.questions[0]))
+    - Number(OVERVIEW_QUESTIONS.includes(right.questions[0])));
   const suggestions = [];
   const seen = new Set();
-  const maximumQuestions = Math.max(0, ...candidates.map((candidate) => candidate?.questions.length || 0));
+  const maximumQuestions = Math.max(0, ...candidates.map((candidate) => candidate.questions.length));
   outer: for (let questionIndex = 0; questionIndex < maximumQuestions; questionIndex += 1) {
     for (const candidate of candidates) {
-      const question = candidate?.questions[questionIndex];
+      const question = candidate.questions[questionIndex];
       if (!question || seen.has(question)) continue;
       seen.add(question);
       const suggestionToken = await encryptSecret(JSON.stringify({
@@ -164,7 +166,9 @@ export async function naturalizeSuggestions(result, context, deadline = Date.now
       if (suggestions.length === MAX_SUGGESTIONS) break outer;
     }
   }
-  return { status: "connected", suggestions };
+  // A successful list request does not make failed per-source retrieval healthy.
+  const failure = candidates.find((candidate) => candidate.status !== "connected");
+  return { status: !suggestions.length && failure ? failure.status : "connected", suggestions };
 }
 
 export async function suggestionRetrievalQuestion(token, question, secret) {
