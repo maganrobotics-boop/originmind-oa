@@ -5,6 +5,7 @@ on:
     paths:
       - .github/workflows/prepare-answer-focus-20260917.yml
       - chat-cloudflare/scripts/prepare-answer-focus-20260917.mjs
+      - chat-cloudflare/scripts/prepare-answer-focus-expectations-20260917.mjs
       - chat-cloudflare/test/answer-focus.test.mjs
 permissions:
   contents: read
@@ -30,6 +31,7 @@ jobs:
         run: |
           test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
           node chat-cloudflare/scripts/prepare-answer-focus-20260917.mjs
+          node chat-cloudflare/scripts/prepare-answer-focus-expectations-20260917.mjs
           git diff --stat
       - name: Install locked dependencies and run full Chat checks
         run: |
@@ -51,7 +53,7 @@ jobs:
           node chat-cloudflare/scripts/check-answer-layout-browser.mjs
       - name: Commit verified application changes to this feature branch only
         run: |
-          git add chat-cloudflare/src/app.mjs chat-cloudflare/src/knowledge.mjs chat-cloudflare/test/answer-presentation-integration.test.mjs chat-cloudflare/test/suggestions.test.mjs chat-cloudflare/scripts/check-answer-layout-browser.mjs
+          git add chat-cloudflare/src/app.mjs chat-cloudflare/src/knowledge.mjs chat-cloudflare/test/answer-presentation-integration.test.mjs chat-cloudflare/test/suggestions.test.mjs chat-cloudflare/test/chat-experience-worker.test.mjs chat-cloudflare/test/worker-contract.test.mjs chat-cloudflare/test/worker.test.mjs chat-cloudflare/scripts/check-answer-layout-browser.mjs
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git commit -m 'fix(chat): prevent document dumps after failed synthesis and focus on the actual question'
