@@ -1,0 +1,54 @@
+name: Formula runtime diagnostic (temporary)
+on:
+  push:
+    branches: [fix/chat-formula-runtime-20260917]
+    paths: [.github/workflows/formula-runtime-diagnostic.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Collect source snapshot and public asset diagnostics
+        shell: bash
+        run: |
+          mkdir -p /tmp/formula-diagnostic
+          tar -czf /tmp/formula-diagnostic/source.tar.gz chat-cloudflare lib .github/workflows
+          node --input-type=module <<'JS'
+          import {writeFile} from 'node:fs/promises';
+          const origin='https://chat.omindos.ai';
+          const records=[];
+          async function get(path) {
+            try {
+              const response=await fetch(new URL(path,origin),{signal:AbortSignal.timeout(25000),cache:'no-store'});
+              const text=await response.text();
+              records.push({path,status:response.status,type:response.headers.get('content-type'),cache:response.headers.get('cache-control'),bytes:Buffer.byteLength(text),prefix:text.slice(0,160)});
+              return text;
+            } catch (error) { records.push({path,error:String(error)}); return ''; }
+          }
+          const html=await get('/');
+          const appPath=html.match(/src="(\/assets\/app-[^"]+\.js)"/)?.[1];
+          if(appPath) {
+            const app=await get(appPath);
+            const mathPath=app.match(/const ANSWER_MATH_ASSET = "([^"]+)"/)?.[1];
+            if(mathPath) await get(mathPath);
+            await writeFile('/tmp/formula-diagnostic/live-app.js',app);
+          }
+          await get('/_health');
+          await writeFile('/tmp/formula-diagnostic/live.html',html);
+          await writeFile('/tmp/formula-diagnostic/diagnostic.json',JSON.stringify(records,null,2));
+          console.log(JSON.stringify(records,null,2));
+          JS
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: formula-runtime-diagnostic
+          path: /tmp/formula-diagnostic
+          retention-days: 3
