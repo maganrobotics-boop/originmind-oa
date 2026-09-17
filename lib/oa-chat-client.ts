@@ -12,17 +12,32 @@ function prefix(value: string, maximum: number) {
   return /[\uD800-\uDBFF]$/u.test(result) ? result.slice(0, -1) : result;
 }
 async function bridge(payload: object, timeoutMs: number): Promise<BridgeResponse> {
-  // Read the Worker binding directly, as the existing public OA service does.
   const { env } = await import('cloudflare:workers');
-  const secret = (env as typeof env & { PUBLIC_LAB_AI_SERVICE_TOKEN?: string }).PUBLIC_LAB_AI_SERVICE_TOKEN || '';
-  if (secret.length < 32) throw new Error('CHAT_BRIDGE_UNAVAILABLE');
+  const bindings = env as typeof env & {
+    PUBLIC_LAB_AI_SERVICE_TOKEN?: string;
+    CHAT_SERVICE?: { fetch: typeof fetch };
+  };
+  const secret = bindings.PUBLIC_LAB_AI_SERVICE_TOKEN || '';
+  if (secret.length < 32) throw new Error('CHAT_BRIDGE_SECRET_MISSING');
+  // Chat is a same-zone Worker route: global fetch cannot dispatch to it.
+  // Keep the signed service API and fail closed rather than send internal
+  // evidence through a public-network fallback or the anonymous Chat API.
+  const service = bindings.CHAT_SERVICE;
+  if (!service || typeof service.fetch !== 'function') throw new Error('CHAT_BRIDGE_SERVICE_BINDING_MISSING');
   const body = JSON.stringify(payload);
   if (new TextEncoder().encode(body).length > 96 * 1024) throw new Error('CHAT_BRIDGE_REQUEST_LIMIT');
-  const response = await fetch(`${OA_CHAT_ORIGIN}${OA_CHAT_PATH}`, {
+  const response = await service.fetch(`${OA_CHAT_ORIGIN}${OA_CHAT_PATH}`, {
     method: 'POST', headers: await signOaChatRequest(body, secret), body,
     cache: 'no-store', redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(timeoutMs),
   });
-  if (!response.ok || !response.headers.get('content-type')?.startsWith('application/json') || !response.body) throw new Error('CHAT_BRIDGE_UNAVAILABLE');
+  if (!response.ok) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error(`CHAT_BRIDGE_HTTP_${response.status}`);
+  }
+  if (!response.headers.get('content-type')?.startsWith('application/json') || !response.body) {
+    await response.body?.cancel().catch(() => {});
+    throw new Error('CHAT_BRIDGE_INVALID_RESPONSE');
+  }
   const reader = response.body.getReader(); const parts: Uint8Array[] = []; let length = 0;
   try {
     for (;;) {
@@ -34,9 +49,23 @@ async function bridge(payload: object, timeoutMs: number): Promise<BridgeRespons
   } finally { reader.releaseLock(); }
   const bytes = new Uint8Array(length); let offset = 0;
   for (const part of parts) { bytes.set(part, offset); offset += part.length; }
-  const data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as BridgeResponse;
-  if (data.received !== true) throw new Error('CHAT_BRIDGE_UNAVAILABLE');
+  let data: BridgeResponse;
+  try { data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes)) as BridgeResponse; }
+  catch { throw new Error('CHAT_BRIDGE_INVALID_RESPONSE'); }
+  if (!data || data.received !== true) throw new Error('CHAT_BRIDGE_INVALID_RESPONSE');
   return data;
+}
+function reportBridgeFailure(error: unknown) {
+  // Only allowlisted codes are logged. Never log the request, response body,
+  // upstream exception text, question, evidence, signature, or service secret.
+  const message = error instanceof Error ? error.message : '';
+  const allowed = ['CHAT_BRIDGE_SECRET_MISSING', 'CHAT_BRIDGE_SERVICE_BINDING_MISSING',
+    'CHAT_BRIDGE_REQUEST_LIMIT', 'CHAT_BRIDGE_RESPONSE_LIMIT', 'CHAT_BRIDGE_INVALID_RESPONSE'];
+  const code = allowed.includes(message) || /^CHAT_BRIDGE_HTTP_[1-5]\d{2}$/u.test(message)
+    ? message
+    : error instanceof Error && ['AbortError', 'TimeoutError'].includes(error.name)
+      ? 'CHAT_BRIDGE_TIMEOUT' : 'CHAT_BRIDGE_TRANSPORT_ERROR';
+  console.warn('OA_CHAT_BRIDGE_FAILURE', code);
 }
 export async function oaChatModelStatus() {
   try {
@@ -75,7 +104,10 @@ export async function answerOaChatQuestion(question: string, ranked: RankedKnowl
   }));
   let result: BridgeResponse;
   try { result = await bridge({ operation: 'answer', question, history: history.slice(-2), documents }, 70000); }
-  catch { return { answer: '已检索到相关资料，但问答服务暂未能生成完整答复，请稍后重试。', citations: [], images: [], mode: 'retrieval', fallbackReason: 'shared_model_unavailable' }; }
+  catch (error) {
+    reportBridgeFailure(error);
+    return { answer: '已检索到相关资料，但问答服务暂未能生成完整答复，请稍后重试。', citations: [], images: [], mode: 'retrieval', fallbackReason: 'shared_model_unavailable' };
+  }
   if (typeof result.answer !== 'string' || !result.answer.trim() || result.answer.length > 12000 || !result.answer.isWellFormed()) throw new Error('CHAT_BRIDGE_INVALID_ANSWER');
   const citations = chunks.map((chunk, index) => ({ id: String(index + 1), itemId: chunk.itemId, revisionId: chunk.revisionId, title: chunk.title, category: chunk.category, sectionTitle: chunk.sectionTitle, paragraphRef: chunk.paragraphRef, excerpt: prefix(chunk.content, 600) }));
   let images: OaChatImage[] = [];

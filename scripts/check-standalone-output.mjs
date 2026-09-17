@@ -2,7 +2,7 @@ import { access, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
 import { REVIEWED_KNOWLEDGE_MIGRATIONS } from "../lib/production-release.mjs";
-import { deploymentTarget, productionTarget, requiredStandaloneSecrets } from "../lib/standalone-config.mjs";
+import { deploymentTarget, productionTarget, requiredStandaloneSecrets, validateProductionChatServiceBindings } from "../lib/standalone-config.mjs";
 
 const target = process.argv[2] || "";
 if (target !== "staging" && target !== "production") throw new Error("Only staging or production standalone output may be checked");
@@ -59,6 +59,7 @@ function assertStagingOutput() {
 }
 
 function assertProductionOutput() {
+  validateProductionChatServiceBindings(config.services);
   const websiteDatabase = databases.find((entry) => entry.binding === "WEBSITE_DB");
   if (config.account_id !== expected.accountId) throw new Error("Standalone Cloudflare account does not match the authorized production account");
   if (
