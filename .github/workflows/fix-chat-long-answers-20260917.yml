@@ -1,16 +1,25 @@
 name: Fix Chat long answers 20260917
 
 on:
+  push:
+    branches: [fix/knowledge-image-e2e-20260917]
+    paths: [.github/workflows/fix-chat-long-answers-20260917.yml]
   workflow_dispatch:
 
 permissions:
   contents: write
 
+concurrency:
+  group: fix-chat-long-answers-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   fix:
+    if: github.ref == 'refs/heads/fix/knowledge-image-e2e-20260917'
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
     steps:
-      - name: Checkout selected branch
+      - name: Checkout isolated repair branch
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: true
@@ -29,7 +38,6 @@ jobs:
         shell: python
         run: |
           from pathlib import Path
-
           app = Path("chat-cloudflare/src/app.mjs")
           text = app.read_text(encoding="utf-8")
           replacements = [
@@ -51,11 +59,11 @@ jobs:
             ),
           ]
           for old, new in replacements:
-            if old not in text:
+            if old in text:
+              text = text.replace(old, new, 1)
+            elif new not in text:
               raise SystemExit(f"Expected app.mjs fragment not found: {old[:160]}")
-            text = text.replace(old, new, 1)
           app.write_text(text, encoding="utf-8")
-
           test = Path("chat-cloudflare/test/worker.test.mjs")
           t = test.read_text(encoding="utf-8")
           t = t.replace(
@@ -80,16 +88,30 @@ jobs:
           grep -F 'workersAiCall(context, messages, maxTokens = 2_400)' chat-cloudflare/src/app.mjs
           grep -F '科研、机器人、论文、项目和技术问题应以回答完整为优先' chat-cloudflare/src/app.mjs
 
-      - name: Commit verified repair
+      - name: Commit verified repair on the isolated branch only
         shell: bash
         run: |
           set -euo pipefail
+          test "$GITHUB_REF_NAME" = 'fix/knowledge-image-e2e-20260917'
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add chat-cloudflare/src/app.mjs chat-cloudflare/test/worker.test.mjs
-          if git diff --cached --quiet; then
-            echo "Long-answer repair is already current."
-            exit 0
+          if ! git diff --cached --quiet; then
+            git commit -m "fix(chat): allow complete long-form answers"
+            git push origin "HEAD:${GITHUB_REF_NAME}"
           fi
-          git commit -m "fix(chat): allow complete long-form answers"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+          git rev-parse HEAD >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Prepare private source snapshot for follow-up testing
+        if: always()
+        shell: bash
+        run: git archive --format=tar --output=source-under-test.tar HEAD
+
+      - name: Retain private source snapshot for one day
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: chat-repair-source
+          path: source-under-test.tar
+          retention-days: 1
+          if-no-files-found: error
