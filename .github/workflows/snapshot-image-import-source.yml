@@ -1,0 +1,22 @@
+name: Snapshot image import source
+on:
+  push:
+    branches: [verify/oa-image-release-20260917]
+    paths: [.github/workflows/snapshot-image-import-source.yml]
+permissions:
+  contents: read
+jobs:
+  snapshot:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: 4da0014864d471faa18640cca9cbcd05c6587fbe
+          persist-credentials: false
+      - run: git archive --format=zip --output=source.zip HEAD chat-cloudflare lib app tests scripts drizzle package.json package-lock.json tsconfig.json
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: image-import-source
+          path: source.zip
+          retention-days: 3
