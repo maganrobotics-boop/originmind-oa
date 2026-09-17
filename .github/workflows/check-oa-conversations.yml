@@ -1,0 +1,30 @@
+name: Check OA conversation integration
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: oa-conversations-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  evidence:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/oa-unified-conversations-20260918'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - name: Preserve exact reviewed source snapshot (no secrets or production access)
+        run: |
+          mkdir -p /tmp/oa-conversation-evidence
+          git archive --format=tar HEAD -o /tmp/oa-conversation-evidence/source.tar
+          git rev-parse HEAD > /tmp/oa-conversation-evidence/commit.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: oa-conversation-source-${{ github.event.pull_request.head.sha }}
+          path: /tmp/oa-conversation-evidence/
+          retention-days: 7
