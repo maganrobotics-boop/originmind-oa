@@ -15,6 +15,7 @@ const SOURCE_PATHS = Object.freeze({
   style: join(FRONTEND_DIRECTORY, "styles.css"),
   zipImportAddon: join(FRONTEND_DIRECTORY, "zip-import-addon.js"),
   math: join(ROOT, "node_modules/katex/dist/katex.mjs"),
+  knowledgeImageReferences: resolve(ROOT, "../lib/knowledge-image-references.mjs"),
 });
 
 const PLACEHOLDERS = Object.freeze({
@@ -35,13 +36,18 @@ function replaceExactlyOnce(template, placeholder, replacement) {
 }
 
 async function expectedBuild() {
-  const [template, appSource, style, zipImportAddon, math] = await Promise.all([
+  const [template, appSource, style, zipImportAddon, math, imageReferencesModule] = await Promise.all([
     readFile(SOURCE_PATHS.html, "utf8"),
     readFile(SOURCE_PATHS.app),
     readFile(SOURCE_PATHS.style),
-    readFile(SOURCE_PATHS.zipImportAddon),
+    readFile(SOURCE_PATHS.zipImportAddon, "utf8"),
     readFile(SOURCE_PATHS.math),
+    readFile(SOURCE_PATHS.knowledgeImageReferences, "utf8"),
   ]);
+  // Share the inert HTML/Markdown image parser with OA, alongside local math.
+  const imageReferencesScript = replaceExactlyOnce(imageReferencesModule,
+    "export function knowledgeImageReferences", "function knowledgeImageReferences");
+  const zipImportBundle = Buffer.from(`"use strict";\n(() => {\n${imageReferencesScript}\n${zipImportAddon}\n})();\n`, "utf8");
   const mathName = `katex-${digest(math)}.mjs`;
   const app = Buffer.from(replaceExactlyOnce(appSource.toString("utf8"), "__KATEX_ASSET__", `/assets/${mathName}`), "utf8");
   const appName = `app-${digest(app)}.js`;
@@ -53,7 +59,7 @@ async function expectedBuild() {
   }
   return {
     html: Buffer.from(html, "utf8"),
-    rootFiles: new Map([["zip-import-addon.js", zipImportAddon]]),
+    rootFiles: new Map([["zip-import-addon.js", zipImportBundle]]),
     assets: new Map([
       [appName, app],
       [mathName, math],
