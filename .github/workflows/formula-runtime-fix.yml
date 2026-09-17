@@ -1,0 +1,64 @@
+name: Formula runtime integration (temporary)
+on:
+  push:
+    branches: [fix/chat-formula-runtime-20260917]
+    paths: [.github/workflows/formula-runtime-fix.yml, .github/formula-runtime-apply.py]
+permissions:
+  contents: write
+jobs:
+  verify:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Apply guarded source integration
+        run: |
+          mkdir -p "$RUNNER_TEMP/formula-evidence"
+          python .github/formula-runtime-apply.py
+          git diff --check
+      - name: Install locked dependencies and browser tools
+        run: |
+          npm ci --prefix chat-cloudflare
+          npm install --prefix "$RUNNER_TEMP/formula-browser" --no-save --ignore-scripts playwright@1.63.0
+          node "$RUNNER_TEMP/formula-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Build and test the complete Chat application
+        shell: bash
+        run: |
+          set -o pipefail
+          npm --prefix chat-cloudflare run build:frontend
+          npm --prefix chat-cloudflare run check 2>&1 | tee "$RUNNER_TEMP/formula-evidence/tests.log"
+          npm --prefix chat-cloudflare run check:wrangler 2>&1 | tee "$RUNNER_TEMP/formula-evidence/dry-run.log"
+      - name: Verify real browser formula rendering and recovery
+        shell: bash
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/formula-browser/node_modules/playwright/index.mjs
+          BROWSER_REPORT_DIR: ${{ runner.temp }}/formula-evidence/browser
+        run: |
+          set -o pipefail
+          node chat-cloudflare/scripts/check-answer-browser.mjs 2>&1 | tee "$RUNNER_TEMP/formula-evidence/browser-original.log"
+          node chat-cloudflare/scripts/check-formula-runtime-browser.mjs 2>&1 | tee "$RUNNER_TEMP/formula-evidence/browser-runtime.log"
+      - name: Commit verified application changes to this branch only
+        run: |
+          test "$GITHUB_REF_NAME" = 'fix/chat-formula-runtime-20260917'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add chat-cloudflare
+          git diff --cached --check
+          git commit -m 'fix(chat): integrate verified formula parsing and bounded engine recovery'
+          git push origin HEAD:refs/heads/fix/chat-formula-runtime-20260917
+          git rev-parse HEAD > "$RUNNER_TEMP/formula-evidence/tested-commit.txt"
+      - name: Collect evidence and pending workflow diff
+        if: always()
+        run: |
+          git diff -- .github/workflows/check-chat-cloudflare.yml .github/workflows/deploy-chat-cloudflare.yml > "$RUNNER_TEMP/formula-evidence/workflow-changes.patch"
+          git ls-tree HEAD .github/formula-runtime.patch.b64 .github/formula-runtime-apply.py .github/workflows/formula-runtime-fix.yml .github/workflows/formula-runtime-diagnostic.yml > "$RUNNER_TEMP/formula-evidence/temporary-files.txt"
+          tar --exclude=node_modules --exclude=.wrangler --exclude=.wrangler-build -czf "$RUNNER_TEMP/formula-evidence/source.tar.gz" chat-cloudflare lib drizzle .github/workflows
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: formula-runtime-integration
+          path: ${{ runner.temp }}/formula-evidence
+          retention-days: 7
