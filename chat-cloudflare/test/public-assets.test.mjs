@@ -29,17 +29,20 @@ function pngDimensions(bytes) {
 }
 
 async function expectedFrontend() {
-  const [template, app, style] = await Promise.all([
+  const [template, appSource, style, math] = await Promise.all([
     readFile(path.join(frontendDir, "index.html"), "utf8"),
     readFile(path.join(frontendDir, "app.js")),
     readFile(path.join(frontendDir, "styles.css")),
+    readFile(path.join(root, "node_modules/katex/dist/katex.mjs")),
   ]);
+  const mathName = `katex-${digest(math)}.mjs`;
+  const app = Buffer.from(appSource.toString("utf8").replace("__KATEX_ASSET__", `/assets/${mathName}`));
   const appName = `app-${digest(app)}.js`;
   const styleName = `styles-${digest(style)}.css`;
   const html = template
     .replace("__APP_ASSET__", `/assets/${appName}`)
     .replace("__STYLE_ASSET__", `/assets/${styleName}`);
-  return { template, html, app, style, appName, styleName };
+  return { template, html, app, style, math, appName, styleName, mathName };
 }
 
 async function fileSnapshot(paths) {
@@ -339,10 +342,13 @@ test("the deterministic build contains exactly the current content-hashed fronte
   ]);
   assert.deepEqual(
     (await readdir(assetDir)).sort(),
-    [expected.appName, "pwa", expected.styleName].sort(),
+    [expected.appName, expected.mathName, "pwa", expected.styleName].sort(),
   );
   assert.equal(await readFile(path.join(publicDir, "index.html"), "utf8"), expected.html);
   assert.deepEqual(await readFile(path.join(assetDir, expected.appName)), expected.app);
+  assert.deepEqual(await readFile(path.join(assetDir, expected.mathName)), expected.math);
+  assert.match(expected.app.toString("utf8"), new RegExp(expected.mathName.replaceAll(".", "\\.")));
+  assert.doesNotMatch(expected.app.toString("utf8"), /__KATEX_ASSET__/u);
   assert.deepEqual(await readFile(path.join(assetDir, expected.styleName)), expected.style);
 });
 
@@ -351,6 +357,7 @@ test("build --check verifies outputs without mutating them", async () => {
   const outputs = [
     path.join(publicDir, "index.html"),
     path.join(assetDir, expected.appName),
+    path.join(assetDir, expected.mathName),
     path.join(assetDir, expected.styleName),
   ];
   const before = await fileSnapshot(outputs);
@@ -358,7 +365,7 @@ test("build --check verifies outputs without mutating them", async () => {
     cwd: root,
     encoding: "utf8",
   });
-  assert.match(result.stdout, /^Frontend checked: app-[a-f0-9]{16}\.js, styles-[a-f0-9]{16}\.css\n$/u);
+  assert.match(result.stdout, /^Frontend checked: app-[a-f0-9]{16}\.js, katex-[a-f0-9]{16}\.mjs, styles-[a-f0-9]{16}\.css\n$/u);
   assert.deepEqual(await fileSnapshot(outputs), before);
 });
 
