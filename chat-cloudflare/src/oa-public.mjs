@@ -1,3 +1,4 @@
+import { parseKnowledgeAssets } from "./knowledge-asset-token.mjs";
 import { cleanPublicChatText } from "./public-text.mjs";
 import {
   OA_PUBLIC_RETRIEVE_URL,
@@ -150,6 +151,7 @@ export function parseOaResult(value) {
       "excerpt",
       "sourceLabel",
       "updatedAt",
+      ...(Object.hasOwn(candidate || {}, "assets") ? ["assets"] : []),
     ]);
     const updatedAt = stringField(item.updatedAt, { max: 10, pattern: DATE_PATTERN });
     const parsed = {
@@ -161,6 +163,7 @@ export function parseOaResult(value) {
       excerpt: stringField(item.excerpt, { trim: true, min: 1, max: 600 }),
       sourceLabel: stringField(item.sourceLabel, { max: 160 }),
       updatedAt,
+      ...(Object.hasOwn(item, "assets") ? { assets: parseKnowledgeAssets(item.assets) } : {}),
     };
     if (!validDate(updatedAt) || parsed.id !== String(index + 1)) throw new Error("OA_RESPONSE_INVALID");
     return parsed;
@@ -168,9 +171,10 @@ export function parseOaResult(value) {
   if (items.reduce((total, item) => total + item.excerpt.length, 0) > 3_000) {
     throw new Error("OA_RESPONSE_INVALID");
   }
-  if (items.reduce((total, item) => total + Object.values(item).reduce((sum, field) => sum + field.length, 0), 0) > 4_096) {
+  if (items.reduce((total, item) => total + Object.values(item).reduce((sum, field) => sum + (typeof field === "string" ? field.length : 0), 0), 0) > 4_096) {
     throw new Error("OA_RESPONSE_INVALID");
   }
+  if (items.reduce((total, item) => total + (item.assets?.length || 0), 0) > 4) throw new Error("OA_RESPONSE_INVALID");
   return items;
 }
 
@@ -289,6 +293,7 @@ export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS) {
         paragraphRef: item.paragraphRef,
         sourceLabel: item.sourceLabel,
         origin: "oa_public",
+        ...(item.assets?.length ? { assets: item.assets } : {}),
       })),
     };
   } catch (error) {

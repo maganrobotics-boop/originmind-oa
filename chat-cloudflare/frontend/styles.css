@@ -4760,3 +4760,10 @@ body.public-chat-page {
     animation: none;
   }
 }
+
+/* Only structured OA-approved same-origin image capabilities reach this gallery. */
+.knowledge-images { display: grid; gap: 16px; width: 100%; margin-top: 16px; }
+.knowledge-figure { margin: 0; max-width: 100%; }
+.knowledge-figure img { display: block; max-width: 100%; height: auto; max-height: 680px; object-fit: contain; border-radius: 8px; }
+.knowledge-figure img[hidden] { display: none; }
+.knowledge-figure figcaption { margin-top: 8px; font-size: 13px; line-height: 1.6; overflow-wrap: anywhere; }

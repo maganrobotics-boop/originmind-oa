@@ -567,6 +567,44 @@ const CHAT_RECENT_LIMIT = 8;
 const CHAT_TITLE_MAX_CHARACTERS = 30;
 const CHAT_CONVERSATIONS_MAX_STORED_CHARS = 2_000_000;
 
+function validatedKnowledgeImages(value) {
+  if (!Array.isArray(value)) return [];
+  const result = [];
+  const seen = new Set();
+  for (const item of value.slice(0, 4)) {
+    if (!item || typeof item.url !== "string" ||
+        !/^\/api\/knowledge\/assets\/v1_[A-Za-z0-9_-]{80,320}$/u.test(item.url) ||
+        !["image/png", "image/jpeg", "image/webp"].includes(item.mimeType) ||
+        typeof item.alt !== "string" || !item.alt.trim() || item.alt.length > 120 || seen.has(item.url)) continue;
+    seen.add(item.url);
+    result.push({ url: item.url, mimeType: item.mimeType, alt: item.alt });
+  }
+  return result;
+}
+
+function knowledgeImageFields(message) {
+  const images = message?.role === "assistant" ? validatedKnowledgeImages(message.images) : [];
+  return images.length ? { images } : {};
+}
+
+function renderKnowledgeImages(images) {
+  const gallery = element("div", { className: "knowledge-images", attributes: { "aria-label": "公开资料关联图片" } });
+  for (const asset of validatedKnowledgeImages(images)) {
+    const figure = element("figure", { className: "knowledge-figure" });
+    const image = element("img", { attributes: {
+      src: asset.url, alt: asset.alt, loading: "lazy", decoding: "async", referrerpolicy: "no-referrer",
+    } });
+    const caption = element("figcaption", { text: asset.alt });
+    image.addEventListener("error", () => {
+      image.hidden = true;
+      caption.textContent = `${asset.alt}（图片已失效、撤回或暂不可用，请重新提问刷新。）`;
+    }, { once: true });
+    figure.append(image, caption);
+    gallery.append(figure);
+  }
+  return gallery;
+}
+
 function boundedChatMessages(messages) {
   const result = [];
   let remaining = CHAT_HISTORY_MAX_CHARS;
@@ -574,7 +612,7 @@ function boundedChatMessages(messages) {
     if (!item || !["user", "assistant"].includes(item.role) || typeof item.content !== "string") continue;
     const content = item.content.slice(0, item.role === "user" ? 2000 : 12_000);
     if (!content.trim() || content.length > remaining) break;
-    result.unshift({ role: item.role, content });
+    result.unshift({ role: item.role, content, ...knowledgeImageFields(item) });
     remaining -= content.length;
   }
   while (result[0]?.role === "assistant") result.shift();
@@ -615,6 +653,7 @@ function readChatHistory(storage, section, now = Date.now()) {
       messages: boundedChatMessages(value.messages).map((item) => ({
         role: item.role,
         content: item.role === "assistant" ? userFacingAnswer(item.content) : item.content,
+        ...knowledgeImageFields(item),
       })),
       draft: value.draft,
       conversationToken: tokenFresh && typeof value.conversationToken === "string" && value.conversationToken.length <= 40_000
@@ -735,6 +774,7 @@ function readChatConversations(storage, allowedSections, now = Date.now()) {
       const messages = boundedChatMessages(item.messages).map((message) => ({
         role: message.role,
         content: message.role === "assistant" ? userFacingAnswer(message.content) : message.content,
+        ...knowledgeImageFields(message),
       }));
       const interrupted = item.interrupted === true;
       conversations.push({
@@ -2493,6 +2533,7 @@ function createPublicApp() {
       : element("div", { className: "message-body", text: answer }));
 
     if (message.role === "assistant") {
+      if (validatedKnowledgeImages(message.images).length) article.append(renderKnowledgeImages(message.images));
       const actions = element("div", { className: "message-actions" });
       const copy = textButton("", "copy-answer");
       copy.setAttribute("aria-label", "复制回答");
@@ -2804,6 +2845,7 @@ function createPublicApp() {
       const assistant = {
         role: "assistant",
         content: userFacingAnswer(payload.answer),
+        ...knowledgeImageFields({ role: "assistant", images: payload.images }),
         mode: payload.mode,
         provider: payload.provider,
       };
