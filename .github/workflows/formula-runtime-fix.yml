@@ -18,6 +18,13 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/formula-evidence"
           python .github/formula-runtime-apply.py
+          python - <<'PY'
+          from pathlib import Path
+          p=Path('chat-cloudflare/scripts/check-answer-browser.mjs')
+          source=p.read_text()
+          assert '"**/assets/katex-*.mjs"' in source
+          p.write_text(source.replace('"**/assets/katex-*.mjs"','"**/assets/katex-*.mjs*"'))
+          PY
           git diff --check
       - name: Install locked dependencies and browser tools
         run: |
