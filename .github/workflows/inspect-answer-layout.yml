@@ -1,0 +1,27 @@
+name: Inspect answer layout
+on:
+  push:
+    branches: [fix/chat-flattened-answer-20260917]
+    paths: [.github/workflows/inspect-answer-layout.yml]
+permissions:
+  contents: read
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Snapshot source and read public response headers
+        shell: bash
+        run: |
+          mkdir -p /tmp/answer-layout
+          git rev-parse HEAD > /tmp/answer-layout/commit.txt
+          git archive --format=tar.gz HEAD > /tmp/answer-layout/source.tar.gz
+          curl --max-time 30 --silent --show-error --dump-header /tmp/answer-layout/headers.txt https://chat.omindos.ai/ --output /tmp/answer-layout/online.html || true
+      - uses: actions/upload-artifact@v4
+        with:
+          name: answer-layout-source-${{ github.run_id }}
+          path: /tmp/answer-layout/
+          retention-days: 3
