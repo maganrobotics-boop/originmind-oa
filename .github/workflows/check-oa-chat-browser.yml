@@ -1,0 +1,67 @@
+name: Check OA Chat browser parity
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'components/knowledge/**'
+      - 'lib/oa-chat*'
+      - 'scripts/*oa-chat*'
+      - 'chat-cloudflare/frontend/**'
+      - 'package*.json'
+      - '.github/workflows/check-oa-chat-browser.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'app/**'
+      - 'components/knowledge/**'
+      - 'lib/oa-chat*'
+      - 'scripts/*oa-chat*'
+      - 'chat-cloudflare/frontend/**'
+      - 'package*.json'
+      - '.github/workflows/check-oa-chat-browser.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oa-chat-browser-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked OA dependencies
+        run: npm run install:ci
+      - name: Build the real OA page with shared Chat rendering
+        run: |
+          node scripts/sync-oa-chat-shared.mjs
+          node scripts/build-oa-chat-browser-fixture.mjs
+      - name: Install the same isolated browser test engine as public Chat
+        run: |
+          npm install --prefix "$RUNNER_TEMP/oa-chat-browser" --no-save --ignore-scripts playwright@1.63.0
+          node "$RUNNER_TEMP/oa-chat-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Verify desktop, tablet and mobile interactions with synthetic APIs
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/oa-chat-browser/node_modules/playwright/index.mjs
+        run: node scripts/check-oa-chat-browser.mjs
+      - name: Preserve browser results and screenshots
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: oa-chat-browser-${{ github.sha }}-${{ github.run_attempt }}
+          path: |
+            parity-validation/browser-app/
+            parity-validation/browser-report/
+          if-no-files-found: warn
+          retention-days: 7

@@ -47,3 +47,13 @@
 .oa-chat-status > .unavailable { background:#b53d3d; }
 @media(max-width:560px) { .oa-shared-chat .oa-chat-messages { padding:18px 14px; } .oa-shared-chat .empty-hero p { font-size:14px; } .oa-shared-chat .oa-chat-composer { min-height:62px; padding:9px 10px 9px 16px; } }
 @media(max-height:520px) { .oa-shared-chat .oa-chat-examples { display:none; } .oa-shared-chat .empty-hero { padding:10px; min-height:70px; } .oa-shared-chat .empty-hero h2 { font-size:22px; margin-bottom:8px; } }
+/* Match OA's 960px drawer breakpoint, including widths above the old 820px layout. */
+.oa-app.oa-workspace .mobile-sidebar:not(.open) { visibility:hidden; box-shadow:none; pointer-events:none; }
+.oa-app.oa-workspace .workspace-sidebar-toggle, .oa-app.oa-workspace .mobile-menu-button { color:#171717; }
+@media(max-width:960px) {
+  .oa-app.oa-workspace .mobile-sidebar { display:block; position:fixed; z-index:60; inset:0 auto 0 0; width:min(86vw,300px); transform:translateX(-100%); transition:transform 180ms ease; box-shadow:10px 0 30px #0f212b2e; }
+  .oa-app.oa-workspace .mobile-sidebar.open { transform:translateX(0); visibility:visible; pointer-events:auto; }
+  .oa-app.oa-workspace .mobile-sidebar .sidebar-shell { display:flex; height:100%; padding-bottom:max(18px,env(safe-area-inset-bottom)); overflow-y:auto; overscroll-behavior:contain; }
+  .oa-app.oa-workspace .mobile-nav-overlay { display:block; position:fixed; z-index:50; inset:0; visibility:hidden; opacity:0; background:#14222b5c; transition:180ms ease; }
+  .oa-app.oa-workspace .mobile-nav-overlay.visible { visibility:visible; opacity:1; }
+}

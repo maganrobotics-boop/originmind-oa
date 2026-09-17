@@ -12,7 +12,9 @@ function prefix(value: string, maximum: number) {
   return /[\uD800-\uDBFF]$/u.test(result) ? result.slice(0, -1) : result;
 }
 async function bridge(payload: object, timeoutMs: number): Promise<BridgeResponse> {
-  const secret = process.env.PUBLIC_LAB_AI_SERVICE_TOKEN || '';
+  // Read the Worker binding directly, as the existing public OA service does.
+  const { env } = await import('cloudflare:workers');
+  const secret = (env as typeof env & { PUBLIC_LAB_AI_SERVICE_TOKEN?: string }).PUBLIC_LAB_AI_SERVICE_TOKEN || '';
   if (secret.length < 32) throw new Error('CHAT_BRIDGE_UNAVAILABLE');
   const body = JSON.stringify(payload);
   if (new TextEncoder().encode(body).length > 96 * 1024) throw new Error('CHAT_BRIDGE_REQUEST_LIMIT');
