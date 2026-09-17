@@ -1,0 +1,66 @@
+name: Prepare Chat answer presentation fix
+
+on:
+  push:
+    branches: [fix/answer-content-cleanup-20260917]
+    paths:
+      - 'chat-cloudflare/src/answer-presentation.mjs'
+      - 'chat-cloudflare/scripts/prepare-answer-presentation.mjs'
+      - 'chat-cloudflare/test/answer-presentation*.test.mjs'
+      - '.github/workflows/prepare-chat-answer-presentation.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  prepare-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: fix/answer-content-cleanup-20260917
+          persist-credentials: true
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: chat-cloudflare/package-lock.json
+      - name: Apply guarded source edits
+        run: node chat-cloudflare/scripts/prepare-answer-presentation.mjs
+      - name: Install locked dependencies
+        run: npm ci --prefix chat-cloudflare
+      - name: Build and verify Chat
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix chat-cloudflare run build:frontend
+          npm --prefix chat-cloudflare run check 2>&1 | tee /tmp/answer-presentation-tests.txt
+          npm --prefix chat-cloudflare run check:wrangler
+      - name: Commit verified source and frontend artifacts
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add chat-cloudflare/src/app.mjs chat-cloudflare/src/knowledge.mjs chat-cloudflare/frontend/app.js chat-cloudflare/test/suggestions.test.mjs chat-cloudflare/public
+          if ! git diff --cached --quiet; then
+            git commit -m 'fix(chat): apply verified clean answer presentation and rebuild assets'
+            git push origin HEAD:fix/answer-content-cleanup-20260917
+          fi
+      - name: Package source and test evidence
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p /tmp/answer-presentation-evidence
+          git rev-parse HEAD > /tmp/answer-presentation-evidence/commit.txt
+          cp /tmp/answer-presentation-tests.txt /tmp/answer-presentation-evidence/ 2>/dev/null || true
+          tar --exclude=node_modules --exclude=.wrangler -czf /tmp/answer-presentation-evidence/source.tar.gz chat-cloudflare lib/knowledge-image-references.mjs
+      - name: Preserve private build evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chat-answer-presentation-${{ github.run_id }}
+          path: /tmp/answer-presentation-evidence
+          if-no-files-found: warn
+          retention-days: 7
