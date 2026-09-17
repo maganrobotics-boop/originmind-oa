@@ -135,7 +135,9 @@ export function OaChatPanel() {
         <form className="composer oa-chat-composer" onSubmit={submit}>
           <label className="sr-only" htmlFor={composerId}>询问实验室大数据</label>
           <textarea ref={input} id={composerId} value={question} rows={1} maxLength={2000} placeholder="询问实验室大数据" onChange={event => setQuestion(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void ask(); } }} />
-          {asking ? <button type="button" className="send-button" onClick={() => requestRef.current?.abort()} aria-label="停止等待回答"><Square size={18} /></button> : <button type="submit" className="send-button" disabled={question.trim().length < 2} aria-label="发送问题"><ArrowUp size={24} /></button>}
+          {/* Abort may synchronously replace the control. Cancel its default action
+              before aborting and keep stop/send as separate DOM buttons. */}
+          {asking ? <button key="stop" type="button" className="send-button" onClick={event => { event.preventDefault(); requestRef.current?.abort(); }} aria-label="停止等待回答"><Square size={18} /></button> : <button key="send" type="submit" className="send-button" disabled={question.trim().length < 2} aria-label="发送问题"><ArrowUp size={24} /></button>}
         </form>
       </div>
     </div>
