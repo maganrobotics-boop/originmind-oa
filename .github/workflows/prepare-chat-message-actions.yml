@@ -24,9 +24,43 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           ref: feat/chat-message-actions-20260917
+          fetch-depth: 0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
+      - name: Reconcile the inspected main layout fix without overwriting source
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          MAIN_FIX=39c2b0919c8abc7138a52636bfdf7557c24417de
+          if ! git merge-base --is-ancestor "$MAIN_FIX" HEAD; then
+            python3 - <<'PY'
+          import pathlib, subprocess
+          path = '.github/workflows/check-chat-cloudflare.yml'
+          current = pathlib.Path(path).read_text()
+          approved = subprocess.check_output(['git', 'show', '39c2b0919c8abc7138a52636bfdf7557c24417de:' + path], text=True)
+          assert current.replace('          node chat-cloudflare/scripts/check-message-actions-browser.mjs\n', '') == approved, 'CI reconciliation must retain the complete approved workflow'
+          PY
+            if ! git merge --no-commit --no-ff "$MAIN_FIX"; then
+              python3 - <<'PY'
+          import subprocess
+          allowed = {
+            '.github/workflows/check-chat-cloudflare.yml',
+            'chat-cloudflare/public/index.html',
+            'chat-cloudflare/public/assets/app-c8025c4679fea989.js',
+            'chat-cloudflare/public/assets/app-063adeb2dac7dbb9.js',
+            'chat-cloudflare/public/assets/app-29458d0915f104d4.js',
+          }
+          conflicts = set(filter(None, subprocess.check_output(['git', 'diff', '--name-only', '--diff-filter=U'], text=True).splitlines()))
+          assert conflicts and conflicts <= allowed, f'Unexpected source conflict; stop for review: {conflicts - allowed}'
+          PY
+              # Source changes must merge normally. Only generated public bytes are
+              # reset before a deterministic rebuild of both preserved changes.
+              git restore --source=HEAD --staged --worktree .github/workflows/check-chat-cloudflare.yml chat-cloudflare/public
+              test -z "$(git diff --name-only --diff-filter=U)"
+            fi
+          fi
       - name: Apply inspected frontend integration
         run: |
           node chat-cloudflare/scripts/prepare-message-actions.mjs
@@ -49,6 +83,7 @@ jobs:
           node chat-cloudflare/scripts/check-message-actions-browser.mjs
           node chat-cloudflare/scripts/check-answer-browser.mjs
           node chat-cloudflare/scripts/check-formula-runtime-browser.mjs
+          node chat-cloudflare/scripts/check-answer-layout-browser.mjs
       - name: Commit only this feature and rebuilt release inputs
         run: |
           set -euo pipefail
@@ -56,7 +91,7 @@ jobs:
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add chat-cloudflare/frontend chat-cloudflare/scripts/build-frontend.mjs chat-cloudflare/scripts/check-message-actions-browser.mjs chat-cloudflare/test chat-cloudflare/package.json chat-cloudflare/public .github/workflows/check-chat-cloudflare.yml
           if ! git diff --cached --quiet; then
-            git commit -m 'feat(chat): add answer actions, public source label and question editing'
+            git commit -m 'build(chat): reconcile message actions with approved answer layout'
             git push origin HEAD:feat/chat-message-actions-20260917
           fi
       - name: Preserve branch verification files
