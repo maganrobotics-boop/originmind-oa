@@ -1,4 +1,5 @@
 import { PublicError } from "./errors.mjs";
+import { cleanAnswerPresentation, boundedKnowledgeExcerpt } from "./answer-presentation.mjs";
 
 function normalizedKey(value) {
   return value.normalize("NFKC").toLocaleLowerCase("zh-CN").replace(/\s+/gu, " ").trim();
@@ -16,30 +17,23 @@ export function displayKnowledgeTitle(item) {
 }
 
 export function fallbackAnswer(documents) {
-  if (!documents.length) {
-    return "目前没有足够信息回答这个问题。你可以补充具体方向、对象或时间范围；如需团队确认，请点击“提交咨询”。";
-  }
   const excerpts = [];
   const seen = new Set();
   for (const document of documents) {
     const clean = typeof document?.body === "string"
-      ? document.body
-        .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, " ")
-        .replace(/\s+/gu, " ")
-        .trim()
+      ? cleanAnswerPresentation(document.body, { title: document.title, document: true })
       : "";
-    const key = clean.normalize("NFKC").toLocaleLowerCase("zh-CN");
+    const key = clean.normalize("NFKC").toLocaleLowerCase("zh-CN").replace(/\s+/gu, " ");
     if (!clean || seen.has(key)) continue;
     seen.add(key);
-    const characters = Array.from(clean);
-    excerpts.push(characters.length > 520 ? `${characters.slice(0, 519).join("")}…` : clean);
+    excerpts.push(boundedKnowledgeExcerpt(clean));
     if (excerpts.length === 3) break;
   }
   if (!excerpts.length) {
-    return "目前没有足够信息回答这个问题。你可以补充具体方向、对象或时间范围；如需团队确认，请点击“提交咨询”。";
+    return "目前没有足够信息回答这个问题。你可以补充具体方向、对象或时间范围。";
   }
-  if (excerpts.length === 1) return excerpts[0];
-  return `知识库中与这个问题直接相关的内容包括：\n\n${excerpts.map((excerpt) => `- ${excerpt}`).join("\n")}`;
+  // Keep actual paragraph/list boundaries: never wrap a whole Markdown document in one bullet.
+  return excerpts.join("\n\n");
 }
 
 export function safeSourceUrl(value) {

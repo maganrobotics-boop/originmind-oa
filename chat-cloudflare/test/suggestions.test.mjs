@@ -363,14 +363,14 @@ test("retrieved knowledge remains a substantive answer when the model is unavail
 });
 
 test("extractive fallback deduplicates and bounds approved knowledge excerpts", () => {
-  const repeated = `公开内容${"甲".repeat(600)}`;
+  const repeated = `公开内容${"甲".repeat(2200)}`;
   const answer = fallbackAnswer([
     { body: repeated },
     { body: repeated },
     { body: "另一条公开内容。" },
   ]);
-  assert.match(answer, /^知识库中与这个问题直接相关的内容包括：/u);
-  assert.equal((answer.match(/^- /gmu) || []).length, 2);
+  assert.doesNotMatch(answer, /知识库中与这个问题直接相关的内容包括/u);
+  assert.equal((answer.match(/^公开内容/gmu) || []).length, 1);
   assert.match(answer, /…/u);
   assert.match(answer, /另一条公开内容/u);
 });
