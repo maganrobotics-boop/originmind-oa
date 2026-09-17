@@ -19,14 +19,15 @@ const migrations = await Promise.all(migrationNames.map((name) => readFile(new U
 const secret = "A".repeat(43);
 const id = "11111111-2222-4333-8444-555555555555";
 const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl6ZFEAAAAASUVORK5CYII=", "base64");
-const content = "# 实验平台\n\n![小车正视与侧视](assets/figure1.png)\n\n平台集成激光雷达与相机。";
+const defaultContent = "# 实验平台\n\n![小车正视与侧视](assets/figure1.png)\n\n平台集成激光雷达与相机。";
+const htmlContent = '# 实验平台\n\n<img src="assets/figure1.png" style="width:4.18557in;height:2.3in" alt="差速轮式小车正视与侧视" />\n\n平台集成激光雷达与相机。';
 const digest = (value) => createHash("sha256").update(value).digest("hex");
 const ranked = [{
   id: "public-chunk-1", sectionTitle: "实验平台", score: 4,
   [PUBLIC_ASSET_CONTEXT]: { itemId: "fixture-item", revisionId: "fixture-revision", chunkNo: 1 },
 }];
 
-function fixture({ ready = true, approved = true } = {}) {
+function fixture({ ready = true, approved = true, content = defaultContent } = {}) {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec("CREATE TABLE migration_control (freeze_id TEXT PRIMARY KEY, activated_at TEXT, deactivated_at TEXT)");
   for (const migration of migrations) sqlite.exec(migration);
@@ -128,3 +129,27 @@ test("production schema rejects missing or inconsistent object bytes without cha
     }), null);
   } finally { f.sqlite.close(); }
 });
+
+test("HTML image references reach the deployed image table and real response bytes", async () => {
+  const f = fixture({ content: htmlContent });
+  try {
+    const images = (await collectPublicKnowledgeAssets(ranked, f.database, secret)).get("public-chunk-1");
+    assert.equal(images?.length, 1);
+    assert.equal(images[0].alt, "差速轮式小车正视与侧视");
+    const response = await readPublicKnowledgeAsset(images[0].token, secret, f.database, f.bucket);
+    assert.equal(response?.status, 200);
+    assert.deepEqual(Buffer.from(await response.arrayBuffer()), png);
+    f.sqlite.exec("UPDATE knowledge_items SET status='revoked',active_revision_id=NULL WHERE id='fixture-item'");
+    assert.equal(await readPublicKnowledgeAsset(images[0].token, secret, f.database, f.bucket), null);
+  } finally { f.sqlite.close(); }
+});
+
+for (const options of [{ ready: false }, { approved: false }]) {
+  test(`HTML syntax cannot bypass readiness or approval: ${JSON.stringify(options)}`, async () => {
+    const f = fixture({ ...options, content: htmlContent });
+    try {
+      assert.equal((await collectPublicKnowledgeAssets(ranked, f.database, secret)).size, 0);
+      assert.equal(f.reads.length, 0);
+    } finally { f.sqlite.close(); }
+  });
+}

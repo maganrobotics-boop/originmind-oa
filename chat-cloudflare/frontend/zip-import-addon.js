@@ -136,6 +136,7 @@ function markdownAssetReferences(markdown) {
     try { decoded = decodeURIComponent(raw); } catch { /* keep raw path */ }
     if (/^assets\//iu.test(decoded)) references.add(normalizeZipPath(decoded));
   }
+  for (const path of knowledgeImageReferences(markdown).keys()) references.add(normalizeZipPath(path));
   return references;
 }
 

@@ -1,3 +1,5 @@
+import { knowledgeImageReferences } from "./knowledge-image-references.mjs";
+
 const SAFE_ASSET_PATH = /^assets\/[A-Za-z0-9][A-Za-z0-9._/-]*\.(?:webp|png|jpe?g)$/i;
 const ALLOWED_MIME = new Set(["image/webp", "image/png", "image/jpeg"]);
 export const MAX_KNOWLEDGE_ASSET_BYTES = 8 * 1024 * 1024;
@@ -7,12 +9,15 @@ const MARKDOWN_IMAGE_REFERENCE = /!\[[^\]]*\]\(\s*(?:<([^>]+)>|([^\s)]+))(?:\s+[
 
 export function referencedKnowledgeAssetPaths(markdown: string): string[] {
   const references = new Set<string>();
+  // Preserve the existing Markdown path validation, including invalid-path errors.
   for (const match of String(markdown || "").matchAll(MARKDOWN_IMAGE_REFERENCE)) {
     const raw = String(match[1] || match[2] || "").split(/[?#]/u, 1)[0];
     let decoded = raw;
     try { decoded = decodeURIComponent(raw); } catch { /* keep raw path */ }
     if (/^assets\//iu.test(decoded)) references.add(normalizeKnowledgeAssetPath(decoded));
   }
+  // Word/Pandoc exports keep <img> tags inside Markdown; these also require uploaded bytes.
+  for (const path of knowledgeImageReferences(markdown).keys()) references.add(path);
   return [...references].sort((left, right) => left.localeCompare(right));
 }
 
