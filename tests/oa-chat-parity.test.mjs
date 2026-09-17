@@ -135,6 +135,8 @@ test('OA keeps its private retrieval and removes only the requested navigation e
   assert.match(route, /getActiveKnowledgeChunks\(actor, retrievalQuery\)/u);
   assert.match(route, /answerOaChatQuestion\(question, ranked, history\)/u);
   assert.match(route, /!authorized\.ndaCompleted/u);
-  assert.match(asset, /detail\?\.item.status !== "active"/u);
-  assert.match(asset, /detail.item.activeRevisionId !== requestedRevision/u);
+  assert.match(asset, /findKnowledgeItem\(safe\.id, access\.actor\)/u);
+  assert.match(asset, /currentItem\?\.status !== "active"/u);
+  assert.match(asset, /currentItem\.active_revision_id !== requestedRevision/u);
+  assert.match(asset, /currentItem\.current_revision_id !== requestedRevision/u);
 });

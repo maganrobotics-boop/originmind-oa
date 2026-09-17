@@ -38,7 +38,9 @@ export function OaChatStatus() {
       try {
         const response = await fetch('/api/lab-ai/status', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
         if (!response.ok) { if (!disposed) setStatus([true, false, null, null, null]); return; }
-        const value = await response.json();
+        const payload: unknown = await response.json();
+        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Invalid status response');
+        const value = payload as Record<string, unknown>;
         if (!disposed) setStatus([true, value.authorized === true, value.modelReady === true, value.knowledgeReady === true, value.retrievalReady === true && value.budgetReady === true]);
       } catch { if (!disposed && !controller?.signal.aborted) setStatus([false, null, null, null, null]); }
     };
