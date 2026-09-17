@@ -1,0 +1,93 @@
+name: Integrate OA chat header menu
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: integrate-oa-chat-menu-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+jobs:
+  integrate:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'fix/oa-chat-menu-20260918'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Apply guarded UI-only changes
+        run: |
+          # Preserve literal backslashes when matching the existing test's regex source.
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+          import assert from 'node:assert/strict';
+          const file = 'scripts/apply-oa-chat-menu.mjs';
+          const source = await readFile(file, 'utf8');
+          const anchor = 'replace(tests, `';
+          assert.equal(source.split(anchor).length, 2);
+          await writeFile(file, source.replace(anchor, 'replace(tests, String.raw`'));
+          NODE
+          node scripts/apply-oa-chat-menu.mjs
+      - name: Install locked dependencies
+        run: npm run install:ci
+      - name: Typecheck, lint, build and run all OA tests
+        run: |
+          mkdir -p parity-validation/menu-integration
+          set -o pipefail
+          npm run typecheck 2>&1 | tee parity-validation/menu-integration/typecheck.log
+          npm run lint 2>&1 | tee parity-validation/menu-integration/lint.log
+          npm test 2>&1 | tee parity-validation/menu-integration/tests.log
+      - name: Build actual page for browser acceptance
+        run: |
+          node scripts/sync-oa-chat-shared.mjs
+          node scripts/build-oa-chat-browser-fixture.mjs
+          npm install --prefix "$RUNNER_TEMP/oa-chat-browser" --no-save --ignore-scripts playwright@1.63.0
+          node "$RUNNER_TEMP/oa-chat-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Verify menu, cancellation and five viewport sizes with synthetic APIs only
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/oa-chat-browser/node_modules/playwright/index.mjs
+        run: node scripts/check-oa-chat-browser.mjs
+      - name: Commit verified edits only to the feature branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          test "$HEAD_BRANCH" = 'fix/oa-chat-menu-20260918'
+          git add -- app/page.tsx components/knowledge/knowledge-view.tsx components/knowledge/oa-chat-panel.tsx tests/ui-components.test.mjs scripts/check-oa-chat-browser.mjs
+          if git diff --cached --quiet; then exit 0; fi
+          authorization="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "::add-mask::$authorization"
+          current="$(git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $authorization" ls-remote origin "refs/heads/$HEAD_BRANCH" | cut -f1)"
+          test "$current" = "$EXPECTED_HEAD" || { echo 'Branch moved; reconcile before committing.'; exit 1; }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'fix(oa): move chat clearing to header menu and remove dashboard AI shortcut'
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $authorization" push origin "HEAD:refs/heads/$HEAD_BRANCH"
+      - name: Preserve isolated validation evidence
+        if: always()
+        run: |
+          mkdir -p parity-validation/menu-integration/source
+          git diff --no-ext-diff --binary HEAD > parity-validation/menu-integration/uncommitted.patch
+          git rev-parse HEAD > parity-validation/menu-integration/checkout-sha.txt
+          for file in app/page.tsx components/knowledge/knowledge-view.tsx components/knowledge/oa-chat-panel.tsx tests/ui-components.test.mjs scripts/check-oa-chat-browser.mjs; do
+            cp --parents "$file" parity-validation/menu-integration/source/
+          done
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: oa-chat-menu-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: |
+            parity-validation/menu-integration/
+            parity-validation/browser-report/
+          retention-days: 7
