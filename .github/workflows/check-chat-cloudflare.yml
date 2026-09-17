@@ -51,6 +51,7 @@ jobs:
         run: |
           node chat-cloudflare/scripts/check-answer-browser.mjs
           node chat-cloudflare/scripts/check-formula-runtime-browser.mjs
+          node chat-cloudflare/scripts/check-answer-layout-browser.mjs
       - name: Preserve browser verification evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
