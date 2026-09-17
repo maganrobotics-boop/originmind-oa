@@ -42,13 +42,13 @@ test("restored screenshot answer renders real headings rather than raw hash sign
   assert.equal(nodes(rendered, "strong")[0].textContent, "重点");
 });
 
-test("cleaned fallback retains paragraphs, subheadings and substantive content", () => {
+test("failed synthesis never passes normal Markdown excerpts off as an answer", () => {
   const answer = fallbackAnswer([{ title: "科研方向介绍", body: raw }, { title: "同一资料", body: raw }]);
-  assert.equal((answer.match(/定位与导航/gu) || []).length, 1);
-  assert.match(answer, /## 一、自主移动\n\n\*\*重点\*\*/u);
-  assert.doesNotMatch(answer, /版本|更新时间|适用范围|知识库中|^- #/mu);
+  assert.match(answer, /未能生成完整答复/u);
+  assert.doesNotMatch(answer, /定位与导航|智能操作|自主移动|版本|更新时间|适用范围|知识库中|#/u);
   assert.doesNotMatch(fallbackAnswer([]), /提交咨询/u);
 });
+
 
 for (const mode of ["ai", "retrieval"]) {
   test(`${mode} response hides metadata while preserving source binding and model grounding`, async (t) => {
@@ -76,7 +76,11 @@ for (const mode of ["ai", "retrieval"]) {
     assert.equal(response.status, 200);
     const result = await response.json();
     assert.equal(result.mode, mode);
-    assert.match(result.answer, /定位与导航/u);
+    if (mode === "ai") assert.match(result.answer, /定位与导航/u);
+    else {
+      assert.match(result.answer, /未能生成完整答复/u);
+      assert.doesNotMatch(result.answer, /定位与导航|自主移动|智能操作/u);
+    }
     assert.doesNotMatch(result.answer, /来源|版本|更新时间|适用范围|科研方向介绍|知识库中|\[1\]/u);
     assert.equal(result.sources.length, 1);
     assert.equal(result.sources[0].title, "科研方向介绍 · 第1段 · 来源：OA 公开知识");

@@ -336,7 +336,7 @@ test("Bailian failure and Workers fallback consume one aggregate status-probe bu
   assert.equal(budgetWrites().length, 1);
 });
 
-test("a failed real chat call returns knowledge while replacing a cached green Qwen status", async () => {
+test("a failed real chat reports failure without excerpts and replaces a cached green Qwen status", async () => {
   let aiCalls = 0;
   const env = environment({
     AI: {
@@ -359,7 +359,9 @@ test("a failed real chat call returns knowledge while replacing a cached green Q
   assert.equal(failedChat.status, 200);
   const failedResult = await body(failedChat);
   assert.equal(failedResult.mode, "retrieval");
-  assert.equal(failedResult.answer, OA_CHUNKS[0].excerpt);
+  assert.match(failedResult.answer, /未能生成完整答复/u);
+  assert.notEqual(failedResult.answer, OA_CHUNKS[0].excerpt);
+  assert.equal(failedResult.sources[0].excerpt, OA_CHUNKS[0].excerpt);
   const updatedStatus = await handleRequest(request("/api/status", { origin: null }), env, {}, oaRuntime());
   const result = await body(updatedStatus);
   assert.equal(result.qwenReady, false);
@@ -878,7 +880,7 @@ test("a verified Bailian configuration overrides Workers AI and forbids redirect
   assert.equal(JSON.parse(fetchCalls[0].init.body).stream, false);
 });
 
-test("Bailian redirect responses fall back to retrieved knowledge without being followed", async () => {
+test("Bailian redirect responses fail safely without returning retrieved text without being followed", async () => {
   const env = environment({ DB: await bailianDatabase() });
   let externalCalls = 0;
   const runtime = oaRuntime(OA_CHUNKS, async (_url, init) => {
@@ -895,11 +897,13 @@ test("Bailian redirect responses fall back to retrieved knowledge without being 
   assert.equal(response.status, 200);
   const result = await body(response);
   assert.equal(result.mode, "retrieval");
-  assert.equal(result.answer, OA_CHUNKS[0].excerpt);
+  assert.match(result.answer, /未能生成完整答复/u);
+  assert.notEqual(result.answer, OA_CHUNKS[0].excerpt);
+  assert.equal(result.sources[0].excerpt, OA_CHUNKS[0].excerpt);
   assert.equal(externalCalls, 1);
 });
 
-test("Bailian non-JSON responses fall back to retrieved knowledge", async () => {
+test("Bailian non-JSON responses fail safely without returning retrieved text", async () => {
   const env = environment({ DB: await bailianDatabase() });
   const runtime = oaRuntime(OA_CHUNKS, async () => {
       return new Response("<html>not JSON</html>", {
@@ -916,10 +920,12 @@ test("Bailian non-JSON responses fall back to retrieved knowledge", async () => 
   assert.equal(response.status, 200);
   const result = await body(response);
   assert.equal(result.mode, "retrieval");
-  assert.equal(result.answer, OA_CHUNKS[0].excerpt);
+  assert.match(result.answer, /未能生成完整答复/u);
+  assert.notEqual(result.answer, OA_CHUNKS[0].excerpt);
+  assert.equal(result.sources[0].excerpt, OA_CHUNKS[0].excerpt);
 });
 
-test("oversized Bailian responses fall back to retrieved knowledge", async () => {
+test("oversized Bailian responses fail safely without returning retrieved text", async () => {
   const env = environment({ DB: await bailianDatabase() });
   const hugeJson = JSON.stringify({ choices: [{ message: { content: "大".repeat(270 * 1024) } }] });
   const encoded = new TextEncoder().encode(hugeJson);
@@ -946,7 +952,9 @@ test("oversized Bailian responses fall back to retrieved knowledge", async () =>
   assert.equal(response.status, 200);
   const result = await body(response);
   assert.equal(result.mode, "retrieval");
-  assert.equal(result.answer, OA_CHUNKS[0].excerpt);
+  assert.match(result.answer, /未能生成完整答复/u);
+  assert.notEqual(result.answer, OA_CHUNKS[0].excerpt);
+  assert.equal(result.sources[0].excerpt, OA_CHUNKS[0].excerpt);
 });
 
 test("rate-limit identifiers depend on RATE_LIMIT_HMAC_KEY, not the encryption key", async () => {

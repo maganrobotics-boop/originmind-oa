@@ -320,7 +320,7 @@ test("suggestion endpoint rejects query parameters", async (t) => {
   assert.equal(response.status, 400);
 });
 
-test("retrieved knowledge remains a substantive answer when the model is unavailable", async (t) => {
+test("retrieved knowledge remains source evidence rather than an answer when the model is unavailable", async (t) => {
   const env = environment({
     AI: { run: async () => { throw new Error("model unavailable"); } },
   });
@@ -358,21 +358,16 @@ test("retrieved knowledge remains a substantive answer when the model is unavail
   assert.equal(response.status, 200);
   const result = await response.json();
   assert.equal(result.mode, "retrieval");
-  assert.equal(result.answer, "团队已公开机器人灵巧操作与系统设计方面的研究内容。");
+  assert.match(result.answer, /未能生成完整答复/u);
+  assert.doesNotMatch(result.answer, /团队已公开机器人灵巧操作/u);
   assert.doesNotMatch(result.answer, /无法整理|换个.*问法/u);
 });
 
-test("extractive fallback deduplicates and bounds approved knowledge excerpts", () => {
+test("fallback never concatenates duplicate or long approved excerpts", () => {
   const repeated = `公开内容${"甲".repeat(2200)}`;
-  const answer = fallbackAnswer([
-    { body: repeated },
-    { body: repeated },
-    { body: "另一条公开内容。" },
-  ]);
-  assert.doesNotMatch(answer, /知识库中与这个问题直接相关的内容包括/u);
-  assert.equal((answer.match(/^公开内容/gmu) || []).length, 1);
-  assert.match(answer, /…/u);
-  assert.match(answer, /另一条公开内容/u);
+  const answer = fallbackAnswer([{ body: repeated }, { body: repeated }, { body: "另一条公开内容。" }]);
+  assert.match(answer, /未能生成完整答复/u);
+  assert.doesNotMatch(answer, /公开内容|甲|另一条|知识库中与这个问题直接相关的内容包括/u);
 });
 
 test("questions come from excerpt topics, never filename metadata or unsupported placeholders", () => {
@@ -520,7 +515,10 @@ test("natural clicks bind to the original source without showing its upload file
   const response = await post();
   assert.equal(response.status, 200);
   assert.equal(retrievedQuestion, expectedSource);
-  assert.equal((await response.json()).answer, "触觉反馈帮助机器人调整抓取物体时的力度。");
+  const answered = await response.json();
+  assert.match(answered.answer, /未能生成完整答复/u);
+  assert.doesNotMatch(answered.answer, /触觉反馈/u);
+  assert.equal(answered.sources[0].excerpt, "触觉反馈帮助机器人调整抓取物体时的力度。");
   assert.equal((await post({ messages: [{ role: "user", content: "篡改后的问题" }] })).status, 400);
   const clear = JSON.parse(await decryptSecret(item.suggestionToken, env.APP_ENCRYPTION_KEY));
   const expired = await encryptSecret(JSON.stringify({ ...clear, expiresAt: Date.now() - 1 }), env.APP_ENCRYPTION_KEY);
@@ -549,7 +547,12 @@ test("model and retrieval fallback responses hide labels without breaking source
     assert.equal(response.status, 200);
     const result = await response.json();
     assert.equal(result.mode, mode);
-    assert.match(result.answer, /ROS2/u);
+    if (mode === "ai") assert.match(result.answer, /ROS2/u);
+    else {
+      assert.match(result.answer, /未能生成完整答复/u);
+      assert.doesNotMatch(result.answer, /ROS2/u);
+    }
+    assert.match(result.sources[0].excerpt, /ROS2/u);
     assert.equal(result.sources.length, 1);
     assert.doesNotMatch(JSON.stringify(result), /脱敏|脱密|匿名化/u);
     assert.equal(typeof result.conversationToken, "string");
