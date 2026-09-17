@@ -1,0 +1,111 @@
+name: Verify OA image browser 20260917
+
+on:
+  push:
+    branches: [verify/oa-image-release-20260917]
+    paths: [.github/workflows/verify-oa-image-browser.yml]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  browser-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Prepare an isolated Chromium test runtime
+        run: |
+          npm install --prefix "$RUNNER_TEMP/om-browser" --ignore-scripts --no-audit --no-fund playwright@1.56.1
+          "$RUNNER_TEMP/om-browser/node_modules/.bin/playwright" install --with-deps chromium
+      - name: Wait for the user-authorized OA release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'JS'
+          for (let attempt=0;attempt<40;attempt++) {
+            const response=await fetch('https://api.github.com/repos/maganrobotics-boop/originmind-oa/actions/runs/35177099384',{headers:{Authorization:`Bearer ${process.env.GH_TOKEN}`,Accept:'application/vnd.github+json'},signal:AbortSignal.timeout(20000)});
+            if (!response.ok) throw new Error(`Release status HTTP ${response.status}`);
+            const run=await response.json();
+            if (run.head_sha!=='14080c5e4018f844e134b5747441cd99f73721c8') throw new Error('Unexpected release commit');
+            console.log(JSON.stringify({releaseRun:run.id,status:run.status,conclusion:run.conclusion}));
+            if (run.status==='completed') {
+              if (run.conclusion!=='success') throw new Error('OA release did not succeed');
+              process.exit(0);
+            }
+            await new Promise(resolve=>setTimeout(resolve,15000));
+          }
+          throw new Error('OA release still incomplete');
+          JS
+      - name: Test live question, image rendering and refresh in Chromium
+        run: |
+          cat > "$RUNNER_TEMP/om-browser/verify.mjs" <<'JS'
+          import {chromium} from 'playwright';
+          import {mkdir,writeFile} from 'node:fs/promises';
+          import path from 'node:path';
+          const out=path.join(process.env.GITHUB_WORKSPACE,'browser-acceptance');
+          await mkdir(out,{recursive:true});
+          const browser=await chromium.launch({headless:true});
+          const context=await browser.newContext({viewport:{width:1200,height:900},locale:'zh-CN',userAgent:'OriginMind-Chat-Release-Smoke/1.0 ChromiumBrowserAcceptance'});
+          const page=await context.newPage();
+          const result={checkedAt:new Date().toISOString(),consoleErrors:[]};
+          page.on('pageerror',error=>result.consoleErrors.push(String(error.message).slice(0,200)));
+          async function inspectImages() {
+            const images=page.locator('img[src^="/api/knowledge/assets/"]');
+            const count=await images.count();
+            for(let i=0;i<count;i++) {
+              await images.nth(i).scrollIntoViewIfNeeded();
+              await page.waitForFunction(img=>img.complete,await images.nth(i).elementHandle(),{timeout:15000}).catch(()=>{});
+            }
+            return images.evaluateAll(items=>items.map(image=>({alt:image.alt,complete:image.complete,width:image.naturalWidth,height:image.naturalHeight,renderedWidth:Math.round(image.getBoundingClientRect().width)})));
+          }
+          try {
+            const home=await page.goto('https://chat.omindos.ai/research',{waitUntil:'domcontentloaded',timeout:45000});
+            result.homeHttp=home.status();
+            result.title=await page.title();
+            const input=page.locator('textarea:visible').first();
+            await input.waitFor({state:'visible',timeout:25000});
+            const question='请展示马家旺论文中差速轮式小车实验平台的正视图和侧视图，并说明激光雷达、相机、计算单元和底盘的用途。';
+            await input.fill(question);
+            const responsePromise=page.waitForResponse(response=>response.url()==='https://chat.omindos.ai/api/chat'&&response.request().method()==='POST',{timeout:100000});
+            await input.press('Enter');
+            const response=await responsePromise;
+            const payload=await response.json();
+            result.chatHttp=response.status();
+            result.mode=payload.mode;
+            result.returnedImageCount=payload.images?.length||0;
+            result.answerLength=[...String(payload.answer||'')].length;
+            result.answerTail=String(payload.answer||'').slice(-350);
+            await page.waitForTimeout(2500);
+            result.imagesBeforeReload=await inspectImages();
+            await page.screenshot({path:path.join(out,'desktop.png'),fullPage:true});
+            await page.reload({waitUntil:'domcontentloaded',timeout:45000});
+            await page.waitForTimeout(3000);
+            result.imagesAfterReload=await inspectImages();
+            result.questionRestored=await page.getByText(question,{exact:true}).count()>0;
+            await page.setViewportSize({width:390,height:844});
+            await page.waitForTimeout(500);
+            result.imagesMobile=await inspectImages();
+            result.mobileHorizontalOverflow=await page.evaluate(()=>document.documentElement.scrollWidth>window.innerWidth+2);
+            await page.screenshot({path:path.join(out,'mobile.png'),fullPage:true});
+            result.passed=result.chatHttp===200&&result.returnedImageCount>0&&result.imagesBeforeReload.length===result.returnedImageCount&&result.imagesBeforeReload.every(i=>i.complete&&i.width>0)&&result.imagesAfterReload.length===result.returnedImageCount&&result.imagesAfterReload.every(i=>i.complete&&i.width>0)&&result.questionRestored&&!result.mobileHorizontalOverflow;
+          } catch(error) {
+            result.error=String(error.message||error).slice(0,1000);
+            result.passed=false;
+            await page.screenshot({path:path.join(out,'failure.png'),fullPage:true}).catch(()=>{});
+          } finally {
+            console.log('BROWSER_ACCEPTANCE',JSON.stringify(result));
+            await writeFile(path.join(out,'summary.json'),JSON.stringify(result,null,2));
+            await browser.close();
+          }
+          if(!result.passed) process.exitCode=1;
+          JS
+          node "$RUNNER_TEMP/om-browser/verify.mjs"
+      - name: Preserve browser screenshots and public results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: browser-oa-image-acceptance-${{ github.run_id }}
+          path: browser-acceptance/
+          if-no-files-found: warn
+          retention-days: 7
