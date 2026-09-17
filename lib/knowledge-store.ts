@@ -1,4 +1,5 @@
 import { getD1Database } from "../db";
+import { PUBLIC_ASSET_CONTEXT } from "./public-knowledge-assets.mjs";
 import {
   KNOWLEDGE_PROJECT,
   MAX_KNOWLEDGE_CONTENT_LENGTH,
@@ -1246,6 +1247,7 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
     SELECT
       ROW_NUMBER() OVER (ORDER BY limited.updated_at DESC, limited.item_id ASC, limited.chunk_no ASC) AS public_chunk_no,
       DENSE_RANK() OVER (ORDER BY limited.item_id ASC) AS public_item_no,
+      c.item_id, c.revision_id, c.chunk_no,
       r.title, r.category, r.source_label, c.section_title, c.paragraph_ref,
       c.content, c.search_text, limited.updated_at
     FROM limited_candidates AS limited
@@ -1258,6 +1260,9 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
   `).bind(...terms, KNOWLEDGE_SEARCH_CANDIDATE_LIMIT).all<{
     public_chunk_no: number;
     public_item_no: number;
+    item_id: string;
+    revision_id: string;
+    chunk_no: number;
     title: string;
     category: string;
     source_label: string;
@@ -1283,6 +1288,7 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
     SELECT
       ROW_NUMBER() OVER (ORDER BY limited.updated_at DESC, limited.item_id ASC, limited.chunk_no ASC) AS public_chunk_no,
       DENSE_RANK() OVER (ORDER BY limited.item_id ASC) AS public_item_no,
+      c.item_id, c.revision_id, c.chunk_no,
       r.title, r.category, r.source_label, c.section_title, c.paragraph_ref,
       c.content, c.search_text, limited.updated_at
     FROM limited_candidates AS limited
@@ -1293,6 +1299,9 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
   `).bind(KNOWLEDGE_SEARCH_CANDIDATE_LIMIT).all<{
     public_chunk_no: number;
     public_item_no: number;
+    item_id: string;
+    revision_id: string;
+    chunk_no: number;
     title: string;
     category: string;
     source_label: string;
@@ -1303,6 +1312,7 @@ export async function getPublicActiveKnowledgeChunks(question?: string): Promise
     updated_at: string;
   }>();
   return result.results.map((row) => ({
+    [PUBLIC_ASSET_CONTEXT]: { itemId: row.item_id, revisionId: row.revision_id, chunkNo: row.chunk_no },
     id: `public-chunk-${row.public_chunk_no}`,
     itemId: `public-item-${row.public_item_no}`,
     revisionId: `public-revision-${row.public_item_no}`,

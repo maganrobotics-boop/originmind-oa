@@ -9,7 +9,10 @@ export const PUBLIC_LAB_AI_MAX_TOTAL_EXCERPT_CHARS = 3_000;
 export const PUBLIC_LAB_AI_MAX_TOTAL_TEXT_CHARS = 4_096;
 export const PUBLIC_LAB_AI_MAX_RESPONSE_BYTES = 16 * 1_024;
 
+type PublicLabAiAsset = { token: string; mimeType: string; alt: string };
+
 type PublicLabAiChunk = {
+  assets?: PublicLabAiAsset[];
   id: string;
   title: string;
   category: string;
@@ -87,10 +90,10 @@ function validDate(value: string): string | null {
 }
 
 function textLength(value: Omit<PublicLabAiChunk, "excerpt">): number {
-  return Object.values(value).reduce((total, field) => total + field.length, 0);
+  return Object.values(value).reduce((total, field) => total + (typeof field === "string" ? field.length : 0), 0);
 }
 
-export function buildPublicLabAiRetrieveResponse(ranked: RankedKnowledgeChunk[]): PublicLabAiRetrieveResponse {
+export function buildPublicLabAiRetrieveResponse(ranked: RankedKnowledgeChunk[], assetsByChunk: Map<string, PublicLabAiAsset[]> = new Map()): PublicLabAiRetrieveResponse {
   const candidates = ranked.slice(0, PUBLIC_LAB_AI_MAX_CHUNKS).flatMap((chunk, index) => {
     const title = boundedLine(chunk.title, 100);
     const category = boundedLine(chunk.category, 40);
@@ -99,6 +102,7 @@ export function buildPublicLabAiRetrieveResponse(ranked: RankedKnowledgeChunk[])
     if (title.length < 2 || !category || !content || !updatedAt) return [];
     return [{
       metadata: {
+        ...(assetsByChunk.has(chunk.id) ? { assets: assetsByChunk.get(chunk.id) } : {}),
         id: String(index + 1),
         title,
         category,
@@ -127,6 +131,10 @@ export function buildPublicLabAiRetrieveResponse(ranked: RankedKnowledgeChunk[])
     return [{ ...candidate.metadata, excerpt }];
   });
   chunks.forEach((chunk, index) => { chunk.id = String(index + 1); });
+  // Text keeps its existing budget; optional image metadata must never break retrieval.
+  if (new TextEncoder().encode(JSON.stringify({ chunks })).byteLength > PUBLIC_LAB_AI_MAX_RESPONSE_BYTES) {
+    for (const chunk of chunks) delete chunk.assets;
+  }
   return { chunks };
 }
 

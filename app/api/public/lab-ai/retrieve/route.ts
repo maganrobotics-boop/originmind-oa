@@ -1,3 +1,4 @@
+import { collectPublicKnowledgeAssets } from "../../../../../lib/public-knowledge-assets.mjs";
 import { readBoundedJsonObject } from "../../../../../lib/bounded-json-request";
 import {
   isWellFormedUnicode,
@@ -51,7 +52,13 @@ export async function POST(request: Request): Promise<Response> {
     }
     const candidates = await getPublicActiveKnowledgeChunks(question);
     const ranked = rankKnowledgeChunks(question, candidates, 6);
-    return publicLabAiJson(buildPublicLabAiRetrieveResponse(ranked));
+    let assets = new Map();
+    try {
+      assets = await collectPublicKnowledgeAssets(ranked, publicEnv.DB, publicEnv.PUBLIC_LAB_AI_SERVICE_TOKEN);
+    } catch {
+      // A missing image migration/binding must not make approved text unavailable.
+    }
+    return publicLabAiJson(buildPublicLabAiRetrieveResponse(ranked, assets));
   } catch {
     return errorResponse("公共知识检索暂不可用。", 503);
   }

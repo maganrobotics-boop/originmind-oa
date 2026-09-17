@@ -253,7 +253,7 @@ test("Workers AI gets only two bounded user turns and never client assistant tex
   assert.equal(result.body.answer, "团队主要研究机器人灵巧操作。");
   assert.equal(captured.model, WORKERS_AI_MODEL);
   assert.equal(captured.input.stream, false);
-  assert.equal(captured.input.max_tokens, 700);
+  assert.equal(captured.input.max_tokens, 2_400);
   const nonSystem = captured.input.messages.slice(1);
   assert.ok(nonSystem.length <= 2);
   assert.ok(nonSystem.every((message) => message.role === "user"));
@@ -459,7 +459,7 @@ test("verified Bailian config overrides Workers AI and uses hardened fetch optio
   assert.equal(modelFetch.init.cache, "no-store");
   assert.equal(modelFetch.init.credentials, "omit");
   assert.equal(JSON.parse(modelFetch.init.body).stream, false);
-  assert.equal(JSON.parse(modelFetch.init.body).max_tokens, 700);
+  assert.equal(JSON.parse(modelFetch.init.body).max_tokens, 2_400);
 });
 
 test("model timing includes a failed Bailian attempt and its Workers fallback", async (t) => {
@@ -1134,10 +1134,10 @@ test("rate-limit identity uses the dedicated HMAC secret", () => {
   assert.doesNotMatch(source, /hmacHex\(\s*context\.env\.APP_ENCRYPTION_KEY/u);
 });
 
-test("chat model defaults cap response length and Bailian wait time", () => {
+test("chat model defaults allow complete answers and sufficient Bailian wait time", () => {
   const source = readFileSync(new URL("../src/app.mjs", import.meta.url), "utf8");
-  assert.match(source, /modelCall\(context, config, messages, maxTokens = 700, timeoutMs = 20_000\)/u);
-  assert.match(source, /workersAiCall\(context, messages, maxTokens = 700\)/u);
+  assert.match(source, /modelCall\(context, config, messages, maxTokens = 2_400, timeoutMs = 60_000\)/u);
+  assert.match(source, /workersAiCall\(context, messages, maxTokens = 2_400\)/u);
 });
 
 test("chat keeps the 25 requests per IP per hour limit", async (t) => {
@@ -1208,4 +1208,94 @@ test("global model budget remains 300 calls per UTC day with its dedicated messa
   assert.equal(result.status, 429);
   assert.equal(result.body.error, "今日 AI 咨询额度已用完，请稍后再试。");
   assert.equal(modelCalls, 0);
+});
+
+test("real Workers chat continues an explicit length stop once and accounts for the extra call", async () => {
+  const calls = [];
+  const env = makeEnvironment({ AI: { run: async (_model, input) => {
+    calls.push(input);
+    return { response: calls.length === 1 ? "团队研究灵巧操作。[1]进一步" : "研究机器人系统设计。[1]", finish_reason: calls.length === 1 ? "length" : "stop" };
+  } } });
+  const response = await handleRequest(apiRequest("/api/chat", { method: "POST", body: { topic: "research", messages: [{ role: "user", content: "详细介绍研究方向" }] } }), env, {}, runtime());
+  const result = await response.json();
+  assert.equal(result.mode, "ai");
+  assert.equal(calls.length, 2);
+  assert.equal(result.answer, "团队研究灵巧操作。进一步研究机器人系统设计。");
+  assert.equal(calls[1].messages[0].content, calls[0].messages[0].content);
+  assert.equal(calls[1].messages.at(-2).role, "assistant");
+  assert.match(calls[1].messages.at(-1).content, /从上一段回答的断点继续/u);
+  assert.equal(Number((await env.DB.prepare("SELECT count FROM limits WHERE key LIKE 'model-day:%'").first()).count), 2);
+});
+
+test("real Bailian chat observes finish_reason without exposing credentials or dropping the first answer", async () => {
+  const env = makeEnvironment();
+  await storeVerifiedBailianConfig(env);
+  const calls = [];
+  const response = await handleRequest(apiRequest("/api/chat", { method: "POST", body: { topic: "research", messages: [{ role: "user", content: "详细介绍研究方向" }] } }), env, {}, runtime(async (url, init) => {
+    if (!String(url).includes("dashscope.aliyuncs.com")) return oaResponse();
+    calls.push(JSON.parse(init.body));
+    return Response.json({ choices: [{ message: { role: "assistant", content: calls.length === 1 ? "研究机器人灵巧操作。[1]" : "同时研究机器人系统设计。[1]" }, finish_reason: calls.length === 1 ? "length" : "stop" }] });
+  }));
+  const result = await response.json();
+  assert.equal(result.provider, "bailian");
+  assert.equal(calls.length, 2);
+  assert.match(result.answer, /灵巧操作。.*系统设计。/u);
+  assert.doesNotMatch(JSON.stringify(result), /test-key-not-a-real-secret|encryptedKey/u);
+});
+
+test("failed continuation preserves a grounded partial response with a visible incomplete notice", async () => {
+  let calls = 0;
+  const env = makeEnvironment({ AI: { run: async () => {
+    if (++calls > 1) throw new Error("network timeout");
+    return { response: "研究机器人灵巧操作。[1]", finish_reason: "length" };
+  } } });
+  const result = await (await handleRequest(apiRequest("/api/chat", { method: "POST", body: { topic: "research", messages: [{ role: "user", content: "详细介绍研究方向" }] } }), env, {}, runtime())).json();
+  assert.equal(calls, 2);
+  assert.equal(result.mode, "ai");
+  assert.match(result.answer, /研究机器人灵巧操作/u);
+  assert.match(result.answer, /尚未完整生成/u);
+});
+
+test("an unsafe continuation is rejected by the same factual-output checks as a first answer", async () => {
+  let calls = 0;
+  const env = makeEnvironment({ AI: { run: async () => ({ response: ++calls === 1 ? "研究灵巧操作。[1]" : "打开 https://untrusted.test [1]", finish_reason: calls === 1 ? "length" : "stop" }) } });
+  const result = await (await handleRequest(apiRequest("/api/chat", { method: "POST", body: { topic: "research", messages: [{ role: "user", content: "详细介绍研究方向" }] } }), env, {}, runtime())).json();
+  assert.equal(calls, 2);
+  assert.equal(result.mode, "retrieval");
+  assert.doesNotMatch(result.answer, /untrusted/u);
+});
+
+test("public chat returns verified image metadata without passing capability tokens to the text model", async () => {
+  const { createKnowledgeAssetToken } = await import("../src/knowledge-asset-token.mjs");
+  const token = await createKnowledgeAssetToken("11111111-2222-4333-8444-555555555555", SERVICE_TOKEN);
+  let prompt;
+  const env = makeEnvironment({ AI: { run: async (_model, input) => { prompt = input.messages[0].content; return { response: "平台用于机器人系统研究。[1]" }; } } });
+  const result = await (await handleRequest(apiRequest("/api/chat", { method: "POST", body: { topic: "research", messages: [{ role: "user", content: "显示平台图片" }] } }), env, {}, runtime(async () => {
+    const source = await oaResponse().json();
+    source.chunks[0].assets = [{ token, mimeType: "image/png", alt: "差速轮式小车实验平台" }];
+    return Response.json(source);
+  }))).json();
+  assert.equal(result.images[0].url, `/api/knowledge/assets/${token}`);
+  assert.equal(result.images[0].alt, "差速轮式小车实验平台");
+  assert.ok(!prompt.includes(token));
+  assert.match(prompt, /差速轮式小车实验平台/u);
+  assert.match(prompt, /没有执行原图像素分析/u);
+});
+
+test("continuation respects the daily model ceiling and does not discard a completed partial answer", async () => {
+  let calls = 0;
+  const env = makeEnvironment({ AI: { run: async () => { calls += 1; return { response: "研究灵巧操作。[1]", finish_reason: "length" }; } } });
+  const day = new Date().toISOString().slice(0, 10);
+  await env.DB.prepare("INSERT INTO limits (key,count,expires) VALUES (?,299,?)").bind(`model-day:${day}`, Math.floor(Date.now() / 1000) + 86400).run();
+  const result = await (await handleRequest(apiRequest("/api/chat", { method: "POST", body: { topic: "research", messages: [{ role: "user", content: "详细介绍研究方向" }] } }), env, {}, runtime())).json();
+  assert.equal(calls, 1);
+  assert.equal(result.mode, "ai");
+  assert.match(result.answer, /尚未完整生成/u);
+});
+
+test("health probes with tiny output budgets never invoke the long-answer continuation", async () => {
+  let calls = 0;
+  const env = makeEnvironment({ AI: { run: async (_model, input) => { calls += 1; assert.equal(input.max_tokens, 8); return { response: "连接", finish_reason: "length" }; } } });
+  assert.equal((await handleRequest(apiRequest("/api/status"), env, {}, runtime())).status, 200);
+  assert.equal(calls, 1);
 });
