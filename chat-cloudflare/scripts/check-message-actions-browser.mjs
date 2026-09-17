@@ -1,7 +1,7 @@
 // Desktop/mobile regression checks; APIs and clipboard/share are isolated test doubles.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { readFile, mkdir } from 'node:fs/promises';
+import { readFile, mkdir, writeFile } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 if (!process.env.PLAYWRIGHT_MODULE) throw Error('Set PLAYWRIGHT_MODULE');
@@ -51,8 +51,9 @@ try {
     const context = await browser.newContext({ viewport, hasTouch:name === 'mobile', isMobile:name === 'mobile',serviceWorkers:'block' });
     const page = await context.newPage();const requests = [];const errors=[];
     page.on('pageerror',error=>errors.push(error.message));await instrument(page,requests);
+    try {
     await page.goto(origin);
-    const input = page.locator('textarea').first();
+    const input = page.getByRole('textbox',{name:'你的问题',exact:true});
     await input.fill('请介绍机器人运动模型');await input.press('Enter');
     await page.locator('.message.assistant math').first().waitFor();
     const toolbar = page.locator('.message.assistant .message-actions').last();
@@ -78,11 +79,12 @@ try {
     assert.ok((await recipient.locator('.answer-share-preview').innerText()).includes('最后一段完整保留'));
     assert.equal(incomingRequests.length,0);assert.equal(await recipient.locator('.message.user').count(),0);
     assert.equal(new URL(recipient.url()).hash,'');
-    await recipient.screenshot({path:resolve(output,`message-share-${name}.png`),fullPage:true});await fresh.close();
+    await recipient.screenshot({path:resolve(output,`message-share-${name}.png`),fullPage:true,animations:'disabled'});await fresh.close();
     await toolbar.locator('.share-answer').click();
     await page.getByRole('button',{name:'确认并分享',exact:true}).click();
     await page.waitForFunction(()=>window.__shared.length === 1);
     await page.getByRole('button',{name:'关闭',exact:true}).click();
+    await page.locator('.message-action-dialog').waitFor({state:'detached'});
     // Copy and cancel editing do not mutate the original conversation.
     await page.locator('.question-actions-trigger').first().click();
     await page.getByRole('button',{name:'复制',exact:true}).click();
@@ -91,12 +93,14 @@ try {
     await page.getByRole('button',{name:'修改',exact:true}).click();
     await page.getByRole('textbox',{name:'修改提问内容'}).fill('取消的修改');
     await page.getByRole('button',{name:'取消',exact:true}).click();
+    await page.locator('.message-action-dialog').waitFor({state:'detached'});
     assert.equal(await page.locator('.message.user .message-body').first().innerText(),'请介绍机器人运动模型');
     assert.equal(requests.length,1);
     await page.locator('.question-actions-trigger').first().click();
     await page.getByRole('button',{name:'修改',exact:true}).click();
     await page.getByRole('textbox',{name:'修改提问内容'}).fill('修改后的机器人问题');
     await page.getByRole('button',{name:'保存并重新回答',exact:true}).click();
+    await page.locator('.message-action-dialog').waitFor({state:'detached'});
     await page.waitForFunction(()=>document.querySelector('.message.user .message-body')?.textContent === '修改后的机器人问题');
     await page.locator('.message.assistant math').first().waitFor();
     assert.equal(requests.length,2);assert.equal(requests[1].conversationToken,undefined);
@@ -124,6 +128,15 @@ try {
     assert.equal(requests.length,2,'Restoring either saved conversation must not request another answer');
     await page.reload();await page.locator('.message.assistant math').first().waitFor();
     assert.equal(await page.locator('.message-source-note').count(),1);
+    // Reproduce a fast close-to-composer handoff in one browser task. A queued
+    // close listener must not steal focus back before the next Enter key.
+    await page.locator('.question-actions-trigger').first().click();
+    await page.evaluate(() => {
+      document.querySelector('.question-action-menu').close();
+      document.querySelector('#question').focus();
+    });
+    await page.locator('.question-action-menu').waitFor({state:'detached'});
+    assert.equal(await input.evaluate(node => document.activeElement === node),true);
     // Movement cancels long-press; a stationary touch opens the same accessible menu.
     const bubble = page.locator('.message.user .message-body').first();
     await bubble.dispatchEvent('pointerdown',{pointerType:'touch',isPrimary:true,clientX:50,clientY:60});
@@ -133,15 +146,30 @@ try {
     await bubble.dispatchEvent('pointerdown',{pointerType:'touch',isPrimary:true,clientX:50,clientY:60});
     await page.locator('.question-action-menu').waitFor();await bubble.dispatchEvent('pointerup',{pointerType:'touch'});
     await page.keyboard.press('Escape');
+    await page.locator('.question-action-menu').waitFor({state:'detached'});
     await page.locator('.message.user').first().focus();await page.keyboard.press('Shift+F10');
     await page.locator('.question-action-menu').waitFor();await page.keyboard.press('Escape');
-    await page.locator('textarea').first().fill('未引用资料时不要标注来源');await page.locator('textarea').first().press('Enter');
+    await page.locator('.question-action-menu').waitFor({state:'detached'});
+    await input.fill('未引用资料时不要标注来源');
+    await input.press('Enter');
     await page.waitForFunction(()=>document.querySelectorAll('.message.assistant').length === 2);
+    assert.equal(requests.length,3);
+    assert.equal(requests[2].messages.at(-1).content,'未引用资料时不要标注来源');
     assert.equal(await page.locator('.message.assistant').last().locator('.message-source-note').count(),0);
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth + 1));
-    await page.screenshot({path:resolve(output,`message-actions-${name}.png`),fullPage:true});
+    await page.screenshot({path:resolve(output,`message-actions-${name}.png`),fullPage:true,animations:'disabled'});
     assert.deepEqual(errors,[]);
-    console.log(`${name}: copy/copy-link/native-share/source evidence, fresh share view, edit cancel/fork/token reset, original and edited history restore, reload, long-press cancellation, keyboard and width passed`);
-    await context.close();
+    console.log(`${name}: copy/copy-link/native-share/source evidence, fresh share view, edit cancel/fork/token reset, original and edited history restore, dialog focus handoff, reload, long-press cancellation, keyboard and width passed`);
+    } catch (error) {
+      // Only fixture content and stubbed request counts are recorded here.
+      const diagnostic = await page.evaluate(() => ({
+        text: document.body.innerText, active: document.activeElement?.outerHTML,
+        dialogs: Array.from(document.querySelectorAll('dialog')).map(node => ({label:node.getAttribute('aria-label'),open:node.open})),
+      })).catch(() => ({}));
+      await writeFile(resolve(output,`message-actions-${name}-failure.json`),JSON.stringify({requestCount:requests.length,errors,...diagnostic},null,2));
+      await page.screenshot({path:resolve(output,`message-actions-${name}-failure.png`),fullPage:true,animations:'disabled'}).catch(() => {});
+      console.error(`${name}: ${requests.length} fixture chat requests; browser errors: ${JSON.stringify(errors)}; active: ${diagnostic.active}`);
+      throw error;
+    } finally { await context.close(); }
   }
 } finally { await browser.close();await new Promise(resolve=>server.close(resolve)); }
