@@ -1,0 +1,26 @@
+name: Chat answer formatting workspace
+
+on:
+  push:
+    branches: [fix/chat-answer-formatting-20260917]
+    paths: [.github/workflows/answer-formatting-workspace.yml]
+
+permissions:
+  contents: read
+
+jobs:
+  source:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Archive tracked Chat source only
+        run: git archive --format=zip --output=chat-formatting-workspace.zip HEAD chat-cloudflare
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chat-formatting-workspace
+          path: chat-formatting-workspace.zip
+          retention-days: 1
+          if-no-files-found: error
