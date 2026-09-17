@@ -41,6 +41,7 @@ jobs:
         run: |
           mkdir -p parity-validation
           node scripts/apply-oa-chat-parity.mjs
+          node scripts/refine-oa-chat-parity.mjs
           node scripts/sync-oa-chat-shared.mjs
           node --check lib/oa-chat-renderer.mjs
           node --check chat-cloudflare/src/grounded-prompt.mjs
@@ -63,9 +64,9 @@ jobs:
           git add -- app/page.tsx app/oa-workspace.css components/knowledge/knowledge-view.tsx \
             'app/api/knowledge/[id]/assets/[...assetPath]/route.ts' \
             chat-cloudflare/src/app.mjs chat-cloudflare/src/grounded-prompt.mjs \
-            lib/oa-chat-renderer.mjs lib/oa-chat-renderer.d.mts \
-            components/knowledge/shared-chat.generated.css \
-            tests/lab-ai-ask-timing.test.mjs tests/ui-components.test.mjs \
+            lib/oa-chat-renderer.mjs lib/oa-chat-renderer.d.mts lib/write-rate-limit.ts \
+            components/knowledge/shared-chat.generated.css components/knowledge/oa-chat-panel.tsx \
+            tests/lab-ai-ask-timing.test.mjs tests/ui-components.test.mjs tests/oa-chat-parity.test.mjs \
             public/assets/oa-chat-LICENSES.md public/assets/katex-*.mjs
           if git diff --cached --quiet; then
             echo 'Integration already committed; checks completed without source changes.'
@@ -83,14 +84,18 @@ jobs:
         if: always()
         run: |
           mkdir -p parity-validation/source
+          git archive --format=tar HEAD -o parity-validation/checkout-source.tar
           git diff --no-ext-diff --binary HEAD > parity-validation/uncommitted.patch
           git status --short > parity-validation/git-status.txt
           git rev-parse HEAD > parity-validation/checkout-sha.txt
           for file in app/page.tsx app/oa-workspace.css \
+            'app/api/knowledge/[id]/assets/[...assetPath]/route.ts' \
             components/knowledge/knowledge-view.tsx components/knowledge/shared-chat.generated.css \
+            components/knowledge/oa-chat-panel.tsx lib/write-rate-limit.ts \
             chat-cloudflare/src/app.mjs chat-cloudflare/src/grounded-prompt.mjs \
             lib/oa-chat-renderer.mjs lib/oa-chat-renderer.d.mts \
-            tests/lab-ai-ask-timing.test.mjs tests/ui-components.test.mjs; do
+            tests/lab-ai-ask-timing.test.mjs tests/ui-components.test.mjs tests/oa-chat-parity.test.mjs \
+            public/assets/oa-chat-LICENSES.md public/assets/katex-*.mjs; do
             if test -f "$file"; then cp --parents "$file" parity-validation/source/; fi
           done
       - name: Upload private validation evidence (not a deployment)
