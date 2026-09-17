@@ -36,14 +36,13 @@ jobs:
             if [ -z "$conflicts" ]; then exit "$result"; fi
             while IFS= read -r path; do
               case "$path" in
-                chat-cloudflare/public/index.html|chat-cloudflare/public/assets/*) ;;
+                chat-cloudflare/public/index.html|chat-cloudflare/public/assets/*.js|chat-cloudflare/public/assets/*.mjs|chat-cloudflare/public/assets/*.css) ;;
                 *) echo "Unresolved authored-source conflict: $path"; exit 1 ;;
               esac
             done <<< "$conflicts"
           fi
-          # Resolve rename/rename conflicts only for deterministic JS/CSS outputs.
-          # The next step rebuilds all of them from the clean source merge.
-          git rm -r -f --ignore-unmatch chat-cloudflare/public/assets
+          # Resolve only deterministic JS/CSS output conflicts, preserving PWA icons.
+          git rm -f --ignore-unmatch -- 'chat-cloudflare/public/assets/*.js' 'chat-cloudflare/public/assets/*.mjs' 'chat-cloudflare/public/assets/*.css'
           git show HEAD:chat-cloudflare/public/index.html > chat-cloudflare/public/index.html
           git add chat-cloudflare/public/index.html
       - name: Install dependencies and verify integrated source
