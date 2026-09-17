@@ -14,6 +14,7 @@ const SOURCE_PATHS = Object.freeze({
   app: join(FRONTEND_DIRECTORY, "app.js"),
   style: join(FRONTEND_DIRECTORY, "styles.css"),
   zipImportAddon: join(FRONTEND_DIRECTORY, "zip-import-addon.js"),
+  knowledgeImageReferences: resolve(ROOT, "../lib/knowledge-image-references.mjs"),
 });
 
 const PLACEHOLDERS = Object.freeze({
@@ -34,12 +35,17 @@ function replaceExactlyOnce(template, placeholder, replacement) {
 }
 
 async function expectedBuild() {
-  const [template, app, style, zipImportAddon] = await Promise.all([
+  const [template, app, style, zipImportAddon, imageReferencesModule] = await Promise.all([
     readFile(SOURCE_PATHS.html, "utf8"),
     readFile(SOURCE_PATHS.app),
     readFile(SOURCE_PATHS.style),
-    readFile(SOURCE_PATHS.zipImportAddon),
+    readFile(SOURCE_PATHS.zipImportAddon, "utf8"),
+    readFile(SOURCE_PATHS.knowledgeImageReferences, "utf8"),
   ]);
+  // Build the classic-script ZIP helper from the same inert parser used by OA.
+  const imageReferencesScript = replaceExactlyOnce(imageReferencesModule,
+    "export function knowledgeImageReferences", "function knowledgeImageReferences");
+  const zipImportBundle = Buffer.from(`"use strict";\n(() => {\n${imageReferencesScript}\n${zipImportAddon}\n})();\n`, "utf8");
   const appName = `app-${digest(app)}.js`;
   const styleName = `styles-${digest(style)}.css`;
   const withApp = replaceExactlyOnce(template, PLACEHOLDERS.app, `/assets/${appName}`);
@@ -49,7 +55,7 @@ async function expectedBuild() {
   }
   return {
     html: Buffer.from(html, "utf8"),
-    rootFiles: new Map([["zip-import-addon.js", zipImportAddon]]),
+    rootFiles: new Map([["zip-import-addon.js", zipImportBundle]]),
     assets: new Map([
       [appName, app],
       [styleName, style],
