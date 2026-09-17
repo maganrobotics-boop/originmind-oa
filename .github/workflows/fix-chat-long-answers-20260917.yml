@@ -1,4 +1,4 @@
-name: Fix Chat long answers 20260917
+name: Verify Chat image and long-answer repair 20260917
 
 on:
   push:
@@ -10,14 +10,14 @@ permissions:
   contents: write
 
 concurrency:
-  group: fix-chat-long-answers-${{ github.ref }}
+  group: fix-chat-image-answer-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  fix:
+  verify:
     if: github.ref == 'refs/heads/fix/knowledge-image-e2e-20260917'
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - name: Checkout isolated repair branch
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
@@ -29,87 +29,83 @@ jobs:
         with:
           node-version: 24
           cache: npm
-          cache-dependency-path: chat-cloudflare/package-lock.json
+          cache-dependency-path: |
+            package-lock.json
+            chat-cloudflare/package-lock.json
 
-      - name: Install locked dependencies
-        run: npm ci --prefix chat-cloudflare
-
-      - name: Patch answer budget and prompt
+      - name: Verify exact source patch and apply without changing production
         shell: python
         run: |
+          import base64, gzip, hashlib, subprocess
           from pathlib import Path
-          app = Path("chat-cloudflare/src/app.mjs")
-          text = app.read_text(encoding="utf-8")
-          replacements = [
-            (
-              "async function modelCall(context, config, messages, maxTokens = 700, timeoutMs = 20_000)",
-              "async function modelCall(context, config, messages, maxTokens = 2_400, timeoutMs = 60_000)",
-            ),
-            (
-              "async function workersAiCall(context, messages, maxTokens = 700)",
-              "async function workersAiCall(context, messages, maxTokens = 2_400)",
-            ),
-            (
-              "默认使用自然、简洁、专业、温和的中文；用户使用其他语言或明确要求时，改用相应语言。先给结论，再补充必要依据或下一步；通常使用两到四个短段落，只有并列信息较多时才用简短列表。",
-              "默认使用自然、专业、完整的中文；用户使用其他语言或明确要求时，改用相应语言。先回答核心问题，再充分补充必要依据、技术细节、例子或下一步。简单问题可以简短；科研、机器人、论文、项目和技术问题应以回答完整为优先，不要为了控制篇幅省略关键内容，也不要在句子或论证尚未完成时停止。并列信息较多时可使用列表。",
-            ),
-            (
-              "其他回答优先短段落。不要输出 HTML、图片或装饰性标题。",
-              "其他回答优先清晰段落；复杂问题允许较长回答。不要输出 HTML、图片或装饰性标题。",
-            ),
-          ]
-          for old, new in replacements:
-            if old in text:
-              text = text.replace(old, new, 1)
-            elif new not in text:
-              raise SystemExit(f"Expected app.mjs fragment not found: {old[:160]}")
-          app.write_text(text, encoding="utf-8")
-          test = Path("chat-cloudflare/test/worker.test.mjs")
-          t = test.read_text(encoding="utf-8")
-          t = t.replace(
-            'modelCall\\(context, config, messages, maxTokens = 700, timeoutMs = 20_000\\)',
-            'modelCall\\(context, config, messages, maxTokens = 2_400, timeoutMs = 60_000\\)',
-          )
-          t = t.replace(
-            'workersAiCall\\(context, messages, maxTokens = 700\\)',
-            'workersAiCall\\(context, messages, maxTokens = 2_400\\)',
-          )
-          t = t.replace('defaults cap response length and Bailian wait time', 'defaults allow complete answers and sufficient Bailian wait time')
-          test.write_text(t, encoding="utf-8")
+          parts = [Path(f'.github/repairs/chat-image-answer-20260917.part{i}').read_text().strip() for i in (1, 2, 3)]
+          for i, part in enumerate(parts, 1):
+              print(f'part {i}: {len(part)} characters, sha256 {hashlib.sha256(part.encode()).hexdigest()}')
+          # Correct the identified two-character transport duplication, then
+          # require the entire decoded patch to match the locally tested digest.
+          encoded = ''.join(parts).replace('QIWbPwzOTwdwd2G', 'QIWbPwzOTwd2G')
+          patch = gzip.decompress(base64.b64decode(encoded, validate=True))
+          expected = '6ea29c1f3b8db9a14fe271900a512ce754cea9996fd78f60d4d678d03b3d514e'
+          actual = hashlib.sha256(patch).hexdigest()
+          if actual != expected:
+              raise SystemExit(f'Patch integrity failure: {actual}')
+          target = Path('/tmp/chat-image-answer-repair.patch')
+          target.write_bytes(patch)
+          subprocess.run(['git', 'apply', '--check', str(target)], check=True)
+          subprocess.run(['git', 'apply', str(target)], check=True)
+          print(f'Applied verified source patch: {actual}')
 
-      - name: Run full Chat checks
-        run: npm --prefix chat-cloudflare run check
-
-      - name: Verify long-answer contract
+      - name: Build frontend and run all Chat tests
         shell: bash
         run: |
           set -euo pipefail
-          grep -F 'maxTokens = 2_400, timeoutMs = 60_000' chat-cloudflare/src/app.mjs
-          grep -F 'workersAiCall(context, messages, maxTokens = 2_400)' chat-cloudflare/src/app.mjs
-          grep -F '科研、机器人、论文、项目和技术问题应以回答完整为优先' chat-cloudflare/src/app.mjs
+          npm ci --prefix chat-cloudflare
+          npm --prefix chat-cloudflare run build:frontend
+          npm --prefix chat-cloudflare run check
+          npm --prefix chat-cloudflare run check:wrangler
 
-      - name: Commit verified repair on the isolated branch only
+      - name: Install locked OA dependencies
+        run: npm run install:ci
+
+      - name: Check OA types
+        run: npm run typecheck
+
+      - name: Lint OA
+        run: npm run lint
+
+      - name: Build and test OA
+        run: npm test
+
+      - name: Commit only verified source and remove one-shot transport
         shell: bash
         run: |
           set -euo pipefail
           test "$GITHUB_REF_NAME" = 'fix/knowledge-image-e2e-20260917'
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add chat-cloudflare/src/app.mjs chat-cloudflare/test/worker.test.mjs
-          if ! git diff --cached --quiet; then
-            git commit -m "fix(chat): allow complete long-form answers"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
-          git rev-parse HEAD >> "$GITHUB_STEP_SUMMARY"
+          git add app/api/public/lab-ai lib/knowledge-store.ts lib/public-knowledge-assets.mjs chat-cloudflare/src chat-cloudflare/test chat-cloudflare/frontend chat-cloudflare/public docs/chat-image-answer-repair-20260917.md
+          git rm .github/repairs/chat-image-answer-20260917.part1 .github/repairs/chat-image-answer-20260917.part2 .github/repairs/chat-image-answer-20260917.part3 .github/workflows/fix-chat-long-answers-20260917.yml
+          git diff --cached --check
+          git commit -m "fix(chat): restore approved knowledge images and complete long answers"
+          git push origin "HEAD:${GITHUB_REF_NAME}"
+          echo "Verified source commit: $(git rev-parse HEAD)" >> "$GITHUB_STEP_SUMMARY"
+          echo 'No merge or production deployment was performed.' >> "$GITHUB_STEP_SUMMARY"
 
-      - name: Prepare private source snapshot for follow-up testing
+      - name: Prepare private source snapshot including changes under test
         if: always()
-        shell: bash
-        run: git archive --format=tar --output=source-under-test.tar HEAD
+        shell: python
+        run: |
+          import subprocess, tarfile
+          from pathlib import Path
+          names = subprocess.check_output(['git','ls-files','-z','--cached','--others','--exclude-standard']).decode().split('\0')
+          with tarfile.open('source-under-test.tar','w') as archive:
+              for name in sorted(set(names)):
+                  if name and name != 'source-under-test.tar' and Path(name).is_file():
+                      archive.add(name, arcname=name, recursive=False)
 
-      - name: Retain private source snapshot for one day
+      - name: Retain private source snapshot for follow-up verification
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: chat-repair-source
           path: source-under-test.tar
