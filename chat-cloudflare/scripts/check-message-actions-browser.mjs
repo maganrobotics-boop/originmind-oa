@@ -101,7 +101,27 @@ try {
     await page.locator('.message.assistant math').first().waitFor();
     assert.equal(requests.length,2);assert.equal(requests[1].conversationToken,undefined);
     assert.equal(requests[1].messages.at(-1).content,'修改后的机器人问题');
-    assert.ok(await page.getByRole('button',{name:/请介绍机器人运动模型，/}).count() > 0);
+    // On mobile the recent list is inside a closed dialog. Exercise its real entry
+    // point rather than weakening the assertion by including hidden elements.
+    async function restoreRecentQuestion(question) {
+      if (name === 'mobile') {
+        await page.getByRole('button',{name:'打开主题菜单',exact:true}).click();
+        await page.locator('#topic-drawer[open]').waitFor();
+      }
+      const sidebar = page.locator(name === 'mobile' ? '#topic-drawer' : '.chat-sidebar');
+      const entry = sidebar.getByRole('button',{name:new RegExp(`^${question}，`)});
+      await entry.waitFor({state:'visible'});
+      assert.equal(await entry.count(),1);
+      await entry.click();
+      await page.waitForFunction(expected => document.querySelector('.message.user .message-body')?.textContent === expected, question);
+      await page.locator('.message.assistant math').first().waitFor();
+      if (name === 'mobile') assert.equal(await page.locator('#topic-drawer[open]').count(),0);
+    }
+    await restoreRecentQuestion('请介绍机器人运动模型');
+    assert.equal(await page.locator('.message.user').count(),1);
+    assert.ok((await page.locator('.message.assistant .answer-content').innerText()).includes('最后一段完整保留'));
+    await restoreRecentQuestion('修改后的机器人问题');
+    assert.equal(requests.length,2,'Restoring either saved conversation must not request another answer');
     await page.reload();await page.locator('.message.assistant math').first().waitFor();
     assert.equal(await page.locator('.message-source-note').count(),1);
     // Movement cancels long-press; a stationary touch opens the same accessible menu.
@@ -121,7 +141,7 @@ try {
     assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth <= innerWidth + 1));
     await page.screenshot({path:resolve(output,`message-actions-${name}.png`),fullPage:true});
     assert.deepEqual(errors,[]);
-    console.log(`${name}: copy/copy-link/native-share/source evidence, fresh share view, edit cancel/fork/token reset, reload, long-press cancellation, keyboard and width passed`);
+    console.log(`${name}: copy/copy-link/native-share/source evidence, fresh share view, edit cancel/fork/token reset, original and edited history restore, reload, long-press cancellation, keyboard and width passed`);
     await context.close();
   }
 } finally { await browser.close();await new Promise(resolve=>server.close(resolve)); }
