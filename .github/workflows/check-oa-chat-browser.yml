@@ -7,7 +7,9 @@ on:
       - 'app/**'
       - 'components/knowledge/**'
       - 'lib/oa-chat*'
+      - 'lib/*direct-message*'
       - 'scripts/*oa-chat*'
+      - 'scripts/*oa-member*'
       - 'chat-cloudflare/frontend/**'
       - 'package*.json'
       - '.github/workflows/check-oa-chat-browser.yml'
@@ -17,7 +19,9 @@ on:
       - 'app/**'
       - 'components/knowledge/**'
       - 'lib/oa-chat*'
+      - 'lib/*direct-message*'
       - 'scripts/*oa-chat*'
+      - 'scripts/*oa-member*'
       - 'chat-cloudflare/frontend/**'
       - 'package*.json'
       - '.github/workflows/check-oa-chat-browser.yml'
@@ -55,6 +59,10 @@ jobs:
         env:
           PLAYWRIGHT_MODULE: ${{ runner.temp }}/oa-chat-browser/node_modules/playwright/index.mjs
         run: node scripts/check-oa-chat-browser.mjs
+      - name: Verify full-content forwarding and real-member replies with two synthetic identities
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/oa-chat-browser/node_modules/playwright/index.mjs
+        run: node scripts/check-oa-member-chat-browser.mjs
       - name: Preserve browser results and screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -63,5 +71,6 @@ jobs:
           path: |
             parity-validation/browser-app/
             parity-validation/browser-report/
+            parity-validation/member-chat-report/
           if-no-files-found: warn
           retention-days: 7
