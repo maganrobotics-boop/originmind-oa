@@ -37,6 +37,19 @@ jobs:
           await writeFile(file, source.replace(anchor, 'replace(tests, String.raw`'));
           NODE
           node scripts/apply-oa-chat-menu.mjs
+          node --input-type=module <<'NODE'
+          import { readFile, writeFile } from 'node:fs/promises';
+          import assert from 'node:assert/strict';
+          const file = 'scripts/check-oa-chat-browser.mjs';
+          let source = await readFile(file, 'utf8');
+          const selection = "      await page.getByRole('menuitem',{name:'清空聊天',exact:true}).click();";
+          assert.equal(source.split(selection).length, 4);
+          source = source.replaceAll(selection, selection + "\n      await page.getByRole('menu').waitFor({state:'detached'});");
+          const cancelled = "      assert.equal(await input.inputValue(),'尚未发送的问题');";
+          assert.equal(source.split(cancelled).length, 2);
+          source = source.replace(cancelled, "      await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='聊天选项');\n" + cancelled);
+          await writeFile(file, source);
+          NODE
       - name: Install locked dependencies
         run: npm run install:ci
       - name: Typecheck, lint, build and run all OA tests
