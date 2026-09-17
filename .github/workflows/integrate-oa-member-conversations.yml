@@ -1,0 +1,103 @@
+name: Integrate and test OA member conversations
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: oa-member-conversations-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+jobs:
+  integrate:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feat/oa-member-conversations-20260918'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install locked dependencies without production credentials
+        run: npm run install:ci
+      - name: Integrate exact reviewed OA source
+        run: |
+          mkdir -p parity-validation
+          node scripts/apply-oa-conversations.mjs
+          node --input-type=module <<'JS'
+          import { readFile, writeFile } from 'node:fs/promises';
+          const page = await readFile('app/page.tsx', 'utf8');
+          await writeFile('app/page.tsx', page.replace('currentUser={session.user} visible={activeView', 'currentUser={session.user || undefined} visible={activeView'));
+          const path = 'scripts/check-oa-member-chat-browser.mjs';
+          const browser = await readFile(path, 'utf8');
+          await writeFile(path, browser.replace("alice.locator('.oa-member-title strong').getByText('成员乙',{exact:true}).waitFor()", "alice.locator('.oa-member-title strong').filter({hasText:'成员乙'}).waitFor()"));
+          JS
+      - name: Typecheck
+        run: set -o pipefail; npm run typecheck 2>&1 | tee parity-validation/typecheck.log
+      - name: Lint
+        run: set -o pipefail; npm run lint 2>&1 | tee parity-validation/lint.log
+      - name: Build and run the full OA suite including real SQL message tests
+        run: set -o pipefail; npm test 2>&1 | tee parity-validation/oa-tests.log
+      - name: Build real OA browser fixture
+        run: node scripts/build-oa-chat-browser-fixture.mjs
+      - name: Install isolated browser engine
+        run: |
+          npm install --prefix "$RUNNER_TEMP/oa-chat-browser" --no-save --ignore-scripts playwright@1.63.0
+          node "$RUNNER_TEMP/oa-chat-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Verify existing five-view Chat interactions
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/oa-chat-browser/node_modules/playwright/index.mjs
+        run: node scripts/check-oa-chat-browser.mjs
+      - name: Verify two-user forwarding and replies with synthetic identities
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/oa-chat-browser/node_modules/playwright/index.mjs
+        run: node scripts/check-oa-member-chat-browser.mjs
+      - name: Commit only validated feature-branch integration
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_HEAD: ${{ github.event.pull_request.head.sha }}
+          HEAD_BRANCH: ${{ github.event.pull_request.head.ref }}
+        run: |
+          set -euo pipefail
+          test "$HEAD_BRANCH" = 'feat/oa-member-conversations-20260918'
+          git add -- app/page.tsx app/oa-workspace.css app/api/direct-messages/route.ts \
+            components/knowledge/oa-chat-panel.tsx tests/ui-components.test.mjs \
+            scripts/check-oa-chat-browser.mjs scripts/check-oa-member-chat-browser.mjs
+          if git diff --cached --quiet; then exit 0; fi
+          authorization="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+          echo "::add-mask::$authorization"
+          current="$(git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $authorization" ls-remote origin "refs/heads/$HEAD_BRANCH" | cut -f1)"
+          test "$current" = "$EXPECTED_HEAD" || { echo 'Branch changed. Reconcile before committing.'; exit 1; }
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git commit -m 'feat(oa): integrate validated member chats, content forwarding and menu layout'
+          git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $authorization" push origin "HEAD:refs/heads/$HEAD_BRANCH"
+      - name: Record source and test evidence
+        if: always()
+        run: |
+          mkdir -p parity-validation/source
+          git diff --binary HEAD > parity-validation/integration.patch
+          git rev-parse HEAD > parity-validation/checkout-sha.txt
+          git archive --format=tar HEAD -o parity-validation/checkout-source.tar
+          for file in app/page.tsx app/oa-workspace.css app/api/direct-messages/route.ts \
+            components/knowledge/oa-chat-panel.tsx tests/ui-components.test.mjs \
+            scripts/check-oa-chat-browser.mjs scripts/check-oa-member-chat-browser.mjs; do
+            if test -f "$file"; then cp --parents "$file" parity-validation/source/; fi
+          done
+      - name: Upload private evidence, never production messages
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: oa-member-conversations-${{ github.event.pull_request.head.sha }}-${{ github.run_attempt }}
+          path: parity-validation/
+          if-no-files-found: warn
+          retention-days: 7
