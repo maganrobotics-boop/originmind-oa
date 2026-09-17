@@ -49,7 +49,7 @@ const vite = await createServer({
     enforce: "pre",
     resolveId(source) {
       if (/\/_lib\/auth$/u.test(source)) return "\0lab-ai-ask-auth";
-      if (/lib\/lab-ai-client$/u.test(source)) return "\0lab-ai-ask-client";
+      if (/lib\/oa-chat-client$/u.test(source)) return "\0lab-ai-ask-client";
       if (/lib\/knowledge-store$/u.test(source)) return "\0lab-ai-ask-store";
       if (/lib\/write-rate-limit$/u.test(source)) return "\0lab-ai-ask-rate-limit";
       if (/^(?:\.\.\/)+db$/u.test(source)) return "\0lab-ai-ask-db";
@@ -62,7 +62,7 @@ const vite = await createServer({
         }
       `;
       if (id === "\0lab-ai-ask-client") return `
-        export async function answerLabQuestion(question, ranked) {
+        export async function answerOaChatQuestion(question, ranked) {
           const state = globalThis.${stateKey};
           state.answerCalls.push({ question, ranked });
           await new Promise((resolve) => setTimeout(resolve, state.answerDelayMs));

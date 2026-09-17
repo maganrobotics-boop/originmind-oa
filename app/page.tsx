@@ -68,6 +68,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import { KnowledgeView, type KnowledgeTab } from "@/components/knowledge/knowledge-view";
 import "./oa-workspace.css";
+import { OaChatStatus } from "@/components/knowledge/oa-chat-panel";
 import {
   NDA_AGREEMENT_VERSION,
   buildNdaAgreementText,
@@ -255,6 +256,10 @@ function StatusBadge({ status }: { status: ApprovalStatus }) {
 
 function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马淦", userAvatarDataUrl = "", authProvider = "chatgpt", currentRole, isAdmin = false, canReviewKnowledge = false, selectedKnowledgeTab = "ask", onKnowledgeTab, onMyPending }: { activeView: ViewKey; setActiveView: (key: ViewKey) => void; onNew: () => void; onProfile: () => void; userName?: string; userAvatarDataUrl?: string; authProvider?: AuthProvider; currentRole?: string | null; isAdmin?: boolean; canReviewKnowledge?: boolean; selectedKnowledgeTab?: KnowledgeTab; onKnowledgeTab: (tab: KnowledgeTab) => void; onMyPending: () => void }) {
   const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const [officeOpen, setOfficeOpen] = useState(true);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(true);
+  const officeId = useId();
+  const knowledgeId = useId();
   const [pendingApprovalCount, setPendingApprovalCount] = useState(0);
   const [pendingMemberCount, setPendingMemberCount] = useState(0);
   const [pendingKnowledgeCount, setPendingKnowledgeCount] = useState(0);
@@ -344,18 +349,19 @@ function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马�
     { key: "dashboard", label: "审批工作台", icon: LayoutDashboard },
     { key: "requests", label: "全部申请", icon: FolderKanban },
     { key: "people", label: "协作成员", icon: UsersRound },
-    { key: "rules", label: "流程与规则", icon: FileCheck2 },
-    ...(isAdmin ? [{ key: "members" as ViewKey, label: "成员审核", icon: UsersRound }, { key: "oem" as ViewKey, label: "官网 OEM 申请", icon: BriefcaseBusiness }, { key: "notifications" as ViewKey, label: "飞书提醒", icon: MessageCircle }] : []),
+    ...(isAdmin ? [{ key: "members" as ViewKey, label: "成员审核", icon: UsersRound }, { key: "notifications" as ViewKey, label: "飞书提醒", icon: MessageCircle }] : []),
   ];
   return <aside className="sidebar-shell">
     <button type="button" className="brand-lockup" onClick={() => setActiveView("dashboard")} aria-label="返回首页" title="返回首页"><div className="brand-copy"><div className="brand-name">{officialBrand}</div><div className="brand-subtitle">联合研发 OA</div></div></button>
-    <div className="sidebar-section-label">审批办公</div>
+    <button type="button" data-sidebar-section="office" className="sidebar-section-label sidebar-group-toggle" aria-expanded={officeOpen} aria-controls={officeId} onClick={() => setOfficeOpen(open => !open)}><span>审批办公</span><ChevronRight className="size-3.5" /></button>
+    <div id={officeId} hidden={!officeOpen}>
     <nav className="sidebar-nav" aria-label="主导航">{items.map(({ key, label, icon: Icon }) => { const itemPendingCount = key === "dashboard" ? pendingApprovalCount : key === "members" ? pendingMemberCount : key === "knowledge" ? pendingKnowledgeCount : 0; const needsAttention = itemPendingCount > 0; const attentionClass = needsAttention ? `attention attention-${key}` : ""; return <button key={key} className={`sidebar-nav-item ${activeView === key ? "active" : ""} ${attentionClass}`} onClick={() => setActiveView(key)}><Icon className="size-[17px]" /><span>{label}</span>{needsAttention && <span className="nav-count nav-count-alert">{itemPendingCount > 99 ? "99+" : itemPendingCount}</span>}</button>; })}</nav>
     <button type="button" className="sidebar-nav-item" onClick={onMyPending}><Clock3 className="size-[17px]" /><span>待我审批</span></button>
     <button type="button" className="sidebar-nav-item" onClick={onNew}><Plus className="size-[17px]" /><span>新建审核申请</span></button>
+    </div>
     <div className="sidebar-divider" />
-    <div className="sidebar-section-label">大模型与资料</div>
-    <nav className="oa-knowledge-nav" aria-label="大模型后台">
+    <button type="button" data-sidebar-section="knowledge" className="sidebar-section-label sidebar-group-toggle" aria-expanded={knowledgeOpen} aria-controls={knowledgeId} onClick={() => setKnowledgeOpen(open => !open)}><span>大模型与资料</span><ChevronRight className="size-3.5" /></button>
+    <nav id={knowledgeId} hidden={!knowledgeOpen} className="oa-knowledge-nav" aria-label="大模型后台">
       {([{ tab: "ask", label: "AI 聊天", icon: Bot }, { tab: "submit", label: "上传资料", icon: Plus }, { tab: "mine", label: "我的资料", icon: FolderKanban }, ...(canReviewKnowledge ? [{ tab: "review", label: "资料审核", icon: ShieldCheck }, { tab: "manage", label: "知识资料管理", icon: BookOpen }] : [])] as { tab: KnowledgeTab; label: string; icon: typeof Bot }[]).map(({ tab, label, icon: Icon }) => <button type="button" key={tab} className={`sidebar-nav-item ${activeView === "knowledge" && selectedKnowledgeTab === tab ? "active" : ""}`} onClick={() => onKnowledgeTab(tab)}><Icon className="size-[17px]" /><span>{label}</span>{tab === "review" && pendingKnowledgeCount > 0 && <span className="nav-count nav-count-alert">{pendingKnowledgeCount > 99 ? "99+" : pendingKnowledgeCount}</span>}</button>)}
       {isAdmin && <a className="sidebar-nav-item" href="https://chat.omindos.ai/manage" target="_blank" rel="noreferrer"><Settings2 className="size-[17px]" /><span>Chat 后台（原入口）</span></a>}
     </nav>
@@ -2424,7 +2430,7 @@ export default function Home() {
   if (!session.registered) return <><Toaster position="top-right" /><RegistrationGate initialUser={session.user} initialStatus={session.status} chatgptLoginEnabled={session.chatgptLoginEnabled} githubLoginEnabled={session.githubLoginEnabled} feishuLoginEnabled={session.feishuLoginEnabled} onRegistered={setSession} /></>;
   if (needsNda) return <><Toaster position="top-right" /><NdaAdmissionGate key={ndaAdmissionIdentityKey(session.user?.email)} session={session} onRefresh={refreshSession} /></>;
   return (
-    <div className={`oa-app oa-workspace ${sidebarCollapsed ? "oa-sidebar-collapsed" : ""}`}>
+    <div className={`oa-app oa-workspace ${sidebarCollapsed ? "oa-sidebar-collapsed" : ""} ${activeView === "knowledge" && knowledgeTab === "ask" ? "oa-chat-open" : ""}`}>
       <Toaster position="top-right" />
       <button type="button" className={`mobile-nav-overlay ${mobileNavOpen ? "visible" : ""}`} onClick={() => { setMobileNavOpen(false); mobileMenuButtonRef.current?.focus(); }} aria-label="关闭导航" aria-hidden={!mobileNavOpen} tabIndex={mobileNavOpen ? 0 : -1} />
       <div ref={mobileSidebarRef} id="mobile-navigation" className={`mobile-sidebar ${mobileNavOpen ? "open" : ""}`} role="dialog" aria-modal="true" aria-label="移动导航" aria-hidden={!mobileNavOpen}>
@@ -2440,6 +2446,7 @@ export default function Home() {
             <ChevronRight className="size-3.5" />
             <strong>{activeView === "dashboard" ? "审批工作台" : activeView === "requests" ? showMineOnly ? "待我处理" : "全部申请" : activeView === "people" ? "协作成员" : activeView === "knowledge" ? "实验室 AI（内部）" : activeView === "members" ? "成员审核" : activeView === "oem" ? "官网 OEM 申请" : activeView === "notifications" ? "飞书提醒" : activeView === "profile" ? "个人设置" : "流程与规则"}</strong>
           </div>
+          {activeView === "knowledge" && knowledgeTab === "ask" && <OaChatStatus />}
           <div className="topbar-actions">
             <div className="topbar-date">{todayLabel}</div>
             <button type="button" className="oa-topbar-user" onClick={() => navigate("profile")} aria-label="打开个人设置"><UserRound className="size-4" />{session.user?.displayName || "成员"}</button>

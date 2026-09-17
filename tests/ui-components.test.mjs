@@ -88,14 +88,15 @@ test("keeps the internal laboratory AI behind OA sign-in, registration and NDA a
   }
 });
 
-test("labels the internal laboratory AI wait as retrieval and answer generation", async () => {
-  const knowledgeSource = await readFile(path.join(root, "components/knowledge/knowledge-view.tsx"), "utf8");
-
-  assert.match(knowledgeSource, /knowledge-answer-loading" role="status"/u);
-  assert.match(knowledgeSource, /正在检索并生成回答…/u);
-  assert.match(knowledgeSource, /\{asking \? "回答中" : "发送"\}/u);
-  assert.doesNotMatch(knowledgeSource, /正在查找审核通过的知识…/u);
-  assert.doesNotMatch(knowledgeSource, /\{asking \? "检索中" : "发送"\}/u);
+test("labels the internal laboratory AI wait and supports Chat-style send and stop", async () => {
+  const source = await readFile(path.join(root, "components/knowledge/oa-chat-panel.tsx"), "utf8");
+  assert.match(source, /knowledge-answer-loading" role="status"/u);
+  assert.match(source, /正在检索并生成回答…/u);
+  assert.match(source, /aria-label="发送问题"/u);
+  assert.match(source, /aria-label="停止等待回答"/u);
+  assert.match(source, /!event\.nativeEvent\.isComposing/u);
+  assert.match(source, /renderAnswerBody\(userFacingAnswer\(answer\)\)/u);
+  assert.doesNotMatch(source, /dangerouslySetInnerHTML|localStorage|conversationToken/u);
 });
 
 test("makes the official Feishu QR the primary login and keeps ChatGPT and GitHub under smaller alternatives", async () => {

@@ -6,7 +6,6 @@ import {
   BookOpen,
   Bot,
   Check,
-  FileCheck2,
   FileText,
   Globe2,
   Info,
@@ -18,11 +17,11 @@ import {
   Search,
   Send,
   ShieldCheck,
-  Sparkles,
   X,
 } from "lucide-react";
 import { toast } from "sonner";
 import { KnowledgePackageImport } from "./package-import";
+import { OaChatPanel } from "./oa-chat-panel";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,8 +42,6 @@ import { PUBLIC_KNOWLEDGE_CONFIRMATION } from "@/lib/knowledge-policy";
 import type {
   KnowledgeAction,
   KnowledgeAsset,
-  KnowledgeAskResponse,
-  KnowledgeCitation,
   KnowledgeDetailResponse,
   KnowledgeEvent,
   KnowledgeItem,
@@ -57,7 +54,6 @@ import type {
 
 export type KnowledgeTab = "ask" | "submit" | "mine" | "review" | "manage";
 type KnowledgeDraft = { title: string; category: string; summary: string; content: string; sourceLabel: string; sourceUrl: string };
-type AskTurn = { id: string; question: string; answer: string; citations: KnowledgeCitation[]; mode?: string };
 type ReviewDetail = Required<Pick<KnowledgeDetailResponse, "revisions" | "events">> & { item: KnowledgeItem; assets?: KnowledgeAsset[] };
 
 const knowledgeManageSortOptions: ReadonlyArray<{ value: KnowledgeListSort; label: string }> = [
@@ -125,13 +121,6 @@ function currentRevision(detail: ReviewDetail): KnowledgeRevision | undefined {
     || [...detail.revisions].sort((a, b) => (b.revisionNo || 0) - (a.revisionNo || 0))[0];
 }
 
-function askModeLabel(mode?: string) {
-  if (!mode) return "知识库回答";
-  if (["model", "rag", "grounded"].includes(mode)) return "大模型综合";
-  if (["retrieval", "retrieval-only", "extractive"].includes(mode)) return "知识检索";
-  return "知识库回答";
-}
-
 function KnowledgeStatusBadge({ status }: { status: KnowledgeStatus }) {
   const meta = statusMeta[status] || statusMeta.pending;
   return <Badge variant="outline" className={`knowledge-status knowledge-status-${status}`}><span />{meta.label}</Badge>;
@@ -164,82 +153,7 @@ function KnowledgeAnonymizationNotice() {
   return <div className="knowledge-submit-note knowledge-anonymization-note" role="note"><ShieldCheck className="size-4" /><p><strong>公开数据脱敏要求</strong>{PUBLIC_DATA_ANONYMIZATION_NOTICE}</p></div>;
 }
 
-function CitationList({ citations, turnId }: { citations: KnowledgeCitation[]; turnId: string }) {
-  if (!citations.length) return null;
-  return <section className="knowledge-citations" aria-label="回答引用">
-    <div className="knowledge-citations-heading"><BookOpen className="size-3.5" /><strong>引用依据</strong><span>{citations.length} 条</span></div>
-    <ol>{citations.map((citation, index) => {
-      const location = citation.sectionTitle || citation.section || citation.paragraphRef;
-      const sourceUrl = safeHttpUrl(citation.sourceUrl);
-      return <li key={`${turnId}-${citation.id}-${index}`}>
-        <div className="knowledge-citation-index">{citation.id || index + 1}</div>
-        <div><div className="knowledge-citation-title"><strong>{citation.title}</strong>{citation.category && <span>{citation.category}</span>}</div>{(location || citation.sourceLabel) && <small>{[location && `${location}${citation.paragraphRef && citation.paragraphRef !== location ? ` · ${citation.paragraphRef}` : ""}`, citation.sourceLabel].filter(Boolean).join(" · ")}</small>}<p>{citation.excerpt}</p>{sourceUrl && <a className="knowledge-citation-link" href={sourceUrl} target="_blank" rel="noreferrer">查看来源</a>}</div>
-      </li>;
-    })}</ol>
-  </section>;
-}
-
-function KnowledgeAskPanel() {
-  const [question, setQuestion] = useState("");
-  const [turns, setTurns] = useState<AskTurn[]>([]);
-  const [asking, setAsking] = useState(false);
-  const examples = ["机器人底盘急停与恢复的操作流程是什么？", "最近有哪些已审核的测试结论？", "项目资料对外分享需要注意什么？"];
-
-  const ask = async (event: FormEvent) => {
-    event.preventDefault();
-    const normalizedQuestion = question.trim();
-    if (normalizedQuestion.length < 2) {
-      toast.info("问题至少需要 2 个字符");
-      return;
-    }
-    setAsking(true);
-    try {
-      const response = await fetch("/api/lab-ai/ask", {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        credentials: "same-origin",
-        body: JSON.stringify({ question: normalizedQuestion }),
-      });
-      const data = await responseJson<KnowledgeAskResponse>(response, "知识助手暂时无法回答");
-      if (!data.answer?.trim()) throw new Error("知识助手没有返回有效回答");
-      setTurns((current) => [...current, {
-        id: `${Date.now()}-${current.length}`,
-        question: normalizedQuestion,
-        answer: data.answer!.trim(),
-        citations: data.citations ?? [],
-        mode: data.mode,
-      }]);
-      setQuestion("");
-    } catch (error) {
-      toast.error("问题未发送", { description: error instanceof Error ? error.message : "请稍后重试" });
-    } finally {
-      setAsking(false);
-    }
-  };
-
-  return <div className="knowledge-ask-layout">
-    <section className="knowledge-chat-card">
-      <div className="knowledge-card-heading"><div className="knowledge-card-icon"><Bot className="size-[18px]" /></div><div><h2>在 OA 内向实验室 AI 提问</h2><p>仅已登录并完成准入与保密签署的成员可使用；助手检索已审核、仍有效的内部及公开知识，并列出依据。</p></div></div>
-      <div className="knowledge-conversation" aria-live="polite">
-        {turns.length === 0 ? <div className="knowledge-welcome"><div className="knowledge-welcome-mark"><Sparkles className="size-5" /></div><strong>从团队已经确认的知识开始</strong><p>可以询问实验步骤、设备操作、技术结论或项目规范。没有足够依据时，助手会明确说明。</p><div className="knowledge-example-list">{examples.map((example) => <button type="button" key={example} onClick={() => setQuestion(example)}>{example}</button>)}</div></div> : turns.map((turn) => <article className="knowledge-turn" key={turn.id}>
-          <div className="knowledge-question"><span>你</span><p>{turn.question}</p></div>
-          <div className="knowledge-answer"><div className="knowledge-answer-avatar"><Bot className="size-4" /></div><div className="knowledge-answer-content"><div className="knowledge-answer-label"><strong>实验室知识助手</strong><Badge variant="outline">{askModeLabel(turn.mode)}</Badge></div><p>{turn.answer}</p><CitationList citations={turn.citations} turnId={turn.id} />{turn.citations.length === 0 && <div className="knowledge-no-citations"><AlertTriangle className="size-3.5" />本次没有检索到可引用的已审核知识，请勿将回答作为关键操作依据。</div>}</div></div>
-        </article>)}
-        {asking && <div className="knowledge-answer knowledge-answer-loading" role="status"><div className="knowledge-answer-avatar"><Bot className="size-4" /></div><div><LoaderCircle className="size-4" />正在检索并生成回答…</div></div>}
-      </div>
-      <form className="knowledge-ask-form" onSubmit={ask}>
-        <label htmlFor="knowledge-question">输入问题</label>
-        <div><Textarea id="knowledge-question" value={question} onChange={(event) => setQuestion(event.target.value)} placeholder="例如：激光雷达标定前需要做哪些检查？" rows={3} minLength={2} maxLength={500} disabled={asking} /><Button type="submit" className="primary-button" disabled={asking || question.trim().length < 2}>{asking ? <LoaderCircle className="size-4" /> : <Send className="size-4" />}{asking ? "回答中" : "发送"}</Button></div>
-        <small>回答用于项目协作参考；关键操作仍应结合原始记录和负责人要求核对。</small>
-      </form>
-    </section>
-    <aside className="knowledge-principles">
-      <div><ShieldCheck className="size-5" /><strong>先审核，再选择范围</strong><p>成员投稿不会立即参与问答；项目负责人或 OA 管理员批准时必须选择“对内”或“对外公开”。</p></div>
-      <div><FileCheck2 className="size-5" /><strong>回答附带依据</strong><p>每次命中知识库时展示条目、章节和原文片段，方便回看。</p></div>
-      <div><LibraryBig className="size-5" /><strong>仅使用有效版本</strong><p>被退回、拒绝或撤销的内容不会被知识问答调用。</p></div>
-    </aside>
-  </div>;
-}
+function KnowledgeAskPanel() { return <OaChatPanel />; }
 
 function KnowledgeSubmitPanel({
   draft,
@@ -762,7 +676,7 @@ export function KnowledgeView({ canReviewKnowledge, activeSection, onSectionChan
     <section className="knowledge-scope-summary" aria-label="实验室知识可见范围说明"><div><ShieldCheck className="size-5" /><p><strong>对内：在 OA 里面问</strong><span>仅已登录并完成准入与保密签署的成员可检索。</span></p></div><div><Globe2 className="size-5" /><p><strong>对外：供 ARTS Robotics AI assistant 使用</strong><span>设为公开须二次确认，随后供 <a href="https://chat.omindos.ai" target="_blank" rel="noreferrer">chat.omindos.ai</a> 检索。</span></p></div></section>
     <Tabs className="knowledge-tabs" value={visibleTab} onValueChange={(value) => setActiveTab(value as KnowledgeTab)}>
       <TabsList aria-label="实验室 AI 功能"><TabsTrigger value="ask"><Bot className="size-4" />知识问答</TabsTrigger><TabsTrigger value="submit"><Send className="size-4" />提交知识</TabsTrigger><TabsTrigger value="mine"><FileText className="size-4" />我的提交</TabsTrigger>{canReviewKnowledge && <TabsTrigger value="review"><ShieldCheck className="size-4" />待审核{reviewPendingCount > 0 && <span className="knowledge-tab-count">{tabCount}</span>}</TabsTrigger>}{canReviewKnowledge && <TabsTrigger value="manage"><LibraryBig className="size-4" />知识库管理</TabsTrigger>}</TabsList>
-      <div hidden={visibleTab !== "ask"}><KnowledgeAskPanel /></div>
+      <div className="oa-chat-tab" hidden={visibleTab !== "ask"}><KnowledgeAskPanel /></div>
       <div hidden={visibleTab !== "submit"}><KnowledgePackageImport key={returnedPackageItem?.id || "new-package"} returnedItem={returnedPackageItem} onCancelReturn={() => setReturnedPackageItem(null)} onSubmitted={() => { void loadMine(); void loadReview(); void loadManage(debouncedManageQuery, manageSort); }} />{!returnedPackageItem && <KnowledgeSubmitPanel draft={draft} setDraft={setDraft} editingItem={editingItem} submitting={submitting} onSubmit={submitKnowledge} onCancelEdit={cancelEditing} />}</div>
       <TabsContent value="mine"><KnowledgeMinePanel items={mine} loading={mineLoading || Boolean(editingLoadingId)} error={mineError} onRetry={() => void loadMine()} onEdit={(item) => void startEditing(item)} editingId={editingLoadingId} /></TabsContent>
       {canReviewKnowledge && <TabsContent value="review"><KnowledgeReviewPanel items={reviewItems} pendingCount={reviewPendingCount} loading={reviewLoading} error={reviewError} onRetry={() => void loadReview()} onOpen={openReview} /></TabsContent>}

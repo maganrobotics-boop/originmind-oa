@@ -18,6 +18,9 @@ if [[ ! -x "${vinext}" ]]; then
   exit 69
 fi
 
+# Keep OA's Markdown/MathML renderer and scoped presentation in lockstep with Chat.
+node "${script_dir}/sync-oa-chat-shared.mjs"
+
 echo "Running bounded vinext build..."
 timeout \
   --signal=TERM \

@@ -14,6 +14,10 @@ const eslintConfig = defineConfig([
     "next-env.d.ts",
     // Reviewed, hash-pinned frontend release artifact; source lint is not applicable.
     "chat-cloudflare/public/assets/**",
+    // The identical, digest-verified upstream MathML module reused by OA.
+    "public/assets/katex-*.mjs",
+    // Compiled actual-page browser fixture, not application source.
+    "parity-validation/browser-app/**",
   ]),
   {
     files: ["components/ui/**/*.{ts,tsx}", "hooks/use-mobile.ts"],
