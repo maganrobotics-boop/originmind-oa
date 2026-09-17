@@ -1,0 +1,45 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { deflateRawSync } from 'node:zlib';
+import { PACKAGE_LIMITS, normalizePackagePath, prepareKnowledgePackage, unpackKnowledgeZip, submitKnowledgePackage } from '../lib/knowledge-package.mjs';
+import { isKnowledgeUploadOrigin } from '../lib/knowledge-upload-origin.ts';
+
+const png = new Uint8Array([137,80,78,71,13,10,26,10,0,0,0,0]);
+const markdown = '# 测试资料\n完整的实验说明和公式 $x^2$。\n![实验平台](assets/one.png)';
+const sample = () => [new File([markdown], 'index.md'), new File([png], 'assets/one.png')];
+function crc(bytes) { let n = 0xffffffff; for (const b of bytes) { n ^= b; for (let i = 0; i < 8; i++) n = (n >>> 1) ^ (0xedb88320 & -(n & 1)); } return (n ^ 0xffffffff) >>> 0; }
+function zip(entries, { method = 0, checksumDelta = 0, declaredSize, flags = 0, mode = 0 } = {}) {
+  const locals = [], central = []; let offset = 0;
+  for (const [name, raw] of entries) {
+    const bytes = Buffer.from(raw), encoded = Buffer.from(name), packed = method === 8 ? deflateRawSync(bytes) : bytes;
+    const local = Buffer.alloc(30); local.writeUInt32LE(0x04034b50); local.writeUInt16LE(flags, 6); local.writeUInt16LE(method, 8); local.writeUInt32LE((crc(bytes) + checksumDelta) >>> 0, 14); local.writeUInt32LE(packed.length, 18); local.writeUInt32LE(declaredSize ?? bytes.length, 22); local.writeUInt16LE(encoded.length, 26);
+    const directory = Buffer.alloc(46); directory.writeUInt32LE(0x02014b50); directory.writeUInt16LE(flags, 8); directory.writeUInt16LE(method, 10); directory.writeUInt32LE((crc(bytes) + checksumDelta) >>> 0, 16); directory.writeUInt32LE(packed.length, 20); directory.writeUInt32LE(declaredSize ?? bytes.length, 24); directory.writeUInt16LE(encoded.length, 28); directory.writeUInt32LE((mode << 16) >>> 0, 38); directory.writeUInt32LE(offset, 42);
+    locals.push(local, encoded, packed); central.push(directory, encoded); offset += local.length + encoded.length + packed.length;
+  }
+  const directory = Buffer.concat(central), end = Buffer.alloc(22); end.writeUInt32LE(0x06054b50); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10); end.writeUInt32LE(directory.length, 12); end.writeUInt32LE(offset, 16);
+  return new File([Buffer.concat([...locals, directory, end])], 'sample.zip');
+}
+const goodResponse = data => Response.json({ received: true, ...data });
+const accepted = () => goodResponse({ item: { id: 'item-one', status: 'pending' }, assetUpload: { revisionId: 'revision-one', uploadToken: 'test-upload-token' } });
+
+test('folder and ZIP preparation preserve markdown, formula and image descriptions', async () => { const pkg = await prepareKnowledgePackage(sample()); assert.equal(pkg.body, markdown); assert.equal(pkg.images[0].alt, '实验平台'); assert.equal(pkg.images[0].path, 'assets/one.png'); assert.equal(pkg.images[0].type, 'image/png'); });
+test('a selected folder root is stripped once, including a Chinese folder name', async () => { const files = sample(); files.forEach((file, i) => Object.defineProperty(file, 'webkitRelativePath', { value: `论文/${i ? 'assets/one.png' : 'index.md'}` })); assert.equal((await prepareKnowledgePackage(files, true)).images.length, 1); });
+test('unsafe and absolute paths fail closed', () => { for (const path of ['../index.md', '/index.md', 'C:/index.md', 'assets/../x.png', 'assets//x.png', 'a\u0000.png']) assert.throws(() => normalizePackagePath(path)); });
+test('case-folded duplicates are rejected', async () => { await assert.rejects(prepareKnowledgePackage([...sample(), new File([png], 'assets/ONE.png')]), /重复/); });
+test('a missing image rejects before any request', async () => { await assert.rejects(prepareKnowledgePackage(sample().slice(0, 1)), /缺失图片/); });
+test('mismatched image bytes and extension are rejected', async () => { await assert.rejects(prepareKnowledgePackage([sample()[0], new File(['not a png'], 'assets/one.png')]), /不是有效/); });
+test('oversized markdown is rejected from metadata without reading the file', async () => { await assert.rejects(prepareKnowledgePackage([{ name: 'index.md', size: PACKAGE_LIMITS.markdown + 1, arrayBuffer() { throw new Error('must not read'); } }]), /大小限制/); });
+test('unknown executable files are rejected', async () => { await assert.rejects(prepareKnowledgePackage([...sample(), new File(['alert(1)'], 'assets/x.js')]), /只允许/); });
+test('unused images are reported explicitly rather than silently counted as uploaded', async () => { const pkg = await prepareKnowledgePackage([...sample(), new File([png], 'assets/extra.png')]); assert.deepEqual(pkg.unusedPaths, ['assets/extra.png']); assert.equal(pkg.images.length, 1); });
+test('invalid UTF-8 markdown is rejected', async () => { await assert.rejects(prepareKnowledgePackage([new File([new Uint8Array([255,255])], 'index.md')]), /UTF-8/); });
+for (const method of [0, 8]) test(`ZIP method ${method} passes CRC and produces the same package`, async () => { const files = await unpackKnowledgeZip(zip([['index.md', markdown], ['assets/one.png', png]], { method })); assert.equal((await prepareKnowledgePackage(files)).body, markdown); });
+test('ZIP CRC mismatch is rejected', async () => { await assert.rejects(unpackKnowledgeZip(zip([['index.md', markdown]], { checksumDelta: 1 })), /校验失败/); });
+test('ZIP inflation exceeding the declared length aborts', async () => { await assert.rejects(unpackKnowledgeZip(zip([['index.md', 'x'.repeat(100000)]], { method: 8, declaredSize: 1 })), /超过声明值/); });
+test('encrypted ZIP is rejected', async () => { await assert.rejects(unpackKnowledgeZip(zip([['index.md', markdown]], { flags: 1 })), /加密/); });
+test('ZIP symbolic links are rejected', async () => { await assert.rejects(unpackKnowledgeZip(zip([['index.md', markdown]], { mode: 0xa000 })), /符号链接/); });
+test('ZIP path traversal and duplicate file names are rejected', async () => { await assert.rejects(unpackKnowledgeZip(zip([['../index.md', markdown]])), /不安全/); await assert.rejects(unpackKnowledgeZip(zip([['index.md', markdown], ['INDEX.md', markdown]])), /重复/); });
+test('truncated ZIP cannot be parsed', async () => { await assert.rejects(unpackKnowledgeZip(new File(['abc'], 'bad.zip')), /损坏/); });
+test('OA same-origin and the existing Chat origin are allowed without widening to third parties', () => { for (const origin of ['https://oa.omindos.ai', 'https://chat.omindos.ai']) assert.equal(isKnowledgeUploadOrigin(new Request('https://oa.omindos.ai/api/knowledge/assets', { headers: { origin } })), true); for (const origin of ['null', 'https://evil.test', 'https://oa.omindos.ai.evil.test']) assert.equal(isKnowledgeUploadOrigin(new Request('https://oa.omindos.ai/api/knowledge/assets', { headers: { origin } })), false); assert.equal(isKnowledgeUploadOrigin(new Request('https://oa.omindos.ai/api/knowledge/assets')), false); });
+test('submit uses one pending document, same-origin credentials, every image, then finalizes; never approves', async () => { const calls = []; const pkg = await prepareKnowledgePackage(sample()); const result = await submitKnowledgePackage(pkg, { fetcher: async (url, init) => { calls.push([url, init]); return calls.length === 1 ? accepted() : goodResponse({}); } }); assert.equal(result.item.status, 'pending'); assert.deepEqual(calls.map(c => c[0]), ['/api/knowledge/import-chat', '/api/knowledge/assets', '/api/knowledge/assets/finalize']); assert.ok(calls.every(([, init]) => init.credentials === 'same-origin')); assert.deepEqual(JSON.parse(calls[2][1].body).expectedPaths, ['assets/one.png']); assert.ok(calls.every(([, init]) => init.method !== 'PATCH')); });
+test('image failure never reports complete; retry retains the same document identity', async () => { const pkg = await prepareKnowledgePackage(sample()); const ids = []; let failImage = true; const fetcher = async (url, init) => { if (url.endsWith('import-chat')) { ids.push(JSON.parse(init.body).document.id); return accepted(); } if (url.endsWith('/assets') && failImage) return Response.json({ error: '图片失败' }, { status: 503 }); return goodResponse({}); }; await assert.rejects(submitKnowledgePackage(pkg, { fetcher }), /图片失败/); failImage = false; await submitKnowledgePackage(pkg, { fetcher }); assert.deepEqual(ids, [pkg.id, pkg.id]); });
+test('returned documents carry only the explicit returned item id', async () => { const pkg = await prepareKnowledgePackage(sample()); let first; await submitKnowledgePackage(pkg, { returnedKnowledgeItemId: 'returned-one', fetcher: async (url, init) => { if (url.endsWith('import-chat')) { first = JSON.parse(init.body); return accepted(); } return goodResponse({}); } }); assert.equal(first.returnedKnowledgeItemId, 'returned-one'); assert.equal(first.document.body, markdown); assert.equal(first.document.visibility, undefined); });
