@@ -55,9 +55,10 @@ jobs:
           conflicts = set(filter(None, subprocess.check_output(['git', 'diff', '--name-only', '--diff-filter=U'], text=True).splitlines()))
           assert conflicts and conflicts <= allowed, f'Unexpected source conflict; stop for review: {conflicts - allowed}'
           PY
-              # Source changes must merge normally. Only generated public bytes are
-              # reset before a deterministic rebuild of both preserved changes.
-              git restore --source=HEAD --staged --worktree .github/workflows/check-chat-cloudflare.yml chat-cloudflare/public
+              # Source changes must merge normally. Resolve only the inspected
+              # generated paths; the next step rebuilds both preserved changes.
+              git rm -f --ignore-unmatch -- chat-cloudflare/public/assets/app-063adeb2dac7dbb9.js chat-cloudflare/public/assets/app-c8025c4679fea989.js
+              git restore --source=HEAD --staged --worktree .github/workflows/check-chat-cloudflare.yml chat-cloudflare/public/index.html chat-cloudflare/public/assets/app-29458d0915f104d4.js
               test -z "$(git diff --name-only --diff-filter=U)"
             fi
           fi
