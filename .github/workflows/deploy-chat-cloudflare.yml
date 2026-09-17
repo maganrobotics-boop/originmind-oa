@@ -72,3 +72,33 @@ jobs:
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 30
+
+  verify-formula-rendering:
+    needs: release
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Install isolated browser test tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/formula-browser" --no-save --ignore-scripts playwright@1.63.0
+          node "$RUNNER_TEMP/formula-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Verify deployed formula assets in a browser without production writes
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/formula-browser/node_modules/playwright/index.mjs
+          BROWSER_REPORT_DIR: ${{ runner.temp }}/formula-production-report
+          ANSWER_BROWSER_ORIGIN: https://chat.omindos.ai
+        run: node chat-cloudflare/scripts/check-formula-runtime-browser.mjs
+      - name: Preserve deployed formula verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: chat-formula-production-${{ github.sha }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/formula-production-report
+          if-no-files-found: warn
+          retention-days: 30
