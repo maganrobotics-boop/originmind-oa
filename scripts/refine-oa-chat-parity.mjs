@@ -24,12 +24,28 @@ await refine('tests/oa-chat-parity.test.mjs', '  assert.match(asset, /detail\\?\
 // generation. Export and import it rather than dropping that existing binding.
 await refine('chat-cloudflare/src/grounded-prompt.mjs', 'function boundedUserMessages(', 'export function boundedUserMessages(');
 await refine('chat-cloudflare/src/app.mjs', 'import { buildGroundedChatMessages }', 'import { buildGroundedChatMessages, boundedUserMessages }');
-// Remove icons left unused after replacing the old chat panel.
 const viewPath = 'components/knowledge/knowledge-view.tsx';
 let view = await readFile(viewPath, 'utf8');
 view = view.replace('  FileCheck2,\n', '').replace('  Sparkles,\n', '');
 await writeFile(viewPath, view);
-console.log('OA status, image revision checks and the public follow-up retrieval helper refined.');
-// This fixture uses the actual integrated components and is preserved as private
-// CI evidence. It never contacts a live API while building.
+// The kept-mounted chat wrapper is an ordinary div, not a tabpanel primitive.
+// Give it the flex height as well, otherwise all messages collapse to padding.
+await refine(viewPath, '<div hidden={visibleTab !== "ask"}><KnowledgeAskPanel /></div>', '<div className="oa-chat-tab" hidden={visibleTab !== "ask"}><KnowledgeAskPanel /></div>');
+const cssPath = 'app/oa-workspace.css';
+let css = await readFile(cssPath, 'utf8');
+if (!css.includes('/* Verified chat-wrapper and composer integration */')) {
+  css += `
+/* Verified chat-wrapper and composer integration */
+.oa-workspace.oa-chat-open .knowledge-tabs > .oa-chat-tab { flex:1 1 0; min-height:0; height:100%; margin:0; padding:0; }
+.oa-workspace.oa-chat-open .topbar-actions > .chat-hub { display:none !important; }
+.oa-workspace .oa-shared-chat .oa-chat-composer-area { width:100%; max-width:none; margin:0; padding:12px max(14px,env(safe-area-inset-right)) max(12px,env(safe-area-inset-bottom)) max(14px,env(safe-area-inset-left)); background:#fff; }
+.oa-workspace .oa-shared-chat .oa-chat-composer { width:100%; max-width:none; margin:0; min-height:72px; padding:14px 12px 14px 20px; border:1px solid #dedede; border-radius:28px; box-shadow:0 2px 20px #00000008; }
+.oa-workspace .oa-shared-chat .oa-chat-composer:focus-within { border-color:#bcbcbc; box-shadow:0 2px 20px #00000008; }
+.oa-workspace .oa-shared-chat .oa-chat-composer .send-button { border-radius:50%; box-shadow:none; }
+.oa-workspace .oa-shared-chat .oa-chat-composer .send-button::before { content:none; }
+@media(max-width:560px) { .oa-workspace .oa-shared-chat .oa-chat-composer { min-height:62px; padding:9px 10px 9px 16px; } }
+`;
+  await writeFile(cssPath, css);
+}
+console.log('OA status, image checks, follow-up retrieval and actual-page viewport integration refined.');
 execFileSync(process.execPath, ['scripts/build-oa-chat-browser-fixture.mjs'], { stdio: 'inherit' });
