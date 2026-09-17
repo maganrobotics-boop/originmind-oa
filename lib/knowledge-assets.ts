@@ -133,7 +133,7 @@ export async function persistKnowledgeAsset(
   const row = await readRow();
   if (!row) throw new Error("knowledge asset metadata was not saved");
   assertMatches(row);
-  return { id: row.id, itemId, revisionId, assetPath: row.asset_path, mimeType: row.mime_type, byteSize: asset.bytes.byteLength, storageKey };
+  return { id: row.id, itemId, revisionId, assetPath: asset.path, mimeType: asset.mimeType, byteSize: asset.bytes.byteLength, storageKey };
 }
 
 export async function persistKnowledgeAssets(
@@ -165,6 +165,7 @@ export async function listKnowledgeRevisionAssets(database: D1Database, revision
     mimeType: row.mime_type, byteSize: Number(row.byte_size), storageKey: row.storage_key,
   }));
 }
+
 
 export async function assertKnowledgeRevisionAssetsReady(database: D1Database, itemId: string, revisionId: string): Promise<void> {
   const contentResult = await database.prepare(`
