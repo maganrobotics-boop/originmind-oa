@@ -1,0 +1,75 @@
+name: Prepare and verify answer layout repair
+on:
+  push:
+    branches: [fix/chat-flattened-answer-20260917]
+    paths: [.github/workflows/prepare-answer-layout.yml]
+permissions:
+  contents: write
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/fix/chat-flattened-answer-20260917'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    env:
+      WRANGLER_SEND_METRICS: 'false'
+      BROWSER_REPORT_DIR: ${{ runner.temp }}/layout-repair-report
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Apply readable source transformation
+        run: |
+          python3 scripts/prepare-answer-layout.py
+          git diff --check
+          node --check chat-cloudflare/frontend/app.js
+          node --test chat-cloudflare/test/answer-presentation*.test.mjs
+      - name: Install locked dependencies and build Chat
+        run: |
+          npm ci --prefix chat-cloudflare
+          npm --prefix chat-cloudflare run build:frontend
+          npm run install:ci
+      - name: Check real OA producer and Chat contract
+        run: node --test tests/public-answer-layout.test.mjs
+      - name: Complete Chat and OA verification
+        run: |
+          npm --prefix chat-cloudflare run check
+          npm --prefix chat-cloudflare run check:wrangler
+          npm run typecheck
+          npm run lint
+          npm test
+      - name: Install isolated browser tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/layout-playwright" --no-save --ignore-scripts playwright@1.63.0
+          node "$RUNNER_TEMP/layout-playwright/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Test rendering history formulas and narrow screens
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/layout-playwright/node_modules/playwright/index.mjs
+        run: |
+          node chat-cloudflare/scripts/check-answer-browser.mjs
+          node chat-cloudflare/scripts/check-formula-runtime-browser.mjs
+          node chat-cloudflare/scripts/check-answer-layout-browser.mjs
+      - name: Commit only verified source and build outputs
+        run: |
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          rm -f scripts/answer-layout.patch.gz.b64 scripts/prepare-answer-layout.py .github/workflows/inspect-answer-layout.yml .github/workflows/prepare-answer-layout.yml
+          git add app/api/public/lab-ai/_lib/response-contract.ts chat-cloudflare/src chat-cloudflare/frontend/app.js chat-cloudflare/public chat-cloudflare/test/answer-presentation-integration.test.mjs chat-cloudflare/scripts/check-answer-layout-browser.mjs tests/public-answer-layout.test.mjs .github/workflows/check-chat-cloudflare.yml
+          git add -u -- scripts/answer-layout.patch.gz.b64 scripts/prepare-answer-layout.py .github/workflows/inspect-answer-layout.yml .github/workflows/prepare-answer-layout.yml
+          git diff --cached --check
+          git commit -m 'fix: preserve OA Markdown structure and prevent raw slide fallback answers'
+          git push origin HEAD:fix/chat-flattened-answer-20260917
+      - name: Preserve test and source evidence
+        if: always()
+        run: |
+          mkdir -p "$BROWSER_REPORT_DIR"
+          git rev-parse HEAD > "$BROWSER_REPORT_DIR/commit.txt"
+          git diff --stat > "$BROWSER_REPORT_DIR/working-diff.txt"
+          tar --exclude=node_modules --exclude=.git --exclude=.wrangler --exclude=.wrangler-build --exclude=dist --exclude=.next -czf "$RUNNER_TEMP/layout-source.tar.gz" .
+          mv "$RUNNER_TEMP/layout-source.tar.gz" "$BROWSER_REPORT_DIR/source.tar.gz"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: answer-layout-verified-${{ github.run_id }}
+          path: ${{ runner.temp }}/layout-repair-report
+          retention-days: 7
