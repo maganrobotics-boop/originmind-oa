@@ -1,0 +1,67 @@
+name: Validate OA workspace phase one (temporary)
+
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: oa-workspace-phase1-source
+  cancel-in-progress: false
+
+jobs:
+  validate-feature:
+    if: >-
+      github.repository == 'maganrobotics-boop/originmind-oa' &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref == 'feat/oa-chat-workspace-phase1-20260917'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Apply exact-base source transformation
+        run: |
+          if ! grep -q 'oa-app oa-workspace' app/page.tsx; then
+            node scripts/apply-oa-workspace-phase1.mjs
+          fi
+          git diff --check
+          git diff --stat
+      - name: Commit only materialized OA source to the feature branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 - <<'PY'
+          import subprocess
+          allowed = {'app/page.tsx', 'components/knowledge/knowledge-view.tsx', 'app/api/knowledge/import-chat/route.ts', 'app/api/knowledge/assets/route.ts', 'app/api/knowledge/assets/finalize/route.ts'}
+          changed = set(subprocess.check_output(['git', 'diff', '--name-only'], text=True).splitlines())
+          if not changed <= allowed:
+              raise SystemExit('Refusing unexpected source writes: ' + repr(changed - allowed))
+          PY
+          if ! git diff --quiet; then
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git add -- app/page.tsx components/knowledge/knowledge-view.tsx app/api/knowledge/import-chat/route.ts app/api/knowledge/assets/route.ts app/api/knowledge/assets/finalize/route.ts
+            git commit -m 'feat(oa): integrate Chat-style workspace and authenticated package uploads'
+            auth="$(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+            git -c "http.https://github.com/.extraheader=AUTHORIZATION: basic $auth" push origin HEAD:refs/heads/feat/oa-chat-workspace-phase1-20260917
+          fi
+      - name: Install locked dependencies
+        run: npm run install:ci
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Lint
+        run: npm run lint
+      - name: Build and all OA tests
+        run: npm test
