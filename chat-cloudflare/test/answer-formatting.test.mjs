@@ -3,7 +3,7 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 import katex from "../node_modules/katex/dist/katex.mjs";
-import { answerMathTokenAt, protectAnswerTechnicalText } from "../src/answer-math.mjs";
+import { answerMathTokenAt, normalizeAnswerMathTex, protectAnswerTechnicalText } from "../src/answer-math.mjs";
 
 const source = await readFile(new URL("../frontend/app.js", import.meta.url), "utf8");
 const section = (start, end) => source.slice(source.indexOf(start), source.indexOf(end, source.indexOf(start)));
@@ -125,4 +125,63 @@ test("the answer footer keeps copy but no further-inquiry entry", () => {
   const footer = section("function assistantMessageNode", "function dispatchQuestion");
   assert.match(footer, /actions\.append\(copy\)/u);
   assert.doesNotMatch(footer, /further-inquiry|需要?进一步交流|openInquiry/u);
+});
+
+
+test("screenshot regression: padded scalar and multiline dynamics formulas are all recognized", async () => {
+  const answer = await readFile(new URL("./fixtures/robot-dynamics-answer.md", import.meta.url), "utf8");
+  const tokens = protectAnswerTechnicalText(answer);
+  assert.equal(tokens.tokens.filter((token) => token.kind === "math").length, 8);
+  assert.equal(tokens.restore(tokens.text), answer);
+  const result = api.renderAnswerBody(api.userFacingAnswer(answer));
+  assert.equal(mathNodes(result).length, 8);
+  for (const token of tokens.tokens.filter((token) => token.kind === "math")) {
+    assert.match(katex.renderToString(token.tex, { output: "mathml", throwOnError: true }), /<math/u);
+  }
+});
+
+test("padded math does not swallow currency, escaped dollars, code or incomplete text", () => {
+  for (const value of ["价格 $ 5 and $ 10", "价格 $5 and $10", String.raw`\$ T \$`, "`$ L = T - V $`", "未完成 $ L = T - V"]) {
+    assert.equal(mathNodes(api.renderAnswerBody(value)).length, 0, value);
+  }
+  assert.equal(mathNodes(api.renderAnswerBody("价格 $5 and $10，公式 $ L = T - V $。")).length, 1);
+  for (const value of ["$ T $", "$ q_i $", String.raw`$ \tau_i $`, "$ L = T - V $", "$x $", "$ x$"]) {
+    assert.equal(mathNodes(api.renderAnswerBody(value)).length, 1, value);
+    assert.equal(answerMathTokenAt(value, 0).raw, value);
+  }
+});
+
+test("matrix recovery restores only explicit broken row separators and preserves raw text", () => {
+  const damaged = String.raw`\begin{bmatrix}
+I_{xx} & I_{xy} & I_{xz} \
+I_{yx} & I_{yy} & I_{yz} \
+I_{zx} & I_{zy} & I_{zz}
+\end{bmatrix}`;
+  const repaired = normalizeAnswerMathTex(damaged);
+  assert.notEqual(repaired, damaged);
+  const markup = katex.renderToString(repaired, {output:"mathml",throwOnError:true});
+  assert.equal((markup.match(/<mtr>/gu) || []).length, 3);
+  assert.equal((markup.match(/<mtd(?:>| )/gu) || []).length, 9);
+  assert.equal(normalizeAnswerMathTex(repaired), repaired);
+  const protectedText = protectAnswerTechnicalText(`$$${damaged}$$`);
+  assert.equal(protectedText.restore(protectedText.text), `$$${damaged}$$`);
+  const calls = [];
+  harness({render(tex, node) {calls.push(tex); node.textContent="MATH";}}).renderAnswerBody(`$$${damaged}$$`);
+  assert.equal(calls[0],repaired);
+});
+
+test("matrix recovery never invents rows from wrapping, uneven columns, nested blocks or code", () => {
+  const values = [String.raw`\frac{d}{dt}\left(\frac{\partial L}{\partial \dot{q}_i}\right)`,
+    String.raw`\begin{bmatrix}a & b
+c & d\end{bmatrix}`,
+    String.raw`\begin{bmatrix}a & b \
+c & d & e\end{bmatrix}`,
+    String.raw`\begin{bmatrix}\text{a} & b \
+c & d\end{bmatrix}`,
+    String.raw`\begin{bmatrix}a & b \\
+c & d\end{bmatrix}`];
+  for (const value of values) assert.equal(normalizeAnswerMathTex(value), value);
+  const literal = "```js\n" + values[2] + "\n```";
+  assert.equal(mathNodes(api.renderAnswerBody(literal)).length, 0);
+  assert.equal(nodes(api.renderAnswerBody(literal),"code")[0].textContent,values[2]);
 });

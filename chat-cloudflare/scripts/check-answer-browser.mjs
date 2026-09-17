@@ -77,7 +77,7 @@ try {
   }
   const context = await browser.newContext({serviceWorkers:"block"});
   const page = await context.newPage();
-  await page.route("**/assets/katex-*.mjs", route => route.abort());
+  await page.route("**/assets/katex-*.mjs*", route => route.abort());
   await page.route("**/api/**", route => route.fulfill({json: new URL(route.request().url()).pathname === "/api/chat" ? {answer,mode:"ai",images:[]} : ready}));
   await page.goto(origin);
   await page.locator("textarea").first().fill("公式组件故障测试");
