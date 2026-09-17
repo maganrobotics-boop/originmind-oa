@@ -118,7 +118,7 @@ try {
         assert.equal(await button.getAttribute('aria-expanded'),'true');
       }
       assert.doesNotMatch(await nav.innerText(), /官网 OEM 申请|流程与规则/u);
-      assert.equal(await nav.locator('.sidebar-user-name').innerText(), '测试成员');
+      assert.equal(await nav.getByRole('button',{name:'打开个人账户菜单',exact:true}).getAttribute('title'), '测试成员');
       assert.equal(await nav.getByRole('button',{name:'打开个人账户菜单',exact:true}).isVisible(),true);
       await page.screenshot({ path:resolve(output,`${name}-navigation.png`),fullPage:true });
       await nav.getByRole('button',{name:'上传资料',exact:true}).click();

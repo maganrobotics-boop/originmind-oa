@@ -12,10 +12,10 @@ type ForwardContent = { body: string; omittedImages?: number };
 type CurrentUser = { email: string; displayName: string };
 type ContextValue = {
   user: CurrentUser; peer: ConversationPeer | null; visible: boolean;
-  aiEpoch: number; dmClearEpoch: number; messageEpoch: number;
+  aiEpoch: number; aiDirty: boolean; setAiDirty: (dirty: boolean) => void; dmClearEpoch: number; messageEpoch: number;
   lastAnswer: ForwardContent | null; setLastAnswer: (answer: ForwardContent | null) => void;
   drafts: Record<string, string>; setMemberDraft: (email: string, body: string) => void;
-  showAi: () => void; newAi: () => void; clearCurrent: () => void;
+  showAi: () => void; newAi: () => void; clearCurrent: () => boolean;
   chooseMember: () => void; forward: (content: ForwardContent) => void;
 };
 const Context = createContext<ContextValue | null>(null);
@@ -29,21 +29,23 @@ export function OaConversationProvider({ currentUser, visible, onOpenChat, child
   const user = currentUser || { email: '', displayName: '成员' };
   const [peer, setPeer] = useState<ConversationPeer | null>(null);
   const [aiEpoch, setAiEpoch] = useState(0);
+  const [aiDirty, setAiDirty] = useState(false);
   const [dmClearEpoch, setDmClearEpoch] = useState(0);
   const [messageEpoch, setMessageEpoch] = useState(0);
   const [lastAnswer, setLastAnswer] = useState<ForwardContent | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [picker, setPicker] = useState<{ content: ForwardContent | null } | null>(null);
   const showAi = () => { setPeer(null); onOpenChat(); };
-  const resetAi = () => { setAiEpoch(value => value + 1); setLastAnswer(null); setPeer(null); onOpenChat(); };
+  const resetAi = () => { setAiEpoch(value => value + 1); setLastAnswer(null); setAiDirty(false); setPeer(null); onOpenChat(); };
   const newAi = () => { if (window.confirm('开始新的 AI 聊天？仅清除当前 AI 对话，不删除资料、审批或真人消息。')) resetAi(); };
   const clearCurrent = () => {
     if (peer) {
-      if (window.confirm(`清空与${peer.name}聊天的本页显示？不会删除双方消息记录，重新打开仍可查看。`)) setDmClearEpoch(value => value + 1);
-    } else if (window.confirm('清空当前 AI 聊天？不会删除资料、审批或真人消息。')) resetAi();
+      if (window.confirm(`清空与${peer.name}聊天的本页显示？不会删除双方消息记录，重新打开仍可查看。`)) { setDmClearEpoch(value => value + 1); return true; }
+    } else if (window.confirm('清空当前 AI 聊天？不会删除资料、审批或真人消息。')) { resetAi(); return true; }
+    return false;
   };
   return <Context.Provider value={{
-    user, peer, visible, aiEpoch, dmClearEpoch, messageEpoch, lastAnswer, setLastAnswer, drafts,
+    user, peer, visible, aiEpoch, aiDirty, setAiDirty, dmClearEpoch, messageEpoch, lastAnswer, setLastAnswer, drafts,
     setMemberDraft: (email, body) => setDrafts(current => ({ ...current, [email]: body })),
     showAi, newAi, clearCurrent, chooseMember: () => setPicker({ content: null }), forward: content => setPicker({ content }),
   }}>
@@ -58,12 +60,31 @@ export function OaConversationTitle({ children }: { children: ReactNode }) {
 }
 export function OaConversationMenu() {
   const chat = useOaConversation();
-  return <DropdownMenu><DropdownMenuTrigger asChild><button type="button" className="oa-conversation-menu" aria-label="聊天更多操作"><MoreHorizontal size={24} /></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="oa-conversation-popover">
-    <DropdownMenuItem onSelect={chat.chooseMember}><MessageCircle />与成员聊天</DropdownMenuItem>
-    {chat.peer && <DropdownMenuItem onSelect={chat.showAi}><Bot />返回 AI 聊天</DropdownMenuItem>}
-    {!chat.peer && chat.lastAnswer && <DropdownMenuItem onSelect={() => { if (chat.lastAnswer) chat.forward(chat.lastAnswer); }}><Forward />转发最近回答</DropdownMenuItem>}
+  const focusComposer = useRef(false);
+  const pendingNavigation = useRef<(() => void) | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const [navigationPending, setNavigationPending] = useState(false);
+  const afterMenuCloses = (action: () => void) => { pendingNavigation.current = action; setNavigationPending(true); };
+  return <DropdownMenu modal={false}><DropdownMenuTrigger asChild><button ref={trigger} disabled={navigationPending} type="button" className="oa-conversation-menu oa-chat-more-button" aria-label="聊天选项"><MoreHorizontal size={24} /></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="oa-conversation-popover oa-chat-clear-menu" onCloseAutoFocus={event => {
+    if (pendingNavigation.current) {
+      event.preventDefault();
+      const navigate = pendingNavigation.current;
+      pendingNavigation.current = null;
+      setNavigationPending(false);
+      trigger.current?.focus();
+      navigate();
+      return;
+    }
+    if (focusComposer.current) {
+      event.preventDefault(); focusComposer.current = false;
+      window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(chat.peer ? '.oa-member-chat textarea' : '.oa-conversation-ai:not([hidden]) textarea')?.focus());
+    }
+  }}>
+    <DropdownMenuItem onSelect={() => afterMenuCloses(chat.chooseMember)}><MessageCircle />与成员聊天</DropdownMenuItem>
+    {chat.peer && <DropdownMenuItem onSelect={() => afterMenuCloses(chat.showAi)}><Bot />返回 AI 聊天</DropdownMenuItem>}
+    {!chat.peer && chat.lastAnswer && <DropdownMenuItem onSelect={() => { const answer = chat.lastAnswer; if (answer) afterMenuCloses(() => chat.forward(answer)); }}><Forward />转发最近回答</DropdownMenuItem>}
     <DropdownMenuSeparator />
-    <DropdownMenuItem onSelect={chat.clearCurrent}><Trash2 />{chat.peer ? '清空本页显示' : '清空聊天'}</DropdownMenuItem>
+    <DropdownMenuItem disabled={!chat.peer && !chat.aiDirty} onSelect={() => { focusComposer.current = chat.clearCurrent(); }}><Trash2 />{chat.peer ? '清空本页显示' : '清空聊天'}</DropdownMenuItem>
   </DropdownMenuContent></DropdownMenu>;
 }
 export function OaNewChatButton() {

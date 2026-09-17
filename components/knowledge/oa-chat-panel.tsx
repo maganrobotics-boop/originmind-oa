@@ -60,7 +60,7 @@ export function OaChatPanel() {
 }
 
 function OaAiChatPanel() {
-  const { forward, setLastAnswer } = useOaConversation();
+  const { forward, setLastAnswer, setAiDirty } = useOaConversation();
   const [question, setQuestion] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [asking, setAsking] = useState(false);
@@ -73,6 +73,7 @@ function OaAiChatPanel() {
   const input = useRef<HTMLTextAreaElement>(null);
   const composerId = useId();
   const stickToEnd = useRef(true);
+  useEffect(() => { setAiDirty(Boolean(turns.length || question || asking || error)); }, [turns.length, question, asking, error, setAiDirty]);
 
   useEffect(() => () => { requestSequence.current++; requestRef.current?.abort(); }, []);
   useEffect(() => {
