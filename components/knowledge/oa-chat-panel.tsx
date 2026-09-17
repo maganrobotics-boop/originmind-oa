@@ -1,11 +1,14 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ArrowUp, Copy, Plus, RotateCcw, Square } from 'lucide-react';
+import { createPortal } from 'react-dom';
+import { ArrowUp, Copy, MoreHorizontal, RotateCcw, Square, Trash2 } from 'lucide-react';
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { renderAnswerBody, userFacingAnswer } from '@/lib/oa-chat-renderer.mjs';
 import type { KnowledgeCitation } from '@/lib/knowledge-types';
 import './shared-chat.generated.css';
 import './oa-chat-panel.css';
+import './oa-chat-menu.css';
 
 type Image = { url: string; alt: string; mimeType: string };
 type Turn = { id: string; question: string; answer: string; citations: KnowledgeCitation[]; images: Image[]; failed?: boolean };
@@ -52,7 +55,7 @@ export function OaChatStatus() {
   return <div className="oa-chat-title"><strong>聊天</strong><div className="oa-chat-status" aria-label="系统连接状态">{status.map((ready, index) => <span key={labels[index]} className={ready === null ? 'unknown' : ready ? 'ready' : 'unavailable'} title={`${labels[index]}：${ready === null ? '待检查' : ready ? '正常' : '暂不可用'}`} aria-label={`${labels[index]}：${ready === null ? '待检查' : ready ? '正常' : '暂不可用'}`} />)}</div></div>;
 }
 
-export function OaChatPanel() {
+export function OaChatPanel({ actionsTarget }: { actionsTarget?: HTMLElement | null }) {
   const [question, setQuestion] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [asking, setAsking] = useState(false);
@@ -65,6 +68,7 @@ export function OaChatPanel() {
   const input = useRef<HTMLTextAreaElement>(null);
   const composerId = useId();
   const stickToEnd = useRef(true);
+  const focusComposerAfterMenu = useRef(false);
 
   useEffect(() => () => { requestSequence.current++; requestRef.current?.abort(); }, []);
   useEffect(() => {
@@ -105,10 +109,12 @@ export function OaChatPanel() {
     }
   }, [question, turns]);
   const submit = (event: FormEvent) => { event.preventDefault(); void ask(); };
-  const newChat = () => {
-    if (turns.length && !window.confirm('开始新聊天将清除当前页面的对话，是否继续？')) return;
+  const clearChat = () => {
+    if (!window.confirm('清空当前聊天？只清除本页对话和未发送的问题，不会删除知识资料或审批记录。')) return;
+    // Invalidate the old request before aborting, so its late reply cannot restore cleared content.
     requestSequence.current++; requestRef.current?.abort(); requestRef.current = null; sending.current = false;
-    setTurns([]); setQuestion(''); setAsking(false); setError(''); input.current?.focus();
+    stickToEnd.current = true; focusComposerAfterMenu.current = true;
+    setTurns([]); setQuestion(''); setAsking(false); setError(''); setCopied('');
   };
   const copy = async (turn: Turn) => {
     try { await navigator.clipboard.writeText(userFacingAnswer(turn.answer)); setCopied(turn.id); }
@@ -117,7 +123,14 @@ export function OaChatPanel() {
 
   return <section className="oa-shared-chat" aria-label="OA 实验室 AI 聊天">
     <div className="chat-app oa-chat-surface">
-      <div className="oa-conversation-tools"><button type="button" onClick={newChat} aria-label="开始新聊天" title="开始新聊天"><Plus size={18} /></button></div>
+      {actionsTarget && createPortal(<DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild><button type="button" className="oa-chat-more-button" aria-label="聊天选项" title="聊天选项"><MoreHorizontal size={24} aria-hidden="true" /></button></DropdownMenuTrigger>
+        <DropdownMenuContent align="end" sideOffset={8} className="oa-chat-clear-menu" onCloseAutoFocus={event => {
+          if (focusComposerAfterMenu.current) { event.preventDefault(); focusComposerAfterMenu.current = false; input.current?.focus(); }
+        }}>
+          <DropdownMenuItem disabled={!turns.length && !question && !asking && !error} onSelect={clearChat}><Trash2 size={16} aria-hidden="true" />清空聊天</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>, actionsTarget)}
       <div className="messages oa-chat-messages" ref={scroll} onScroll={() => { const element = scroll.current; if (element) stickToEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96; }}>
         {turns.length === 0 ? <section className="empty-hero" aria-labelledby={`${composerId}-welcome`}><h2 id={`${composerId}-welcome`}>想了解实验室的什么？</h2><p>从已审核的实验室公开及内部知识中检索并回答</p></section> : turns.map(turn => <div className="oa-chat-turn" key={turn.id}>
           <article className="message user"><div className="message-content"><p>{turn.question}</p><button type="button" className="oa-question-edit" onClick={() => { setQuestion(turn.question); input.current?.focus(); }} disabled={asking}>修改问题</button></div></article>

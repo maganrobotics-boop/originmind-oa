@@ -1,0 +1,8 @@
+/* The menu is mounted in the actual header, not positioned over the message area. */
+.oa-app.oa-workspace.oa-chat-open .topbar-actions > .oa-chat-menu-host { display:flex; align-items:center; }
+.oa-chat-menu-host .oa-chat-more-button { display:grid; place-items:center; width:44px; height:44px; padding:0; border:0; border-radius:50%; background:#f7f7f7; color:#171717; cursor:pointer; }
+.oa-chat-menu-host .oa-chat-more-button:hover, .oa-chat-menu-host .oa-chat-more-button[data-state="open"] { background:#ededed; }
+.oa-chat-menu-host .oa-chat-more-button:focus-visible { outline:2px solid #777; outline-offset:2px; }
+.oa-chat-clear-menu { min-width:168px; padding:6px; border:1px solid #e6e6e6; border-radius:14px; background:#fff; color:#171717; box-shadow:0 8px 28px #00000018; }
+.oa-chat-clear-menu [role="menuitem"] { min-height:44px; padding:10px 12px; border-radius:9px; cursor:pointer; }
+.oa-chat-clear-menu [role="menuitem"][data-highlighted] { background:#f4f4f4; color:#171717; }
