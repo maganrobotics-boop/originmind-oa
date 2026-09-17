@@ -26,7 +26,8 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const browser = await chromium.launch({headless:true});
 const markdown = "# 示例机器人公司\n\n## 公司介绍\n\n**主要方向**是自主导航与机器人系统。\n\n| 场景 | 用途 |\n| --- | --- |\n| 金属矿 | 巡检 |\n| 工厂 | 运输 |";
 const cases = [
-  ["structured-fallback", fallbackAnswer([{title:"示例机器人公司",body:markdown}])],
+  ["structured-answer", markdown],
+  ["failed-prose-synthesis", fallbackAnswer([{title:"示例机器人公司",body:markdown}])],
   ["legacy-collapsed", "公司从事机器人研发。 ## 功能介绍\n\n| 场景 | 功能 | |---|---| | 金属矿 | 巡检 | | 工厂 | 运输 |\n\n[公司主页](https://example.test/company)"],
   ["failed-slide-synthesis", fallbackAnswer([{title:"示例公司",body:"## 第 1 页封面(INVESTOR BRIEF) 示例企业。 仅供投资人交流未经许可请勿转发。"}])],
 ];
@@ -52,7 +53,7 @@ try {
         assert.doesNotMatch(text,/##|\|---|\]\(https|INVESTOR BRIEF|仅供投资人/u);
         assert.equal(await content.locator("a,img").count(),0);
         assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
-        if(scenario!=="failed-slide-synthesis") {
+        if(!scenario.startsWith("failed-")) {
           assert.equal(await content.locator("table").count(),1);
           assert.equal(await content.locator("td").count(),4);
           assert.ok(await content.locator("p").count()>=1);

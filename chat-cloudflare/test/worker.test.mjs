@@ -496,7 +496,7 @@ test("model timing includes a failed Bailian attempt and its Workers fallback", 
   assert.ok(timings.model >= 20);
 });
 
-test("an oversized Bailian response falls back to retrieved knowledge", async (t) => {
+test("an oversized Bailian response fails safely without returning retrieved text", async (t) => {
   const env = makeEnvironment({ AI: undefined });
   t.after(() => env.DB.close());
   await storeVerifiedBailianConfig(env);
@@ -522,7 +522,9 @@ test("an oversized Bailian response falls back to retrieved knowledge", async (t
   const result = await responseJson(response);
   assert.equal(result.status, 200);
   assert.equal(result.body.mode, "retrieval");
-  assert.equal(result.body.answer, "经 OA 审核公开的资料包括机器人灵巧操作与机器人系统设计。");
+  assert.match(result.body.answer, /未能生成完整答复/u);
+  assert.doesNotMatch(result.body.answer, /机器人灵巧操作/u);
+  assert.equal(result.body.sources[0].excerpt, "经 OA 审核公开的资料包括机器人灵巧操作与机器人系统设计。");
 });
 
 test("Chat admin cannot publish documents directly", async (t) => {

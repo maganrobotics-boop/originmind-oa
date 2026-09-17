@@ -20,7 +20,7 @@ function knowledge(title, excerpt) {
     excerpt, sourceLabel: "OA 公开知识", updatedAt: "2026-09-14" }] });
 }
 
-test("an exact recommended question receives its approved content even without a model", async (t) => {
+test("an exact recommended question retains approved sources but never dumps them when the model fails", async (t) => {
   const env = environment(); t.after(() => env.DB.close());
   const question = "《机器人巡检实践》有哪些值得关注的核心内容？";
   const excerpt = "机器人通过激光雷达定位，并按照预设巡检任务记录设备状态。";
@@ -29,7 +29,9 @@ test("an exact recommended question receives its approved content even without a
   });
   const result = await response.json();
   assert.equal(response.status, 200);
-  assert.equal(result.answer, excerpt);
+  assert.match(result.answer, /未能生成完整答复/u);
+  assert.notEqual(result.answer, excerpt);
+  assert.equal(result.sources[0].excerpt, excerpt);
   assert.equal(result.mode, "retrieval");
   assert.equal(result.sources.length, 1);
   assert.ok(result.conversationToken);
@@ -52,5 +54,8 @@ test("restored follow-ups recover their subject from user questions when signed 
   assert.match(query, /第二点再具体说说/u);
   assert.match(query, /机器人巡检有哪些能力/u);
   assert.doesNotMatch(query, /UNTRUSTED/u);
-  assert.match((await response.json()).answer, /设备巡检/u);
+  const result = await response.json();
+  assert.match(result.answer, /未能生成完整答复/u);
+  assert.doesNotMatch(result.answer, /设备巡检/u);
+  assert.match(result.sources[0].excerpt, /设备巡检/u);
 });

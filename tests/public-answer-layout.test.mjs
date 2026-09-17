@@ -89,8 +89,21 @@ for (const mode of ["ai", "retrieval", "rejected"]) {
     if(mode==="rejected") assert.equal(result.fallbackReason,"answer_validation_failed");
     assert.ok(prompt.includes("\\n\\n"));
     const rendered=browser.renderAnswerBody(browser.userFacingAnswer(result.answer));
-    assert.equal(nodes(rendered,"table").length,1);
-    assert.equal(nodes(rendered,"td").length,4);
+    if(mode==="ai") {
+      // A successfully grounded answer retains its full structured presentation.
+      assert.equal(nodes(rendered,"table").length,1);
+      assert.equal(nodes(rendered,"td").length,4);
+      assert.equal(nodes(rendered,"strong")[0].textContent,"主要方向");
+    } else {
+      // Failed or rejected generation must not turn retrieved prose into an answer.
+      assert.match(result.answer,/未能生成完整答复/u);
+      assert.match(rendered.textContent,/未能生成完整答复/u);
+      assert.doesNotMatch(result.answer,/示例机器人公司|公司介绍|主要方向|金属矿|工厂|没有编号的回答/u);
+      assert.doesNotMatch(rendered.textContent,/示例机器人公司|公司介绍|主要方向|金属矿|工厂|没有编号的回答/u);
+      assert.equal(nodes(rendered,"table").length,0);
+      assert.equal(nodes(rendered,"td").length,0);
+      assert.ok(nodes(rendered,"p").length>=1);
+    }
     assert.doesNotMatch(rendered.textContent,/##|\|/u);
     assert.equal(result.sources.length,1);
     assert.ok(result.conversationToken);
