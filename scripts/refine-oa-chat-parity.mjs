@@ -1,4 +1,5 @@
 import { readFile, writeFile } from 'node:fs/promises';
+import { execFileSync } from 'node:child_process';
 
 async function refine(path, before, after) {
   const text = await readFile(path, 'utf8');
@@ -20,3 +21,6 @@ await refine(assetPath, '    const requestedRevision = query.get("revision");', 
 await refine(assetPath, '      || detail?.item.status !== "active" || detail.item.activeRevisionId !== requestedRevision\n      || detail.item.currentRevisionId !== requestedRevision)', '      || currentItem?.status !== "active" || currentItem.active_revision_id !== requestedRevision\n      || currentItem.current_revision_id !== requestedRevision)');
 await refine('tests/oa-chat-parity.test.mjs', '  assert.match(asset, /detail\\?\\.item.status !== "active"/u);\n  assert.match(asset, /detail.item.activeRevisionId !== requestedRevision/u);', '  assert.match(asset, /findKnowledgeItem\\(safe\\.id, access\\.actor\\)/u);\n  assert.match(asset, /currentItem\\?\\.status !== "active"/u);\n  assert.match(asset, /currentItem\\.active_revision_id !== requestedRevision/u);\n  assert.match(asset, /currentItem\\.current_revision_id !== requestedRevision/u);');
 console.log('OA status validation, separate rate bucket and authoritative image revision checks refined.');
+// This fixture uses the actual integrated components and is preserved as private
+// CI evidence. It never contacts a live API while building.
+execFileSync(process.execPath, ['scripts/build-oa-chat-browser-fixture.mjs'], { stdio: 'inherit' });
