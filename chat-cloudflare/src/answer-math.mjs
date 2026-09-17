@@ -32,7 +32,7 @@ export function answerMathTokenAt(text, index) {
   if (text.startsWith("\\[", index)) { left = "\\["; right = "\\]"; display = true; }
   else if (text.startsWith("\\(", index)) { left = "\\("; right = "\\)"; }
   else if (text.startsWith("$$", index)) { left = right = "$$"; display = true; }
-  else if (text[index] === "$" && text[index - 1] !== "$" && !/[\s$]/u.test(text[index + 1] || " ")) { left = right = "$"; }
+  else if (text[index] === "$" && text[index - 1] !== "$" && text[index + 1] !== "$") { left = right = "$"; }
   else if (text.startsWith("\\begin{", index)) {
     const match = text.slice(index).match(/^\\begin\{((?:equation|align|alignat|aligned|alignedat|gather|gathered|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases)\*?)\}/u);
     if (match) { left = match[0]; right = `\\end{${match[1]}}`; display = environment = true; }
@@ -48,10 +48,37 @@ export function answerMathTokenAt(text, index) {
   }
   if (end === -1) return null;
   const content = text.slice(start, end);
-  // Currency such as "$5 and $10" is prose, not a formula.
-  if (left === "$" && (!content || /\s$/u.test(content) || /\r|\n/u.test(content) || /\d/u.test(text[end + 1] || ""))) return null;
+  // Model answers often emit "$ L = T - V $". Permit padded math without
+  // consuming currency prose such as "$5 and $10" or "$ 5 and $ 10".
+  const trimmed = content.trim();
+  if (left === "$") {
+    if (!trimmed || /\r|\n/u.test(content) || /\d/u.test(text[end + 1] || "")) return null;
+    const padded = content !== trimmed;
+    const looksMathematical = /\\[a-zA-Z]|[_^=+*/<>\-≤≥≠−]/u.test(trimmed) || /^[\p{L}\p{N}.]+$/u.test(trimmed);
+    if (padded && !looksMathematical) return null;
+  }
   const raw = text.slice(index, end + right.length);
   return { kind: "math", raw, tex: environment ? raw : content, display, end: end + right.length };
+}
+
+export function normalizeAnswerMathTex(value) {
+  return String(value).replace(
+    /\\begin\{(matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix)\}([\s\S]*?)\\end\{\1\}/gu,
+    (original, environment, body) => {
+      if (/\\(?:begin|end|text|verb|multicolumn|hline)\b/u.test(body)) return original;
+      const lines = body.split("\n");
+      const rows = lines.map((line, index) => ({ line, index })).filter(({ line }) => line.trim());
+      if (rows.length < 2 || rows.length > 50) return original;
+      const columns = rows.map(({ line }) => (line.match(/(?<!\\)&/gu) || []).length);
+      if (columns[0] < 1 || columns.some((count) => count !== columns[0])) return original;
+      const preceding = rows.slice(0, -1);
+      if (preceding.some(({ line }) => !/(?<!\\)\\{1,2}[ \t\r]*$/u.test(line))) return original;
+      for (const { line, index } of preceding) {
+        lines[index] = line.replace(/(?<!\\)\\([ \t\r]*)$/u, (_, spaces) => "\\\\" + spaces);
+      }
+      return `\\begin{${environment}}${lines.join("\n")}\\end{${environment}}`;
+    },
+  );
 }
 
 export function protectAnswerTechnicalText(value, { code = true } = {}) {

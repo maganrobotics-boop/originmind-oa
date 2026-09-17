@@ -564,7 +564,7 @@ function answerMathTokenAt(text, index) {
   if (text.startsWith("\\[", index)) { left = "\\["; right = "\\]"; display = true; }
   else if (text.startsWith("\\(", index)) { left = "\\("; right = "\\)"; }
   else if (text.startsWith("$$", index)) { left = right = "$$"; display = true; }
-  else if (text[index] === "$" && text[index - 1] !== "$" && !/[\s$]/u.test(text[index + 1] || " ")) { left = right = "$"; }
+  else if (text[index] === "$" && text[index - 1] !== "$" && text[index + 1] !== "$") { left = right = "$"; }
   else if (text.startsWith("\\begin{", index)) {
     const match = text.slice(index).match(/^\\begin\{((?:equation|align|alignat|aligned|alignedat|gather|gathered|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases)\*?)\}/u);
     if (match) { left = match[0]; right = `\\end{${match[1]}}`; display = environment = true; }
@@ -580,10 +580,37 @@ function answerMathTokenAt(text, index) {
   }
   if (end === -1) return null;
   const content = text.slice(start, end);
-  // Currency such as "$5 and $10" is prose, not a formula.
-  if (left === "$" && (!content || /\s$/u.test(content) || /\r|\n/u.test(content) || /\d/u.test(text[end + 1] || ""))) return null;
+  // Model answers often emit "$ L = T - V $". Permit padded math without
+  // consuming currency prose such as "$5 and $10" or "$ 5 and $ 10".
+  const trimmed = content.trim();
+  if (left === "$") {
+    if (!trimmed || /\r|\n/u.test(content) || /\d/u.test(text[end + 1] || "")) return null;
+    const padded = content !== trimmed;
+    const looksMathematical = /\\[a-zA-Z]|[_^=+*/<>\-≤≥≠−]/u.test(trimmed) || /^[\p{L}\p{N}.]+$/u.test(trimmed);
+    if (padded && !looksMathematical) return null;
+  }
   const raw = text.slice(index, end + right.length);
   return { kind: "math", raw, tex: environment ? raw : content, display, end: end + right.length };
+}
+
+function normalizeAnswerMathTex(value) {
+  return String(value).replace(
+    /\\begin\{(matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix)\}([\s\S]*?)\\end\{\1\}/gu,
+    (original, environment, body) => {
+      if (/\\(?:begin|end|text|verb|multicolumn|hline)\b/u.test(body)) return original;
+      const lines = body.split("\n");
+      const rows = lines.map((line, index) => ({ line, index })).filter(({ line }) => line.trim());
+      if (rows.length < 2 || rows.length > 50) return original;
+      const columns = rows.map(({ line }) => (line.match(/(?<!\\)&/gu) || []).length);
+      if (columns[0] < 1 || columns.some((count) => count !== columns[0])) return original;
+      const preceding = rows.slice(0, -1);
+      if (preceding.some(({ line }) => !/(?<!\\)\\{1,2}[ \t\r]*$/u.test(line))) return original;
+      for (const { line, index } of preceding) {
+        lines[index] = line.replace(/(?<!\\)\\([ \t\r]*)$/u, (_, spaces) => "\\\\" + spaces);
+      }
+      return `\\begin{${environment}}${lines.join("\n")}\\end{${environment}}`;
+    },
+  );
 }
 
 function protectAnswerTechnicalText(value, { code = true } = {}) {
@@ -979,14 +1006,27 @@ function recentChatConversations(conversations) {
 const ANSWER_MATH_ASSET = "/assets/katex-cc567bec51ade0dc.mjs";
 let answerMathEngine = null;
 let answerMathLoading = null;
+let answerMathRequestSequence = 0;
 
 function loadAnswerMathEngine() {
+  if (answerMathEngine) return Promise.resolve(answerMathEngine);
   if (!answerMathLoading) {
-    // Lazy and same-origin: a missing formula asset must never stop chat startup.
-    answerMathLoading = import(ANSWER_MATH_ASSET).then((module) => {
-      answerMathEngine = module.default;
-      return answerMathEngine;
-    }).catch(() => null);
+    // A transient import error must not poison later answers in this tab.
+    // Distinct URLs also bypass the browser's cached failed module promises.
+    answerMathLoading = (async () => {
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (attempt) await new Promise((resolve) => setTimeout(resolve, attempt * 400));
+        try {
+          const sequence = answerMathRequestSequence++;
+          const url = sequence ? `${ANSWER_MATH_ASSET}?retry=${sequence}` : ANSWER_MATH_ASSET;
+          const mathModule = await import(url);
+          if (typeof mathModule.default?.render !== "function") throw new TypeError("Invalid formula engine");
+          answerMathEngine = mathModule.default;
+          return answerMathEngine;
+        } catch { /* Keep the original formula visible until a retry succeeds. */ }
+      }
+      return null;
+    })().finally(() => { answerMathLoading = null; });
   }
   return answerMathLoading;
 }
@@ -1010,7 +1050,7 @@ function renderAnswerMath(token, budget = { count: 0, characters: 0 }) {
   const render = (engine) => {
     if (!engine?.render) { fallback("公式组件暂不可用，已保留原始写法。"); return; }
     try {
-      engine.render(token.tex, node, {
+      engine.render(normalizeAnswerMathTex(token.tex), node, {
         displayMode: token.display,
         // Native MathML needs no remote stylesheets or downloaded font files.
         output: "mathml", trust: false, throwOnError: true,
