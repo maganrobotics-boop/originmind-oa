@@ -68,7 +68,7 @@ test("shows the system administrator role consistently across account and collab
   assert.match(directMessagesSource, /isAdmin: owner\.isAdmin/u);
 });
 
-test("keeps the internal laboratory AI discoverable only inside the admitted OA dashboard", async () => {
+test("keeps the internal laboratory AI behind OA sign-in, registration and NDA admission", async () => {
   const pageSource = await readFile(path.join(root, "app/page.tsx"), "utf8");
 
   assert.match(pageSource, /className="dashboard-ai-entry"/u);
@@ -76,8 +76,16 @@ test("keeps the internal laboratory AI discoverable only inside the admitted OA 
   assert.match(pageSource, /实验室 AI（内部）/u);
   assert.match(pageSource, /进入内部 AI/u);
   assert.match(pageSource, /if \(!session\) return[\s\S]*?<h1>请登录账号<\/h1>/u);
+  assert.match(pageSource, /if \(!session\.registered\) return[\s\S]*?<RegistrationGate/u);
   assert.match(pageSource, /if \(needsNda\) return[\s\S]*?<NdaAdmissionGate/u);
-  assert.ok(pageSource.indexOf("if (needsNda) return") < pageSource.indexOf('<div className="oa-app">'));
+  const workspaceStart = pageSource.indexOf('<div className={`oa-app oa-workspace ');
+  const knowledgeStart = pageSource.indexOf('<KnowledgeView ', workspaceStart);
+  assert.ok(workspaceStart >= 0, "the OA workspace must exist");
+  assert.ok(knowledgeStart > workspaceStart, "knowledge must render inside the OA workspace");
+  for (const guard of ["if (!session) return", "if (!session.registered) return", "if (needsNda) return"]) {
+    const guardStart = pageSource.indexOf(guard);
+    assert.ok(guardStart >= 0 && guardStart < workspaceStart, `${guard} must precede workspace rendering`);
+  }
 });
 
 test("labels the internal laboratory AI wait as retrieval and answer generation", async () => {
@@ -212,12 +220,14 @@ test("lets a pending applicant sign out into a QR-first account switch screen", 
   assert.match(gateSource, /切换登录方式不会删除原账户的注册、审核或业务记录/u);
 });
 
-test("returns successful external sign-ins to the OA dashboard", async () => {
+test("returns successful external sign-ins to the OA Chat workspace", async () => {
   const pageSource = await readFile(path.join(root, "app/page.tsx"), "utf8");
+  assert.match(pageSource, /useState<ViewKey>\("knowledge"\)/u);
+  assert.match(pageSource, /useState<KnowledgeTab>\("ask"\)/u);
 
   for (const provider of ["github", "feishu"]) {
     const signedInBranch = new RegExp(
-      `${provider}Status === "signed-in"\\) \\{[\\s\\S]*?setActiveView\\("dashboard"\\);[\\s\\S]*?setShowMineOnly\\(false\\);[\\s\\S]*?window\\.scrollTo\\(\\{ top: 0, left: 0, behavior: "auto" \\}\\);`,
+      `${provider}Status === "signed-in"\\) \\{[\\s\\S]*?setActiveView\\("knowledge"\\);[\\s\\S]*?setShowMineOnly\\(false\\);[\\s\\S]*?setMobileNavOpen\\(false\\);[\\s\\S]*?window\\.scrollTo\\(\\{ top: 0, left: 0, behavior: "auto" \\}\\);`,
       "u",
     );
     assert.match(pageSource, signedInBranch);

@@ -1,3 +1,4 @@
+import { isKnowledgeUploadOrigin } from "../../../../lib/knowledge-upload-origin";
 import { getDb } from "../../../../db";
 import { authorizeKnowledgeAssetRevision } from "../../../../lib/knowledge-asset-authorization";
 import { stageKnowledgeAsset } from "../../../../lib/knowledge-asset-upload";
@@ -13,7 +14,7 @@ function reply(data: unknown, status = 200) { return Response.json(data, { statu
 export async function OPTIONS(request: Request) { return request.headers.get("origin") === CHAT_ORIGIN ? new Response(null, { status: 204, headers: headers() }) : new Response(null, { status: 403 }); }
 
 export async function PUT(request: Request) {
-  if (request.headers.get("origin") !== CHAT_ORIGIN) return reply({ error: "请从 Chat 管理页面上传。" }, 403);
+  if (!isKnowledgeUploadOrigin(request)) return reply({ error: "请从 OA 或 Chat 管理页面上传。" }, 403);
   const authorized = await getAuthorizedUser();
   if (!authorized?.memberId || !authorized.accountUserId || !authorized.memberMutationRevision || !authorized.ndaCompleted) return reply({ error: "请先完成 OA 登录、实名绑定及保密协议。" }, 401);
   const actor: KnowledgeActor = { memberId: authorized.memberId, accountUserId: authorized.accountUserId, memberMutationRevision: authorized.memberMutationRevision, name: authorized.user.displayName, email: authorized.user.email, isAdmin: authorized.isAdmin };

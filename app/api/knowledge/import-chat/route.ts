@@ -1,3 +1,4 @@
+import { isKnowledgeUploadOrigin } from "../../../../lib/knowledge-upload-origin";
 import { getDb } from "../../../../db";
 import { readBoundedJsonObject } from "../../../../lib/bounded-json-request";
 import { chatImportIdentity, parseChatKnowledgeImport } from "../../../../lib/chat-knowledge-import";
@@ -18,13 +19,13 @@ const MAX_CHAT_IMPORT_REQUEST_BYTES = 12 * 1024 * 1024;
 const SAFE_KNOWLEDGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 function corsHeaders(): Record<string, string> { return { "access-control-allow-origin": CHAT_ORIGIN, "access-control-allow-credentials": "true", "access-control-allow-methods": "POST, OPTIONS", "access-control-allow-headers": "content-type", "cache-control": "private, no-store, max-age=0", vary: "Origin, Cookie" }; }
 function reply(data: unknown, status = 200) { return Response.json(data, { status, headers: corsHeaders() }); }
-function allowedOrigin(request: Request) { return request.headers.get("origin") === CHAT_ORIGIN; }
+function allowedOrigin(request: Request) { return isKnowledgeUploadOrigin(request); }
 function exactOwner(item: KnowledgeItemWithRevisionRow, actor: KnowledgeActor) { return item.submitter_member_id === actor.memberId && item.submitter_email.trim().toLowerCase() === actor.email.trim().toLowerCase(); }
 function isAcknowledgedResubmission(item: KnowledgeItemWithRevisionRow, actor: KnowledgeActor, contentHash: string, expectedRevisionNo?: number) { const revisionNo = Number(item.current_revision_no); return exactOwner(item, actor) && item.status === "pending" && item.revision_status === "pending" && revisionNo >= 2 && (expectedRevisionNo === undefined || revisionNo === expectedRevisionNo) && Boolean(item.current_revision_id) && !item.active_revision_id && item.content_hash === contentHash; }
 function acknowledgedReply(item: KnowledgeItemWithRevisionRow, partCount: number) { return reply({ received: true, item: { id: item.id, title: item.title, status: item.status, visibility: item.visibility, currentRevisionNo: Number(item.current_revision_no) }, partCount, assetUpload: item.current_revision_id ? { revisionId: item.current_revision_id, uploadToken: knowledgeAssetUploadToken() } : undefined }); }
 export async function OPTIONS(request: Request) { const requestedHeaders = (request.headers.get("access-control-request-headers") || "").toLowerCase().split(",").map((value) => value.trim()).filter(Boolean); if (!allowedOrigin(request) || request.headers.get("access-control-request-method") !== "POST" || requestedHeaders.some((value) => value !== "content-type")) return new Response(null, { status: 403 }); return new Response(null, { status: 204, headers: corsHeaders() }); }
 export async function POST(request: Request) {
-  if (!allowedOrigin(request)) return Response.json({ error: "请从 Chat 管理页面提交。" }, { status: 403 });
+  if (!allowedOrigin(request)) return Response.json({ error: "请从 OA 或 Chat 管理页面提交。" }, { status: 403 });
   const authorized = await getAuthorizedUser();
   if (!authorized) return reply({ error: "请先在同一浏览器登录 OA，然后返回此页点击“提交 OA 待审”。Chat 草稿已保留。" }, 401);
   if (!authorized.ndaCompleted || !authorized.memberId || !authorized.accountUserId || !authorized.memberMutationRevision) return reply({ error: "请先完成 OA 成员激活、实名绑定及保密协议，再提交审核。Chat 草稿已保留。" }, 403);
@@ -36,6 +37,7 @@ export async function POST(request: Request) {
   let returnedKnowledgeItemId: string | undefined;
   if (Object.hasOwn(parsed.value, "returnedKnowledgeItemId")) { const candidate = parsed.value.returnedKnowledgeItemId; if (typeof candidate !== "string" || !SAFE_KNOWLEDGE_ID.test(candidate)) return reply({ error: "退回知识条目编号格式不正确。" }, 400); returnedKnowledgeItemId = candidate; }
   let imported; try { imported = parseChatKnowledgeImport({ document: parsed.value.document }); } catch (error) { return reply({ error: error instanceof Error ? error.message : "导入格式不正确。" }, 400); }
+  if (request.headers.get("origin") === new URL(request.url).origin) imported.submissions[0] = { ...imported.submissions[0], sourceLabel: `OA 资料导入 · ${imported.submissions[0].title}` };
   const actor: KnowledgeActor = { memberId: authorized.memberId, accountUserId: authorized.accountUserId, memberMutationRevision: authorized.memberMutationRevision, name: authorized.user.displayName, email: authorized.user.email, isAdmin: authorized.isAdmin };
   try {
     const db = await getDb();

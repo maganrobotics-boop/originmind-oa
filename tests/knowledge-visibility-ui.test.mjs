@@ -30,13 +30,21 @@ test("presents multipart Chat imports as one file with one review action", async
   assert.equal(reviewFunction.match(/method: "PATCH"/gu)?.length, 1);
 });
 
-test("sends returned multipart imports back to Chat instead of the 20k OA editor", async () => {
+test("keeps returned multipart reuploads inside OA without using the 20k editor", async () => {
   const source = await readFile(path.join(root, "components/knowledge/knowledge-view.tsx"), "utf8");
-  const card = source.slice(source.indexOf("function KnowledgeItemCard"), source.indexOf("function KnowledgeMinePanel"));
+  const cardStart = source.indexOf("function KnowledgeItemCard");
+  const cardEnd = source.indexOf("function KnowledgeMinePanel", cardStart);
+  assert.ok(cardStart >= 0 && cardEnd > cardStart);
+  const card = source.slice(cardStart, cardEnd);
 
   assert.match(card, /const isMultipartImport = Boolean\(item\.contentPartCount && item\.contentPartCount > 1\)/u);
-  assert.match(card, /item\.status === "returned" && isMultipartImport \? [\s\S]*?https:\/\/chat\.omindos\.ai\/manage\?returnedKnowledgeItem=\$\{encodeURIComponent\(item\.id\)\}[\s\S]*?重新导入[\s\S]*?更新当前条目和审计记录[\s\S]*?: item\.status === "returned" && onEdit/u);
+  assert.match(card, /item\.status === "returned" && isMultipartImport \? [\s\S]*?onClick=\{\(\) => onEdit\?\.\(item\)\}[\s\S]*?disabled=\{!onEdit\}[\s\S]*?在 OA 重新上传[\s\S]*?: item\.status === "returned" && onEdit/u);
+  assert.doesNotMatch(card, /https:\/\/chat\.omindos\.ai\/manage/u);
   assert.match(card, />修改并重提<\/Button>/u);
+  // A multipart return must keep its original item and exit before the small editor fetch.
+  assert.match(source, /const startEditing = async \(item: KnowledgeItem\) => \{\s*if \(item\.contentPartCount && item\.contentPartCount > 1\) \{ setReturnedPackageItem\(item\); setActiveTab\("submit"\); return; \}/u);
+  assert.match(source, /<KnowledgePackageImport[^>]*returnedItem=\{returnedPackageItem\}/u);
+  assert.match(source, /\{!returnedPackageItem && <KnowledgeSubmitPanel/u);
 });
 
 test("requires the exact second confirmation before publishing knowledge", async () => {
