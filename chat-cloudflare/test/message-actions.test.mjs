@@ -4,7 +4,7 @@ import test from 'node:test';
 import vm from 'node:vm';
 const source = await readFile(new URL('../frontend/message-actions.js', import.meta.url), 'utf8');
 function helpers(overrides = {}) {
-  return vm.runInNewContext(`${source}\n({ answerSnapshot, createAnswerShareUrl, decodeAnswerShare, boundedShareStream })`, {
+  return vm.runInNewContext(`${source}\n({ answerSnapshot, createAnswerShareUrl, decodeAnswerShare, boundedShareStream, messageActionDialog })`, {
     TextEncoder, TextDecoder, URL, Blob, CompressionStream, DecompressionStream, Uint8Array, btoa, atob, ...overrides,
   });
 }
@@ -52,4 +52,38 @@ test('share import never fetches or sends a chat request', () => {
   const incoming = source.slice(source.indexOf('async function openIncomingSharedAnswer'));
   assert.doesNotMatch(incoming, /fetch\(|\/api\/chat|dispatchQuestion|localStorage\.setItem/);
   assert.match(incoming, /未经独立核验/);
+});
+
+test('late dialog cleanup respects a newer focus target or modal', () => {
+  for (const mode of ['composer', 'new-modal', 'unclaimed', 'inside-closing', 'detached-opener']) {
+    const doc = { activeElement: null, modal: null };
+    function node() {
+      return {
+        isConnected: true, children: [], listeners: new Map(),
+        append(...items) { this.children.push(...items); },
+        addEventListener(name, listener) { this.listeners.set(name, listener); },
+        remove() { this.isConnected = false; },
+        contains(target) { return target === this || this.children.some(child => child.contains(target)); },
+        focus() { doc.activeElement = this; },
+      };
+    }
+    doc.body = node();
+    doc.querySelector = () => doc.modal;
+    const opener = node();
+    const h = helpers({ document: doc,
+      element: (_tag, _options, children = []) => { const value = node(); value.append(...children); return value; },
+      textButton: () => node(),
+    });
+    const dialog = h.messageActionDialog('test', opener);
+    const next = node();
+    if (mode === 'composer') doc.activeElement = next;
+    else if (mode === 'new-modal') { doc.activeElement = doc.body; doc.modal = next; }
+    else if (mode === 'inside-closing') { dialog.append(next); doc.activeElement = next; }
+    else doc.activeElement = doc.body;
+    if (mode === 'detached-opener') opener.isConnected = false;
+    const expected = mode === 'unclaimed' || mode === 'inside-closing' ? opener : doc.activeElement;
+    dialog.listeners.get('close')();
+    assert.equal(dialog.isConnected, false, `${mode}: the closing dialog is removed`);
+    assert.equal(doc.activeElement, expected, `${mode}: focus is not stolen`);
+  }
 });
