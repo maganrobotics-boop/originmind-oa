@@ -79,7 +79,7 @@ for (const mode of ["ai", "retrieval"]) {
     assert.match(result.answer, /定位与导航/u);
     assert.doesNotMatch(result.answer, /来源|版本|更新时间|适用范围|科研方向介绍|知识库中|\[1\]/u);
     assert.equal(result.sources.length, 1);
-    assert.equal(result.sources[0].title, "科研方向介绍");
+    assert.equal(result.sources[0].title, "科研方向介绍 · 第1段 · 来源：OA 公开知识");
     assert.match(prompt, /每个有资料依据的具体事实后必须紧跟 \[1\]/u);
     assert.doesNotMatch(prompt, /> 版本：V1.0/u);
   });

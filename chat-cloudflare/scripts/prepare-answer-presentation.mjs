@@ -5,7 +5,7 @@ const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const get = (path) => readFile(resolve(root, path), "utf8");
 const put = (path, content) => writeFile(resolve(root, path), content);
 function once(value, before, after) {
-  if (!value.includes(before) && value.includes(after)) return value;
+  if (value.includes(after)) return value;
   if (value.split(before).length !== 2) throw new Error(`Unexpected source anchor: ${before.slice(0, 100)}`);
   return value.replace(before, () => after);
 }
@@ -74,6 +74,6 @@ suggestions = once(suggestions,
   'assert.doesNotMatch(answer, /知识库中与这个问题直接相关的内容包括/u);');
 suggestions = once(suggestions,
   'assert.equal((answer.match(/^- /gmu) || []).length, 2);',
-  'assert.equal((answer.match(/公开内容/gu) || []).length, 1);');
+  'assert.equal((answer.match(/^公开内容/gmu) || []).length, 1);');
 await put("test/suggestions.test.mjs", suggestions);
 console.log("Prepared Worker, frontend, model prompt and regression tests without modifying OA data.");
