@@ -997,8 +997,7 @@ textarea {
   white-space: nowrap;
 }
 
-.inquiry-trigger,
-.further-inquiry {
+.inquiry-trigger {
   display: inline-flex;
   flex: 0 0 auto;
   min-height: 34px;
@@ -1011,8 +1010,7 @@ textarea {
   white-space: nowrap;
 }
 
-.inquiry-trigger:hover,
-.further-inquiry:hover {
+.inquiry-trigger:hover {
   color: var(--brand-deep);
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -3393,11 +3391,28 @@ body.public-chat-page {
 .answer-content > :first-child { margin-top: 0; }
 .answer-content > :last-child { margin-bottom: 0; }
 .answer-content p { margin: 0 0 0.8em; white-space: pre-wrap; }
-.answer-content strong { font-weight: 650; }
+.answer-content strong { font-weight: 700; }
 .answer-content h3,
 .answer-content h4,
 .answer-content h5,
-.answer-content h6 { margin: 1em 0 0.4em; font-size: 1em; line-height: 1.5; font-weight: 650; }
+.answer-content h6 { margin: 1em 0 0.4em; font-size: 1em; line-height: 1.5; font-weight: 700; }
+/* Keep hierarchy visible without making every paragraph a heading. */
+.answer-content h3 { font-size: 1.16em; margin-top: 1.25em; }
+.answer-content h4 { font-size: 1.08em; margin-top: 1.1em; }
+.answer-content hr { border: 0; border-top: 1px solid #e2e8e4; margin: 1.2em 0; }
+.answer-content [data-align="center"] { text-align: center; }
+.answer-content [data-align="right"] { text-align: right; }
+.answer-content .answer-math { white-space: normal; overflow-wrap: normal; }
+.answer-content .answer-math math { font-size: 1.06em; }
+.answer-content .answer-math-block {
+  display: block; max-width: 100%; margin: 0.85em 0; padding: 0.35em 0;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-x: contain;
+}
+.answer-content .answer-math-block math { display: block; min-width: max-content; }
+.answer-content .answer-math[data-math-status="fallback"] {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.92em; white-space: pre-wrap; overflow-wrap: anywhere;
+}
 .answer-content ul,
 .answer-content ol { margin: 0.6em 0 0.9em; padding-left: 1.5em; }
 .answer-content li { margin: 0.3em 0; }

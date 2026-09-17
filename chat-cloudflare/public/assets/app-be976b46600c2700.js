@@ -529,8 +529,94 @@ function referenceSectionStart(value) {
   return indexes.length ? Math.min(...indexes) : -1;
 }
 
+// BEGIN SHARED ANSWER TOKENS
+// Kept byte-for-byte in frontend/app.js between SHARED ANSWER TOKENS markers.
+// A token is recognized before Markdown escapes, tables, or citation cleanup.
+function answerCodeTokenAt(text, index) {
+  const remaining = text.slice(index);
+  const lineStart = text.lastIndexOf("\n", index - 1) + 1;
+  const fence = /^[ \t]*$/u.test(text.slice(lineStart, index))
+    ? remaining.match(/^(`{3,}|~{3,})([^\n]*)\n/u) : null;
+  if (fence) {
+    const close = new RegExp(`^[ \\t]*${fence[1][0]}{${fence[1].length},}[ \\t]*(?:\\n|$)`, "gmu");
+    close.lastIndex = index + fence[0].length;
+    const end = close.exec(text);
+    const stop = end ? end.index + end[0].length - (end[0].endsWith("\n") ? 1 : 0) : text.length;
+    return { kind: "code", raw: text.slice(index, stop), end: stop };
+  }
+  const ticks = remaining.match(/^`+/u)?.[0];
+  if (!ticks) return null;
+  let end = text.indexOf(ticks, index + ticks.length);
+  while (end !== -1 && (text[end - 1] === "`" || text[end + ticks.length] === "`")) {
+    end = text.indexOf(ticks, end + ticks.length);
+  }
+  return end === -1 ? null : {
+    kind: "code", raw: text.slice(index, end + ticks.length),
+    content: text.slice(index + ticks.length, end), end: end + ticks.length,
+  };
+}
+
+function answerMathTokenAt(text, index) {
+  let left = "";
+  let right = "";
+  let display = false;
+  let environment = false;
+  if (text.startsWith("\\[", index)) { left = "\\["; right = "\\]"; display = true; }
+  else if (text.startsWith("\\(", index)) { left = "\\("; right = "\\)"; }
+  else if (text.startsWith("$$", index)) { left = right = "$$"; display = true; }
+  else if (text[index] === "$" && text[index - 1] !== "$" && !/[\s$]/u.test(text[index + 1] || " ")) { left = right = "$"; }
+  else if (text.startsWith("\\begin{", index)) {
+    const match = text.slice(index).match(/^\\begin\{((?:equation|align|alignat|aligned|alignedat|gather|gathered|matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix|cases)\*?)\}/u);
+    if (match) { left = match[0]; right = `\\end{${match[1]}}`; display = environment = true; }
+  }
+  if (!left) return null;
+  const start = index + left.length;
+  let end = text.indexOf(right, start);
+  while (end !== -1) {
+    let slashes = 0;
+    for (let cursor = end - 1; cursor >= start && text[cursor] === "\\"; cursor -= 1) slashes += 1;
+    if (slashes % 2 === 0 && (right !== "$" || text[end + 1] !== "$")) break;
+    end = text.indexOf(right, end + right.length);
+  }
+  if (end === -1) return null;
+  const content = text.slice(start, end);
+  // Currency such as "$5 and $10" is prose, not a formula.
+  if (left === "$" && (!content || /\s$/u.test(content) || /\r|\n/u.test(content) || /\d/u.test(text[end + 1] || ""))) return null;
+  const raw = text.slice(index, end + right.length);
+  return { kind: "math", raw, tex: environment ? raw : content, display, end: end + right.length };
+}
+
+function protectAnswerTechnicalText(value, { code = true } = {}) {
+  const input = String(value ?? "");
+  let prefix = "\uE000M";
+  while (input.includes(prefix)) prefix += "M";
+  const originals = [];
+  let text = "";
+  for (let index = 0; index < input.length;) {
+    const token = (input[index] === "`" || input[index] === "~" ? answerCodeTokenAt(input, index) : null) ||
+      (input[index] === "\\" || input[index] === "$" ? answerMathTokenAt(input, index) : null);
+    if (token?.kind === "code" && !code) {
+      text += token.raw; index = token.end;
+    } else if (token) {
+      text += `${prefix}${originals.length}\uE001`;
+      originals.push(token);
+      index = token.end;
+    } else if (input[index] === "\\" && index + 1 < input.length) {
+      text += input.slice(index, index + 2); index += 2;
+    } else { text += input[index++]; }
+  }
+  return {
+    text, prefix, tokens: originals,
+    restore: (output) => String(output).replace(new RegExp(`${prefix}(\\d+)\uE001`, "gu"),
+      (match, index) => originals[Number(index)]?.raw ?? match),
+  };
+}
+
+// END SHARED ANSWER TOKENS
+
 function userFacingAnswer(value) {
-  const answer = cleanPublicChatText(value);
+  const technical = protectAnswerTechnicalText(cleanPublicChatText(value));
+  const answer = technical.text;
   const sectionStart = referenceSectionStart(answer);
   const answerBody = sectionStart === -1 ? answer : answer.slice(0, sectionStart);
   if (/\[\s*\[\s*[0-9０-９][\s\S]*?\]\s*\]/u.test(answerBody)) return "暂时没有可显示的回答。";
@@ -552,7 +638,7 @@ function userFacingAnswer(value) {
     /(?:^|[^\p{L}\p{N}_*`#~-])(?:参考|引用|出处)(?:列表|清单)?(?:如下(?:所示)?)?[ \t]*(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*[:：]/iu.test(withoutReferences) ||
     /(?:^|[^\p{L}\p{N}_-])(?:references?|sources?|citations?|bibliography|works[ \t]+cited)(?:[ \t]+list)?[ \t]*[:：]/iu.test(withoutReferences) ||
     referenceSectionStart(withoutReferences) !== -1;
-  return withoutReferences && !hasResidualMarker ? withoutReferences : "暂时没有可显示的回答。";
+  return withoutReferences && !hasResidualMarker ? technical.restore(withoutReferences) : "暂时没有可显示的回答。";
 }
 
 const CHAT_HISTORY_KEY = "arts-public-chat-history-v1:";
@@ -820,19 +906,119 @@ function recentChatConversations(conversations) {
     .slice(0, CHAT_RECENT_LIMIT);
 }
 
-function appendAnswerInline(parent, text) {
-  // All content is added as text or a small set of inert formatting elements.
-  const pattern = /\\([\\`*_{}\[\]()#+\-.!|])|`([^`\n]+)`|\*\*([^*\n]+)\*\*|__([^_\n]+)__|\*([^*\n]+)\*/gu;
-  let offset = 0;
-  for (const match of text.matchAll(pattern)) {
-    parent.append(document.createTextNode(text.slice(offset, match.index)));
-    if (match[1]) parent.append(document.createTextNode(match[1]));
-    else if (match[2]) parent.append(element("code", { text: match[2] }));
-    else if (match[3] || match[4]) parent.append(element("strong", { text: match[3] || match[4] }));
-    else parent.append(element("em", { text: match[5] }));
-    offset = match.index + match[0].length;
+const ANSWER_MATH_ASSET = "/assets/katex-cc567bec51ade0dc.mjs";
+let answerMathEngine = null;
+let answerMathLoading = null;
+
+function loadAnswerMathEngine() {
+  if (!answerMathLoading) {
+    // Lazy and same-origin: a missing formula asset must never stop chat startup.
+    answerMathLoading = import(ANSWER_MATH_ASSET).then((module) => {
+      answerMathEngine = module.default;
+      return answerMathEngine;
+    }).catch(() => null);
   }
-  parent.append(document.createTextNode(text.slice(offset)));
+  return answerMathLoading;
+}
+
+function renderAnswerMath(token, budget = { count: 0, characters: 0 }) {
+  const node = element("span", {
+    className: `answer-math${token.display ? " answer-math-block" : ""}`,
+    attributes: { "data-math-status": "pending" },
+    text: token.raw,
+  });
+  const fallback = (reason) => {
+    node.textContent = token.raw;
+    node.setAttribute("data-math-status", "fallback");
+    node.setAttribute("title", reason);
+  };
+  budget.count += 1; budget.characters += token.tex.length;
+  if (token.tex.length > 8_000 || budget.count > 160 || budget.characters > 24_000) {
+    fallback("公式较复杂，已保留原始写法。");
+    return node;
+  }
+  const render = (engine) => {
+    if (!engine?.render) { fallback("公式组件暂不可用，已保留原始写法。"); return; }
+    try {
+      engine.render(token.tex, node, {
+        displayMode: token.display,
+        // Native MathML needs no remote stylesheets or downloaded font files.
+        output: "mathml", trust: false, throwOnError: true,
+        strict: "ignore", maxExpand: 1_000, maxSize: 10,
+      });
+      node.setAttribute("data-math-status", "rendered");
+    } catch {
+      fallback("此公式暂未识别，已保留原始写法。");
+    }
+  };
+  if (answerMathEngine) render(answerMathEngine);
+  else if (typeof window !== "undefined") void loadAnswerMathEngine().then(render);
+  return node;
+}
+
+function answerMaskedMathAt(text, index, technical) {
+  if (!technical || !text.startsWith(technical.prefix, index)) return null;
+  const end = text.indexOf("\uE001", index + technical.prefix.length);
+  if (end < 0) return null;
+  const number = text.slice(index + technical.prefix.length, end);
+  if (!/^\d+$/u.test(number)) return null;
+  const token = technical.tokens[Number(number)];
+  return token?.kind === "math" ? { token, end: end + 1 } : null;
+}
+
+function answerEmphasisEnd(text, start, marker) {
+  for (let index = start; index < text.length;) {
+    if (text[index] === "\\") { index += 2; continue; }
+    if (text[index] === "`") {
+      const code = answerCodeTokenAt(text, index);
+      if (code) { index = code.end; continue; }
+    }
+    if (text.startsWith(marker, index)) return index;
+    index += 1;
+  }
+  return -1;
+}
+
+function appendAnswerInline(parent, text, technical = null, depth = 0, budget = { count: 0, characters: 0 }) {
+  // Model HTML, links, and images remain inert text. Only our nodes and KaTeX
+  // with trust:false can create markup; formulas are protected before emphasis.
+  if (depth > 12) { parent.append(document.createTextNode(technical ? technical.restore(text) : text)); return; }
+  if (!technical) {
+    technical = protectAnswerTechnicalText(text, { code: false });
+    text = technical.text;
+  }
+  let plain = "";
+  const flush = () => { if (plain) { parent.append(document.createTextNode(plain)); plain = ""; } };
+  for (let index = 0; index < text.length;) {
+    const math = answerMaskedMathAt(text, index, technical);
+    if (math) { flush(); parent.append(renderAnswerMath(math.token, budget)); index = math.end; continue; }
+    if (text[index] === "`") {
+      const code = answerCodeTokenAt(text, index);
+      if (code?.content !== undefined) {
+        flush(); parent.append(element("code", { text: code.content })); index = code.end; continue;
+      }
+    }
+    if (text[index] === "\\" && /[\\`*_{}\[\]()#+\-.!|$]/u.test(text[index + 1] || "")) {
+      // Do not eat the opener of an incomplete formula while it is still text.
+      plain += /[([]/u.test(text[index + 1]) ? text.slice(index, index + 2) : text[index + 1];
+      index += 2; continue;
+    }
+    const marker = ["***", "___", "**", "__", "*", "_", "~~"].find((value) => text.startsWith(value, index));
+    if (marker && !(marker[0] === "_" && /[\p{L}\p{N}]/u.test(text[index - 1] || ""))) {
+      const end = answerEmphasisEnd(text, index + marker.length, marker);
+      if (end > index + marker.length && text.slice(index + marker.length, end).trim()) {
+        flush();
+        const node = element(marker === "~~" ? "del" : marker.length > 1 ? "strong" : "em");
+        const target = marker.length === 3 ? element("em") : node;
+        appendAnswerInline(target, text.slice(index + marker.length, end), technical, depth + 1, budget);
+        if (target !== node) node.append(target);
+        parent.append(node); index = end + marker.length; continue;
+      }
+      plain += marker; index += marker.length; continue;
+    }
+    plain += text[index++];
+  }
+  flush();
 }
 
 function answerTableCells(line) {
@@ -840,13 +1026,13 @@ function answerTableCells(line) {
   if (!text.includes("|")) return null;
   const cells = [];
   let cell = "";
-  let inCode = false;
-  for (let index = 0; index < text.length; index += 1) {
-    const char = text[index];
-    if (char === "\\" && text[index + 1] === "|") { cell += "|"; index += 1; }
-    else if (char === "`") { inCode = !inCode; cell += char; }
-    else if (char === "|" && !inCode) { cells.push(cell.trim()); cell = ""; }
-    else cell += char;
+  for (let index = 0; index < text.length;) {
+    const token = (text[index] === "`" ? answerCodeTokenAt(text, index) : null) ||
+      (text[index] === "\\" || text[index] === "$" ? answerMathTokenAt(text, index) : null);
+    if (token) { cell += token.raw; index = token.end; }
+    else if (text[index] === "\\" && text[index + 1] === "|") { cell += "\\|"; index += 2; }
+    else if (text[index] === "|") { cells.push(cell.trim()); cell = ""; index += 1; }
+    else cell += text[index++];
   }
   cells.push(cell.trim());
   if (text.startsWith("|")) cells.shift();
@@ -863,18 +1049,34 @@ function answerTableAt(lines, index) {
 
 function renderAnswerBody(answer) {
   const body = element("div", { className: "message-body answer-content" });
-  const lines = String(answer).slice(0, 12_000).replace(/\r\n?/gu, "\n").split("\n");
-  const startsBlock = (index) => /^\s*(?:#{1,6}\s|[-+*]\s|\d+[.)]\s|>|`{3,}|~{3,})/u.test(lines[index] || "") || answerTableAt(lines, index);
+  const technical = protectAnswerTechnicalText(String(answer).replace(/\r\n?/gu, "\n"), { code: false });
+  const lines = technical.text.split("\n");
+  const budget = { count: 0, characters: 0 };
+  const inline = (node, text) => appendAnswerInline(node, text, technical, 0, budget);
+  const standaloneMath = (line) => {
+    const trimmed = line.trim();
+    const math = answerMaskedMathAt(trimmed, 0, technical);
+    return math?.token.display && math.end === trimmed.length ? math.token : null;
+  };
+  const rule = (line) => /^\s{0,3}(?:(?:\*\s*){3,}|(?:-\s*){3,}|(?:_\s*){3,})$/u.test(line);
+  const startsBlock = (index) => /^\s*(?:#{1,6}\s|[-+*]\s|\d+[.)、]\s|>|`{3,}|~{3,})/u.test(lines[index] || "") ||
+    answerTableAt(lines, index) || standaloneMath(lines[index] || "") || rule(lines[index] || "");
   for (let index = 0; index < lines.length;) {
     const line = lines[index];
     if (!line.trim()) { index += 1; continue; }
+    const math = standaloneMath(line);
+    if (math) { body.append(renderAnswerMath(math, budget)); index += 1; continue; }
     const fence = line.match(/^\s*(`{3,}|~{3,})(.*)$/u);
     if (fence) {
       const code = [];
       index += 1;
       while (index < lines.length && !new RegExp(`^\\s*${fence[1][0]}{${fence[1].length},}\\s*$`, "u").test(lines[index])) code.push(lines[index++]);
       if (index < lines.length) index += 1;
-      body.append(element("pre", {}, [element("code", { text: code.join("\n") })]));
+      const content = technical.restore(code.join("\n"));
+      if (/^(?:math|latex|tex)$/iu.test(fence[2].trim())) {
+        const wrapped = answerMathTokenAt(content.trim(), 0);
+        body.append(renderAnswerMath({ raw: content, tex: wrapped?.end === content.trim().length ? wrapped.tex : content, display: true }, budget));
+      } else body.append(element("pre", {}, [element("code", { text: content })]));
       continue;
     }
     const headers = answerTableAt(lines, index);
@@ -882,44 +1084,49 @@ function renderAnswerBody(answer) {
       const wrap = element("div", { className: "answer-table-scroll", attributes: { role: "region", "aria-label": "回答表格，可左右滑动", tabindex: "0" } });
       const table = element("table");
       const head = element("tr");
-      for (const value of headers) { const cell = element("th", { attributes: { scope: "col" } }); appendAnswerInline(cell, value); head.append(cell); }
+      const dividers = answerTableCells(lines[index + 1]);
+      const cellNode = (tag, value, column) => {
+        const node = element(tag, { attributes: tag === "th" ? { scope: "col" } : {} });
+        const marker = dividers[column];
+        if (marker.endsWith(":")) node.setAttribute("data-align", marker.startsWith(":") ? "center" : "right");
+        inline(node, value); return node;
+      };
+      headers.forEach((value, column) => head.append(cellNode("th", value, column)));
       table.append(element("thead", {}, [head]));
       const rows = element("tbody");
       index += 2;
-      let count = 0;
-      while (index < lines.length && count < 100) {
+      while (index < lines.length) {
         const values = answerTableCells(lines[index]);
         if (!values || values.length !== headers.length) break;
         const row = element("tr");
-        for (const value of values) { const cell = element("td"); appendAnswerInline(cell, value); row.append(cell); }
-        rows.append(row); index += 1; count += 1;
+        values.forEach((value, column) => row.append(cellNode("td", value, column)));
+        rows.append(row); index += 1;
       }
-      table.append(rows); wrap.append(table); body.append(wrap);
-      continue;
+      table.append(rows); wrap.append(table); body.append(wrap); continue;
     }
+    if (rule(line)) { body.append(element("hr")); index += 1; continue; }
     const heading = line.match(/^\s*(#{1,6})\s+(.+?)\s*#*$/u);
-    if (heading) { const node = element(`h${Math.min(6, heading[1].length + 2)}`); appendAnswerInline(node, heading[2]); body.append(node); index += 1; continue; }
-    const listItem = line.match(/^\s*(?:([-+*])|(\d+)[.)])\s+(.+)$/u);
+    if (heading) { const node = element(`h${Math.min(6, heading[1].length + 2)}`); inline(node, heading[2]); body.append(node); index += 1; continue; }
+    const listItem = line.match(/^\s*(?:([-+*])|(\d+)[.)、])\s+(.+)$/u);
     if (listItem) {
       const ordered = Boolean(listItem[2]);
       const list = element(ordered ? "ol" : "ul");
       if (ordered && Number(listItem[2]) > 1 && Number(listItem[2]) < 10_000) list.setAttribute("start", listItem[2]);
       while (index < lines.length) {
-        const item = lines[index].match(/^\s*(?:([-+*])|(\d+)[.)])\s+(.+)$/u);
+        const item = lines[index].match(/^\s*(?:([-+*])|(\d+)[.)、])\s+(.+)$/u);
         if (!item || Boolean(item[2]) !== ordered) break;
-        const node = element("li"); appendAnswerInline(node, item[3]); list.append(node); index += 1;
+        const node = element("li"); inline(node, item[3]); list.append(node); index += 1;
       }
       body.append(list); continue;
     }
     if (/^\s*>/u.test(line)) {
       const quote = [];
       while (index < lines.length && /^\s*>/u.test(lines[index])) quote.push(lines[index++].replace(/^\s*>\s?/u, ""));
-      const node = element("blockquote"); appendAnswerInline(node, quote.join("\n")); body.append(node); continue;
+      const node = element("blockquote"); inline(node, quote.join("\n")); body.append(node); continue;
     }
-    const paragraph = [line];
-    index += 1;
+    const paragraph = [line]; index += 1;
     while (index < lines.length && lines[index].trim() && !startsBlock(index)) paragraph.push(lines[index++]);
-    const node = element("p"); appendAnswerInline(node, paragraph.join("\n")); body.append(node);
+    const node = element("p"); inline(node, paragraph.join("\n")); body.append(node);
   }
   return body;
 }
@@ -2539,9 +2746,7 @@ function createPublicApp() {
       copy.setAttribute("aria-label", "复制回答");
       copy.append(icon("□"));
       copy.addEventListener("click", () => void copyAnswer(answer, conversationId));
-      const further = textButton("需要进一步交流", "further-inquiry");
-      further.addEventListener("click", (event) => openInquiry(event.currentTarget));
-      actions.append(copy, further);
+      actions.append(copy);
       article.append(actions);
     }
     return article;

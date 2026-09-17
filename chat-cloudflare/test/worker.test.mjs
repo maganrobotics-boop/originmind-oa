@@ -1299,3 +1299,46 @@ test("health probes with tiny output budgets never invoke the long-answer contin
   assert.equal((await handleRequest(apiRequest("/api/status"), env, {}, runtime())).status, 200);
   assert.equal(calls, 1);
 });
+
+test("chat preserves formula arrays and code while hiding only external citation markers", async (t) => {
+  let prompt = "";
+  const output = String.raw`**数学模型**：\(x[999] + a_{[1]} = \frac{v^2}{r}\)。[1]
+
+\[
+A=\begin{bmatrix}1&2\\3&4\end{bmatrix}
+\]
+矩阵描述系统。[1]
+
+代码示例：` + "`values[999]`。[1]";
+  const env = makeEnvironment({ AI: { run: async (_model, input) => {
+    prompt = input.messages[0].content;
+    return { response: output };
+  } } });
+  t.after(() => env.DB.close());
+  const result = await (await handleRequest(apiRequest("/api/chat", { method: "POST", body: {
+    topic: "research", messages: [{ role: "user", content: "请解释数学模型" }],
+  } }), env, {}, runtime())).json();
+  assert.equal(result.mode, "ai");
+  assert.match(result.answer, /x\[999\]/u);
+  assert.ok(result.answer.includes(String.raw`a_{[1]}`));
+  assert.ok(result.answer.includes(String.raw`\begin{bmatrix}1&2\\3&4\end{bmatrix}`));
+  assert.ok(result.answer.includes("`values[999]`"));
+  assert.doesNotMatch(result.answer, /。\[1\]/u);
+  assert.ok(prompt.includes(String.raw`行内用 \( ... \)`));
+  assert.ok(prompt.includes(String.raw`独立公式用 \[ ... \]`));
+  assert.match(prompt, /不在回答结尾固定追加/u);
+});
+
+test("math and code cannot masquerade as grounding citations or bypass contact restrictions", async (t) => {
+  for (const output of [String.raw`只有公式 \(x[1]\)。`, "只有代码 `a[1]`。",
+    String.raw`公式 \(x[1]\)。[999]`, String.raw`公式 \(\text{https://unsafe.test}\)。[1]`,
+    String.raw`公式 \(\text{person@example.test}\)。[1]`, String.raw`公式 \(13912345678\)。[1]`]) {
+    const env = makeEnvironment({ AI: { run: async () => ({ response: output }) } });
+    t.after(() => env.DB.close());
+    const result = await (await handleRequest(apiRequest("/api/chat", { method: "POST", body: {
+      topic: "research", messages: [{ role: "user", content: "请解释数学模型" }],
+    } }), env, {}, runtime())).json();
+    assert.equal(result.mode, "retrieval", output);
+    assert.doesNotMatch(result.answer, /unsafe|person@example|13912345678/u);
+  }
+});

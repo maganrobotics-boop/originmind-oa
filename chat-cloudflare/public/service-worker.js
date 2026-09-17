@@ -2,7 +2,7 @@
 
 const CACHE_PREFIX = "originmind-versioned-static-";
 const CACHE_NAME = `${CACHE_PREFIX}v1`;
-const VERSIONED_ASSET_PATH = /^\/assets\/(?:app-[a-f0-9]{16}\.js|styles-[a-f0-9]{16}\.css|pwa\/[a-z0-9-]+-v[0-9]+\.png)$/u;
+const VERSIONED_ASSET_PATH = /^\/assets\/(?:app-[a-f0-9]{16}\.js|katex-[a-f0-9]{16}\.mjs|styles-[a-f0-9]{16}\.css|pwa\/[a-z0-9-]+-v[0-9]+\.png)$/u;
 
 self.addEventListener("install", (event) => {
   event.waitUntil(self.skipWaiting());

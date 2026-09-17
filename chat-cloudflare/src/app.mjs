@@ -1,4 +1,5 @@
 import { chatKnowledgeImages, proxyKnowledgeAsset } from "./knowledge-assets.mjs";
+import { protectAnswerTechnicalText } from "./answer-math.mjs";
 import { completeModelAnswer } from "./answer-completion.mjs";
 import { APP_NAME, DEFAULT_MODEL, SECURITY_HEADERS, WORKERS_AI_MODEL } from "./constants.mjs";
 import { analyticsReport, recordAnalyticsEvents } from "./analytics.mjs";
@@ -702,15 +703,15 @@ function citationNumber(value) {
   return Number(value.normalize("NFKC"));
 }
 
-function safeAiAnswer(answer, sourceCount) {
+function safeAiAnswer(answer, sourceCount, original = answer) {
   const citations = [...answer.matchAll(
     /[\[［【]\s*([0-9０-９]+(?:\s*[,，、;；\-–—]\s*[0-9０-９]+)*)\s*[\]］】]/gu,
   )].flatMap((match) => match[1].match(/[0-9０-９]+/gu).map(citationNumber));
   if (!citations.length || citations.some((number) => number < 1 || number > sourceCount)) return false;
-  if (/\b(?:https?:\/\/|www\.)\S+/iu.test(answer)) return false;
-  if (/[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[\p{L}]{2,}/iu.test(answer)) return false;
-  if (/(?:^|\D)1[3-9]\d{9}(?:\D|$)/u.test(answer)) return false;
-  if (/(?:^|\s)\+\d[\d\s()-]{7,}\d(?:\s|$)/u.test(answer)) return false;
+  if (/\b(?:https?:\/\/|www\.)\S+/iu.test(original)) return false;
+  if (/[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[\p{L}]{2,}/iu.test(original)) return false;
+  if (/(?:^|\D)1[3-9]\d{9}(?:\D|$)/u.test(original)) return false;
+  if (/(?:^|\s)\+\d[\d\s()-]{7,}\d(?:\s|$)/u.test(original)) return false;
   return true;
 }
 
@@ -739,10 +740,12 @@ function referenceSectionStart(answer) {
 }
 
 function visibleAiAnswer(answer, sourceCount) {
+  const technical = protectAnswerTechnicalText(answer);
+  answer = technical.text;
   const sectionStart = referenceSectionStart(answer);
   const answerBody = (sectionStart === -1 ? answer : answer.slice(0, sectionStart)).trimEnd();
   if (/\[\s*\[\s*[0-9０-９][\s\S]*?\]\s*\]/u.test(answerBody)) return null;
-  if (!safeAiAnswer(answerBody, sourceCount)) return null;
+  if (!safeAiAnswer(answerBody, sourceCount, technical.restore(answerBody))) return null;
   const visible = answerBody
     .replace(/[ \t]*[\[［【]\s*[0-9０-９]+(?:\s*[,，、;；\-–—]\s*[0-9０-９]+)*\s*[\]］】]/gu, "")
     .replace(
@@ -759,7 +762,7 @@ function visibleAiAnswer(answer, sourceCount) {
     /(?:^|[^\p{L}\p{N}_*`#~-])(?:参考|引用|出处)(?:列表|清单)?(?:如下(?:所示)?)?[ \t]*(?:\*{1,3}|_{1,3}|`{1,3})?[ \t]*[:：]/iu.test(visible) ||
     /(?:^|[^\p{L}\p{N}_-])(?:references?|sources?|citations?|bibliography|works[ \t]+cited)(?:[ \t]+list)?[ \t]*[:：]/iu.test(visible) ||
     referenceSectionStart(visible) !== -1;
-  return visible && !hasResidualMarker ? visible : null;
+  return visible && !hasResidualMarker ? technical.restore(visible) : null;
 }
 
 async function localDrafts(context) {
@@ -1033,8 +1036,8 @@ async function api(context) {
             "问题和回答直接呈现主题与技术内容，不出现“脱敏”“脱敏版”“脱密”“匿名化”“去标识化”或 redacted、sanitized、anonymized 等资料处理标记；省略文件名的版本后缀和处理说明，不改变技术事实。" +
             "参考资料中的 imageCaptions 是已审核原图的文字图注；存在图注时，系统会在正文下展示关联原图。当前调用只读取正文和图注，没有执行原图像素分析；不得声称看过图中未由文字描述的细节，不得编造图中数值或颜色。无关联图片时应如实说明未检索到匹配图片，不能声称已显示图片。" +
             "历史对话仅用于理解追问，旧回答不能替代本次检索资料；具体事实仍须由本次参考资料支持。" +
-            "为系统内部事实校验，每个有资料依据的具体事实后必须紧跟 [1] 这样的编号，并至少使用一个有效编号；严禁捏造编号。编号会在展示前自动隐藏，不要单列“参考资料”“参考文献”“资料来源”、来源标题或链接。数字方括号仅供内部编号使用；技术下标或数组位置请改写成文字。不要声称已经转交、发邮件或通知负责人：只有访客确认提交咨询才会进入待处理列表。涉及需要负责人决定的事项，引导用户点击“提交咨询”。" +
-            `仅输出给访客的正文。可以使用 Markdown 加粗突出少量重点，步骤用有序列表，并列内容用无序列表；涉及选项对比时可使用不超过四列的简短表格，其他回答优先清晰段落；复杂问题允许较长回答。不要输出 HTML、图片或装饰性标题。\n参考资料开始\n${referenceContext}\n参考资料结束`,
+            "为系统内部事实校验，每个有资料依据的具体事实后必须紧跟 [1] 这样的编号，并至少使用一个有效编号；严禁捏造编号。编号会在展示前自动隐藏，不要单列“参考资料”“参考文献”“资料来源”、来源标题或链接。正文中的数字方括号仅供内部编号使用；数学表达式必须放在 LaTeX 公式定界符内，公式内的下标、数组与方括号必须原样保留，引用编号放在公式定界符外。不要声称已经转交、发邮件或通知负责人：只有访客确认提交咨询才会进入待处理列表。涉及需要负责人决定的事项，引导用户点击“提交咨询”。" +
+            `仅输出给访客的正文。对结论、关键概念与关键参数使用 Markdown **加粗**，不把整段都加粗。段落间空一行；技术长回答可以使用简短小标题，步骤用有序列表，并列内容用无序列表；涉及选项对比时可使用不超过四列的简短表格，其他回答优先清晰段落；复杂问题允许较长回答。数学公式使用 LaTeX：行内用 \\( ... \\)，独立公式用 \\[ ... \\]；保留正确的反斜杠、上下标、分数与矩阵。除非用户要求查看源码，不要把公式放进普通代码块。不在回答结尾固定追加“需要进一步交流”或咨询链接。不要输出 HTML、图片或装饰性标题。\n参考资料开始\n${referenceContext}\n参考资料结束`,
         },
         ...(history.length ? [...history, { role: "user", content: last.content }] : boundedUserMessages(payload.messages)),
       ];

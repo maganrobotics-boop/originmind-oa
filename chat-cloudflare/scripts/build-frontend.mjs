@@ -14,6 +14,7 @@ const SOURCE_PATHS = Object.freeze({
   app: join(FRONTEND_DIRECTORY, "app.js"),
   style: join(FRONTEND_DIRECTORY, "styles.css"),
   zipImportAddon: join(FRONTEND_DIRECTORY, "zip-import-addon.js"),
+  math: join(ROOT, "node_modules/katex/dist/katex.mjs"),
 });
 
 const PLACEHOLDERS = Object.freeze({
@@ -34,12 +35,15 @@ function replaceExactlyOnce(template, placeholder, replacement) {
 }
 
 async function expectedBuild() {
-  const [template, app, style, zipImportAddon] = await Promise.all([
+  const [template, appSource, style, zipImportAddon, math] = await Promise.all([
     readFile(SOURCE_PATHS.html, "utf8"),
     readFile(SOURCE_PATHS.app),
     readFile(SOURCE_PATHS.style),
     readFile(SOURCE_PATHS.zipImportAddon),
+    readFile(SOURCE_PATHS.math),
   ]);
+  const mathName = `katex-${digest(math)}.mjs`;
+  const app = Buffer.from(replaceExactlyOnce(appSource.toString("utf8"), "__KATEX_ASSET__", `/assets/${mathName}`), "utf8");
   const appName = `app-${digest(app)}.js`;
   const styleName = `styles-${digest(style)}.css`;
   const withApp = replaceExactlyOnce(template, PLACEHOLDERS.app, `/assets/${appName}`);
@@ -52,6 +56,7 @@ async function expectedBuild() {
     rootFiles: new Map([["zip-import-addon.js", zipImportAddon]]),
     assets: new Map([
       [appName, app],
+      [mathName, math],
       [styleName, style],
     ]),
   };
@@ -61,7 +66,7 @@ async function generatedAssetNames() {
   try {
     const entries = await readdir(PUBLIC_ASSET_DIRECTORY, { withFileTypes: true });
     return entries
-      .filter((entry) => entry.isFile() && /\.(?:css|js)$/u.test(entry.name))
+      .filter((entry) => entry.isFile() && /\.(?:css|m?js)$/u.test(entry.name))
       .map((entry) => entry.name)
       .sort();
   } catch (error) {
