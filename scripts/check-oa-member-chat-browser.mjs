@@ -49,7 +49,7 @@ try {
    await alice.screenshot({path:resolve(output,`${name}-forward-preview.png`),fullPage:true});
    await alice.getByRole('button',{name:'取消',exact:true}).click();assert.equal(posts.length,0,'cancelling a preview must not send');
    await alice.getByRole('button',{name:'聊天更多操作'}).click();await alice.getByRole('menuitem',{name:'转发最近回答'}).click();await alice.getByRole('button',{name:'选择 成员乙'}).click();
-   await alice.getByRole('button',{name:'确认发送',exact:true}).click();await alice.locator('.oa-member-title strong').getByText('成员乙',{exact:true}).waitFor();
+   await alice.getByRole('button',{name:'确认发送',exact:true}).click();await alice.locator('.oa-member-title strong').filter({hasText:'成员乙'}).waitFor();
    assert.equal(posts.length,1);assert.equal(posts[0].input.body,preview);assert.equal(store[0].senderName,'成员甲');
    await bob.getByRole('button',{name:'聊天更多操作'}).click();await bob.getByRole('menuitem',{name:'与成员聊天'}).click();await bob.getByRole('button',{name:'与 成员甲 聊天'}).click();
    await bob.locator('.oa-direct-message').filter({hasText:'正文完整结束'}).waitFor();assert.equal(await bob.locator('.oa-member-title strong').innerText(),'成员甲');

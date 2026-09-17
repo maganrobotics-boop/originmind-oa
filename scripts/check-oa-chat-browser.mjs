@@ -77,7 +77,8 @@ try {
       assert.ok(height-before.composer.bottom >= 0 && height-before.composer.bottom <= 20, 'composer must remain at viewport bottom');
       assert.ok(before.messages.height > 60 && before.scrollWidth <= width+1);
       assert.equal(await page.locator('.topbar .chat-hub').isVisible(), false, 'old private-chat toolbar must not duplicate the Chat header');
-      assert.equal(await page.locator('.oa-topbar-user').innerText(), '测试成员');
+      assert.equal(await page.locator('.topbar .oa-topbar-user').count(), 0);
+      assert.equal(await page.getByRole('button', {name:'聊天更多操作'}).isVisible(), true);
       await page.screenshot({ path:resolve(output,`${name}-welcome.png`),fullPage:true });
       const input = page.getByPlaceholder('询问实验室大数据');
       await input.fill('请解释机器人运动模型和矩阵');

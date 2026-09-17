@@ -1,11 +1,13 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ArrowUp, Copy, Plus, RotateCcw, Square } from 'lucide-react';
+import { ArrowUp, Copy, Forward, RotateCcw, Square } from 'lucide-react';
 import { renderAnswerBody, userFacingAnswer } from '@/lib/oa-chat-renderer.mjs';
 import type { KnowledgeCitation } from '@/lib/knowledge-types';
 import './shared-chat.generated.css';
 import './oa-chat-panel.css';
+import { useOaConversation } from './oa-conversation-context';
+import { OaMemberChat } from './oa-member-chat';
 
 type Image = { url: string; alt: string; mimeType: string };
 type Turn = { id: string; question: string; answer: string; citations: KnowledgeCitation[]; images: Image[]; failed?: boolean };
@@ -53,6 +55,12 @@ export function OaChatStatus() {
 }
 
 export function OaChatPanel() {
+  const { peer, aiEpoch } = useOaConversation();
+  return <><div className="oa-conversation-ai" hidden={Boolean(peer)}><OaAiChatPanel key={aiEpoch} /></div>{peer && <OaMemberChat key={peer.email} peer={peer} />}</>;
+}
+
+function OaAiChatPanel() {
+  const { forward, setLastAnswer } = useOaConversation();
   const [question, setQuestion] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [asking, setAsking] = useState(false);
@@ -95,6 +103,7 @@ export function OaChatPanel() {
       if (sequence !== requestSequence.current) return;
       const images = (Array.isArray(data.images) ? data.images : []).filter(validImage).slice(0, 4);
       setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: data.answer!, citations: data.citations || [], images } : turn));
+      setLastAnswer({ body: userFacingAnswer(data.answer!), omittedImages: images.length });
     } catch (cause) {
       if (sequence !== requestSequence.current) return;
       setTurns(current => current.map(turn => turn.id === id ? { ...turn, failed: true } : turn));
@@ -103,13 +112,8 @@ export function OaChatPanel() {
     } finally {
       if (sequence === requestSequence.current) { sending.current = false; setAsking(false); requestRef.current = null; }
     }
-  }, [question, turns]);
+  }, [question, turns, setLastAnswer]);
   const submit = (event: FormEvent) => { event.preventDefault(); void ask(); };
-  const newChat = () => {
-    if (turns.length && !window.confirm('开始新聊天将清除当前页面的对话，是否继续？')) return;
-    requestSequence.current++; requestRef.current?.abort(); requestRef.current = null; sending.current = false;
-    setTurns([]); setQuestion(''); setAsking(false); setError(''); input.current?.focus();
-  };
   const copy = async (turn: Turn) => {
     try { await navigator.clipboard.writeText(userFacingAnswer(turn.answer)); setCopied(turn.id); }
     catch { setError('浏览器未允许复制，请长按回答选择文字。'); }
@@ -117,13 +121,12 @@ export function OaChatPanel() {
 
   return <section className="oa-shared-chat" aria-label="OA 实验室 AI 聊天">
     <div className="chat-app oa-chat-surface">
-      <div className="oa-conversation-tools"><button type="button" onClick={newChat} aria-label="开始新聊天" title="开始新聊天"><Plus size={18} /></button></div>
       <div className="messages oa-chat-messages" ref={scroll} onScroll={() => { const element = scroll.current; if (element) stickToEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96; }}>
         {turns.length === 0 ? <section className="empty-hero" aria-labelledby={`${composerId}-welcome`}><h2 id={`${composerId}-welcome`}>想了解实验室的什么？</h2><p>从已审核的实验室公开及内部知识中检索并回答</p></section> : turns.map(turn => <div className="oa-chat-turn" key={turn.id}>
           <article className="message user"><div className="message-content"><p>{turn.question}</p><button type="button" className="oa-question-edit" onClick={() => { setQuestion(turn.question); input.current?.focus(); }} disabled={asking}>修改问题</button></div></article>
           {turn.answer && <article className="message assistant"><div className="message-content"><RichAnswer answer={turn.answer} />
             {!!turn.images.length && <div className="oa-answer-images">{turn.images.map(image => <figure key={image.url}><img src={image.url} alt={image.alt} loading="lazy" referrerPolicy="no-referrer" onError={event => { event.currentTarget.hidden = true; }} /><figcaption>{image.alt}</figcaption></figure>)}</div>}
-            <div className="oa-answer-actions"><button type="button" className="copy-answer" onClick={() => void copy(turn)} aria-label="复制回答"><Copy size={15} />{copied === turn.id ? '已复制' : '复制'}</button>{!!turn.citations.length && <details><summary>参考已审核资料</summary>{turn.citations.map(citation => <p key={`${citation.id}-${citation.itemId}`}>{citation.title}{citation.sectionTitle ? ` · ${citation.sectionTitle}` : ''}</p>)}</details>}</div>
+            <div className="oa-answer-actions"><button type="button" className="copy-answer" onClick={() => void copy(turn)} aria-label="复制回答"><Copy size={15} />{copied === turn.id ? '已复制' : '复制'}</button><button type="button" aria-label="转发回答给成员" onClick={() => forward({ body: userFacingAnswer(turn.answer), omittedImages: turn.images.length })}><Forward size={15} />转发</button>{!!turn.citations.length && <details><summary>参考已审核资料</summary>{turn.citations.map(citation => <p key={`${citation.id}-${citation.itemId}`}>{citation.title}{citation.sectionTitle ? ` · ${citation.sectionTitle}` : ''}</p>)}</details>}</div>
           </div></article>}
           {turn.failed && <button type="button" className="oa-chat-retry" disabled={asking} onClick={() => void ask(turn)}><RotateCcw size={16} />重新回答</button>}
         </div>)}

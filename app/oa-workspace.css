@@ -69,7 +69,7 @@
 .oa-workspace.oa-chat-open .topbar { position:relative; display:flex; align-items:center; flex:0 0 64px; min-height:64px; margin:0; padding:0 12px; border-bottom:1px solid #eee; background:#fff; }
 .oa-workspace.oa-chat-open .breadcrumbs { display:none; }
 .oa-workspace.oa-chat-open .topbar-actions { margin-left:auto; }
-.oa-workspace.oa-chat-open .topbar-actions > :not(.oa-topbar-user) { display:none; }
+.oa-workspace.oa-chat-open .topbar-actions > :not(.oa-topbar-user):not(.oa-conversation-menu) { display:none; }
 .oa-workspace.oa-chat-open .oa-topbar-user { max-width:120px; font-size:14px; padding:8px; }
 .oa-workspace.oa-chat-open .workspace-sidebar-toggle, .oa-workspace.oa-chat-open .mobile-menu-button { border:0; border-radius:50%; width:44px; height:44px; background:#f7f7f7; }
 .oa-workspace.oa-chat-open .oa-knowledge-pane { flex:1 1 0; min-height:0; display:flex; overflow:hidden; margin:0; }
