@@ -1,0 +1,112 @@
+name: Verify OA image release 20260917
+
+on:
+  push:
+    branches: [verify/oa-image-release-20260917]
+    paths: [.github/workflows/verify-oa-image-release.yml]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  public-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Wait for the user-authorized OA release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          node --input-type=module <<'JS'
+          const url = 'https://api.github.com/repos/maganrobotics-boop/originmind-oa/actions/runs/35177099384';
+          for (let attempt = 0; attempt < 50; attempt++) {
+            const response = await fetch(url, {headers:{Authorization:`Bearer ${process.env.GH_TOKEN}`, Accept:'application/vnd.github+json'}, signal:AbortSignal.timeout(20000)});
+            if (!response.ok) throw new Error(`Release status HTTP ${response.status}`);
+            const run = await response.json();
+            if (run.head_sha !== '14080c5e4018f844e134b5747441cd99f73721c8') throw new Error('Unexpected release commit');
+            console.log(JSON.stringify({releaseRun:run.id,status:run.status,conclusion:run.conclusion,commit:run.head_sha}));
+            if (run.status === 'completed') {
+              if (run.conclusion !== 'success') throw new Error('OA release did not succeed');
+              process.exit(0);
+            }
+            await new Promise(resolve => setTimeout(resolve, 15000));
+          }
+          throw new Error('OA release still incomplete; no production probes executed');
+          JS
+      - name: Probe real public questions and original image bytes
+        run: |
+          node --input-type=module <<'JS'
+          import {writeFile,mkdir} from 'node:fs/promises';
+          import {createHash} from 'node:crypto';
+          const origin = 'https://chat.omindos.ai';
+          const ua = 'OriginMind-Chat-Release-Smoke/1.0';
+          await mkdir('acceptance', {recursive:true});
+          const results = {checkedAt:new Date().toISOString(),oaCommit:'14080c5e4018f844e134b5747441cd99f73721c8',questions:[]};
+          async function request(path, init={}) {
+            return fetch(origin + path, {...init, headers:{'User-Agent':ua, 'Cache-Control':'no-cache', ...(init.headers || {})}, redirect:'error', signal:AbortSignal.timeout(85000)});
+          }
+          const status = await request('/api/status');
+          results.statusHttp = status.status;
+          results.status = await status.json();
+          console.log('PUBLIC_STATUS', JSON.stringify(results.status));
+          const home = await request('/');
+          results.homeHttp = home.status;
+          const html = await home.text();
+          results.frontendAssets = [...html.matchAll(/(?:src|href)="(\/assets\/(?:app|styles)-[a-f0-9]+\.(?:js|css))"/g)].map(match=>match[1]);
+          console.log('PUBLIC_HOME', JSON.stringify({status:home.status,assets:results.frontendAssets}));
+          const questions = [
+            '请展示马家旺论文中差速轮式小车实验平台的正视图和侧视图，并说明激光雷达、相机、计算单元和底盘的用途。',
+            '论文中的差速轮式小车实验平台是什么样的？请显示原图。',
+            '请详细介绍三维环境地面移动机器人的全地形语义导航方法，分别说明研究问题、系统构成、定位与建图、语义导航、实验验证和局限。不要只列标题，要完整回答。'
+          ];
+          for (const [index, question] of questions.entries()) {
+            const started = Date.now();
+            try {
+              const response = await request('/api/chat', {method:'POST', headers:{'Content-Type':'application/json',Origin:origin,Referer:origin+'/', 'Sec-Fetch-Site':'same-origin'},body:JSON.stringify({messages:[{role:'user',content:question}],topic:'research'})});
+              const payload = await response.json();
+              const answer = typeof payload.answer === 'string' ? payload.answer : '';
+              const result = {question,http:response.status,durationMs:Date.now()-started,serverTiming:response.headers.get('server-timing'),mode:payload.mode,provider:payload.provider,releaseId:payload.releaseId,oaPublicStatus:payload.oaPublicStatus,error:payload.error,answerLength:[...answer].length,answer,sourceTitles:(payload.sources||[]).map(source=>source.title),sourceExcerpts:(payload.sources||[]).map(source=>String(source.excerpt||'').slice(0,700)),images:[]};
+              for (const [imageIndex, image] of (payload.images || []).slice(0,4).entries()) {
+                if (typeof image.url !== 'string' || !/^\/api\/knowledge\/assets\/[A-Za-z0-9_.-]+$/.test(image.url)) throw new Error('Unsafe or malformed image path');
+                const asset = await request(image.url);
+                const bytes = new Uint8Array(await asset.arrayBuffer());
+                const type = (asset.headers.get('content-type') || '').split(';')[0];
+                const imageResult = {alt:image.alt,http:asset.status,mimeType:type,bytes:bytes.length,signature:Buffer.from(bytes.slice(0,12)).toString('hex'),sha256:createHash('sha256').update(bytes).digest('hex'),cacheControl:asset.headers.get('cache-control'),nosniff:asset.headers.get('x-content-type-options')};
+                if (asset.status === 200 && /^image\/(png|jpeg|webp)$/.test(type)) {
+                  await writeFile(`acceptance/question-${index+1}-image-${imageIndex+1}.${type==='image/jpeg'?'jpg':type.split('/')[1]}`,bytes);
+                }
+                result.images.push(imageResult);
+              }
+              if (payload.images?.length) {
+                const first = payload.images[0].url;
+                const pivot = first.lastIndexOf('/') + 14;
+                const changed = first.slice(0,pivot)+(first[pivot]==='A'?'B':'A')+first.slice(pivot+1);
+                const denied = await request(changed);
+                result.tamperedImageHttp = denied.status;
+                await denied.body?.cancel();
+              }
+              results.questions.push(result);
+              console.log('LIVE_QUESTION_RESULT', JSON.stringify(result));
+            } catch (error) {
+              const result={question,error:String(error.message||error),durationMs:Date.now()-started};
+              results.questions.push(result);
+              console.log('LIVE_QUESTION_ERROR',JSON.stringify(result));
+            }
+          }
+          await writeFile('acceptance/summary.json',JSON.stringify(results,null,2));
+          const imageQuestions = results.questions.slice(0,2);
+          const imagesPassed = imageQuestions.every(q=>q.http===200 && q.images?.some(i=>i.http===200 && i.bytes>100 && /^image\//.test(i.mimeType)));
+          const longAnswer = results.questions[2];
+          const longAnswerPassed = longAnswer?.http===200 && longAnswer.mode==='ai' && longAnswer.answerLength>=600 && !/尚未完整生成|未能完整生成/.test(longAnswer.answer||'');
+          console.log('ACCEPTANCE_SUMMARY',JSON.stringify({imagesPassed,longAnswerPassed,notBrowserVerified:true}));
+          if (!imagesPassed || !longAnswerPassed) process.exitCode=1;
+          JS
+      - name: Preserve public acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: public-oa-image-acceptance-${{ github.run_id }}
+          path: acceptance/
+          if-no-files-found: warn
+          retention-days: 7
