@@ -1,0 +1,94 @@
+name: Chat answer formatting integration
+
+on:
+  push:
+    branches: [fix/chat-answer-formatting-20260917]
+    paths: [.github/workflows/answer-formatting-workspace.yml]
+
+permissions:
+  contents: write
+
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/fix/chat-answer-formatting-20260917'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: true
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+      - name: Integrate reviewed main image-import changes without dropping math assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git merge --no-commit --no-ff a73c97e49f3cec87d1eb563974921a9a64a02a9e || {
+            test "$(git diff --name-only --diff-filter=U)" = "chat-cloudflare/scripts/build-frontend.mjs"
+          }
+          python3 - <<'PY'
+          import pathlib, subprocess
+          path = 'chat-cloudflare/scripts/build-frontend.mjs'
+          source = subprocess.check_output(['git', 'show', 'HEAD:' + path]).decode()
+          def replace(old, new):
+              global source
+              assert source.count(old) == 1, old
+              source = source.replace(old, new)
+          replace('  math: join(ROOT, "node_modules/katex/dist/katex.mjs"),', '  math: join(ROOT, "node_modules/katex/dist/katex.mjs"),\n  knowledgeImageReferences: resolve(ROOT, "../lib/knowledge-image-references.mjs"),')
+          replace('const [template, appSource, style, zipImportAddon, math] = await Promise.all([', 'const [template, appSource, style, zipImportAddon, math, imageReferencesModule] = await Promise.all([')
+          replace('readFile(SOURCE_PATHS.zipImportAddon),', 'readFile(SOURCE_PATHS.zipImportAddon, "utf8"),')
+          replace('readFile(SOURCE_PATHS.math),', 'readFile(SOURCE_PATHS.math),\n    readFile(SOURCE_PATHS.knowledgeImageReferences, "utf8"),')
+          replace('  const mathName = ', '''  // Share the inert HTML/Markdown image parser with OA, alongside local math.
+            const imageReferencesScript = replaceExactlyOnce(imageReferencesModule,
+              "export function knowledgeImageReferences", "function knowledgeImageReferences");
+            const zipImportBundle = Buffer.from(`"use strict";\\n(() => {\\n${imageReferencesScript}\\n${zipImportAddon}\\n})();\\n`, "utf8");
+            const mathName = ''')
+          replace('rootFiles: new Map([["zip-import-addon.js", zipImportAddon]]),', 'rootFiles: new Map([["zip-import-addon.js", zipImportBundle]]),')
+          pathlib.Path(path).write_text(source)
+          PY
+          git add chat-cloudflare/scripts/build-frontend.mjs
+          test -z "$(git diff --name-only --diff-filter=U)"
+      - name: Install locked dependencies
+        run: npm ci --prefix chat-cloudflare
+      - name: Build and run complete integrated Chat tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm --prefix chat-cloudflare run build:frontend
+          npm --prefix chat-cloudflare run check 2>&1 | tee answer-formatting-tests.log
+          npm --prefix chat-cloudflare run check:wrangler 2>&1 | tee answer-formatting-dry-run.log
+      - name: Install isolated browser test tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          npm install --prefix "$RUNNER_TEMP/answer-browser" --no-package-lock --ignore-scripts playwright@1.58.2
+          node "$RUNNER_TEMP/answer-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Verify real desktop and mobile answer rendering
+        shell: bash
+        run: |
+          set -euo pipefail
+          PLAYWRIGHT_MODULE="$RUNNER_TEMP/answer-browser/node_modules/playwright/index.mjs" node chat-cloudflare/scripts/check-answer-browser.mjs 2>&1 | tee answer-formatting-browser.log
+      - name: Commit verified integration to feature branch only
+        shell: bash
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REF_NAME" = "fix/chat-answer-formatting-20260917"
+          git diff --check
+          git add -A chat-cloudflare
+          git commit -m "fix(chat): integrate current HTML image preservation with formula rendering"
+          git push origin "HEAD:$GITHUB_REF_NAME"
+          git rev-parse HEAD | tee answer-formatting-commit.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: answer-formatting-integrated-verification
+          path: |
+            answer-formatting-*.log
+            answer-formatting-commit.txt
+            answer-browser-report
+          retention-days: 7
+          if-no-files-found: warn
