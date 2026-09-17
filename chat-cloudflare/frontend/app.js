@@ -949,9 +949,9 @@ function loadAnswerMathEngine() {
         try {
           const sequence = answerMathRequestSequence++;
           const url = sequence ? `${ANSWER_MATH_ASSET}?retry=${sequence}` : ANSWER_MATH_ASSET;
-          const module = await import(url);
-          if (typeof module.default?.render !== "function") throw new TypeError("Invalid formula engine");
-          answerMathEngine = module.default;
+          const mathModule = await import(url);
+          if (typeof mathModule.default?.render !== "function") throw new TypeError("Invalid formula engine");
+          answerMathEngine = mathModule.default;
           return answerMathEngine;
         } catch { /* Keep the original formula visible until a retry succeeds. */ }
       }
