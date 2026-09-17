@@ -1,0 +1,46 @@
+name: Formula lint integration (temporary)
+on:
+  push:
+    branches: [fix/chat-formula-runtime-20260917]
+    paths: [.github/workflows/formula-lint-fix.yml]
+permissions:
+  contents: write
+jobs:
+  fix:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Rename only the reserved module local in the formula loader
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          import subprocess
+          p=Path('chat-cloudflare/frontend/app.js')
+          assert subprocess.check_output(['git','hash-object',str(p)],text=True).strip()=='24fa1a1650e0ccc876eb450fcd4abd988f4fd933'
+          text=p.read_text()
+          assert text.count('const module = await import(url);')==1
+          text=text.replace('const module = await import(url);','const mathModule = await import(url);')
+          text=text.replace('typeof module.default?.render','typeof mathModule.default?.render')
+          text=text.replace('answerMathEngine = module.default;','answerMathEngine = mathModule.default;')
+          p.write_text(text)
+          PY
+      - name: Check both repository lint and Chat build
+        run: |
+          npm run install:ci
+          npm run lint
+          npm ci --prefix chat-cloudflare
+          npm --prefix chat-cloudflare run build:frontend
+          npm --prefix chat-cloudflare run check
+          git diff --check
+      - name: Commit verified rename and generated assets to the fix branch
+        run: |
+          test "$GITHUB_REF_NAME" = 'fix/chat-formula-runtime-20260917'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add chat-cloudflare/frontend/app.js chat-cloudflare/public
+          git commit -m 'fix(chat): use lint-compatible formula module name and rebuild assets'
+          git push origin HEAD:refs/heads/fix/chat-formula-runtime-20260917
