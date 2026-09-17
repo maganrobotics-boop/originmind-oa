@@ -41,9 +41,11 @@ jobs:
               esac
             done <<< "$conflicts"
           fi
-          # These are deterministic build outputs. All authored source merges
-          # must already be clean before regenerating them from both changes.
-          git restore --source=HEAD --staged --worktree chat-cloudflare/public/index.html chat-cloudflare/public/assets
+          # Resolve rename/rename conflicts only for deterministic JS/CSS outputs.
+          # The next step rebuilds all of them from the clean source merge.
+          git rm -r -f --ignore-unmatch chat-cloudflare/public/assets
+          git show HEAD:chat-cloudflare/public/index.html > chat-cloudflare/public/index.html
+          git add chat-cloudflare/public/index.html
       - name: Install dependencies and verify integrated source
         shell: bash
         run: |
