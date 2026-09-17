@@ -1,0 +1,35 @@
+name: Verify published Chat images and long answers 20260917
+
+on:
+  push:
+    branches: [verify/chat-public-live-20260917]
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  public-live-acceptance:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 27
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - name: Check acceptance script syntax
+        run: node --check chat-cloudflare/scripts/verify-public-live-20260917.mjs
+      - name: Verify exact releases then probe public answers and image bytes
+        env:
+          ACTIONS_READ_TOKEN: ${{ github.token }}
+        run: node chat-cloudflare/scripts/verify-public-live-20260917.mjs
+      - name: Preserve token-free public acceptance evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: chat-public-live-acceptance-${{ github.run_id }}
+          path: live-acceptance-evidence/result.json
+          if-no-files-found: warn
+          retention-days: 14
