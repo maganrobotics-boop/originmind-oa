@@ -69,6 +69,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { KnowledgeView, type KnowledgeTab } from "@/components/knowledge/knowledge-view";
 import "./oa-workspace.css";
 import { OaChatStatus } from "@/components/knowledge/oa-chat-panel";
+import { OaConversationProvider, OaConversationMenu, OaConversationTitle, OaNewChatButton, useOaConversation } from "@/components/knowledge/oa-conversation-context";
 import {
   NDA_AGREEMENT_VERSION,
   buildNdaAgreementText,
@@ -255,6 +256,7 @@ function StatusBadge({ status }: { status: ApprovalStatus }) {
 }
 
 function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马淦", userAvatarDataUrl = "", authProvider = "chatgpt", currentRole, isAdmin = false, canReviewKnowledge = false, selectedKnowledgeTab = "ask", onKnowledgeTab, onMyPending }: { activeView: ViewKey; setActiveView: (key: ViewKey) => void; onNew: () => void; onProfile: () => void; userName?: string; userAvatarDataUrl?: string; authProvider?: AuthProvider; currentRole?: string | null; isAdmin?: boolean; canReviewKnowledge?: boolean; selectedKnowledgeTab?: KnowledgeTab; onKnowledgeTab: (tab: KnowledgeTab) => void; onMyPending: () => void }) {
+  const conversation = useOaConversation();
   const [userMenuOpen, setUserMenuOpen] = useState(false);
   const [officeOpen, setOfficeOpen] = useState(true);
   const [knowledgeOpen, setKnowledgeOpen] = useState(true);
@@ -352,7 +354,8 @@ function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马�
     ...(isAdmin ? [{ key: "members" as ViewKey, label: "成员审核", icon: UsersRound }, { key: "notifications" as ViewKey, label: "飞书提醒", icon: MessageCircle }] : []),
   ];
   return <aside className="sidebar-shell">
-    <button type="button" className="brand-lockup" onClick={() => setActiveView("dashboard")} aria-label="返回首页" title="返回首页"><div className="brand-copy"><div className="brand-name">{officialBrand}</div><div className="brand-subtitle">联合研发 OA</div></div></button>
+    <button type="button" className="brand-lockup" onClick={() => setActiveView("dashboard")} aria-label="返回首页" title="返回首页"><div className="brand-copy"><div className="brand-name">联合研发 OA</div><div className="brand-subtitle">{officialBrand}</div></div></button>
+    <div className="oa-sidebar-scroll">
     <button type="button" data-sidebar-section="office" className="sidebar-section-label sidebar-group-toggle" aria-expanded={officeOpen} aria-controls={officeId} onClick={() => setOfficeOpen(open => !open)}><span>审批办公</span><ChevronRight className="size-3.5" /></button>
     <div id={officeId} hidden={!officeOpen}>
     <nav className="sidebar-nav" aria-label="主导航">{items.map(({ key, label, icon: Icon }) => { const itemPendingCount = key === "dashboard" ? pendingApprovalCount : key === "members" ? pendingMemberCount : key === "knowledge" ? pendingKnowledgeCount : 0; const needsAttention = itemPendingCount > 0; const attentionClass = needsAttention ? `attention attention-${key}` : ""; return <button key={key} className={`sidebar-nav-item ${activeView === key ? "active" : ""} ${attentionClass}`} onClick={() => setActiveView(key)}><Icon className="size-[17px]" /><span>{label}</span>{needsAttention && <span className="nav-count nav-count-alert">{itemPendingCount > 99 ? "99+" : itemPendingCount}</span>}</button>; })}</nav>
@@ -362,12 +365,17 @@ function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马�
     <div className="sidebar-divider" />
     <button type="button" data-sidebar-section="knowledge" className="sidebar-section-label sidebar-group-toggle" aria-expanded={knowledgeOpen} aria-controls={knowledgeId} onClick={() => setKnowledgeOpen(open => !open)}><span>大模型与资料</span><ChevronRight className="size-3.5" /></button>
     <nav id={knowledgeId} hidden={!knowledgeOpen} className="oa-knowledge-nav" aria-label="大模型后台">
-      {([{ tab: "ask", label: "AI 聊天", icon: Bot }, { tab: "submit", label: "上传资料", icon: Plus }, { tab: "mine", label: "我的资料", icon: FolderKanban }, ...(canReviewKnowledge ? [{ tab: "review", label: "资料审核", icon: ShieldCheck }, { tab: "manage", label: "知识资料管理", icon: BookOpen }] : [])] as { tab: KnowledgeTab; label: string; icon: typeof Bot }[]).map(({ tab, label, icon: Icon }) => <button type="button" key={tab} className={`sidebar-nav-item ${activeView === "knowledge" && selectedKnowledgeTab === tab ? "active" : ""}`} onClick={() => onKnowledgeTab(tab)}><Icon className="size-[17px]" /><span>{label}</span>{tab === "review" && pendingKnowledgeCount > 0 && <span className="nav-count nav-count-alert">{pendingKnowledgeCount > 99 ? "99+" : pendingKnowledgeCount}</span>}</button>)}
+      {([{ tab: "ask", label: "AI 聊天", icon: Bot }, { tab: "submit", label: "上传资料", icon: Plus }, { tab: "mine", label: "我的资料", icon: FolderKanban }, ...(canReviewKnowledge ? [{ tab: "review", label: "资料审核", icon: ShieldCheck }, { tab: "manage", label: "知识资料管理", icon: BookOpen }] : [])] as { tab: KnowledgeTab; label: string; icon: typeof Bot }[]).map(({ tab, label, icon: Icon }) => <button type="button" key={tab} className={`sidebar-nav-item ${activeView === "knowledge" && selectedKnowledgeTab === tab ? "active" : ""}`} onClick={() => { if (tab === "ask") conversation.showAi(); onKnowledgeTab(tab); }}><Icon className="size-[17px]" /><span>{label}</span>{tab === "review" && pendingKnowledgeCount > 0 && <span className="nav-count nav-count-alert">{pendingKnowledgeCount > 99 ? "99+" : pendingKnowledgeCount}</span>}</button>)}
       {isAdmin && <a className="sidebar-nav-item" href="https://chat.omindos.ai/manage" target="_blank" rel="noreferrer"><Settings2 className="size-[17px]" /><span>Chat 后台（原入口）</span></a>}
     </nav>
-    <a className="sidebar-nav-item" href="/guide"><BookOpen className="size-[17px]" /><span>项目章程与使用指南</span></a>
-    <div className="sidebar-footer-card"><div className="footer-card-icon"><UsersRound className="size-4" /></div><div><div className="footer-card-title">联合研发工作区</div><div className="footer-card-text">{officialBrand}</div></div></div>
-    <div className="sidebar-user"><div className="avatar avatar-dark sidebar-user-avatar">{userAvatarDataUrl ? <img src={userAvatarDataUrl} alt="" /> : userName.slice(0, 1)}</div><div className="sidebar-user-copy"><div className="sidebar-user-name">{userName}</div><div className="sidebar-user-role">{sessionRoleLabel(currentRole, isAdmin)}</div></div><div className="sidebar-user-control"><button type="button" className="sidebar-user-menu" onClick={() => setUserMenuOpen((open) => !open)} aria-expanded={userMenuOpen} aria-haspopup="menu" aria-label="打开个人账户菜单" title="个人账户菜单"><MoreHorizontal className="size-4" /></button>{userMenuOpen && <div className="sidebar-user-popover" role="menu"><button type="button" role="menuitem" onClick={openProfile}><Settings2 className="size-3.5" />个人设置</button><button type="button" role="menuitem" className="logout-action" onClick={logout}><LogOut className="size-3.5" />退出登录</button></div>}</div></div>
+    </div>
+    <div className="oa-sidebar-bottom">
+      <div className="oa-sidebar-links"><a href="https://omindos.ai" target="_blank" rel="noreferrer">官网 ↗</a>{isAdmin && <a href="https://chat.omindos.ai/manage" target="_blank" rel="noreferrer">管理</a>}<a href="/guide">使用指南</a></div>
+      <div className="oa-sidebar-bottom-row"><OaNewChatButton /><div className="sidebar-user-control">
+        <button type="button" className="oa-sidebar-account" onClick={() => setUserMenuOpen(open => !open)} aria-expanded={userMenuOpen} aria-haspopup="menu" aria-label="打开个人账户菜单" title={userName}>{userAvatarDataUrl ? <img src={userAvatarDataUrl} alt="" /> : userName.slice(0, 1)}</button>
+        {userMenuOpen && <div className="sidebar-user-popover" role="menu"><div className="oa-sidebar-account-copy"><strong>{userName}</strong><div className="sidebar-user-role">{sessionRoleLabel(currentRole, isAdmin)}</div></div><button type="button" role="menuitem" onClick={openProfile}><Settings2 className="size-3.5" />个人设置</button><button type="button" role="menuitem" className="logout-action" onClick={logout}><LogOut className="size-3.5" />退出登录</button></div>}
+      </div></div>
+    </div>
   </aside>;
 }
 
@@ -2033,7 +2041,6 @@ function RulesView() {
 export default function Home() {
   const [activeView, setActiveView] = useState<ViewKey>("knowledge");
   const [knowledgeTab, setKnowledgeTab] = useState<KnowledgeTab>("ask");
-  const [chatActionsTarget, setChatActionsTarget] = useState<HTMLDivElement | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   useEffect(() => { try { setSidebarCollapsed(localStorage.getItem("oa.sidebar.collapsed") === "true"); } catch { /* optional preference */ } }, []);
   const toggleSidebar = () => setSidebarCollapsed(current => {
@@ -2431,6 +2438,7 @@ export default function Home() {
   if (!session.registered) return <><Toaster position="top-right" /><RegistrationGate initialUser={session.user} initialStatus={session.status} chatgptLoginEnabled={session.chatgptLoginEnabled} githubLoginEnabled={session.githubLoginEnabled} feishuLoginEnabled={session.feishuLoginEnabled} onRegistered={setSession} /></>;
   if (needsNda) return <><Toaster position="top-right" /><NdaAdmissionGate key={ndaAdmissionIdentityKey(session.user?.email)} session={session} onRefresh={refreshSession} /></>;
   return (
+    <OaConversationProvider key={session.user?.email || "oa-member"} currentUser={session.user || undefined} visible={activeView === "knowledge" && knowledgeTab === "ask"} onOpenChat={() => { setKnowledgeTab("ask"); navigate("knowledge"); }}>
     <div className={`oa-app oa-workspace ${sidebarCollapsed ? "oa-sidebar-collapsed" : ""} ${activeView === "knowledge" && knowledgeTab === "ask" ? "oa-chat-open" : ""}`}>
       <Toaster position="top-right" />
       <button type="button" className={`mobile-nav-overlay ${mobileNavOpen ? "visible" : ""}`} onClick={() => { setMobileNavOpen(false); mobileMenuButtonRef.current?.focus(); }} aria-label="关闭导航" aria-hidden={!mobileNavOpen} tabIndex={mobileNavOpen ? 0 : -1} />
@@ -2447,14 +2455,14 @@ export default function Home() {
             <ChevronRight className="size-3.5" />
             <strong>{activeView === "dashboard" ? "审批工作台" : activeView === "requests" ? showMineOnly ? "待我处理" : "全部申请" : activeView === "people" ? "协作成员" : activeView === "knowledge" ? "实验室 AI（内部）" : activeView === "members" ? "成员审核" : activeView === "oem" ? "官网 OEM 申请" : activeView === "notifications" ? "飞书提醒" : activeView === "profile" ? "个人设置" : "流程与规则"}</strong>
           </div>
-          {activeView === "knowledge" && knowledgeTab === "ask" && <OaChatStatus />}
+          {activeView === "knowledge" && knowledgeTab === "ask" && <OaConversationTitle><OaChatStatus /></OaConversationTitle>}
           <div className="topbar-actions">
             <div className="topbar-date">{todayLabel}</div>
-            {activeView === "knowledge" && knowledgeTab === "ask" ? <div className="oa-chat-menu-host" ref={setChatActionsTarget} /> : <button type="button" className="oa-topbar-user" onClick={() => navigate("profile")} aria-label="打开个人设置"><UserRound className="size-4" />{session.user?.displayName || "成员"}</button>}
+            {activeView === "knowledge" && knowledgeTab === "ask" ? <OaConversationMenu /> : <button type="button" className="oa-topbar-user" onClick={() => navigate("profile")} aria-label="打开个人设置"><UserRound className="size-4" />{session.user?.displayName || "成员"}</button>}
             <ChatHub currentUser={session.user} currentRole={session.role} isAdmin={session.isAdmin} />
           </div>
         </header>
-        <div className="oa-knowledge-pane" hidden={activeView !== "knowledge"}><KnowledgeView canReviewKnowledge={Boolean(session.canReviewKnowledge)} activeSection={knowledgeTab} onSectionChange={setKnowledgeTab} chatActionsTarget={chatActionsTarget} /></div>
+        <div className="oa-knowledge-pane" hidden={activeView !== "knowledge"}><KnowledgeView canReviewKnowledge={Boolean(session.canReviewKnowledge)} activeSection={knowledgeTab} onSectionChange={setKnowledgeTab} /></div>
         {activeView === "notifications" ? <NotificationStatus /> : activeView === "oem" ? <OemInbox /> : activeView === "members" ? <MembersView currentEmail={session.user?.email} /> : activeView === "people" ? <PeopleView currentUser={session.user} /> : activeView === "knowledge" ? null : activeView === "profile" ? <ProfileSettingsView currentUser={session.user} currentRole={session.role} isAdmin={Boolean(session.isAdmin)} migrationExportEnabled={session.migrationExportEnabled} migrationUnfreezeEnabled={session.migrationUnfreezeEnabled} onIdentityChanged={(fullName, avatarDataUrl) => { setMyAvatarDataUrl(avatarDataUrl); setSession((current) => current?.user ? { ...current, user: { ...current.user, displayName: fullName } } : current); }} /> : activeView === "rules" ? <RulesView /> : activeView === "requests" ? <RequestsView approvals={approvals} filteredApprovals={filteredApprovals} myPendingApprovals={myPendingApprovals} dataReady={dataReady} activeFilter={activeFilter} setActiveFilter={setActiveFilter} showMineOnly={showMineOnly} onClearMine={() => setShowMineOnly(false)} onOpen={openApproval} /> : <>
           <section className="page-heading dashboard-heading">
             <div>
@@ -2478,5 +2486,6 @@ export default function Home() {
       <DetailSheet approval={selectedApproval} events={detailEvents} loading={detailLoading} error={detailError} currentEmail={session.user?.email} isAdmin={session.isAdmin} open={Boolean(selectedId)} onOpenChange={(open) => { if (!open) closeApproval(); }} onRetry={retryApprovalDetail} onApprove={approveSelected} onConfirmPurchase={confirmPurchaseSelected} onReturn={returnSelected} onForceReturn={forceReturnSelected} onResubmit={resubmitSelected} onWithdraw={withdrawSelected} onVoid={voidSelected} onArchiveNote={archiveNoteSelected} onEditDraft={openDraftEditor} />
       <MetricDialog panel={metricPanel} approvals={approvals} monthlyApproved={monthlyApproved} archiveRatio={archiveRatio} onOpenApproval={openMetricApproval} onOpenChange={setMetricPanel} />
     </div>
+    </OaConversationProvider>
   );
 }

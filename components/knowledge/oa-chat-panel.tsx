@@ -1,14 +1,13 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
-import { ArrowUp, Copy, MoreHorizontal, RotateCcw, Square, Trash2 } from 'lucide-react';
-import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
+import { ArrowUp, Copy, Forward, RotateCcw, Square } from 'lucide-react';
 import { renderAnswerBody, userFacingAnswer } from '@/lib/oa-chat-renderer.mjs';
 import type { KnowledgeCitation } from '@/lib/knowledge-types';
 import './shared-chat.generated.css';
 import './oa-chat-panel.css';
-import './oa-chat-menu.css';
+import { useOaConversation } from './oa-conversation-context';
+import { OaMemberChat } from './oa-member-chat';
 
 type Image = { url: string; alt: string; mimeType: string };
 type Turn = { id: string; question: string; answer: string; citations: KnowledgeCitation[]; images: Image[]; failed?: boolean };
@@ -55,7 +54,13 @@ export function OaChatStatus() {
   return <div className="oa-chat-title"><strong>聊天</strong><div className="oa-chat-status" aria-label="系统连接状态">{status.map((ready, index) => <span key={labels[index]} className={ready === null ? 'unknown' : ready ? 'ready' : 'unavailable'} title={`${labels[index]}：${ready === null ? '待检查' : ready ? '正常' : '暂不可用'}`} aria-label={`${labels[index]}：${ready === null ? '待检查' : ready ? '正常' : '暂不可用'}`} />)}</div></div>;
 }
 
-export function OaChatPanel({ actionsTarget }: { actionsTarget?: HTMLElement | null }) {
+export function OaChatPanel() {
+  const { peer, aiEpoch } = useOaConversation();
+  return <><div className="oa-conversation-ai" hidden={Boolean(peer)}><OaAiChatPanel key={aiEpoch} /></div>{peer && <OaMemberChat key={peer.email} peer={peer} />}</>;
+}
+
+function OaAiChatPanel() {
+  const { forward, setLastAnswer, setAiDirty } = useOaConversation();
   const [question, setQuestion] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [asking, setAsking] = useState(false);
@@ -68,7 +73,7 @@ export function OaChatPanel({ actionsTarget }: { actionsTarget?: HTMLElement | n
   const input = useRef<HTMLTextAreaElement>(null);
   const composerId = useId();
   const stickToEnd = useRef(true);
-  const focusComposerAfterMenu = useRef(false);
+  useEffect(() => { setAiDirty(Boolean(turns.length || question || asking || error)); }, [turns.length, question, asking, error, setAiDirty]);
 
   useEffect(() => () => { requestSequence.current++; requestRef.current?.abort(); }, []);
   useEffect(() => {
@@ -99,6 +104,7 @@ export function OaChatPanel({ actionsTarget }: { actionsTarget?: HTMLElement | n
       if (sequence !== requestSequence.current) return;
       const images = (Array.isArray(data.images) ? data.images : []).filter(validImage).slice(0, 4);
       setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: data.answer!, citations: data.citations || [], images } : turn));
+      setLastAnswer({ body: userFacingAnswer(data.answer!), omittedImages: images.length });
     } catch (cause) {
       if (sequence !== requestSequence.current) return;
       setTurns(current => current.map(turn => turn.id === id ? { ...turn, failed: true } : turn));
@@ -107,15 +113,8 @@ export function OaChatPanel({ actionsTarget }: { actionsTarget?: HTMLElement | n
     } finally {
       if (sequence === requestSequence.current) { sending.current = false; setAsking(false); requestRef.current = null; }
     }
-  }, [question, turns]);
+  }, [question, turns, setLastAnswer]);
   const submit = (event: FormEvent) => { event.preventDefault(); void ask(); };
-  const clearChat = () => {
-    if (!window.confirm('清空当前聊天？只清除本页对话和未发送的问题，不会删除知识资料或审批记录。')) return;
-    // Invalidate the old request before aborting, so its late reply cannot restore cleared content.
-    requestSequence.current++; requestRef.current?.abort(); requestRef.current = null; sending.current = false;
-    stickToEnd.current = true; focusComposerAfterMenu.current = true;
-    setTurns([]); setQuestion(''); setAsking(false); setError(''); setCopied('');
-  };
   const copy = async (turn: Turn) => {
     try { await navigator.clipboard.writeText(userFacingAnswer(turn.answer)); setCopied(turn.id); }
     catch { setError('浏览器未允许复制，请长按回答选择文字。'); }
@@ -123,20 +122,12 @@ export function OaChatPanel({ actionsTarget }: { actionsTarget?: HTMLElement | n
 
   return <section className="oa-shared-chat" aria-label="OA 实验室 AI 聊天">
     <div className="chat-app oa-chat-surface">
-      {actionsTarget && createPortal(<DropdownMenu modal={false}>
-        <DropdownMenuTrigger asChild><button type="button" className="oa-chat-more-button" aria-label="聊天选项" title="聊天选项"><MoreHorizontal size={24} aria-hidden="true" /></button></DropdownMenuTrigger>
-        <DropdownMenuContent align="end" sideOffset={8} className="oa-chat-clear-menu" onCloseAutoFocus={event => {
-          if (focusComposerAfterMenu.current) { event.preventDefault(); focusComposerAfterMenu.current = false; input.current?.focus(); }
-        }}>
-          <DropdownMenuItem disabled={!turns.length && !question && !asking && !error} onSelect={clearChat}><Trash2 size={16} aria-hidden="true" />清空聊天</DropdownMenuItem>
-        </DropdownMenuContent>
-      </DropdownMenu>, actionsTarget)}
       <div className="messages oa-chat-messages" ref={scroll} onScroll={() => { const element = scroll.current; if (element) stickToEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96; }}>
         {turns.length === 0 ? <section className="empty-hero" aria-labelledby={`${composerId}-welcome`}><h2 id={`${composerId}-welcome`}>想了解实验室的什么？</h2><p>从已审核的实验室公开及内部知识中检索并回答</p></section> : turns.map(turn => <div className="oa-chat-turn" key={turn.id}>
           <article className="message user"><div className="message-content"><p>{turn.question}</p><button type="button" className="oa-question-edit" onClick={() => { setQuestion(turn.question); input.current?.focus(); }} disabled={asking}>修改问题</button></div></article>
           {turn.answer && <article className="message assistant"><div className="message-content"><RichAnswer answer={turn.answer} />
             {!!turn.images.length && <div className="oa-answer-images">{turn.images.map(image => <figure key={image.url}><img src={image.url} alt={image.alt} loading="lazy" referrerPolicy="no-referrer" onError={event => { event.currentTarget.hidden = true; }} /><figcaption>{image.alt}</figcaption></figure>)}</div>}
-            <div className="oa-answer-actions"><button type="button" className="copy-answer" onClick={() => void copy(turn)} aria-label="复制回答"><Copy size={15} />{copied === turn.id ? '已复制' : '复制'}</button>{!!turn.citations.length && <details><summary>参考已审核资料</summary>{turn.citations.map(citation => <p key={`${citation.id}-${citation.itemId}`}>{citation.title}{citation.sectionTitle ? ` · ${citation.sectionTitle}` : ''}</p>)}</details>}</div>
+            <div className="oa-answer-actions"><button type="button" className="copy-answer" onClick={() => void copy(turn)} aria-label="复制回答"><Copy size={15} />{copied === turn.id ? '已复制' : '复制'}</button><button type="button" aria-label="转发回答给成员" onClick={() => forward({ body: userFacingAnswer(turn.answer), omittedImages: turn.images.length })}><Forward size={15} />转发</button>{!!turn.citations.length && <details><summary>参考已审核资料</summary>{turn.citations.map(citation => <p key={`${citation.id}-${citation.itemId}`}>{citation.title}{citation.sectionTitle ? ` · ${citation.sectionTitle}` : ''}</p>)}</details>}</div>
           </div></article>}
           {turn.failed && <button type="button" className="oa-chat-retry" disabled={asking} onClick={() => void ask(turn)}><RotateCcw size={16} />重新回答</button>}
         </div>)}

@@ -71,9 +71,9 @@ test("shows the system administrator role consistently across account and collab
 test("keeps the internal laboratory AI behind OA sign-in, registration and NDA admission", async () => {
   const pageSource = await readFile(path.join(root, "app/page.tsx"), "utf8");
 
-  assert.doesNotMatch(pageSource, /className="dashboard-ai-entry"|进入内部 AI/u);
-  assert.match(pageSource, /aria-label="大模型后台"/u);
-  assert.match(pageSource, /tab: "ask", label: "AI 聊天"/u);
+  assert.match(pageSource, /实验室 AI（内部）/u);
+  assert.doesNotMatch(pageSource, /className="dashboard-ai-entry"/u);
+  assert.match(pageSource, /<OaConversationProvider/u);
   assert.match(pageSource, /if \(!session\) return[\s\S]*?<h1>请登录账号<\/h1>/u);
   assert.match(pageSource, /if \(!session\.registered\) return[\s\S]*?<RegistrationGate/u);
   assert.match(pageSource, /if \(needsNda\) return[\s\S]*?<NdaAdmissionGate/u);

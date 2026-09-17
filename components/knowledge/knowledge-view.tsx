@@ -153,7 +153,7 @@ function KnowledgeAnonymizationNotice() {
   return <div className="knowledge-submit-note knowledge-anonymization-note" role="note"><ShieldCheck className="size-4" /><p><strong>公开数据脱敏要求</strong>{PUBLIC_DATA_ANONYMIZATION_NOTICE}</p></div>;
 }
 
-function KnowledgeAskPanel({ actionsTarget }: { actionsTarget?: HTMLElement | null }) { return <OaChatPanel actionsTarget={actionsTarget} />; }
+function KnowledgeAskPanel() { return <OaChatPanel />; }
 
 function KnowledgeSubmitPanel({
   draft,
@@ -337,7 +337,7 @@ function KnowledgeRevokeDialog({ item, note, setNote, submitting, onOpenChange, 
   return <Dialog open={Boolean(item)} onOpenChange={onOpenChange}><DialogContent className="knowledge-revoke-dialog"><DialogHeader><div className="knowledge-dialog-icon knowledge-dialog-icon-danger"><AlertTriangle className="size-5" /></div><DialogTitle>停止这条知识用于问答？</DialogTitle><DialogDescription>“{item?.title || "该知识"}”将立即退出可检索范围，已有记录和审核轨迹继续保留。</DialogDescription></DialogHeader><label className="form-field"><span className="field-label">撤销原因 <b className="required-mark">*</b></span><Textarea value={note} onChange={(event) => setNote(event.target.value)} placeholder="至少 2 个字符；说明信息错误、已经过期或不再适用的原因" rows={4} minLength={2} maxLength={1000} required disabled={submitting} /></label><DialogFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>取消</Button><Button type="button" className="knowledge-revoke-confirm" onClick={onConfirm} disabled={submitting || note.trim().length < 2}>{submitting ? <LoaderCircle className="size-4" /> : <X className="size-4" />}确认停止用于问答</Button></DialogFooter></DialogContent></Dialog>;
 }
 
-export function KnowledgeView({ canReviewKnowledge, activeSection, onSectionChange, chatActionsTarget }: { canReviewKnowledge: boolean; activeSection?: KnowledgeTab; onSectionChange?: (tab: KnowledgeTab) => void; chatActionsTarget?: HTMLElement | null }) {
+export function KnowledgeView({ canReviewKnowledge, activeSection, onSectionChange }: { canReviewKnowledge: boolean; activeSection?: KnowledgeTab; onSectionChange?: (tab: KnowledgeTab) => void }) {
   const [internalTab, setInternalTab] = useState<KnowledgeTab>("ask");
   const activeTab = activeSection ?? internalTab;
   const setActiveTab = (tab: KnowledgeTab) => { setInternalTab(tab); onSectionChange?.(tab); };
@@ -676,7 +676,7 @@ export function KnowledgeView({ canReviewKnowledge, activeSection, onSectionChan
     <section className="knowledge-scope-summary" aria-label="实验室知识可见范围说明"><div><ShieldCheck className="size-5" /><p><strong>对内：在 OA 里面问</strong><span>仅已登录并完成准入与保密签署的成员可检索。</span></p></div><div><Globe2 className="size-5" /><p><strong>对外：供 ARTS Robotics AI assistant 使用</strong><span>设为公开须二次确认，随后供 <a href="https://chat.omindos.ai" target="_blank" rel="noreferrer">chat.omindos.ai</a> 检索。</span></p></div></section>
     <Tabs className="knowledge-tabs" value={visibleTab} onValueChange={(value) => setActiveTab(value as KnowledgeTab)}>
       <TabsList aria-label="实验室 AI 功能"><TabsTrigger value="ask"><Bot className="size-4" />知识问答</TabsTrigger><TabsTrigger value="submit"><Send className="size-4" />提交知识</TabsTrigger><TabsTrigger value="mine"><FileText className="size-4" />我的提交</TabsTrigger>{canReviewKnowledge && <TabsTrigger value="review"><ShieldCheck className="size-4" />待审核{reviewPendingCount > 0 && <span className="knowledge-tab-count">{tabCount}</span>}</TabsTrigger>}{canReviewKnowledge && <TabsTrigger value="manage"><LibraryBig className="size-4" />知识库管理</TabsTrigger>}</TabsList>
-      <div className="oa-chat-tab" hidden={visibleTab !== "ask"}><KnowledgeAskPanel actionsTarget={chatActionsTarget} /></div>
+      <div className="oa-chat-tab" hidden={visibleTab !== "ask"}><KnowledgeAskPanel /></div>
       <div hidden={visibleTab !== "submit"}><KnowledgePackageImport key={returnedPackageItem?.id || "new-package"} returnedItem={returnedPackageItem} onCancelReturn={() => setReturnedPackageItem(null)} onSubmitted={() => { void loadMine(); void loadReview(); void loadManage(debouncedManageQuery, manageSort); }} />{!returnedPackageItem && <KnowledgeSubmitPanel draft={draft} setDraft={setDraft} editingItem={editingItem} submitting={submitting} onSubmit={submitKnowledge} onCancelEdit={cancelEditing} />}</div>
       <TabsContent value="mine"><KnowledgeMinePanel items={mine} loading={mineLoading || Boolean(editingLoadingId)} error={mineError} onRetry={() => void loadMine()} onEdit={(item) => void startEditing(item)} editingId={editingLoadingId} /></TabsContent>
       {canReviewKnowledge && <TabsContent value="review"><KnowledgeReviewPanel items={reviewItems} pendingCount={reviewPendingCount} loading={reviewLoading} error={reviewError} onRetry={() => void loadReview()} onOpen={openReview} /></TabsContent>}
