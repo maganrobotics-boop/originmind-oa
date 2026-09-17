@@ -767,7 +767,10 @@ function validatedKnowledgeImages(value) {
 
 function knowledgeImageFields(message) {
   const images = message?.role === "assistant" ? validatedKnowledgeImages(message.images) : [];
-  return images.length ? { images } : {};
+  return {
+    ...(images.length ? { images } : {}),
+    ...(message?.role === "assistant" && message.publicSources === true ? { publicSources: true } : {}),
+  };
 }
 
 function renderKnowledgeImages(images) {
@@ -2821,17 +2824,36 @@ function createPublicApp() {
     }
   }
 
-  async function copyAnswer(content, conversationId) {
+  async function copyAnswer(content, conversationId, label = "回答") {
     const session = conversationFor(conversationId);
     if (!session) return;
     try {
-      if (!navigator.clipboard?.writeText) throw new Error("Clipboard unavailable");
-      await navigator.clipboard.writeText(content);
-      session.notice = "已复制回答";
-    } catch {
-      session.notice = "无法自动复制，请长按选择文字。";
+      await writeMessageClipboard(content);
+      session.notice = `已复制${label}`;
+    } catch (error) {
+      session.notice = error.message || "无法自动复制，请长按选择文字。";
     }
     if (state.activeConversationId === conversationId) syncFeedback();
+  }
+
+  function editChatQuestion(message, conversationId, opener) {
+    const session = conversationFor(conversationId);
+    if (!session || session.sending) return;
+    openQuestionEditor(String(message.content || ""), opener, (question) => {
+      const current = conversationFor(conversationId);
+      const index = current?.messages.indexOf(message) ?? -1;
+      if (!current || current.sending || index < 0 || state.activeConversationId !== conversationId) {
+        throw new Error("当前聊天已变化，请关闭编辑窗口后重试。");
+      }
+      // Editing forks the prefix, never deletes the original thread and never reuses its signed token.
+      const branch = createConversation(current.section);
+      branch.messages = current.messages.slice(0, index).map((turn) => ({ ...turn }));
+      branch.conversationToken = "";
+      branch.tokenSavedAt = 0;
+      branch.draft = question;
+      activateConversation(branch.id, { historyMode: "push" });
+      dispatchQuestion(question, branch.id);
+    });
   }
 
   function assistantMessageNode(message, conversationId) {
@@ -2851,13 +2873,26 @@ function createPublicApp() {
 
     if (message.role === "assistant") {
       if (validatedKnowledgeImages(message.images).length) article.append(renderKnowledgeImages(message.images));
-      const actions = element("div", { className: "message-actions" });
-      const copy = textButton("", "copy-answer");
-      copy.setAttribute("aria-label", "复制回答");
-      copy.append(icon("□"));
-      copy.addEventListener("click", () => void copyAnswer(answer, conversationId));
-      actions.append(copy);
+      const actions = element("div", { className: "message-actions", attributes: { role: "group", "aria-label": "回答操作" } });
+      const share = (opener, intent) => {
+        const session = conversationFor(conversationId);
+        const index = session?.messages.indexOf(message) ?? -1;
+        if (index < 0) return;
+        const question = session.messages.slice(0, index).findLast((turn) => turn.role === "user")?.content || "";
+        openAnswerShare({ v: 1, question: String(question), answer }, opener, intent);
+      };
+      const copy = messageActionButton("复制回答", "copy", "copy-answer", () => void copyAnswer(answer, conversationId));
+      const copyLink = messageActionButton("复制链接", "link", "copy-answer-link", (event) => share(event.currentTarget, "copy"));
+      const shareLink = messageActionButton("分享链接", "share", "share-answer", (event) => share(event.currentTarget, "share"));
+      actions.append(copy, copyLink, shareLink);
+      if (message.publicSources === true) {
+        actions.append(element("span", { className: "message-source-note", text: "参考内部公开资料" }));
+      }
       article.append(actions);
+    } else if (message.role === "user") {
+      installQuestionActions(article, answer,
+        (opener) => editChatQuestion(message, conversationId, opener),
+        () => copyAnswer(answer, conversationId, "提问"));
     }
     return article;
   }
@@ -3160,7 +3195,10 @@ function createPublicApp() {
       const assistant = {
         role: "assistant",
         content: userFacingAnswer(payload.answer),
-        ...knowledgeImageFields({ role: "assistant", images: payload.images }),
+        ...knowledgeImageFields({
+          role: "assistant", images: payload.images,
+          publicSources: payload.oaPublicStatus === "connected" && Array.isArray(payload.sources) && payload.sources.length > 0,
+        }),
         mode: payload.mode,
         provider: payload.provider,
       };

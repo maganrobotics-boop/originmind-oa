@@ -3,7 +3,8 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 import { runInNewContext } from "node:vm";
 
-const source = await readFile(new URL("../frontend/app.js", import.meta.url), "utf8");
+const messageActions = await readFile(new URL("../frontend/message-actions.js", import.meta.url), "utf8");
+const source = messageActions + "\n" + await readFile(new URL("../frontend/app.js", import.meta.url), "utf8");
 class TestNode {
   constructor(tag = "#text", text = "") { this.tag = tag; this.text = text; this.children = []; this.attributes = {}; }
   append(...nodes) { this.children.push(...nodes.map((node) => node instanceof TestNode ? node : new TestNode("#text", String(node)))); }
@@ -306,6 +307,7 @@ function publicAppHarness(store, {
   const doc = new AppNode("document");
   doc.documentElement = new AppNode("html"); doc.body = new AppNode("body");
   doc.createElement = (tag) => new AppNode(tag);
+  doc.createElementNS = (_namespace, tag) => new AppNode(tag);
   doc.createTextNode = (text) => new TestNode("#text", text);
   doc.getElementById = (id) => all.find((node) => node.id === id);
   const win = new AppNode("window");

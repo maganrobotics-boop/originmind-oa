@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "build:frontend": "node scripts/build-frontend.mjs",
-    "check:frontend": "node --check frontend/app.js && node --check scripts/build-frontend.mjs && node scripts/build-frontend.mjs --check",
+    "check:frontend": "node --check frontend/app.js && node --check frontend/message-actions.js && node --check scripts/build-frontend.mjs && node scripts/build-frontend.mjs --check",
     "test": "node --test",
     "check": "node --check src/index.mjs && npm run check:frontend && node --test",
     "check:wrangler": "wrangler deploy --dry-run --strict --config wrangler.example.jsonc --outdir .wrangler-build"

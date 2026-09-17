@@ -29,14 +29,17 @@ function pngDimensions(bytes) {
 }
 
 async function expectedFrontend() {
-  const [template, appSource, style, math] = await Promise.all([
+  const [template, appSource, baseStyle, math, messageActions, actionStyle] = await Promise.all([
     readFile(path.join(frontendDir, "index.html"), "utf8"),
     readFile(path.join(frontendDir, "app.js")),
     readFile(path.join(frontendDir, "styles.css")),
     readFile(path.join(root, "node_modules/katex/dist/katex.mjs")),
+    readFile(path.join(frontendDir, "message-actions.js"), "utf8"),
+    readFile(path.join(frontendDir, "message-actions.css")),
   ]);
   const mathName = `katex-${digest(math)}.mjs`;
-  const app = Buffer.from(appSource.toString("utf8").replace("__KATEX_ASSET__", `/assets/${mathName}`));
+  const app = Buffer.from(`${messageActions}\n${appSource.toString("utf8").replace("__KATEX_ASSET__", `/assets/${mathName}`)}\nvoid openIncomingSharedAnswer();\n`);
+  const style = Buffer.concat([baseStyle, Buffer.from("\n"), actionStyle]);
   const appName = `app-${digest(app)}.js`;
   const styleName = `styles-${digest(style)}.css`;
   const html = template

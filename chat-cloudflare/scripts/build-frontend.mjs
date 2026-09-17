@@ -12,6 +12,8 @@ const PUBLIC_ASSET_DIRECTORY = join(PUBLIC_DIRECTORY, "assets");
 const SOURCE_PATHS = Object.freeze({
   html: join(FRONTEND_DIRECTORY, "index.html"),
   app: join(FRONTEND_DIRECTORY, "app.js"),
+  messageActions: join(FRONTEND_DIRECTORY, "message-actions.js"),
+  messageActionStyle: join(FRONTEND_DIRECTORY, "message-actions.css"),
   style: join(FRONTEND_DIRECTORY, "styles.css"),
   zipImportAddon: join(FRONTEND_DIRECTORY, "zip-import-addon.js"),
   math: join(ROOT, "node_modules/katex/dist/katex.mjs"),
@@ -36,20 +38,23 @@ function replaceExactlyOnce(template, placeholder, replacement) {
 }
 
 async function expectedBuild() {
-  const [template, appSource, style, zipImportAddon, math, imageReferencesModule] = await Promise.all([
+  const [template, appSource, baseStyle, zipImportAddon, math, imageReferencesModule, messageActions, actionStyle] = await Promise.all([
     readFile(SOURCE_PATHS.html, "utf8"),
     readFile(SOURCE_PATHS.app),
     readFile(SOURCE_PATHS.style),
     readFile(SOURCE_PATHS.zipImportAddon, "utf8"),
     readFile(SOURCE_PATHS.math),
     readFile(SOURCE_PATHS.knowledgeImageReferences, "utf8"),
+    readFile(SOURCE_PATHS.messageActions, "utf8"),
+    readFile(SOURCE_PATHS.messageActionStyle),
   ]);
   // Share the inert HTML/Markdown image parser with OA, alongside local math.
   const imageReferencesScript = replaceExactlyOnce(imageReferencesModule,
     "export function knowledgeImageReferences", "function knowledgeImageReferences");
   const zipImportBundle = Buffer.from(`"use strict";\n(() => {\n${imageReferencesScript}\n${zipImportAddon}\n})();\n`, "utf8");
   const mathName = `katex-${digest(math)}.mjs`;
-  const app = Buffer.from(replaceExactlyOnce(appSource.toString("utf8"), "__KATEX_ASSET__", `/assets/${mathName}`), "utf8");
+  const app = Buffer.from(`${messageActions}\n${replaceExactlyOnce(appSource.toString("utf8"), "__KATEX_ASSET__", `/assets/${mathName}`)}\nvoid openIncomingSharedAnswer();\n`, "utf8");
+  const style = Buffer.concat([baseStyle, Buffer.from("\n"), actionStyle]);
   const appName = `app-${digest(app)}.js`;
   const styleName = `styles-${digest(style)}.css`;
   const withApp = replaceExactlyOnce(template, PLACEHOLDERS.app, `/assets/${appName}`);
