@@ -123,7 +123,7 @@ test("ordinary model markup stays inert and long answers do not lose their endin
 
 test("the answer footer keeps copy but no further-inquiry entry", () => {
   const footer = section("function assistantMessageNode", "function dispatchQuestion");
-  assert.match(footer, /actions\.append\(copy\)/u);
+  assert.match(footer, /actions\.append\(copy, copyLink, shareLink\)/u);
   assert.doesNotMatch(footer, /further-inquiry|需要?进一步交流|openInquiry/u);
 });
 

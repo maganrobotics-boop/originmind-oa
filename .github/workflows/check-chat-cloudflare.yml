@@ -50,6 +50,7 @@ jobs:
           BROWSER_REPORT_DIR: ${{ runner.temp }}/formula-browser-report
         run: |
           node chat-cloudflare/scripts/check-answer-browser.mjs
+          node chat-cloudflare/scripts/check-message-actions-browser.mjs
           node chat-cloudflare/scripts/check-formula-runtime-browser.mjs
           node chat-cloudflare/scripts/check-answer-layout-browser.mjs
       - name: Preserve browser verification evidence
