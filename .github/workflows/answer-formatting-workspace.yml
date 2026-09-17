@@ -16,11 +16,20 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: 24
+      - name: Prepare pinned math dependency
+        run: |
+          npm install --prefix chat-cloudflare --save-dev --save-exact --ignore-scripts katex@0.18.7
+          tar -czf chat-math-dependency.tgz chat-cloudflare/node_modules/katex chat-cloudflare/package.json chat-cloudflare/package-lock.json
       - name: Archive tracked Chat source only
         run: git archive --format=zip --output=chat-formatting-workspace.zip HEAD chat-cloudflare
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         with:
           name: chat-formatting-workspace
-          path: chat-formatting-workspace.zip
+          path: |
+            chat-formatting-workspace.zip
+            chat-math-dependency.tgz
           retention-days: 1
           if-no-files-found: error
