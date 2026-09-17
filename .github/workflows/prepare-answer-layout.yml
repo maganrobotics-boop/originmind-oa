@@ -53,9 +53,17 @@ jobs:
         run: |
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          rm -f scripts/answer-layout.patch.gz.b64 scripts/prepare-answer-layout.py .github/workflows/inspect-answer-layout.yml .github/workflows/prepare-answer-layout.yml
-          git add app/api/public/lab-ai/_lib/response-contract.ts chat-cloudflare/src chat-cloudflare/frontend/app.js chat-cloudflare/public chat-cloudflare/test/answer-presentation-integration.test.mjs chat-cloudflare/scripts/check-answer-layout-browser.mjs tests/public-answer-layout.test.mjs .github/workflows/check-chat-cloudflare.yml
-          git add -u -- scripts/answer-layout.patch.gz.b64 scripts/prepare-answer-layout.py .github/workflows/inspect-answer-layout.yml .github/workflows/prepare-answer-layout.yml
+          # Workflow edits are handled separately with the authorized connector.
+          # The Actions token commits source only; no extra permissions are needed.
+          git diff -- .github/workflows/check-chat-cloudflare.yml > "$BROWSER_REPORT_DIR/workflow-followup.patch"
+          git restore -- .github/workflows/check-chat-cloudflare.yml
+          rm -f scripts/answer-layout.patch.gz.b64 scripts/prepare-answer-layout.py
+          git add app/api/public/lab-ai/_lib/response-contract.ts chat-cloudflare/src chat-cloudflare/frontend/app.js chat-cloudflare/public chat-cloudflare/test/answer-presentation-integration.test.mjs chat-cloudflare/scripts/check-answer-layout-browser.mjs tests/public-answer-layout.test.mjs
+          git add -u -- scripts/answer-layout.patch.gz.b64 scripts/prepare-answer-layout.py
+          if git diff --cached --name-only | grep -q '^.github/workflows/'; then
+            echo 'Refusing to include workflow changes in the source-only commit.' >&2
+            exit 1
+          fi
           git diff --cached --check
           git commit -m 'fix: preserve OA Markdown structure and prevent raw slide fallback answers'
           git push origin HEAD:fix/chat-flattened-answer-20260917
@@ -65,7 +73,7 @@ jobs:
           mkdir -p "$BROWSER_REPORT_DIR"
           git rev-parse HEAD > "$BROWSER_REPORT_DIR/commit.txt"
           git diff --stat > "$BROWSER_REPORT_DIR/working-diff.txt"
-          tar --exclude=node_modules --exclude=.git --exclude=.wrangler --exclude=.wrangler-build --exclude=dist --exclude=.next -czf "$RUNNER_TEMP/layout-source.tar.gz" .
+          tar --exclude=node_modules --exclude=.git --exclude=.sites-runtime --exclude=.wrangler --exclude=.wrangler-build --exclude=dist --exclude=.next -czf "$RUNNER_TEMP/layout-source.tar.gz" .
           mv "$RUNNER_TEMP/layout-source.tar.gz" "$BROWSER_REPORT_DIR/source.tar.gz"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()
