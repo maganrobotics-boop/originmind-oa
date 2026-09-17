@@ -24,12 +24,27 @@ await patch(context,'<DropdownMenuContent align="end" className="oa-conversation
     }
   }}>`);
 await patch(context,'<DropdownMenuItem onSelect={chat.clearCurrent}>','<DropdownMenuItem disabled={!chat.peer && !chat.aiDirty} onSelect={() => { focusComposer.current = chat.clearCurrent(); }}>');
+// Navigation and dialogs must begin after the old menu has fully closed. Otherwise
+// its delayed focus restoration can close a newly opened menu or steal modal focus.
+await patch(context,'  const focusComposer = useRef(false);','  const focusComposer = useRef(false);\n  const pendingNavigation = useRef<(() => void) | null>(null);\n  const trigger = useRef<HTMLButtonElement>(null);');
+await patch(context,'<button type="button" className="oa-conversation-menu oa-chat-more-button"','<button ref={trigger} type="button" className="oa-conversation-menu oa-chat-more-button"');
+await patch(context,'    if (focusComposer.current) {',`    if (pendingNavigation.current) {
+      event.preventDefault();
+      const navigate = pendingNavigation.current;
+      pendingNavigation.current = null;
+      trigger.current?.focus();
+      navigate();
+      return;
+    }
+    if (focusComposer.current) {`);
+await patch(context,'onSelect={chat.chooseMember}','onSelect={() => { pendingNavigation.current = chat.chooseMember; }}');
+await patch(context,'onSelect={chat.showAi}','onSelect={() => { pendingNavigation.current = chat.showAi; }}');
+await patch(context,'onSelect={() => { if (chat.lastAnswer) chat.forward(chat.lastAnswer); }}','onSelect={() => { const answer = chat.lastAnswer; if (answer) pendingNavigation.current = () => chat.forward(answer); }}');
 const panel='components/knowledge/oa-chat-panel.tsx';
 await patch(panel,'const { forward, setLastAnswer } = useOaConversation();','const { forward, setLastAnswer, setAiDirty } = useOaConversation();');
 await patch(panel,'  const stickToEnd = useRef(true);','  const stickToEnd = useRef(true);\n  useEffect(() => { setAiDirty(Boolean(turns.length || question || asking || error)); }, [turns.length, question, asking, error, setAiDirty]);');
 const memberTest='scripts/check-oa-member-chat-browser.mjs';
 const browser=await readFile(memberTest,'utf8');
 await writeFile(memberTest,browser.replaceAll('聊天更多操作','聊天选项'));
-// The account is now the round footer avatar; opening it exposes the same identity.
 await patch('scripts/check-oa-chat-browser.mjs', "      assert.equal(await nav.locator('.sidebar-user-name').innerText(), '测试成员');", "      assert.equal(await nav.getByRole('button',{name:'打开个人账户菜单',exact:true}).getAttribute('title'), '测试成员');");
-console.log('Merged main model fixes retained; full clear-menu regressions and member forwarding are integrated.');
+console.log('Current main guards, deferred menu navigation, member forwarding and light sidebar integrated.');
