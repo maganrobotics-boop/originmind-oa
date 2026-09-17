@@ -137,8 +137,13 @@ function messageActionDialog(title, opener) {
   const header = element('header', { className: 'message-dialog-header' }, [heading, close]);
   dialog.append(header);
   dialog.addEventListener('close', () => {
+    // The close event is queued: another field or dialog may already own focus.
+    const active = document.activeElement;
+    const unclaimed = !active || active === document.body || dialog.contains(active);
     dialog.remove();
-    if (opener?.isConnected) opener.focus({ preventScroll: true });
+    if (unclaimed && !document.querySelector('dialog[open]') && opener?.isConnected) {
+      opener.focus({ preventScroll: true });
+    }
   }, { once: true });
   dialog.addEventListener('click', event => { if (event.target === dialog) {
     const rect = dialog.getBoundingClientRect();
