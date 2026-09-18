@@ -8,6 +8,7 @@ import { useOaConversation } from './oa-conversation-context';
 import './oa-chat-documents.css';
 import { readChatAttachments, type ChatAttachmentBundle } from '@/lib/oa-chat-attachments.mjs';
 import { OaFilePicker, OaSourceArchive, OaSourceImages, OaTaskArchive } from './oa-file-controls';
+import { AdminMeetingMinutesLink } from './admin-meeting-minutes';
 
 type ImportedEntry = { type: 'import'; id: string; order: number; source: ChatDocumentSource; bundle?: ChatAttachmentBundle };
 type TaskEntry = { type: 'task'; id: string; order: number; requestId?: string; plan?: ChatDocumentPlan; task?: ChatDocumentTask; problem?: string };
@@ -15,7 +16,7 @@ export type ChatDocumentEntry = ImportedEntry | TaskEntry;
 const statusLabels = { queued: '材料已保存，等待处理', running: '正在处理材料、制作并保存文档…', succeeded: '文档已生成并保存', failed: '文档尚未生成', cancelled: '任务已取消' };
 const message = (cause: unknown, fallback: string) => cause instanceof Error && !['AbortError', 'TimeoutError'].includes(cause.name) ? cause.message : fallback;
 
-/** No material is put in localStorage or the shared knowledge base. Saved tasks remain owner-scoped by the API. */
+/** No material is put in localStorage or the shared knowledge base. Only meeting-minute tasks also have an admin read-only view. */
 export function useOaChatDocuments(nextOrder: () => number) {
   const { setLastAnswer } = useOaConversation();
   const [entries, setEntries] = useState<ChatDocumentEntry[]>([]);
@@ -184,13 +185,14 @@ function DocumentBody({ text }: { text: string }) {
   return <div ref={host} className="oa-rich-answer oa-document-body" />;
 }
 export function OaChatDocumentEvent({ entry, documents }: { entry: ChatDocumentEntry; documents: Documents }) {
-  if (entry.type === 'import') return <article className="oa-import-card" aria-label={`已导入 ${entry.source.name}`}><header><FileText size={20} /><strong>{entry.source.name}</strong><span>{entry.source.text.length.toLocaleString()} 字</span></header><TextPreview text={entry.source.text} />{entry.bundle && <OaSourceImages bundle={entry.bundle} />}<footer><small>临时材料，不自动入库；关闭此页会释放未提交的原文件。单次 AI 处理最多 20,000 字，超出不截断，完整资料仍可归档送审。</small><button type="button" className="oa-document-text-button" disabled={documents.busy} onClick={() => documents.useSource(entry.source)}>使用这份材料</button></footer>{entry.bundle && <OaSourceArchive bundle={entry.bundle} />}</article>;
+  if (entry.type === 'import') return <article className="oa-import-card" aria-label={`已导入 ${entry.source.name}`}><header><FileText size={20} /><strong>{entry.source.name}</strong><span>{entry.source.text.length.toLocaleString()} 字</span></header><TextPreview text={entry.source.text} />{entry.bundle && <OaSourceImages bundle={entry.bundle} />}<footer><small>临时材料，不自动入库；关闭此页会释放未提交的原文件。以“会议纪要”任务发送后，管理员可查看文字材料和成果。单次 AI 处理最多 20,000 字，超出不截断，完整资料仍可归档送审。</small><button type="button" className="oa-document-text-button" disabled={documents.busy} onClick={() => documents.useSource(entry.source)}>使用这份材料</button></footer>{entry.bundle && <OaSourceArchive bundle={entry.bundle} />}</article>;
   const task = entry.task;
   const disabled = task ? documents.pending.some(key => key.endsWith(`:${task.id}`)) : documents.busy;
   return <div className="oa-chat-turn oa-document-turn">
     <article className="message user"><div className="message-content"><p>{entry.plan?.instruction || task?.instruction || '打开已保存文档'}</p></div></article>
     <article className="oa-document-card" aria-label="文档处理任务"><header><FileText size={24} /><div><strong>{task?.title || entry.plan?.title || '文档处理'}</strong><p role="status">{task ? statusLabels[task.status] : entry.problem ? '提交结果待核对' : '正在提交材料…'}</p></div></header>
-      {task?.status === 'succeeded' && task.result && <><p className="oa-document-filename">{task.title}.docx <span>仅本人可访问</span></p><div className="oa-document-actions"><button type="button" onClick={() => documents.openPreview(task)}>打开文档</button><button type="button" disabled={documents.pending.includes(`download:${task.id}:docx`)} onClick={() => void documents.download(task, 'docx')}><Download size={16} />下载 Word</button><button type="button" disabled={documents.busy} onClick={() => documents.useSource({ name: `${task.title}.md`, text: task.result! })}>继续修改</button></div><details className="oa-document-inline-preview"><summary>在对话中查看正文</summary><DocumentBody text={task.result} /></details><OaTaskArchive task={task} /></>}
+      {task?.status === 'succeeded' && task.result && <><p className="oa-document-filename">{task.title}.docx <span>{task.kind === 'meeting_minutes' ? '本人和 OA 管理员可查看' : '仅本人可访问'}</span></p><div className="oa-document-actions"><button type="button" onClick={() => documents.openPreview(task)}>打开文档</button><button type="button" disabled={documents.pending.includes(`download:${task.id}:docx`)} onClick={() => void documents.download(task, 'docx')}><Download size={16} />下载 Word</button><button type="button" disabled={documents.busy} onClick={() => documents.useSource({ name: `${task.title}.md`, text: task.result! })}>继续修改</button></div><details className="oa-document-inline-preview"><summary>在对话中查看正文</summary><DocumentBody text={task.result} /></details><OaTaskArchive task={task} /></>}
+      {task?.kind === 'meeting_minutes' && <p>会议纪要已提交，OA 管理员可查看材料与处理状态；尚未自动进入知识库。</p>}
       {task?.status === 'failed' && <p className="oa-chat-error" role="alert">{chatDocumentFailure(task.failure_code)}</p>}
       {entry.problem && <p className="oa-chat-error" role="alert">{entry.problem}</p>}
       <div className="oa-document-actions">
@@ -207,7 +209,7 @@ export function OaDocumentUpload({ documents, disabled }: { documents: Documents
   return <OaFilePicker disabled={disabled || documents.busy} onFiles={(files, folder) => void documents.importFiles(files, folder)} />;
 }
 export function OaDocumentSource({ documents }: { documents: Documents }) {
-  return <div className="oa-document-tools">{documents.importProgress && <p className="oa-file-progress" role="status">{documents.importProgress}</p>}{documents.source && <span className="oa-document-source"><FileText size={16} /><span>本次使用：{documents.source.name}</span><button type="button" aria-label="不再使用这份材料" disabled={documents.busy} onClick={() => documents.useSource(null)}><X size={15} /></button></span>}<button type="button" className="oa-document-text-button" onClick={() => void documents.showHistory()}><History size={15} />已保存文档</button></div>;
+  return <div className="oa-document-tools">{documents.importProgress && <p className="oa-file-progress" role="status">{documents.importProgress}</p>}{documents.source && <span className="oa-document-source"><FileText size={16} /><span>本次使用：{documents.source.name}</span><button type="button" aria-label="不再使用这份材料" disabled={documents.busy} onClick={() => documents.useSource(null)}><X size={15} /></button></span>}<button type="button" className="oa-document-text-button" onClick={() => void documents.showHistory()}><History size={15} />已保存文档</button><AdminMeetingMinutesLink /></div>;
 }
 function DocumentDialog({ label, open, onClose, children }: { label: string; open: boolean; onClose: () => void; children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
