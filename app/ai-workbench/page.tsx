@@ -95,7 +95,7 @@ export default function AiWorkbench() {
       if (!response.ok) { const body = await response.json().catch(() => ({})) as { error?: string }; throw new Error(body.error || '文件暂不可下载。'); }
       const file = await response.blob(), url = URL.createObjectURL(file), link = document.createElement('a');
       link.href = url; link.download = `${task.title.replace(/[\/\\:*?"<>|\r\n\t]/gu, '_')}.${format}`;
-      document.body.append(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 60000);
+      document.body.appendChild(link); link.click(); link.remove(); window.setTimeout(() => URL.revokeObjectURL(url), 60000);
     } catch (cause) { setError(cause instanceof Error ? cause.message : '下载失败，已保存的成果仍保留。'); }
     finally { pendingActions.current.delete(guard); }
   }
