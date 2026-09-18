@@ -37,6 +37,11 @@ beforeEach(() => {
   };
   state.env.CHAT_SERVICE = {
     async fetch(url, init) {
+      // Retain compatibility with workerd versions that reject redirect: 'error'.
+      // This is a conservative test double, not a production runtime probe.
+      if (init.redirect !== undefined && !['follow','manual'].includes(init.redirect)) {
+        throw new TypeError('legacy workerd only accepts follow or manual redirect modes');
+      }
       assert.equal(this, state.env.CHAT_SERVICE);
       state.calls.push({url,init});
       if (state.error) throw state.error;
@@ -52,7 +57,7 @@ test('OA uses the signed service binding even when same-zone public fetch is una
   const {url,init}=globalThis[stateKey].calls[0];
   assert.equal(url,'https://chat.omindos.ai/api/internal/oa-answer');
   assert.equal(globalThis[stateKey].publicCalls,0);
-  assert.equal(init.cache,'no-store'); assert.equal(init.redirect,'error'); assert.equal(init.credentials,'omit');
+  assert.equal(init.cache,'no-store'); assert.equal(init.redirect,'manual'); assert.equal(init.credentials,'omit');
   assert.equal(init.headers.cookie,undefined); assert.equal(init.headers.origin,undefined);
   assert.deepEqual(JSON.parse(init.body),{operation:'status'});
   const headers=await signOaChatRequest(init.body,globalThis[stateKey].env.PUBLIC_LAB_AI_SERVICE_TOKEN,{now:Number(init.headers['x-oa-chat-time'])*1000,nonce:init.headers['x-oa-chat-nonce']});
@@ -97,10 +102,11 @@ test('missing service binding fails closed without a public-network fallback', a
   assert.deepEqual(globalThis[stateKey].warnings,[['OA_CHAT_BRIDGE_FAILURE','CHAT_BRIDGE_SERVICE_BINDING_MISSING']]);
 });
 
-for (const status of [401,403,404,429,503]) {
+for (const status of [301,302,303,307,308,401,403,404,429,503]) {
   test(`service HTTP ${status} produces only a safe diagnostic and never retries publicly`, async () => {
     const state = globalThis[stateKey];
-    state.response = new Response(`private: ${chunk.content} ${state.env.PUBLIC_LAB_AI_SERVICE_TOKEN}`,{status});
+    const headers = status < 400 ? {location:'https://untrusted.example/never-follow'} : {};
+    state.response = new Response(`private: ${chunk.content} ${state.env.PUBLIC_LAB_AI_SERVICE_TOKEN}`,{status,headers});
     const result = await client.answerOaChatQuestion('请说明测试结果',[chunk]);
     assert.equal(result.fallbackReason,'shared_model_unavailable');
     assert.deepEqual(state.warnings,[['OA_CHAT_BRIDGE_FAILURE',`CHAT_BRIDGE_HTTP_${status}`]]);
