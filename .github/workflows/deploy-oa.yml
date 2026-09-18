@@ -11,6 +11,11 @@ on:
         description: 'Type the exact Worker:D1-UUID:hostname confirmation from the production environment'
         required: true
         type: string
+      enable_ai_workbench:
+        description: '初始化并启用 AI 工作台（首次使用需勾选；保留现有资料）'
+        required: false
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -89,6 +94,13 @@ jobs:
           PUBLIC_LAB_AI_SERVICE_TOKEN: ${{ secrets.PUBLIC_LAB_AI_SERVICE_TOKEN }}
           OA_PRODUCTION_RELEASE_CONFIRM: ${{ inputs.confirmation }}
         run: npm run release:standalone:production
+      - name: Initialize and enable the OA AI workbench
+        if: ${{ inputs.enable_ai_workbench == true }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          OA_PRODUCTION_RELEASE_CONFIRM: ${{ inputs.confirmation }}
+          OA_ENABLE_AI_WORKBENCH: 'true'
+        run: bash scripts/activate-ai-workbench-production.sh
       - name: Preserve immutable release and recovery evidence
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4

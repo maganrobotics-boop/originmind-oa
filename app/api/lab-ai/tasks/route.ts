@@ -15,11 +15,19 @@ function visible(row: TaskRow) {
 }
 async function access(): Promise<{ actor: TaskActor; db: D1Database } | Response> {
   const user = await getAuthorizedUser();
-  if (!user) return json({ error: '请先登录 OA。' }, 401);
-  if (!user.ndaCompleted || !user.memberId || !user.accountUserId || !user.memberMutationRevision) return json({ error: '请先完成实名准入和保密协议。' }, 403);
+  if (!user) return json({ code: 'TASK_LOGIN_REQUIRED', error: '请先登录 OA。' }, 401);
+  if (!user.ndaCompleted || !user.memberId || !user.accountUserId || !user.memberMutationRevision) return json({ code: 'TASK_ADMISSION_REQUIRED', error: '请先完成实名准入和保密协议。' }, 403);
   const { env } = await import('cloudflare:workers');
-  if ((env as unknown as { OA_AI_TASKS_ENABLED?: string }).OA_AI_TASKS_ENABLED !== 'true') return json({ error: 'AI 工作台尚未启用，需管理员完成任务库和模型服务发布。' }, 503);
-  return { actor: { memberId: user.memberId, accountUserId: user.accountUserId, memberMutationRevision: user.memberMutationRevision }, db: await getD1Database() };
+  if ((env as unknown as { OA_AI_TASKS_ENABLED?: string }).OA_AI_TASKS_ENABLED !== 'true') return json({ code: 'TASKS_DISABLED', error: 'AI 工作台尚未启用。管理员需在 OA 正式发布中勾选“初始化并启用 AI 工作台”；材料无需重新填写。' }, 503);
+  const db = await getD1Database();
+  try {
+    // Readiness must include file storage, not only an apparently empty task list.
+    await db.prepare('SELECT id,member_id,account_user_id,status,origin,lease_token FROM ai_workbench_tasks LIMIT 0').all();
+    await db.prepare('SELECT task_id,format,content_base64,byte_size,sha256,lease_token FROM ai_workbench_artifacts LIMIT 0').all();
+  } catch {
+    return json({ code: 'TASK_SCHEMA_UNAVAILABLE', error: '任务数据库尚未就绪：未完成初始化或暂时不可访问。管理员需检查工作台初始化结果，当前不会提交任务或调用模型。' }, 503);
+  }
+  return { actor: { memberId: user.memberId, accountUserId: user.accountUserId, memberMutationRevision: user.memberMutationRevision }, db };
 }
 export async function GET(request: Request) {
   try {
@@ -68,7 +76,7 @@ export async function POST(request: Request) {
   } catch (cause) {
     const code = cause instanceof Error ? cause.message : '';
     if (code === 'TASK_IDEMPOTENCY_CONFLICT') return json({ error: '该提交编号已用于其他内容，请重新提交。' }, 409);
-    if (code === 'TASK_CREATE_LIMIT_OR_AUTH') return json({ error: '准入状态已变化，或已达到任务数量限制（每日100项、同时5项）。' }, 429);
+    if (code === 'TASK_CREATE_LIMIT_OR_AUTH') return json({ error: '准入状态已变化，或已达到任务数量限制（每日100项、同时最多5项）。' }, 429);
     return json({ error: '任务处理暂不可用，请刷新任务记录核对状态，勿重复提交。' }, 503);
   }
 }
