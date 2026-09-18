@@ -61,15 +61,16 @@ export async function POST(request: Request) {
       return json({ task: visible(task) }, 201);
     }
     if (v.action === 'saveDraft') {
+      const id = v.id;
       if (Object.keys(v).some(k => !['action', 'id', 'title', 'result', 'expectedUpdatedAt'].includes(k))
-        || typeof v.id !== 'string' || !/^[a-f0-9-]{36}$/u.test(v.id) || !validDocumentDraft(v)) return json({ error: '草稿须包含有效标题、10–18000字正文和原版本号。' }, 400);
-      const task = await saveDocumentDraft(ctx.db, ctx.actor, v.id, v);
+        || typeof id !== 'string' || !/^[a-f0-9-]{36}$/u.test(id) || !validDocumentDraft(v)) return json({ error: '草稿须包含有效标题、10–18000字正文和原版本号。' }, 400);
+      const task = await saveDocumentDraft(ctx.db, ctx.actor, id, v);
       return json({ saved: true, task: visible(task) });
     }
     if (Object.keys(v).some(k => !['action', 'id'].includes(k)) || !['run', 'retry', 'cancel'].includes(String(v.action)) || typeof v.id !== 'string' || !/^[a-f0-9-]{36}$/u.test(v.id)) return json({ error: '任务操作格式不正确。' }, 400);
     if (!await readTask(ctx.db, ctx.actor, v.id)) return json({ error: '任务不存在或无访问权限。' }, 404);
     if (v.action === 'cancel') await cancelTask(ctx.db, ctx.actor, v.id);
-    if (v.action === 'retry' && !await retryTask(ctx.db, ctx.actor, v.id)) return json({ error: '仅失败任务可重试，每项最多3次、同时5项。' }, 409);
+    if (v.action === 'retry' && !await retryTask(ctx.db, ctx.actor, v.id)) return json({ error: '仅失败任务可重试，每项最多3次、同时最多5项。' }, 409);
     if (v.action === 'run' || v.action === 'retry') await runTask(ctx.db, v.id, generateOaTask);
     const task = await readTask(ctx.db, ctx.actor, v.id);
     return task ? json({ task: visible(task) }) : json({ error: '任务访问权限已变化。' }, 403);
