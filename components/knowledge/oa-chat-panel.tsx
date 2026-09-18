@@ -3,6 +3,7 @@
 import { FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
 import { ArrowUp, Copy, Forward, RotateCcw, Square } from 'lucide-react';
 import { renderAnswerBody, userFacingAnswer } from '@/lib/oa-chat-renderer.mjs';
+import { initialChatIndicators, probeChatIndicators, pendingChatIndicators, replyChatIndicators, failedChatIndicators } from '@/lib/oa-chat-indicators.mjs';
 import type { KnowledgeCitation } from '@/lib/knowledge-types';
 import './shared-chat.generated.css';
 import './oa-chat-panel.css';
@@ -11,7 +12,7 @@ import { OaMemberChat } from './oa-member-chat';
 
 type Image = { url: string; alt: string; mimeType: string };
 type Turn = { id: string; question: string; answer: string; citations: KnowledgeCitation[]; images: Image[]; failed?: boolean };
-type Reply = { answer?: string; citations?: KnowledgeCitation[]; images?: Image[]; error?: string; mode?: string };
+type Reply = { answer?: string; citations?: KnowledgeCitation[]; images?: Image[]; error?: string; mode?: string; fallbackReason?: string };
 const EXAMPLES = ['实验室有哪些研究方向？', '机器人底盘急停与恢复的操作流程是什么？', '最近有哪些已审核的测试结论？'];
 
 function RichAnswer({ answer }: { answer: string }) {
@@ -30,28 +31,30 @@ function validImage(image: Image): boolean {
 }
 
 export function OaChatStatus() {
-  const [status, setStatus] = useState<Array<boolean | null>>([null, null, null, null, null]);
-  const labels = ['网络连接', 'OA 成员身份', '共享模型服务', '已审核知识', '检索与调用状态'];
+  const { requestStatus } = useOaConversation();
+  const [probe, setProbe] = useState(initialChatIndicators);
   useEffect(() => {
     let disposed = false; let controller: AbortController | undefined;
     const load = async () => {
       if (document.visibilityState === 'hidden') return;
-      controller?.abort(); controller = new AbortController();
+      controller?.abort();
+      const current = new AbortController(); controller = current;
+      let httpStatus: number | null = null;
       try {
-        const response = await fetch('/api/lab-ai/status', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]) });
-        if (!response.ok) { if (!disposed) setStatus([true, false, null, null, null]); return; }
-        const payload: unknown = await response.json();
-        if (!payload || typeof payload !== 'object' || Array.isArray(payload)) throw new Error('Invalid status response');
-        const value = payload as Record<string, unknown>;
-        if (!disposed) setStatus([true, value.authorized === true, value.modelReady === true, value.knowledgeReady === true, value.retrievalReady === true && value.budgetReady === true]);
-      } catch { if (!disposed && !controller?.signal.aborted) setStatus([false, null, null, null, null]); }
+        const response = await fetch('/api/lab-ai/status', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.any([current.signal, AbortSignal.timeout(15000)]) });
+        httpStatus = response.status;
+        const payload: unknown = response.ok ? await response.json() : undefined;
+        if (!disposed && !current.signal.aborted) setProbe(probeChatIndicators(httpStatus, payload));
+      } catch { if (!disposed && !current.signal.aborted) setProbe(probeChatIndicators(httpStatus)); }
     };
     void load();
     const interval = window.setInterval(load, 60000);
     document.addEventListener('visibilitychange', load);
     return () => { disposed = true; controller?.abort(); window.clearInterval(interval); document.removeEventListener('visibilitychange', load); };
   }, []);
-  return <div className="oa-chat-title"><strong>聊天</strong><div className="oa-chat-status" aria-label="系统连接状态">{status.map((ready, index) => <span key={labels[index]} className={ready === null ? 'unknown' : ready ? 'ready' : 'unavailable'} title={`${labels[index]}：${ready === null ? '待检查' : ready ? '正常' : '暂不可用'}`} aria-label={`${labels[index]}：${ready === null ? '待检查' : ready ? '正常' : '暂不可用'}`} />)}</div></div>;
+  // Background probes never overwrite the result of the displayed question.
+  const status = requestStatus || probe;
+  return <div className="oa-chat-title"><strong>AI 助手</strong><details className="oa-chat-status-details"><summary aria-label="查看 AI 助手状态" title={status.summary}><div className="oa-chat-status" aria-label="系统连接状态" data-source={status.source} data-summary={status.summary}>{status.items.map(item => <span key={item.label} className={item.state} title={`${item.label}：${item.detail}`} aria-label={`${item.label}：${item.detail}`} />)}</div></summary><div className="oa-chat-status-panel"><p className="oa-chat-status-stamp">{status.source === 'question' ? '最近一次提问' : '服务检查'} · {new Date(status.checkedAt).toLocaleTimeString()}</p><p role="status">{status.summary}</p><dl>{status.items.map(item => <div key={item.label}><dt>{item.label}</dt><dd>{item.detail}</dd></div>)}</dl><small>圆点从左到右对应以上五项。灰色为未知或未执行，黄色为等待或需注意；服务检查不代表回答已生成。</small></div></details></div>;
 }
 
 export function OaChatPanel() {
@@ -60,7 +63,7 @@ export function OaChatPanel() {
 }
 
 function OaAiChatPanel() {
-  const { forward, setLastAnswer, setAiDirty } = useOaConversation();
+  const { forward, setLastAnswer, setAiDirty, setRequestStatus } = useOaConversation();
   const [question, setQuestion] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [asking, setAsking] = useState(false);
@@ -95,25 +98,31 @@ function OaAiChatPanel() {
     const history = preceding.slice(-2).map(turn => ({ role: 'user', content: turn.question }));
     const sequence = ++requestSequence.current;
     const controller = new AbortController(); requestRef.current = controller; sending.current = true;
+    let httpStatus: number | null = null;
     setAsking(true); setError(''); setQuestion(''); stickToEnd.current = true;
+    setRequestStatus(pendingChatIndicators()); setLastAnswer(null);
     setTurns([...preceding, { id, question: normalized, answer: '', citations: [], images: [] }]);
     try {
       const response = await fetch('/api/lab-ai/ask', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ question: normalized, history }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(80000)]) });
+      httpStatus = response.status;
       const data = await response.json() as Reply;
-      if (!response.ok || !data.answer?.trim()) throw new Error(data.error || '暂未收到完整回答，请重试。');
       if (sequence !== requestSequence.current) return;
+      if (!response.ok || typeof data?.answer !== 'string' || !data.answer.trim()) throw new Error(data?.error || '暂未收到完整回答，请重试。');
       const images = (Array.isArray(data.images) ? data.images : []).filter(validImage).slice(0, 4);
-      setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: data.answer!, citations: data.citations || [], images } : turn));
-      setLastAnswer({ body: userFacingAnswer(data.answer!), omittedImages: images.length });
+      const fallback = data.mode === 'retrieval' && data.fallbackReason !== 'no_documents';
+      setRequestStatus(replyChatIndicators(data));
+      setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: data.answer!, citations: data.citations || [], images, failed: fallback } : turn));
+      setLastAnswer(fallback ? null : { body: userFacingAnswer(data.answer), omittedImages: images.length });
     } catch (cause) {
       if (sequence !== requestSequence.current) return;
+      setRequestStatus(failedChatIndicators(httpStatus, controller.signal.aborted));
       setTurns(current => current.map(turn => turn.id === id ? { ...turn, failed: true } : turn));
       setError(controller.signal.aborted ? '已停止等待。问题已保留，可以重试。' : cause instanceof Error ? cause.message : '发送失败，请重试。');
       setQuestion(normalized);
     } finally {
       if (sequence === requestSequence.current) { sending.current = false; setAsking(false); requestRef.current = null; }
     }
-  }, [question, turns, setLastAnswer]);
+  }, [question, turns, setLastAnswer, setRequestStatus]);
   const submit = (event: FormEvent) => { event.preventDefault(); void ask(); };
   const copy = async (turn: Turn) => {
     try { await navigator.clipboard.writeText(userFacingAnswer(turn.answer)); setCopied(turn.id); }
