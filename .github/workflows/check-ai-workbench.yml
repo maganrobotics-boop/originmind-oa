@@ -5,7 +5,16 @@ on:
     branches: ['feat/oa-ai-workbench-20260918']
   pull_request:
     branches: [main]
-    paths: ['lib/ai-workbench*', 'app/ai-workbench/**', 'app/api/lab-ai/tasks/**', 'tests/ai-workbench*', '.github/workflows/check-ai-workbench.yml']
+    paths:
+      - 'lib/ai-workbench*'
+      - 'lib/oa-chat-client.ts'
+      - 'app/ai-workbench/**'
+      - 'app/api/lab-ai/tasks/**'
+      - 'chat-cloudflare/src/oa-chat-bridge.mjs'
+      - 'worker/index.ts'
+      - 'migrations/oa/**'
+      - 'tests/ai-workbench*'
+      - '.github/workflows/check-ai-workbench.yml'
 
 permissions:
   contents: read
@@ -22,13 +31,6 @@ jobs:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
         with:
           persist-credentials: false
-      - name: Prepare exact source for isolated review
-        run: git archive --format=zip HEAD -o "$RUNNER_TEMP/source.zip"
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
-        with:
-          name: ai-workbench-source-${{ github.sha }}
-          path: ${{ runner.temp }}/source.zip
-          retention-days: 1
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
@@ -37,5 +39,18 @@ jobs:
         run: npm run install:ci
       - name: Typecheck
         run: npm run typecheck
+      - name: Lint
+        run: npm run lint
       - name: Build and test
-        run: npm test
+        shell: bash
+        run: |
+          set -o pipefail
+          npm test 2>&1 | tee "$RUNNER_TEMP/ai-workbench-tests.log"
+      - name: Preserve test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ai-workbench-tests-${{ github.sha }}
+          path: ${{ runner.temp }}/ai-workbench-tests.log
+          if-no-files-found: warn
+          retention-days: 7

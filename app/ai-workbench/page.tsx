@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { TASK_KINDS } from '../../lib/ai-workbench-core.mjs';
 import { renderAnswerBody } from '../../lib/oa-chat-renderer.mjs';
@@ -78,7 +79,7 @@ export default function AiWorkbench() {
     finally { submitGuard.current = false; setBusy(false); }
   }
   return <main className="ai-workbench">
-    <header><a href="/">← 返回 OA</a><h1>AI 工作台</h1><p>把材料和要求交给 AI，生成文档并保存到本人的任务记录。</p></header>
+    <header><Link href="/">← 返回 OA</Link><h1>AI 工作台</h1><p>把材料和要求交给 AI，生成文档并保存到本人的任务记录。</p></header>
     <div className="workbench-note">仅本人可见，不自动公开，不代替审批。第一版支持文字、TXT 和 Markdown 材料；Word 导出保留标题、正文、加粗和简单表格，图片与公式暂不转换。</div>
     {error && <div className="workbench-error" role="alert">{error} <button type="button" onClick={() => { setError(''); void refresh().catch(cause => setError(cause.message)); }}>刷新核对</button></div>}
     <div className="workbench-grid">
