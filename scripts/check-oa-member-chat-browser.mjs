@@ -76,7 +76,7 @@ try {
    assert.equal(apiCalls.filter(c=>c.path==='/api/lab-ai/ask').length,1,'member messages must never go through AI');
    await alice.screenshot({path:resolve(output,`${name}-two-way-chat.png`),fullPage:true});
    await alice.getByRole('button',{name:'聊天选项'}).click();await alice.getByRole('menuitem',{name:'AI 助手',exact:true}).click();await alice.locator('.oa-conversation-ai').waitFor({state:'visible'});await alice.locator('.oa-member-title').waitFor({state:'detached'});assert.ok((await alice.locator('.message.assistant').innerText()).includes('正文完整结束'));
-   await alice.getByRole('button',{name:'聊天选项'}).click();await alice.getByRole('menuitem',{name:'清空聊天',exact:true}).click();await alice.getByText('想了解实验室的什么？',{exact:true}).waitFor();assert.equal(store.length,2,'clearing AI must not delete member messages');
+   await alice.getByRole('button',{name:'聊天选项'}).click();await alice.getByRole('menuitem',{name:'清空聊天',exact:true}).click();await alice.getByText('需要实验室大模型做什么？',{exact:true}).waitFor();assert.equal(store.length,2,'clearing AI must not delete member messages');
    await alice.getByRole('button',{name:name==='desktop'?'展开侧栏':'打开导航',exact:true}).click();const nav=alice.locator(name==='desktop'?'.oa-desktop-navigation':'.mobile-sidebar');
    assert.equal(await nav.locator('.oa-sidebar-new-chat').count(),1);assert.equal(await nav.locator('.oa-sidebar-account').count(),1);
    // Wait only for the horizontal entrance animation. Never scroll the footer into view.
