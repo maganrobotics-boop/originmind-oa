@@ -32,7 +32,7 @@ function validImage(image: Image): boolean {
 
 export function OaChatStatus() {
   const { requestStatus } = useOaConversation();
-  const [probe, setProbe] = useState(initialChatIndicators);
+  const [probe, setProbe] = useState(() => ({ ...initialChatIndicators(), checkedAt: 0 }));
   useEffect(() => {
     let disposed = false; let controller: AbortController | undefined;
     const load = async () => {
@@ -54,7 +54,7 @@ export function OaChatStatus() {
   }, []);
   // Background probes never overwrite the result of the displayed question.
   const status = requestStatus || probe;
-  return <div className="oa-chat-title"><strong>AI 助手</strong><details className="oa-chat-status-details"><summary aria-label="查看 AI 助手状态" title={status.summary}><div className="oa-chat-status" aria-label="系统连接状态" data-source={status.source} data-summary={status.summary}>{status.items.map(item => <span key={item.label} className={item.state} title={`${item.label}：${item.detail}`} aria-label={`${item.label}：${item.detail}`} />)}</div></summary><div className="oa-chat-status-panel"><p className="oa-chat-status-stamp">{status.source === 'question' ? '最近一次提问' : '服务检查'} · {new Date(status.checkedAt).toLocaleTimeString()}</p><p role="status">{status.summary}</p><dl>{status.items.map(item => <div key={item.label}><dt>{item.label}</dt><dd>{item.detail}</dd></div>)}</dl><small>圆点从左到右对应以上五项。灰色为未知或未执行，黄色为等待或需注意；服务检查不代表回答已生成。</small></div></details></div>;
+  return <div className="oa-chat-title"><strong>AI 助手</strong><details className="oa-chat-status-details"><summary aria-label="查看 AI 助手状态" title={status.summary}><div className="oa-chat-status" aria-label="系统连接状态" data-source={status.source} data-summary={status.summary}>{status.items.map(item => <span key={item.label} className={item.state} title={`${item.label}：${item.detail}`} aria-label={`${item.label}：${item.detail}`} />)}</div></summary><div className="oa-chat-status-panel"><p className="oa-chat-status-stamp">{status.source === 'question' ? '最近一次提问' : '服务检查'} · {status.checkedAt ? new Date(status.checkedAt).toLocaleTimeString() : '尚未检查'}</p><p role="status">{status.summary}</p><dl>{status.items.map(item => <div key={item.label}><dt>{item.label}</dt><dd>{item.detail}</dd></div>)}</dl><small>圆点从左到右对应以上五项。灰色为未知或未执行，黄色为等待或需注意；服务检查不代表回答已生成。</small></div></details></div>;
 }
 
 export function OaChatPanel() {
