@@ -36,7 +36,13 @@ test('confirmed AI clearing remounts fresh local state and invalidates pending r
 
 test('accessible header controls restore focus and never use global cross-page clear events', async () => {
   const [panel,context] = await Promise.all([read('components/knowledge/oa-chat-panel.tsx'),read('components/knowledge/oa-conversation-context.tsx')]);
-  assert.match(context,/<DropdownMenu modal=\{false\}>/u);
+  // Loading authorized names requires controlled open state; modal=false still
+  // prevents a hidden focus trap when switching the active conversation.
+  const menu = context.match(/<DropdownMenu\s[^>]*>/u)?.[0];
+  assert.ok(menu, 'the conversation selector must remain a DropdownMenu');
+  assert.match(menu,/\bmodal=\{false\}/u);
+  assert.match(menu,/\bopen=\{open\}/u);
+  assert.match(menu,/\bonOpenChange=\{changeOpen\}/u);
   assert.match(context,/aria-label="聊天选项"/u);
   assert.match(context,/focusComposer\.current = chat\.clearCurrent\(\)/u);
   assert.match(context,/disabled=\{!chat\.peer && !chat\.aiDirty\}/u);
