@@ -15,21 +15,19 @@ jobs:
         with:
           ref: ${{ github.sha }}
           persist-credentials: true
-      - name: Apply exact reviewed patch without touching main or production
+      - name: Apply exact reviewed correction on feature branch
         shell: bash
         run: |
           python3 - <<'PY'
-          import hashlib, lzma, pathlib, subprocess
-          root = pathlib.Path('.openai/ai-workbench-review-parts')
-          packed = b''.join((root / f'part-{i}.bin').read_bytes() for i in range(7))
-          patch = lzma.decompress(packed)
-          assert len(patch) < 200000
-          assert hashlib.sha256(patch).hexdigest() == 'a6eff222076db89122a333fe4a5f4b4e4113f2d7f04e631b7b0cbd643ead7aee'
+          import base64, hashlib, zlib, pathlib, subprocess
+          patch = zlib.decompress(base64.b64decode(pathlib.Path('.openai/ai-workbench-review.patch.b64').read_text().strip(), validate=True))
+          assert len(patch) < 20000
+          assert hashlib.sha256(patch).hexdigest() == '6b97d8cc3b25962eabea77bd5fb7c874971f21b60d6c52a25b0369ce38c72bbc'
           subprocess.run(['git', 'apply', '--check', '-'], input=patch, check=True)
           subprocess.run(['git', 'apply', '--index', '-'], input=patch, check=True)
           PY
-          git rm -r .openai/ai-workbench-review.patch.b64 .openai/ai-workbench-review-parts
-          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'feat: add private OA AI workbench and Feishu document tasks'
+          git rm .openai/ai-workbench-review.patch.b64
+          git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'fix: type task responses and verify archived NDA before task access'
           git push origin HEAD:refs/heads/feat/oa-ai-workbench-20260918
           git rev-parse HEAD > "$RUNNER_TEMP/workbench-result-sha.txt"
           git config --local --unset-all http.https://github.com/.extraheader || true
