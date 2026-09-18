@@ -1,0 +1,10 @@
+import type { KnowledgePackage } from './knowledge-package.mjs';
+export type ChatAttachmentBundle = { id: string; name: string; text: string; parts: Array<{ path: string; file: File; mime: string; text: string }>; warnings: string[]; pkg: KnowledgePackage };
+export const ATTACHMENT_LIMITS: Readonly<{ files: number; zip: number; total: number; document: number; image: number; text: number }>;
+export const CHAT_ATTACHMENT_ACCEPT: string;
+export function attachmentMime(name: string): string;
+export function validateDocx(file: File): Promise<void>;
+export function validateBinaryAttachment(file: File): Promise<{ name: string; mimeType: string; kind: string }>;
+export function unpackChatAttachmentZip(file: File): Promise<File[]>;
+export function extractChatAttachment(file: File, options?: { signal?: AbortSignal }): Promise<string>;
+export function readChatAttachments(files: File[], options?: { folder?: boolean; extract?: typeof extractChatAttachment; signal?: AbortSignal; onProgress?: (text: string) => void }): Promise<ChatAttachmentBundle>;

@@ -117,7 +117,7 @@ mv "${project_root}/dist" "${release_root}/dist"
 config_path="${release_root}/dist/server/wrangler.json"
 mkdir "${release_root}/workbench"
 if [[ "${workbench_enabled}" == "true" ]]; then
-  cp -a "${project_root}/migrations/oa/0002_ai_workbench.sql" "${project_root}/migrations/oa/0003_ai_workbench_artifacts.sql" "${release_root}/workbench/"
+  cp -a "${project_root}/migrations/oa/0002_ai_workbench.sql" "${project_root}/migrations/oa/0003_ai_workbench_artifacts.sql" "${project_root}/migrations/oa/0004_ai_workbench_retention.sql" "${release_root}/workbench/"
   node "${script_dir}/oa-workbench-release.mjs" manifest "${release_root}/workbench" "${release_root}/workbench/activation-plan.json"
 fi
 
@@ -258,9 +258,9 @@ node "${script_dir}/check-production-migration-state.mjs" after \
   --migrations-dir "${release_root}/drizzle"
 
 if [[ "${workbench_enabled}" == "true" ]]; then
-  # These two immutable, hash-reviewed CREATE IF NOT EXISTS files are additive.
+  # These three immutable, hash-reviewed CREATE IF NOT EXISTS files are additive.
   # Never apply migrations/oa as the Drizzle ledger or change WEBSITE_DB.
-  for task_migration in 0002_ai_workbench.sql 0003_ai_workbench_artifacts.sql; do
+  for task_migration in 0002_ai_workbench.sql 0003_ai_workbench_artifacts.sql 0004_ai_workbench_retention.sql; do
     run_wrangler d1 execute DB --remote --json --config "${config_path}" --file "${release_root}/workbench/${task_migration}" > "${release_root}/workbench-${task_migration%.sql}-applied.json"
   done
   run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${task_schema_query}" > "${release_root}/workbench-schema-after.json"

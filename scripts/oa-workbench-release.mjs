@@ -9,6 +9,7 @@ import { sanitizeTaskDiagnostic } from '../lib/ai-workbench-diagnostics.mjs';
 export const TASK_MIGRATIONS = Object.freeze({
   '0002_ai_workbench.sql': 'e9343e0f36d1666f18868745b9046837a82e0ca8549d93057452c72fc420ca27',
   '0003_ai_workbench_artifacts.sql': '393f96ef5cba7caced716412e074cbb8c207cd40d9cc222097dfabc3df6cdb92',
+  '0004_ai_workbench_retention.sql': '4f10e8ba74eae321befde9a194d6306a08ed0c8bdd4d4f5d1ca9bcba02aba886',
 });
 export const TASK_SCHEMA_QUERY = "SELECT type,name,sql FROM sqlite_master WHERE (name GLOB 'ai_workbench_*' OR tbl_name GLOB 'ai_workbench_*') AND name NOT GLOB 'sqlite_*' ORDER BY type,name";
 const hash = value => createHash('sha256').update(value).digest('hex');
