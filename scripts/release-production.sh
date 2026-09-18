@@ -18,6 +18,17 @@ if [[ ! "${GITHUB_SHA:-}" =~ ^[0-9a-f]{40}$ || ! "${GITHUB_RUN_ID:-}" =~ ^[0-9]+
   echo "GitHub release provenance is incomplete." >&2
   exit 64
 fi
+# Default releases preserve the provider-managed flag. Only an explicit manual
+# input may initialize task storage, probe the paid model, and turn tasks on.
+workbench_enabled="${OA_PRODUCTION_ENABLE_AI_WORKBENCH:-false}"
+if [[ "${workbench_enabled}" != "true" && "${workbench_enabled}" != "false" ]]; then
+  echo "OA_PRODUCTION_ENABLE_AI_WORKBENCH must be true or false." >&2
+  exit 64
+fi
+workbench_deploy_args=()
+if [[ "${workbench_enabled}" == "true" ]]; then
+  workbench_deploy_args=(--var OA_AI_TASKS_ENABLED:true)
+fi
 required_variables=(
   OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID
   OA_PRODUCTION_WORKER_NAME
@@ -104,15 +115,20 @@ release_root="$(mktemp -d "${release_base}/production-${GITHUB_SHA:0:12}-${GITHU
 cp -a "${project_root}/drizzle" "${release_root}/drizzle"
 mv "${project_root}/dist" "${release_root}/dist"
 config_path="${release_root}/dist/server/wrangler.json"
+mkdir "${release_root}/workbench"
+if [[ "${workbench_enabled}" == "true" ]]; then
+  cp -a "${project_root}/migrations/oa/0002_ai_workbench.sql" "${project_root}/migrations/oa/0003_ai_workbench_artifacts.sql" "${release_root}/workbench/"
+  node "${script_dir}/oa-workbench-release.mjs" manifest "${release_root}/workbench" "${release_root}/workbench/activation-plan.json"
+fi
 
 node "${script_dir}/check-standalone-output.mjs" production "${config_path}"
-if [[ -n "$(find "${release_root}/dist" "${release_root}/drizzle" -type l -print -quit)" ]]; then
+if [[ -n "$(find "${release_root}/dist" "${release_root}/drizzle" "${release_root}/workbench" -type l -print -quit)" ]]; then
   echo "The immutable production artifact must not contain symlinks." >&2
   exit 65
 fi
 (
   cd "${release_root}"
-  find dist drizzle -type f -print0 | sort -z | xargs -0 sha256sum > artifact-sha256.txt
+  find dist drizzle workbench -type f -print0 | sort -z | xargs -0 sha256sum > artifact-sha256.txt
 )
 
 private_root="$(mktemp -d "${project_root}/.wrangler/production-preflight.XXXXXX")"
@@ -174,11 +190,24 @@ migration_state="$(node "${script_dir}/check-production-migration-state.mjs" bef
   --schema "${release_root}/schema-before.json" \
   --migrations-dir "${release_root}/drizzle")"
 
+if [[ "${workbench_enabled}" == "true" ]]; then
+  # LIMIT 0 validates the admission columns without reading any member records.
+  run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "SELECT id,account_user_id,mutation_revision,status,nda_accepted_at,nda_agreement_version,nda_approval_id,chatgpt_account FROM members LIMIT 0; SELECT id,type,status,requester_email,payload_json FROM approvals LIMIT 0" > "${release_root}/workbench-prerequisites.json"
+  task_schema_query="SELECT type,name,sql FROM sqlite_master WHERE (name GLOB 'ai_workbench_*' OR tbl_name GLOB 'ai_workbench_*') AND name NOT GLOB 'sqlite_*' ORDER BY type,name"
+  run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${task_schema_query}" > "${release_root}/workbench-schema-before.json"
+  node "${script_dir}/oa-workbench-release.mjs" before "${release_root}/workbench" "${release_root}/workbench-schema-before.json" "${release_root}/workbench-schema-before-verified.json"
+fi
+
 # stdin keeps the protected value out of argv and logs. The first target check
 # captures the rollback point, and the migration check verifies the database
 # ledger, freeze and schema state before this provider mutation.
 printf '%s' "${public_lab_ai_service_token}" \
   | run_wrangler secret put PUBLIC_LAB_AI_SERVICE_TOKEN --config "${config_path}"
+if [[ "${workbench_enabled}" == "true" ]]; then
+  # One synthetic real task, charged only against the existing model budget.
+  # A failed probe prevents task-schema writes and enabling the feature.
+  PUBLIC_LAB_AI_SERVICE_TOKEN="${public_lab_ai_service_token}" node "${script_dir}/oa-workbench-release.mjs" probe "${release_root}/workbench-model-probe.json"
+fi
 public_lab_ai_service_token=""
 
 # Cloudflare never returns the secret value. Verify only that the required name
@@ -195,15 +224,16 @@ node "${script_dir}/check-production-cloudflare-target.mjs" \
   --versions "${versions_path}" \
   --receipt "${release_root}/target-secret-configured.json"
 
-# Validate this exact immutable artifact before changing production schema.
-run_wrangler deploy --dry-run --strict --keep-vars --config "${config_path}"
+# Validate this exact immutable artifact and the explicitly recorded flag before
+# changing production schema. No arbitrary CLI vars or target overrides exist.
+run_wrangler deploy --dry-run --strict --keep-vars --config "${config_path}" "${workbench_deploy_args[@]}"
 (
   cd "${release_root}"
   sha256sum --check artifact-sha256.txt
 )
 
-# Record the recovery bookmark immediately before the only possible database
-# mutation. It is evidence for manual recovery, never an automatic rollback.
+# Record the recovery bookmark immediately before the possible database
+# mutations. It is evidence for manual recovery, never an automatic rollback.
 run_wrangler d1 time-travel info DB --json --config "${config_path}" > "${bookmark_path}"
 node "${script_dir}/check-production-d1-bookmark.mjs" "${bookmark_path}" "${release_root}/d1-bookmark-before.json"
 
@@ -227,6 +257,16 @@ node "${script_dir}/check-production-migration-state.mjs" after \
   --schema "${release_root}/schema-after.json" \
   --migrations-dir "${release_root}/drizzle"
 
+if [[ "${workbench_enabled}" == "true" ]]; then
+  # These two immutable, hash-reviewed CREATE IF NOT EXISTS files are additive.
+  # Never apply migrations/oa as the Drizzle ledger or change WEBSITE_DB.
+  for task_migration in 0002_ai_workbench.sql 0003_ai_workbench_artifacts.sql; do
+    run_wrangler d1 execute DB --remote --json --config "${config_path}" --file "${release_root}/workbench/${task_migration}" > "${release_root}/workbench-${task_migration%.sql}-applied.json"
+  done
+  run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${task_schema_query}" > "${release_root}/workbench-schema-after.json"
+  node "${script_dir}/oa-workbench-release.mjs" after "${release_root}/workbench" "${release_root}/workbench-schema-after.json" "${release_root}/workbench-schema-after-verified.json"
+fi
+
 (
   cd "${release_root}"
   sha256sum --check artifact-sha256.txt
@@ -236,7 +276,7 @@ node "${script_dir}/check-production-migration-state.mjs" after \
 # check leaves the captured rollback point and D1 bookmark for manual review.
 release_message="production ${GITHUB_SHA} run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
 run_wrangler deploy --strict --keep-vars --config "${config_path}" \
-  --message "${release_message}"
+  --message "${release_message}" "${workbench_deploy_args[@]}"
 
 run_wrangler secret list --format json --config "${config_path}" > "${secrets_path}"
 run_wrangler deployments list --json --config "${config_path}" > "${deployments_path}"
@@ -263,6 +303,8 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- Worker: \`${expected_worker_name}\`"
     echo "- D1 migration state before release: \`${migration_state}\`"
     echo "- Target and public smoke checks: passed"
+    echo "- Workbench activation requested: \`${workbench_enabled}\`"
+    echo "- Member-session task submission/download: still requires authenticated acceptance"
     echo "- Automatic rollback: disabled"
   } >> "${GITHUB_STEP_SUMMARY}"
 fi
