@@ -10,6 +10,8 @@ on:
       - 'lib/*direct-message*'
       - 'scripts/*oa-chat*'
       - 'scripts/*oa-member*'
+      - 'scripts/*oa-guide*'
+      - 'tests/oa-guide.test.mjs'
       - 'chat-cloudflare/frontend/**'
       - 'package*.json'
       - '.github/workflows/check-oa-chat-browser.yml'
@@ -22,6 +24,8 @@ on:
       - 'lib/*direct-message*'
       - 'scripts/*oa-chat*'
       - 'scripts/*oa-member*'
+      - 'scripts/*oa-guide*'
+      - 'tests/oa-guide.test.mjs'
       - 'chat-cloudflare/frontend/**'
       - 'package*.json'
       - '.github/workflows/check-oa-chat-browser.yml'
@@ -71,6 +75,10 @@ jobs:
         env:
           PLAYWRIGHT_MODULE: ${{ runner.temp }}/oa-chat-browser/node_modules/playwright/index.mjs
         run: node scripts/check-oa-chat-documents-browser.mjs
+      - name: Verify guide readability, navigation and public-private boundary without API access
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/oa-chat-browser/node_modules/playwright/index.mjs
+        run: node scripts/check-oa-guide-browser.mjs
       - name: Preserve browser results and screenshots
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
@@ -82,5 +90,6 @@ jobs:
             parity-validation/member-chat-report/
             parity-validation/chat-status-report/
             parity-validation/chat-documents-report/
+            parity-validation/guide-report/
           if-no-files-found: warn
           retention-days: 7

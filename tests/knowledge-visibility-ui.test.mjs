@@ -98,7 +98,7 @@ test("lets authorized reviewers reclassify active knowledge with the same public
   assert.match(source, /visibility_changed_public: "调整为对外公开"/u);
 
   const guideSource = await readFile(path.join(root, "app/guide/page.tsx"), "utf8");
-  assert.match(guideSource, /已入库知识可在“知识库管理”中重新调整范围/u);
+  assert.match(guideSource, /已入库知识可在“知识资料管理”中重新调整范围/u);
 });
 
 test("labels legacy approved events as internal and names both new audit events", async () => {
