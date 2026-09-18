@@ -57,3 +57,39 @@
 .oa-direct-sender-note { margin:6px 0 0; font-size:11px; color:#777; text-align:center; }
 .oa-member-chat .oa-chat-error > button { margin-left:12px; display:inline-flex; gap:4px; align-items:center; }
 @media(max-width:560px) { .oa-shared-chat .oa-direct-message { max-width:96%; padding:12px; } .oa-member-picker { padding:18px; } }
+
+/* The shell must never scroll the account footer below the visible viewport.
+   Override legacy vh/min-height rules; only the middle navigation may scroll. */
+.oa-app.oa-workspace .oa-desktop-navigation > aside.sidebar-shell,
+.oa-app.oa-workspace .mobile-sidebar > aside.sidebar-shell { display:flex; flex-direction:column; box-sizing:border-box; min-height:0; overflow:hidden; }
+.oa-app.oa-workspace .oa-desktop-navigation > aside.sidebar-shell { height:100vh; height:100dvh; }
+.oa-app.oa-workspace .sidebar-shell > .brand-lockup { flex:0 0 auto; }
+.oa-app.oa-workspace .sidebar-shell > .oa-sidebar-scroll { flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+.oa-app.oa-workspace .sidebar-shell > .oa-sidebar-bottom { flex:0 0 auto; margin-top:auto; background:#fafafa; }
+.oa-app.oa-workspace .oa-sidebar-bottom .sidebar-user-popover { max-height:60dvh; overflow-y:auto; }
+@media(max-width:960px) {
+  .oa-app.oa-workspace .mobile-sidebar { height:100vh; height:100dvh; max-height:100dvh; min-height:0; }
+  .oa-app.oa-workspace .mobile-sidebar > aside.sidebar-shell { height:100%; max-height:100%; padding-bottom:max(12px,env(safe-area-inset-bottom)); }
+}
+
+/* Names are immediate destinations. No intermediate member-picker dialog. */
+.oa-conversation-popover.oa-chat-clear-menu { min-width:200px; max-width:calc(100vw - 24px); max-height:var(--radix-dropdown-menu-content-available-height,80dvh); overflow-y:auto; }
+.oa-conversation-popover .oa-conversation-peer-list { max-height:46dvh; overflow-y:auto; overscroll-behavior:contain; }
+.oa-conversation-popover [role="menuitem"] > span { min-width:0; overflow:hidden; text-overflow:ellipsis; }
+.oa-conversation-popover .oa-conversation-selected { margin-left:auto; flex:none; }
+.oa-conversation-popover [aria-current="true"] { background:#f1f1f1; font-weight:600; }
+
+/* A tap exposes the label/evidence for every dot, including unknown states. */
+.oa-workspace .oa-chat-status-details { position:relative; pointer-events:auto; }
+.oa-workspace .oa-chat-status-details > summary { display:flex; align-items:center; justify-content:center; min-height:24px; min-width:84px; padding:4px; cursor:pointer; list-style:none; border-radius:8px; }
+.oa-workspace .oa-chat-status-details > summary::-webkit-details-marker { display:none; }
+.oa-workspace .oa-chat-status-details > summary:focus-visible { outline:2px solid #1677ff; outline-offset:2px; }
+.oa-workspace .oa-chat-status > .pending, .oa-workspace .oa-chat-status > .warning { background:#c68c27; }
+.oa-workspace .oa-chat-status-panel { position:absolute; z-index:45; top:100%; left:50%; transform:translateX(-50%); width:min(88vw,340px); max-height:min(70dvh,480px); overflow:auto; padding:16px; border:1px solid #ddd; border-radius:14px; background:#fff; color:#222; box-shadow:0 8px 28px #0000001a; text-align:left; font-size:13px; line-height:1.6; }
+.oa-workspace .oa-chat-status-panel p { margin:0 0 10px; }
+.oa-workspace .oa-chat-status-panel .oa-chat-status-stamp { font-size:11px; color:#777; }
+.oa-workspace .oa-chat-status-panel dl { display:grid; gap:8px; margin:0 0 12px; }
+.oa-workspace .oa-chat-status-panel dl > div { display:grid; grid-template-columns:82px minmax(0,1fr); gap:8px; }
+.oa-workspace .oa-chat-status-panel dt { font-weight:600; }
+.oa-workspace .oa-chat-status-panel dd { margin:0; color:#666; overflow-wrap:anywhere; }
+.oa-workspace .oa-chat-status-panel small { font-size:11px; color:#777; }
