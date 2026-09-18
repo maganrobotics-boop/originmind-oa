@@ -56,7 +56,7 @@ test('provider errors, duplicate objects, unexpected triggers and schema drift s
 test('live-probe request is signed, fixed-destination and synthetic; receipts contain no source text', async () => {
   let calls = 0;
   const receipt = await probeTaskTools(secret, async (url, options) => {
-    calls++; assert.equal(url, 'https://chat.omindos.ai/api/internal/oa-answer'); assert.equal(options.redirect, 'error');
+    calls++; assert.equal(url, 'https://chat.omindos.ai/api/internal/oa-answer'); assert.equal(options.redirect, 'manual');
     assert.equal(options.headers.origin, undefined); assert.equal(options.headers.cookie, undefined);
     const body = JSON.parse(options.body); assert.equal(body.operation, 'task'); assert.match(body.task.material, /合成测试/);
     const signed = `oa-chat-bridge/v1\nPOST\n/api/internal/oa-answer\n${options.headers['x-oa-chat-time']}\n${options.headers['x-oa-chat-nonce']}\n${options.body}`;
