@@ -5,6 +5,7 @@ import { generateOaTask } from '../../../../lib/oa-chat-client';
 import { TASK_LIMITS, validTaskInput } from '../../../../lib/ai-workbench-core.mjs';
 import { ARTIFACT_TYPES, verifiedArtifactBytes } from '../../../../lib/ai-workbench-artifacts.mjs';
 import { cancelTask, createTask, listTasks, readTask, readTaskArtifact, retryTask, runTask, type TaskActor, type TaskInput, type TaskRow } from '../../../../lib/ai-workbench-store';
+import { saveDocumentDraft, validDocumentDraft } from '../../../../lib/oa-document-draft';
 
 const headers = { 'cache-control': 'private, no-store, max-age=0', 'x-content-type-options': 'nosniff' };
 const json = (body: unknown, status = 200) => Response.json(body, { status, headers });
@@ -35,6 +36,7 @@ export async function GET(request: Request) {
     if (row.status !== 'succeeded') return json({ error: '任务尚未生成可下载成果。' }, 409);
     const artifact = await readTaskArtifact(ctx.db, ctx.actor, id, format);
     if (!artifact) return json({ error: '成果文件尚未完整归档或访问权限已变化，暂不可下载。' }, 409);
+    if (artifact.created_at !== row.updated_at) return json({ error: '文件版本已更新，请重新打开最新稿后下载。' }, 409);
     const bytes = await verifiedArtifactBytes(artifact);
     const filename = encodeURIComponent(`${row.title.replace(/[\/\\:*?"<>|\r\n\t]/gu, '_')}.${format}`);
     return new Response(bytes, { headers: { ...headers, 'content-type': ARTIFACT_TYPES[format],
@@ -58,15 +60,25 @@ export async function POST(request: Request) {
       const task = await createTask(ctx.db, ctx.actor, input as TaskInput, `oa:${v.requestId}`);
       return json({ task: visible(task) }, 201);
     }
+    if (v.action === 'saveDraft') {
+      if (Object.keys(v).some(k => !['action', 'id', 'title', 'result', 'expectedUpdatedAt'].includes(k))
+        || typeof v.id !== 'string' || !/^[a-f0-9-]{36}$/u.test(v.id) || !validDocumentDraft(v)) return json({ error: '草稿须包含有效标题、10–18000字正文和原版本号。' }, 400);
+      const task = await saveDocumentDraft(ctx.db, ctx.actor, v.id, v);
+      return json({ saved: true, task: visible(task) });
+    }
     if (Object.keys(v).some(k => !['action', 'id'].includes(k)) || !['run', 'retry', 'cancel'].includes(String(v.action)) || typeof v.id !== 'string' || !/^[a-f0-9-]{36}$/u.test(v.id)) return json({ error: '任务操作格式不正确。' }, 400);
     if (!await readTask(ctx.db, ctx.actor, v.id)) return json({ error: '任务不存在或无访问权限。' }, 404);
     if (v.action === 'cancel') await cancelTask(ctx.db, ctx.actor, v.id);
-    if (v.action === 'retry' && !await retryTask(ctx.db, ctx.actor, v.id)) return json({ error: '仅失败任务可重试，每项最多3次、同时最多5项。' }, 409);
+    if (v.action === 'retry' && !await retryTask(ctx.db, ctx.actor, v.id)) return json({ error: '仅失败任务可重试，每项最多3次、同时5项。' }, 409);
     if (v.action === 'run' || v.action === 'retry') await runTask(ctx.db, v.id, generateOaTask);
     const task = await readTask(ctx.db, ctx.actor, v.id);
     return task ? json({ task: visible(task) }) : json({ error: '任务访问权限已变化。' }, 403);
   } catch (cause) {
     const code = cause instanceof Error ? cause.message : '';
+    if (code === 'DRAFT_NOT_FOUND') return json({ error: '文档不存在或访问权限已变化，未保存修改。' }, 404);
+    if (code === 'DRAFT_CONFLICT') return json({ error: '文档已在其他窗口更新，或已开始送审。当前修改未覆盖服务器，请核对最新稿。' }, 409);
+    if (code === 'DRAFT_LOCKED') return json({ error: '文档已进入送审流程或尚未生成，不能覆盖修改。' }, 409);
+    if (code === 'DRAFT_INVALID' || code === 'TASK_INVALID_RESULT' || code === 'TASK_EMPTY_DOCUMENT') return json({ error: '请检查标题与正文；正文至少10字，且不能含不安全内容。' }, 400);
     if (code === 'TASK_IDEMPOTENCY_CONFLICT') return json({ error: '该提交编号已用于其他内容，请重新提交。' }, 409);
     if (code === 'TASK_CREATE_LIMIT_OR_AUTH') return json({ error: '准入状态已变化，或已达到任务数量限制（每日100项、同时5项）。' }, 429);
     return json({ error: '任务处理暂不可用，请刷新任务记录核对状态，勿重复提交。' }, 503);
