@@ -1,0 +1,51 @@
+name: Check OA AI workbench
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'lib/ai-workbench*'
+      - 'lib/oa-chat-client.ts'
+      - 'app/ai-workbench/**'
+      - 'app/api/lab-ai/tasks/**'
+      - 'chat-cloudflare/src/oa-chat-bridge.mjs'
+      - 'worker/index.ts'
+      - 'migrations/oa/**'
+      - 'tests/ai-workbench*'
+      - 'tests/helpers/ai-workbench*'
+      - '.github/workflows/check-ai-workbench.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-workbench-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      # The canonical OA workflow still runs install, typecheck, lint, build
+      # and the full suite. This additional job avoids rebuilding it twice.
+      - name: Test real OA task logic and archived files
+        shell: bash
+        run: |
+          set -o pipefail
+          node --test --test-concurrency=1 tests/ai-workbench-*.test.mjs 2>&1 | tee "$RUNNER_TEMP/ai-workbench-tests.log"
+      - name: Preserve test results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: ai-workbench-tests-${{ github.sha }}
+          path: ${{ runner.temp }}/ai-workbench-tests.log
+          if-no-files-found: warn
+          retention-days: 7
