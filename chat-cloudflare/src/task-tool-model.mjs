@@ -23,7 +23,8 @@ export function createTaskToolModel({ endpoint, apiKey, model, fetcher, consumeB
       response = await fetcher(`${url.href}/chat/completions`, { method: 'POST', headers: {
         authorization: `Bearer ${apiKey}`, 'content-type': 'application/json', accept: 'application/json',
       }, body, redirect: 'manual', cache: 'no-store', credentials: 'omit', signal: controller.signal });
-      if (!response.ok) throw new Error('TASK_MODEL_HTTP');
+      // Keep only the numeric status; do not read an upstream error body.
+      if (!response.ok) throw Object.assign(new Error('TASK_MODEL_HTTP'), { upstreamStatus: response.status });
       if (response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') throw new Error('TASK_MODEL_PROTOCOL');
       if (Number(response.headers.get('content-length') || 0) > 262144 || !response.body) throw new Error('TASK_MODEL_RESPONSE_LIMIT');
       reader = response.body.getReader(); let length = 0; const parts = [];
@@ -40,6 +41,11 @@ export function createTaskToolModel({ endpoint, apiKey, model, fetcher, consumeB
       catch { throw new Error('TASK_MODEL_PROTOCOL'); }
       if (!Array.isArray(value?.choices) || value.choices.length !== 1 || !value.choices[0]?.message) throw new Error('TASK_MODEL_PROTOCOL');
       return { message: value.choices[0].message, finishReason: value.choices[0].finish_reason };
+    } catch (error) {
+      // Do not turn a timeout, failed fetch, or broken response stream into HTTP.
+      if (controller.signal.aborted || error?.name === 'AbortError' || error?.name === 'TimeoutError') throw new Error('TASK_TOOL_TIMEOUT');
+      if (error instanceof TypeError) throw new Error('TASK_MODEL_TRANSPORT');
+      throw error;
     } finally {
       clearTimeout(timer);
       if (reader) { await reader.cancel().catch(() => {}); reader.releaseLock(); }

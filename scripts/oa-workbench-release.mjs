@@ -4,6 +4,7 @@ import { lstat, readFile, readdir, writeFile } from 'node:fs/promises';
 import { resolve, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
+import { sanitizeTaskDiagnostic } from '../lib/ai-workbench-diagnostics.mjs';
 
 export const TASK_MIGRATIONS = Object.freeze({
   '0002_ai_workbench.sql': 'e9343e0f36d1666f18868745b9046837a82e0ca8549d93057452c72fc420ca27',
@@ -42,6 +43,8 @@ export function releaseFailureDiagnostic(error, phase) {
   if (SERVICE_CODES.has(error?.serviceCode)) result.serviceCode = error.serviceCode;
   if (RESPONSE_KINDS.has(error?.responseKind)) result.responseKind = error.responseKind;
   if (IO_CODES.has(error?.code)) result.ioCode = error.code;
+  const taskDiagnostic = sanitizeTaskDiagnostic(error?.taskDiagnostic);
+  if (taskDiagnostic) result.taskDiagnostic = taskDiagnostic;
   return result;
 }
 const normalizeSql = value => typeof value === 'string' ? value.trim().replace(/\s+/gu, ' ').replace(/;$/u, '') : '';
@@ -108,7 +111,8 @@ async function boundedJson(response) {
   catch { fail(response.ok ? 'TASK_PROBE_JSON' : 'TASK_PROBE_HTTP', { httpStatus, responseKind: 'invalid_json' }); }
   if (!response.ok) {
     // Map exact, known service messages to fixed labels; never print the message.
-    fail('TASK_PROBE_HTTP', { httpStatus, responseKind: 'json', serviceCode: SERVICE_ERRORS.get(result?.error) });
+    fail('TASK_PROBE_HTTP', { httpStatus, responseKind: 'json', serviceCode: SERVICE_ERRORS.get(result?.error),
+      taskDiagnostic: sanitizeTaskDiagnostic(result?.diagnostic) });
   }
   if (!result || typeof result !== 'object' || Array.isArray(result)) fail('TASK_PROBE_JSON', { httpStatus });
   return result;
