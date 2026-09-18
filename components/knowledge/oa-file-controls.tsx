@@ -89,10 +89,12 @@ function TaskArchive({ task }: { task: ChatDocumentTask }) {
     } catch { if (mounted.current && version === revision.current) setError('归档状态暂时无法核对，请刷新核对；不要将状态未知当作已归档。'); }
   }, [task.id]);
   useEffect(() => {
-    mounted.current = true; void refresh();
+    mounted.current = true;
+    // Start the initial network subscription after commit; cancel it on unmount.
+    const initialRefresh = window.setTimeout(() => { void refresh(); }, 0);
     const update = () => { if (document.visibilityState !== 'hidden') void refresh(); };
     window.addEventListener('oa-files-archived', update); document.addEventListener('visibilitychange', update);
-    return () => { mounted.current = false; window.removeEventListener('oa-files-archived', update); document.removeEventListener('visibilitychange', update); };
+    return () => { mounted.current = false; window.clearTimeout(initialRefresh); window.removeEventListener('oa-files-archived', update); document.removeEventListener('visibilitychange', update); };
   }, [refresh]);
   async function submit() {
     if (lock.current || !confirmed) return;
