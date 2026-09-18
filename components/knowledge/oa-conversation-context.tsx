@@ -63,6 +63,10 @@ export function OaConversationTitle({ children }: { children: ReactNode }) {
 }
 export function OaConversationMenu() {
   const chat = useOaConversation();
+  return <ConversationMenu key={chat.user.email} />;
+}
+function ConversationMenu() {
+  const chat = useOaConversation();
   const userEmail = chat.user.email;
   const focusComposer = useRef(false);
   const pendingNavigation = useRef<(() => void) | null>(null);
@@ -73,10 +77,11 @@ export function OaConversationMenu() {
   const [loadingMembers, setLoadingMembers] = useState(false);
   const [memberError, setMemberError] = useState('');
   const [reload, setReload] = useState(0);
+  const resetMemberLoading = () => { setMembers([]); setMemberError(''); setLoadingMembers(true); };
+  const changeOpen = (nextOpen: boolean) => { if (nextOpen) resetMemberLoading(); setOpen(nextOpen); };
   useEffect(() => {
     if (!open) return;
     const controller = new AbortController();
-    setMembers([]); setMemberError(''); setLoadingMembers(true);
     void (async () => {
       try {
         const response = await fetch('/api/direct-messages?summary=1', { credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' }, signal: controller.signal });
@@ -90,7 +95,7 @@ export function OaConversationMenu() {
     return () => controller.abort();
   }, [open, userEmail, reload]);
   const afterMenuCloses = (action: () => void) => { pendingNavigation.current = action; setNavigationPending(true); };
-  return <DropdownMenu modal={false} open={open} onOpenChange={setOpen}><DropdownMenuTrigger asChild><button ref={trigger} disabled={navigationPending} type="button" className="oa-conversation-menu oa-chat-more-button" aria-label="聊天选项"><MoreHorizontal size={24} /></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="oa-conversation-popover oa-chat-clear-menu" onCloseAutoFocus={event => {
+  return <DropdownMenu modal={false} open={open} onOpenChange={changeOpen}><DropdownMenuTrigger asChild><button ref={trigger} disabled={navigationPending} type="button" className="oa-conversation-menu oa-chat-more-button" aria-label="聊天选项"><MoreHorizontal size={24} /></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="oa-conversation-popover oa-chat-clear-menu" onCloseAutoFocus={event => {
     if (pendingNavigation.current) {
       event.preventDefault();
       const navigate = pendingNavigation.current;
@@ -108,7 +113,7 @@ export function OaConversationMenu() {
     <DropdownMenuItem aria-current={!chat.peer ? 'true' : undefined} onSelect={() => afterMenuCloses(chat.showAi)}><Bot /><span>AI 助手</span>{!chat.peer && <Check className="oa-conversation-selected" aria-hidden="true" />}</DropdownMenuItem>
     <div className="oa-conversation-peer-list" role="group" aria-label="可聊天成员">
       {loadingMembers && <DropdownMenuItem disabled>正在加载成员…</DropdownMenuItem>}
-      {memberError && <DropdownMenuItem onSelect={event => { event.preventDefault(); setReload(value => value + 1); }}><RotateCcw /><span>{memberError}</span></DropdownMenuItem>}
+      {memberError && <DropdownMenuItem onSelect={event => { event.preventDefault(); resetMemberLoading(); setReload(value => value + 1); }}><RotateCcw /><span>{memberError}</span></DropdownMenuItem>}
       {!loadingMembers && !memberError && !members.length && <DropdownMenuItem disabled>暂无可聊天成员</DropdownMenuItem>}
       {members.map(member => <DropdownMenuItem key={member.email} aria-label={member.name} title={member.name} aria-current={chat.peer?.email === member.email ? 'true' : undefined} onSelect={() => afterMenuCloses(() => chat.openPeer(member))}><MessageCircle /><span>{member.name}</span>{chat.peer?.email === member.email && <Check className="oa-conversation-selected" aria-hidden="true" />}</DropdownMenuItem>)}
     </div>
