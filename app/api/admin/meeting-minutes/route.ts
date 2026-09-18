@@ -18,7 +18,7 @@ export async function GET(request: Request) {
     const cursor = rawCursor ? parseMeetingCursor(rawCursor) : null;
     if (rawCursor && !cursor) return json({ error: '分页位置不正确。' }, 400);
     const db = await getD1Database();
-    if (!await hasMeetingAdminMembership(db, actor)) return json({ error: '管理员准入状态已变化，请重新登录。' }, 403);
+    if (!await hasMeetingAdminMembership(db, actor)) return json({ error: '管理员准入状态已变化。请重新登录。' }, 403);
     if (!id) return json({ ...await listAdminMeetingMinutes(db, actor, cursor), checkedAt: Date.now() });
     const item = await readAdminMeetingMinute(db, actor, id);
     if (!item) return json({ error: '会议纪要不存在、已清理或无访问权限。' }, 404);
@@ -36,7 +36,7 @@ export async function GET(request: Request) {
     // Catch an admission change while a saved artifact was being verified.
     if (!await hasMeetingAdminMembership(db, actor)) return json({ error: '管理员访问权限已变化。' }, 403);
     const filename = encodeURIComponent(item.title.replace(/[\/\\:*?"<>|\r\n\t]/gu, '_') + suffix);
-    return new Response(bytes, { headers: { ...headers, 'content-type': mime, 'content-length': String(bytes.byteLength), 'content-disposition': `attachment; filename="meeting.${format === 'source' ? 'txt' : format}"; filename*=UTF-8''${filename}` } });
+    return new Response(new Uint8Array(bytes).buffer, { headers: { ...headers, 'content-type': mime, 'content-length': String(bytes.byteLength), 'content-disposition': `attachment; filename="meeting.${format === 'source' ? 'txt' : format}"; filename*=UTF-8''${filename}` } });
   } catch {
     return json({ error: '会议纪要暂时无法读取；未将连接失败当成空记录，请稍后重试。' }, 503);
   }
