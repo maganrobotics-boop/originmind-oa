@@ -52,6 +52,7 @@ function Editor({ task, onSaved, onDirtyChange }: Props) {
     const data = await response.json() as { saved?: boolean; task?: unknown; error?: string };
     if (!response.ok || data?.saved !== true || !isChatDocumentTask(data.task) || data.task.id !== task.id || !data.task.result) throw new Error(data?.error || '草稿保存尚未确认，未提交审批。');
     if (mounted.current) { revision.current++; onSaved(data.task); setEdit(null); setLifecycle({ state: 'draft', expiresAt: null, knowledgeItemId: null, knowledgeStatus: null }); setNotice('草稿已保存，未提交审批、未入知识库；不会被临时清理。'); }
+    window.dispatchEvent(new Event('oa-files-archived'));
     return data.task;
   }
   async function act(submit: boolean) {
