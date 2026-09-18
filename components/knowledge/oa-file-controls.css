@@ -1,0 +1,29 @@
+.oa-attachment-picker { position:relative; flex:0 0 44px; align-self:flex-end; }
+.oa-attachment-menu { position:absolute; bottom:calc(100% + 12px); left:0; z-index:40; width:min(300px,calc(100vw - 48px)); padding:10px; border:1px solid #ddd; border-radius:16px; background:#fff; color:#222; box-shadow:0 8px 30px #0002; }
+.oa-attachment-menu > button { display:flex; width:100%; align-items:center; gap:9px; padding:12px; min-height:44px; border:0; border-radius:9px; background:transparent; color:inherit; text-align:left; }
+.oa-attachment-menu > button:hover { background:#f2f2f2; }
+.oa-attachment-menu small { display:block; padding:8px 10px; font-size:12px; line-height:1.6; color:#666; }
+.oa-file-archive { margin-top:12px; min-width:0; font-size:13px; overflow-wrap:anywhere; }
+.oa-file-archive p { margin:6px 0; line-height:1.7; }
+.oa-file-archive-button,.oa-file-actions > button { display:inline-flex; align-items:center; justify-content:center; min-height:40px; gap:6px; padding:8px 12px; border:1px solid #ccc; border-radius:10px; background:#fff; color:#222; font-size:14px; }
+.oa-file-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:10px; }
+.oa-file-actions > button:disabled { opacity:.5; cursor:not-allowed; }
+.oa-file-refresh { display:inline-flex; align-items:center; gap:4px; min-height:36px; margin-top:4px; padding:3px 0; border:0; background:none; color:#666; font-size:12px; }
+.oa-archive-confirm { padding:12px; border:1px solid #ddd; border-radius:12px; background:#fff; }
+.oa-archive-confirm label { display:flex; align-items:flex-start; gap:8px; margin-top:8px; }
+.oa-archive-confirm input { flex-shrink:0; margin-top:4px; }
+.oa-file-warning { color:#9b3c17; }
+.oa-source-images { margin:12px 0; }
+.oa-source-images summary { cursor:pointer; }
+.oa-source-images > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(min(180px,100%),1fr)); gap:12px; margin-top:10px; }
+.oa-source-images figure { min-width:0; margin:0; }
+.oa-source-images img { display:block; max-width:100%; max-height:300px; object-fit:contain; border-radius:8px; }
+.oa-source-images figcaption { margin-top:4px; color:#666; font-size:12px; overflow-wrap:anywhere; }
+.oa-file-progress { width:100%; font-size:13px; overflow-wrap:anywhere; }
+.oa-generic-source { border:1px solid #e1e1e1; padding:16px; border-radius:16px; margin:0 0 20px; }
+.oa-generic-source h2 { margin:0 0 8px; }
+.oa-generic-source pre { white-space:pre-wrap; overflow-wrap:anywhere; max-height:300px; overflow:auto; }
+
+.oa-generic-source .oa-document-add { display:grid; place-items:center; width:44px; height:44px; border:1px solid #ccc; border-radius:50%; background:#fff; color:#333; }
+.oa-generic-source .oa-attachment-menu { top:calc(100% + 8px); bottom:auto; }
+.oa-shared-chat .oa-document-dialog > footer { max-height:48%; overflow:auto; overscroll-behavior:contain; }

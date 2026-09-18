@@ -4,6 +4,7 @@ import { createServer } from 'node:http';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { resolve, extname, sep } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { png, pdf, docxParts, zip } from '../tests/helpers/oa-attachment-fixtures.mjs';
 import { randomUUID } from 'node:crypto';
 import { prepareTaskArtifacts, verifiedArtifactBytes } from '../lib/ai-workbench-artifacts.mjs';
 if (!process.env.PLAYWRIGHT_MODULE) throw new Error('Set PLAYWRIGHT_MODULE to the pinned Playwright installation');
@@ -30,14 +31,29 @@ try {
   for (const [name, width, height] of [['desktop',1280,900],['mobile',390,844],['mobile-small',320,700],['landscape',844,390]]) {
     const context = await browser.newContext({ viewport:{ width,height }, serviceWorkers:'block', acceptDownloads:true });
     const page = await context.newPage(), requests = [], errors = [], held = [], tasks = new Map(), ids = new Map();
+    const archived = new Map(); let failArchive = true;
     let clock = 10, mode = 'success', loseCreate = false, unavailable = false;
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/*', async route => {
       const request = route.request(), url = new URL(request.url());
       if (url.origin !== origin) return route.abort();
       if (!url.pathname.startsWith('/api/')) return route.continue();
-      const body = request.postDataJSON();
+      const body = request.headers()['content-type']?.includes('application/json') ? request.postDataJSON() : null;
       requests.push({ path:url.pathname, method:request.method(), body });
+      if (url.pathname === '/api/lab-ai/extract') return route.fulfill({json:{text:`已解析 ${decodeURIComponent(request.headers()['x-oa-file-name'])}，这是一段用于浏览器回归的完整合成内容。`}});
+      if (url.pathname === '/api/knowledge/import-chat') return route.fulfill({status:201,json:{received:true,item:{id:body.document.id,status:'pending',visibility:'internal'},assetUpload:{revisionId:'test-revision',uploadToken:'test-token'}}});
+      if (url.pathname.startsWith('/api/knowledge/assets')) return route.fulfill({json:{received:true}});
+      if (url.pathname === '/api/lab-ai/archive') {
+        if (request.method() === 'GET') {
+          const id = url.searchParams.get('id');
+          return route.fulfill({json:{lifecycle:archived.get(id) || {state:'temporary',expiresAt:Date.now()+604800000,knowledgeItemId:null,knowledgeStatus:null}}});
+        }
+        assert.deepEqual(Object.keys(body).sort(),['confirmed','id']); assert.equal(body.confirmed,true);
+        const receipt = {id:body.id,status:'pending',visibility:'internal'};
+        archived.set(body.id,{state:'submitted',expiresAt:null,knowledgeItemId:receipt.id,knowledgeStatus:'pending',visibility:'internal'});
+        if (failArchive) { failArchive=false; return route.abort('failed'); }
+        return route.fulfill({json:{received:true,item:receipt}});
+      }
       if (url.pathname === '/api/lab-ai/tasks') {
         if (unavailable) return route.fulfill({ status:503, json:{ error:'文档处理服务暂不可用（合成测试）' } });
         if (request.method() === 'GET') {
@@ -72,7 +88,7 @@ try {
     });
     const createRequests = () => requests.filter(item => item.path === '/api/lab-ai/tasks' && item.body?.action === 'create');
     const importText = async (name, text) => {
-      await page.locator('input[type=file][accept*=".markdown"]').setInputFiles({name,mimeType:'text/plain',buffer:Buffer.from(text)});
+      await page.locator('.oa-shared-chat input[type=file][accept*=".markdown"]').setInputFiles({name,mimeType:'text/plain',buffer:Buffer.from(text)});
       await page.getByRole('article',{name:`已导入 ${name}`,exact:true}).waitFor();
     };
     const input = page.getByPlaceholder('询问实验室大数据');
@@ -104,7 +120,7 @@ try {
         await input.fill('');
       }
       assert.equal(await page.locator('.oa-shared-chat a[href="/ai-workbench"]').count(),0);
-      assert.equal(await page.getByRole('button',{name:'导入 TXT 或 MD 文档',exact:true}).isVisible(),true);
+      assert.equal(await page.getByRole('button',{name:'上传文件、图片、ZIP 或文件夹',exact:true}).isVisible(),true);
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
       await page.screenshot({path:resolve(output,`${name}-welcome.png`),fullPage:true});
       await send('实验室有哪些研究方向？'); await page.locator('.message.assistant').waitFor();
@@ -127,6 +143,16 @@ try {
       const path = resolve(output,`${name}-synthetic.docx`); await download.saveAs(path);
       const bytes = await readFile(path); assert.equal(bytes.subarray(0,2).toString(),'PK'); assert.ok(bytes.length>100);
       await page.screenshot({path:resolve(output,`${name}-preview.png`),fullPage:true});
+      // A separate, explicit archive confirmation; a lost reply retries the same task.
+      assert.equal(requests.filter(item=>item.path==='/api/lab-ai/archive' && item.method==='POST').length,0);
+      const archivePanel = preview.getByRole('region',{name:'成果归档与保留期限'});
+      await archivePanel.getByRole('button',{name:'归档成果',exact:true}).click();
+      const confirmArchive = archivePanel.getByRole('button',{name:'确认归档并提交 OA',exact:true});
+      assert.equal(await confirmArchive.isDisabled(),true);
+      await archivePanel.getByRole('checkbox').check(); await confirmArchive.click();
+      await archivePanel.getByRole('alert').waitFor(); await confirmArchive.click();
+      await archivePanel.getByRole('status').filter({hasText:'已提交 OA，待审核'}).waitFor();
+      assert.equal(archived.size,1); await page.screenshot({path:resolve(output,`${name}-archive-pending.png`),fullPage:true});
       await closePreview(); assert.equal(new URL(page.url()).pathname,'/');
       await page.getByRole('button',{name:'不再使用这份材料',exact:true}).click();
       await send('Word 是什么？'); await page.waitForFunction(()=>document.querySelectorAll('.message.assistant').length===2);
@@ -160,17 +186,56 @@ try {
       await history.locator('.oa-document-history button').first().click(); await preview.waitFor(); await closePreview();
       assert.equal(new URL(page.url()).pathname,'/');
       // Unsupported import leaves existing material/results intact.
-      await page.locator('input[type=file][accept*=".markdown"]').setInputFiles({name:'不支持.pdf',mimeType:'application/pdf',buffer:Buffer.from('not a document')});
-      await page.getByRole('alert').filter({hasText:'只支持 TXT'}).waitFor();
+      await page.locator('.oa-shared-chat input[type=file][accept*=".markdown"]').setInputFiles({name:'不支持.pdf',mimeType:'application/pdf',buffer:Buffer.from('not a document')});
+      await page.getByRole('alert').filter({hasText:'文件格式无法识别'}).waitFor();
       // Service failure is explicit and does not break ordinary QA.
       unavailable=true; await importText('服务测试.md','模型不可用时不应出现伪造文档。'); await send('整理材料');
       await page.getByRole('alert').filter({hasText:'文档处理服务暂不可用'}).waitFor(); assert.equal(await preview.isVisible(),false);
       await page.getByRole('button',{name:'不再使用这份材料',exact:true}).click(); await send('实验室有哪些研究方向？'); await page.locator('.message.assistant').waitFor();
       assert.deepEqual(errors,[]);
-      assert.ok(requests.filter(item=>item.method==='POST').every(item=>['/api/lab-ai/ask','/api/lab-ai/tasks'].includes(item.path)));
+      assert.ok(requests.filter(item=>item.method==='POST').every(item=>['/api/lab-ai/ask','/api/lab-ai/tasks','/api/lab-ai/archive'].includes(item.path)));
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
       await page.screenshot({path:resolve(output,`${name}-conversation.png`),fullPage:true});
-      results.push({name,passed:true,approvedCopy:true,capabilityHints:true,ordinaryChat:true,rawImport:true,safeText:true,documentPreview:true,realDocxDownload:true,continueEditing:true,manualRetry:true,idempotentRecovery:true,cancelLateResponse:true,restoreSaved:true,serviceFailure:true,errors});
+      // A generic archive is not constrained to index.md + assets/. The real ZIP validator runs in-browser.
+      unavailable=false;
+      const docx = zip(docxParts,{name:'报告.docx'});
+      const packed = zip([['项目/记录.md','# 原始记录\n这份资料包含图片、PDF 和 DOCX。'],['项目/平台.png',png],['说明.pdf',pdf],['报告.docx',Buffer.from(await docx.arrayBuffer())]],{method:8});
+      await page.getByRole('button',{name:'上传文件、图片、ZIP 或文件夹',exact:true}).click();
+      await page.getByRole('group',{name:'聊天附件上传方式'}).waitFor();
+      assert.equal(await page.getByRole('button',{name:'上传文件夹',exact:true}).isVisible(),true);
+      await page.keyboard.press('Escape');
+      const beforeImport=requests.filter(item=>item.path==='/api/knowledge/import-chat').length;
+      await page.locator('.oa-shared-chat').getByLabel('选择聊天文件或 ZIP',{exact:true}).setInputFiles({name:'普通资料.zip',mimeType:'application/zip',buffer:Buffer.from(await packed.arrayBuffer())});
+      const source=page.getByRole('article',{name:'已导入 资料包（4 个文件）',exact:true}); await source.waitFor();
+      assert.equal(requests.filter(item=>item.path==='/api/knowledge/import-chat').length,beforeImport,'parsing does not submit knowledge');
+      assert.equal(requests.filter(item=>item.path==='/api/lab-ai/extract').length,3);
+      await source.locator('.oa-source-images summary').click(); await source.locator('img').waitFor();
+      assert.ok((await source.locator('img').getAttribute('src')).startsWith('data:'));
+      await source.getByRole('button',{name:'归档资料',exact:true}).click();
+      const sourceConfirm=source.getByRole('button',{name:'确认归档并提交 OA',exact:true}); assert.equal(await sourceConfirm.isDisabled(),true);
+      await source.getByRole('checkbox').check(); await sourceConfirm.click();
+      await source.getByRole('status').filter({hasText:'已提交 OA，待审核'}).waitFor();
+      assert.equal(requests.filter(item=>item.path==='/api/knowledge/assets' && item.method==='PUT').length,1);
+      assert.equal(requests.filter(item=>item.path==='/api/knowledge/assets/finalize').length,1);
+      await page.screenshot({path:resolve(output,`${name}-zip-upload.png`),fullPage:true});
+      // Directory selection carries real relative paths; nothing is auto-archived.
+      const directory=resolve(output,`${name}-folder`); await mkdir(directory,{recursive:true});
+      await writeFile(resolve(directory,'记录.txt'),'文件夹中的完整实验记录。');
+      await page.locator('.oa-shared-chat').getByLabel('选择聊天文件夹',{exact:true}).setInputFiles(directory);
+      await page.getByRole('article',{name:'已导入 记录.txt',exact:true}).waitFor();
+      assert.equal(requests.filter(item=>item.path==='/api/knowledge/import-chat').length,beforeImport+1);
+      // The sidebar exposes the same parser and archive controls, not a text-only form.
+      if(name==='desktop') {
+        await page.getByRole('button',{name:'展开侧栏',exact:true}).click();
+        await page.getByRole('button',{name:'上传资料',exact:true}).click();
+        const sidebar=page.getByRole('region',{name:'通用资料上传'}); await sidebar.waitFor();
+        await sidebar.getByLabel('选择聊天文件或 ZIP',{exact:true}).setInputFiles({name:'侧栏资料.txt',mimeType:'text/plain',buffer:Buffer.from('侧栏与聊天共用归档审批，未批准不入库。')});
+        await sidebar.getByRole('button',{name:'归档资料',exact:true}).waitFor();
+        assert.equal(requests.filter(item=>item.path==='/api/knowledge/import-chat').length,beforeImport+1);
+        await page.screenshot({path:resolve(output,`${name}-sidebar-upload.png`),fullPage:true});
+      }
+      assert.deepEqual(errors,[]); assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+      results.push({name,passed:true,approvedCopy:true,capabilityHints:true,ordinaryChat:true,rawImport:true,safeText:true,documentPreview:true,realDocxDownload:true,continueEditing:true,manualRetry:true,idempotentRecovery:true,cancelLateResponse:true,restoreSaved:true,serviceFailure:true,zip:true,folder:true,pdf:true,docxImport:true,imagePreview:true,explicitArchive:true,archiveRetry:true,errors});
       console.log(`${name}: unified chat, import, preview, DOCX, recovery, cancellation and history passed`);
     } catch (error) { await page.screenshot({path:resolve(output,`${name}-failure.png`),fullPage:true}); results.push({name,passed:false,error:error.message,errors}); throw error; }
     finally { await context.close(); }

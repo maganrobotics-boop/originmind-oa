@@ -5,6 +5,7 @@ import { legacyOaRedirect } from "../lib/legacy-oa-redirect.mjs";
 import { ensureMigrationWriteFreezeMarker, isMigrationWriteFrozen, shouldBlockForMigrationFreeze } from "../lib/migration-freeze";
 import { archiveApprovalPdfsToFeishu, type FeishuArchiveEnv } from "../lib/feishu-drive-archive";
 import { processAiWorkbench, type TaskEnv } from "../lib/ai-workbench-runner";
+import { processTemporaryFileCleanup } from "../lib/oa-chat-file-lifecycle";
 import { processApprovalNotifications } from "../lib/feishu-notifications";
 
 interface Env extends TaskEnv {
@@ -82,7 +83,7 @@ async function archiveApprovalsFromResponse(response: Response, env: Env) {
 
 const worker = {
   async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
-    if (!isMigrationWriteFrozen(env as unknown as Record<string, unknown>)) ctx.waitUntil(Promise.all([processApprovalNotifications(env), processAiWorkbench(env)]));
+    if (!isMigrationWriteFrozen(env as unknown as Record<string, unknown>)) ctx.waitUntil(Promise.all([processApprovalNotifications(env), processAiWorkbench(env), processTemporaryFileCleanup(env)]));
   },
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const legacyRedirect = legacyOaRedirect(request, env.OA_LEGACY_REDIRECT_ENABLED);
