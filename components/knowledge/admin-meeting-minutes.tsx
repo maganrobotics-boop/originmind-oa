@@ -22,7 +22,7 @@ function isMeetingSummary(value: unknown): value is MeetingSummary {
 }
 function isMeetingDetail(value: unknown): value is MeetingDetail {
   const row = jsonRecord(value);
-  return isMeetingSummary(row) && typeof row.material === 'string' && typeof row.result === 'string' && typeof row.instruction === 'string';
+  return typeof row.material === 'string' && typeof row.result === 'string' && typeof row.instruction === 'string' && isMeetingSummary(row);
 }
 class ReadError extends Error { constructor(message: string, readonly status: number) { super(message); } }
 async function read(query: string, signal: AbortSignal) {
