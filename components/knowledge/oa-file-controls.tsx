@@ -83,8 +83,8 @@ function TaskArchive({ task }: { task: ChatDocumentTask }) {
     const version = ++revision.current;
     try {
       const response = await fetch(`/api/lab-ai/archive?id=${encodeURIComponent(task.id)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
-      const data = await response.json();
-      if (!response.ok || typeof data.lifecycle?.state !== 'string') throw new Error(data.error || '归档状态暂时无法核对。');
+      const data = await response.json() as { lifecycle?: Lifecycle; error?: string } | null;
+      if (!response.ok || !data?.lifecycle || typeof data.lifecycle.state !== 'string') throw new Error(data?.error || '归档状态暂时无法核对。');
       if (mounted.current && version === revision.current) { setLifecycle(data.lifecycle); setError(''); }
     } catch { if (mounted.current && version === revision.current) setError('归档状态暂时无法核对，请刷新核对；不要将状态未知当作已归档。'); }
   }, [task.id]);
@@ -99,8 +99,8 @@ function TaskArchive({ task }: { task: ChatDocumentTask }) {
     lock.current = true; revision.current++; setBusy(true); setError('');
     try {
       const response = await fetch('/api/lab-ai/archive', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: task.id, confirmed: true }), signal: AbortSignal.timeout(90000) });
-      const data = await response.json();
-      if (!response.ok || data.received !== true || !data.item?.id) throw new Error(data.error || '归档接收尚未确认。');
+      const data = await response.json() as { received?: boolean; error?: string; item?: { id: string; status: string; visibility?: string } } | null;
+      if (!response.ok || data?.received !== true || !data.item?.id || typeof data.item.status !== 'string') throw new Error(data?.error || '归档接收尚未确认。');
       if (mounted.current) { revision.current++; setLifecycle({ state: 'submitted', expiresAt: null, knowledgeItemId: data.item.id, knowledgeStatus: data.item.status, visibility: data.item.visibility }); setOpen(false); }
       window.dispatchEvent(new Event('oa-files-archived'));
     } catch (cause) { if (mounted.current) setError(cause instanceof Error ? cause.message : '归档结果尚未确认，请核对后重试。'); }

@@ -88,7 +88,7 @@ try {
     });
     const createRequests = () => requests.filter(item => item.path === '/api/lab-ai/tasks' && item.body?.action === 'create');
     const importText = async (name, text) => {
-      await page.locator('input[type=file][accept*=".markdown"]').setInputFiles({name,mimeType:'text/plain',buffer:Buffer.from(text)});
+      await page.locator('.oa-shared-chat input[type=file][accept*=".markdown"]').setInputFiles({name,mimeType:'text/plain',buffer:Buffer.from(text)});
       await page.getByRole('article',{name:`已导入 ${name}`,exact:true}).waitFor();
     };
     const input = page.getByPlaceholder('询问实验室大数据');
@@ -186,7 +186,7 @@ try {
       await history.locator('.oa-document-history button').first().click(); await preview.waitFor(); await closePreview();
       assert.equal(new URL(page.url()).pathname,'/');
       // Unsupported import leaves existing material/results intact.
-      await page.locator('input[type=file][accept*=".markdown"]').setInputFiles({name:'不支持.pdf',mimeType:'application/pdf',buffer:Buffer.from('not a document')});
+      await page.locator('.oa-shared-chat input[type=file][accept*=".markdown"]').setInputFiles({name:'不支持.pdf',mimeType:'application/pdf',buffer:Buffer.from('not a document')});
       await page.getByRole('alert').filter({hasText:'文件格式无法识别'}).waitFor();
       // Service failure is explicit and does not break ordinary QA.
       unavailable=true; await importText('服务测试.md','模型不可用时不应出现伪造文档。'); await send('整理材料');
@@ -205,7 +205,7 @@ try {
       assert.equal(await page.getByRole('button',{name:'上传文件夹',exact:true}).isVisible(),true);
       await page.keyboard.press('Escape');
       const beforeImport=requests.filter(item=>item.path==='/api/knowledge/import-chat').length;
-      await page.getByLabel('选择聊天文件或 ZIP',{exact:true}).setInputFiles({name:'普通资料.zip',mimeType:'application/zip',buffer:Buffer.from(await packed.arrayBuffer())});
+      await page.locator('.oa-shared-chat').getByLabel('选择聊天文件或 ZIP',{exact:true}).setInputFiles({name:'普通资料.zip',mimeType:'application/zip',buffer:Buffer.from(await packed.arrayBuffer())});
       const source=page.getByRole('article',{name:'已导入 资料包（4 个文件）',exact:true}); await source.waitFor();
       assert.equal(requests.filter(item=>item.path==='/api/knowledge/import-chat').length,beforeImport,'parsing does not submit knowledge');
       assert.equal(requests.filter(item=>item.path==='/api/lab-ai/extract').length,3);
@@ -221,7 +221,7 @@ try {
       // Directory selection carries real relative paths; nothing is auto-archived.
       const directory=resolve(output,`${name}-folder`); await mkdir(directory,{recursive:true});
       await writeFile(resolve(directory,'记录.txt'),'文件夹中的完整实验记录。');
-      await page.getByLabel('选择聊天文件夹',{exact:true}).setInputFiles(directory);
+      await page.locator('.oa-shared-chat').getByLabel('选择聊天文件夹',{exact:true}).setInputFiles(directory);
       await page.getByRole('article',{name:'已导入 记录.txt',exact:true}).waitFor();
       assert.equal(requests.filter(item=>item.path==='/api/knowledge/import-chat').length,beforeImport+1);
       // The sidebar exposes the same parser and archive controls, not a text-only form.
