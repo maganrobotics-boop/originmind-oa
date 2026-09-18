@@ -52,9 +52,30 @@
 .oa-app.oa-workspace .mobile-sidebar:not(.open) { visibility:hidden; box-shadow:none; pointer-events:none; }
 .oa-app.oa-workspace .workspace-sidebar-toggle, .oa-app.oa-workspace .mobile-menu-button { color:#171717; }
 @media(max-width:960px) {
-  .oa-app.oa-workspace .mobile-sidebar { display:block; position:fixed; z-index:60; inset:0 auto 0 0; width:min(86vw,300px); transform:translateX(-100%); transition:transform 180ms ease; box-shadow:10px 0 30px #0f212b2e; }
+  .oa-app.oa-workspace .mobile-sidebar { display:block; position:fixed; z-index:60; inset:0 auto auto 0; height:100dvh; max-height:100dvh; width:min(86vw,300px); transform:translateX(-100%); transition:transform 180ms ease; box-shadow:10px 0 30px #0f212b2e; }
   .oa-app.oa-workspace .mobile-sidebar.open { transform:translateX(0); visibility:visible; pointer-events:auto; }
-  .oa-app.oa-workspace .mobile-sidebar .sidebar-shell { display:flex; height:100%; padding-bottom:max(18px,env(safe-area-inset-bottom)); overflow-y:auto; overscroll-behavior:contain; }
+  .oa-app.oa-workspace .mobile-sidebar .sidebar-shell { display:flex; box-sizing:border-box; height:100%; min-height:0; max-height:100%; padding-bottom:max(18px,env(safe-area-inset-bottom)); overflow:visible; overscroll-behavior:contain; }
   .oa-app.oa-workspace .mobile-nav-overlay { display:block; position:fixed; z-index:50; inset:0; visibility:hidden; opacity:0; background:#14222b5c; transition:180ms ease; }
   .oa-app.oa-workspace .mobile-nav-overlay.visible { visibility:visible; opacity:1; }
 }
+
+/* Only the middle navigation scrolls; the account stays above browser controls. */
+.oa-app.oa-workspace .oa-sidebar-scroll { flex:1 1 0; min-height:0; overflow-y:auto; overscroll-behavior:contain; }
+.oa-app.oa-workspace .oa-sidebar-bottom { flex:0 0 auto; position:relative; z-index:2; background:#fafafa; }
+.oa-app.oa-workspace .sidebar-shell > .brand-lockup { flex-shrink:0; }
+.oa-chat-status-button { pointer-events:auto; display:grid; place-items:center; min-width:96px; min-height:24px; margin:-3px 0; padding:4px 12px; border:0; border-radius:12px; background:transparent; }
+.oa-chat-status-button:focus-visible { outline:2px solid #555; outline-offset:2px; }
+.oa-chat-status > .attention, .oa-status-dot.attention { background:#b77a16; }
+.oa-status-dot { display:inline-block; width:8px; height:8px; flex:0 0 8px; border-radius:50%; background:#bdbdbd; }
+.oa-status-dot.ready { background:#238d5b; }
+.oa-status-dot.unavailable { background:#b53d3d; }
+.oa-chat-status-details { z-index:70; width:min(340px,calc(100vw - 24px)); max-height:var(--radix-popover-content-available-height,70dvh); overflow-y:auto; padding:16px; background:#fff; color:#333; border:1px solid #ddd; border-radius:14px; }
+.oa-chat-status-detail { display:flex; gap:10px; align-items:baseline; margin:12px 0; font-size:13px; }
+.oa-chat-status-detail p { margin:3px 0 0; color:#666; line-height:1.5; }
+.oa-chat-status-details > small { display:block; color:#777; line-height:1.6; }
+.oa-conversation-roster { max-height:min(42dvh,320px); overflow-y:auto; overscroll-behavior:contain; }
+.oa-roster-note { padding:10px; color:#777; font-size:13px; }
+.oa-menu-person-avatar { display:grid; place-items:center; flex:0 0 24px; width:24px; height:24px; border-radius:50%; background:#eee; font-size:12px; }
+.oa-menu-person-name { min-width:0; white-space:normal; overflow-wrap:anywhere; }
+.oa-selected-peer { margin-left:auto; flex:none; }
+.oa-answer-degraded { font-size:13px; color:#a23737; margin:0 0 8px; }

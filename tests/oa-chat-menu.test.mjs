@@ -36,7 +36,7 @@ test('confirmed AI clearing remounts fresh local state and invalidates pending r
 
 test('accessible header controls restore focus and never use global cross-page clear events', async () => {
   const [panel,context] = await Promise.all([read('components/knowledge/oa-chat-panel.tsx'),read('components/knowledge/oa-conversation-context.tsx')]);
-  assert.match(context,/<DropdownMenu modal=\{false\}>/u);
+  assert.match(context,/<DropdownMenu modal=\{false\} open=\{open\} onOpenChange=\{changeOpen\}>/u);
   assert.match(context,/aria-label="聊天选项"/u);
   assert.match(context,/focusComposer\.current = chat\.clearCurrent\(\)/u);
   assert.match(context,/disabled=\{!chat\.peer && !chat\.aiDirty\}/u);
