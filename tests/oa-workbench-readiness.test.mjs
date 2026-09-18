@@ -6,9 +6,9 @@ import ts from 'typescript';
 
 function compile(path, modules) {
   const output=ts.transpileModule(readFileSync(new URL(path,import.meta.url),'utf8'), {compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.ReactJSX,esModuleInterop:true}}).outputText;
-  const module={exports:{}};
-  new Function('require','module','exports',output)(name=>{if(!Object.hasOwn(modules,name))throw new Error(`Unexpected test import: ${name}`);return modules[name];},module,module.exports);
-  return module.exports;
+  const compiledModule={exports:{}};
+  new Function('require','module','exports',output)(name=>{if(!Object.hasOwn(modules,name))throw new Error(`Unexpected test import: ${name}`);return modules[name];},compiledModule,compiledModule.exports);
+  return compiledModule.exports;
 }
 function uiHarness() {
   const slots=[], effects=[]; let cursor=0;

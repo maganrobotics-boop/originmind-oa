@@ -60,8 +60,10 @@ export default function AiWorkbench() {
     mounted.current = true;
     const id = new URLSearchParams(window.location.search).get('id');
     if (id && /^[a-f0-9-]{36}$/u.test(id)) activeId.current = id;
-    void refresh().catch(() => {}).finally(() => { if (mounted.current) setLoading(false); });
-    return () => { mounted.current = false; };
+    let cancelled = false;
+    // Start the external check asynchronously; cleanup prevents stale starts.
+    void Promise.resolve().then(() => { if (!cancelled) return refresh(); }).catch(() => {}).finally(() => { if (!cancelled && mounted.current) setLoading(false); });
+    return () => { cancelled = true; mounted.current = false; };
   }, [refresh]);
   useEffect(() => {
     if (!tasks.some(task => ['queued', 'running'].includes(task.status)) && !['queued', 'running'].includes(selected?.status || '')) return;
