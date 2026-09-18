@@ -28,7 +28,9 @@ async function bridge(payload: object, timeoutMs: number): Promise<BridgeRespons
   if (new TextEncoder().encode(body).length > 96 * 1024) throw new Error('CHAT_BRIDGE_REQUEST_LIMIT');
   const response = await service.fetch(`${OA_CHAT_ORIGIN}${OA_CHAT_PATH}`, {
     method: 'POST', headers: await signOaChatRequest(body, secret), body,
-    cache: 'no-store', redirect: 'error', credentials: 'omit', signal: AbortSignal.timeout(timeoutMs),
+    // Manual mode works across workerd versions and never follows a Location.
+    // The !response.ok guard below rejects every 3xx before reading its body.
+    cache: 'no-store', redirect: 'manual', credentials: 'omit', signal: AbortSignal.timeout(timeoutMs),
   });
   if (!response.ok) {
     await response.body?.cancel().catch(() => {});
