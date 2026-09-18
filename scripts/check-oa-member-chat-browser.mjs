@@ -79,6 +79,8 @@ try {
    await alice.getByRole('button',{name:'聊天选项'}).click();await alice.getByRole('menuitem',{name:'清空聊天',exact:true}).click();await alice.getByText('想了解实验室的什么？',{exact:true}).waitFor();assert.equal(store.length,2,'clearing AI must not delete member messages');
    await alice.getByRole('button',{name:name==='desktop'?'展开侧栏':'打开导航',exact:true}).click();const nav=alice.locator(name==='desktop'?'.oa-desktop-navigation':'.mobile-sidebar');
    assert.equal(await nav.locator('.oa-sidebar-new-chat').count(),1);assert.equal(await nav.locator('.oa-sidebar-account').count(),1);
+   // Wait only for the horizontal entrance animation. Never scroll the footer into view.
+   if(name!=='desktop')await alice.waitForFunction(()=>{const el=document.querySelector('.mobile-sidebar.open');return el&&Math.abs(el.getBoundingClientRect().left)<0.5;});
    for(const visibleHeight of name==='desktop'?[height]:[height,480,720]){
     await alice.setViewportSize({width,height:visibleHeight});
     const footer=await nav.evaluate(element=>{
@@ -88,6 +90,7 @@ try {
       });
       return {targets,height:innerHeight,width:innerWidth};
     });
+    console.log(`${name} footer ${visibleHeight}: ${JSON.stringify(footer)}`);
     assert.ok(footer.targets.every(r=>r.top>=0&&r.bottom<=footer.height&&r.left>=0&&r.right<=footer.width&&r.hit),'account and new-chat controls must be visible and hittable without scrolling');
     const before=await nav.locator('.oa-sidebar-bottom').boundingBox();
     await nav.locator('.oa-sidebar-scroll').evaluate(el=>{el.scrollTop=el.scrollHeight;});
