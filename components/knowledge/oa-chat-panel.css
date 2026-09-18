@@ -26,9 +26,12 @@
 .oa-shared-chat .oa-chat-composer textarea { flex:1; width:100%; min-width:0; min-height:28px; max-height:144px; padding:8px 0; margin:0; resize:none; outline:none; border:0; border-radius:0; background:transparent; color:#171717; box-shadow:none; font:inherit; font-size:16px; line-height:1.5; }
 .oa-shared-chat .oa-chat-composer .send-button { display:grid; place-items:center; position:static; flex:0 0 44px; width:44px; height:44px; min-height:44px; margin:0; padding:0; border-radius:50%; border:0; color:white; background:#222; }
 .oa-shared-chat .oa-chat-composer .send-button:disabled { background:#d8d8d8; }
-.oa-shared-chat .oa-chat-examples { display:flex; flex-direction:column; gap:6px; padding:0 4px 14px; }
-.oa-shared-chat .oa-chat-examples p { margin:0 0 4px; font-size:13px; color:#888; }
-.oa-shared-chat .oa-chat-examples button { background:none; text-align:left; padding:6px 0; color:#666; font-size:15px; }
+.oa-shared-chat .oa-chat-examples { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; max-width:640px; padding:0 0 10px; }
+.oa-shared-chat .oa-chat-examples p { grid-column:1 / -1; margin:0 0 2px; font-size:12px; color:#777; }
+.oa-shared-chat .oa-chat-examples button { min-width:0; min-height:34px; border:1px solid #e8e8e8; border-radius:12px; background:#f7f7f7; text-align:center; padding:6px 2px; color:#555; font-size:14px; line-height:1.4; white-space:nowrap; }
+.oa-shared-chat .oa-chat-examples button:hover:not(:disabled) { background:#ededed; }
+.oa-shared-chat .oa-chat-examples button:focus-visible { outline:2px solid #555; outline-offset:2px; }
+.oa-shared-chat .oa-chat-examples button:disabled { opacity:0.55; cursor:not-allowed; }
 .oa-shared-chat .oa-question-edit { display:block; margin:6px 0 0 auto; padding:0; font-size:12px; color:#777; background:none; }
 .oa-shared-chat .oa-answer-actions { display:flex; align-items:flex-start; flex-wrap:wrap; gap:16px; margin-top:12px; color:#777; font-size:13px; }
 .oa-shared-chat .oa-answer-actions button { display:inline-flex; align-items:center; gap:6px; color:inherit; background:none; padding:4px 0; }
@@ -48,7 +51,7 @@
 .oa-chat-status > .ready { background:#238d5b; }
 .oa-chat-status > .unavailable { background:#b53d3d; }
 @media(max-width:560px) { .oa-shared-chat .oa-chat-messages { padding:18px 14px; } .oa-shared-chat .empty-hero p { font-size:14px; } .oa-shared-chat .oa-chat-composer { min-height:62px; padding:9px 10px 9px 16px; } }
-@media(max-height:520px) { .oa-shared-chat .oa-chat-examples { display:none; } .oa-shared-chat .empty-hero { padding:10px; min-height:70px; } .oa-shared-chat .empty-hero h2 { font-size:22px; margin-bottom:8px; } }
+@media(max-height:520px) { .oa-shared-chat .oa-chat-examples { padding-bottom:6px; } .oa-shared-chat .oa-chat-examples p { display:none; } .oa-shared-chat .oa-chat-examples button { min-height:30px; padding-block:4px; } .oa-shared-chat .empty-hero { padding:10px; min-height:70px; } .oa-shared-chat .empty-hero h2 { font-size:22px; margin-bottom:8px; } }
 /* Match OA's 960px drawer breakpoint, including widths above the old 820px layout. */
 .oa-app.oa-workspace .mobile-sidebar:not(.open) { visibility:hidden; box-shadow:none; pointer-events:none; }
 .oa-app.oa-workspace .workspace-sidebar-toggle, .oa-app.oa-workspace .mobile-menu-button { color:#171717; }
