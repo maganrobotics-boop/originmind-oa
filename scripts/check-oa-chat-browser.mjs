@@ -117,7 +117,10 @@ try {
         await button.click();
         assert.equal(await button.getAttribute('aria-expanded'),'true');
       }
-      assert.doesNotMatch(await nav.innerText(), /官网 OEM 申请|流程与规则/u);
+      assert.doesNotMatch(await nav.innerText(), /官网 OEM 申请|流程与规则|大模型与资料|AI 聊天/u);
+      assert.equal(await nav.locator('[data-sidebar-section="knowledge"]').innerText(), '实验室大模型');
+      assert.equal(await nav.getByRole('navigation', {name:'实验室大模型',exact:true}).count(), 1);
+      assert.equal(await nav.getByRole('button', {name:'AI 助手',exact:true}).isVisible(), true);
       assert.equal(await nav.getByRole('button',{name:'打开个人账户菜单',exact:true}).getAttribute('title'), '测试成员');
       assert.equal(await nav.getByRole('button',{name:'打开个人账户菜单',exact:true}).isVisible(),true);
       await page.screenshot({ path:resolve(output,`${name}-navigation.png`),fullPage:true });
@@ -131,7 +134,7 @@ try {
       assert.equal(await page.getByRole('button',{name:'聊天选项',exact:true}).count(),0);
       assert.equal(await page.locator('.main-shell .stats-grid').isVisible(),true);
       if (!desktop) await page.getByRole('button',{name:'打开导航',exact:true}).click();
-      await nav.getByRole('button',{name:'AI 聊天',exact:true}).click();
+      await nav.getByRole('button',{name:'AI 助手',exact:true}).click();
       assert.equal(await input.inputValue(),'切换审批与资料后保留的问题');
       assert.equal(await page.locator('.message.assistant math').count(),4);
       if (desktop) await page.getByRole('button',{name:'收起侧栏',exact:true}).click();

@@ -27,7 +27,7 @@ const result = '# 项目周报\n\n## 已完成\n\n**原型装配已完成。**\n
 const browser = await chromium.launch({ headless:true });
 const results = [];
 try {
-  for (const [name, width, height] of [['desktop',1280,900],['mobile',390,844],['landscape',844,390]]) {
+  for (const [name, width, height] of [['desktop',1280,900],['mobile',390,844],['mobile-small',320,700],['landscape',844,390]]) {
     const context = await browser.newContext({ viewport:{ width,height }, serviceWorkers:'block', acceptDownloads:true });
     const page = await context.newPage(), requests = [], errors = [], held = [], tasks = new Map(), ids = new Map();
     let clock = 10, mode = 'success', loseCreate = false, unavailable = false;
@@ -82,7 +82,27 @@ try {
     try {
       await page.goto(origin); await page.locator('.oa-shared-chat').waitFor();
       if (name==='desktop') await page.getByRole('button',{name:'收起侧栏',exact:true}).click();
-      assert.equal(await page.getByRole('heading',{name:'需要实验室大模型做什么？',exact:true}).isVisible(),true);
+      assert.equal(await page.getByRole('heading',{name:'实验室大模型能做什么',exact:true}).isVisible(),true);
+      assert.equal(await page.locator('.empty-hero p').innerText(),'知识问答、资料整理、会议纪要、项目总结等');
+      assert.equal(await page.locator('.empty-hero p').isVisible(),true);
+      assert.ok(await page.locator('.empty-hero').evaluate(element => [...element.querySelectorAll('h2,p')].every(child => child.scrollWidth <= child.clientWidth + 1)));
+      const hints = page.locator('.oa-chat-examples button');
+      assert.deepEqual(await hints.allTextContents(),['知识问答','资料整理','会议纪要','项目总结']);
+      if (height > 520) {
+        const prompts = [
+          '实验室有哪些研究方向？',
+          '请把材料整理成结构清晰的 Word 文档，保留关键事实。',
+          '请整理成会议纪要，区分讨论、决定和待办，未明确的信息标注待补充。',
+          '请把材料整理成项目总结文档，列出已完成工作、主要成果、存在问题和下一步计划，未明确的信息标注待补充。',
+        ];
+        for (let index = 0; index < prompts.length; index++) {
+          await hints.nth(index).click();
+          assert.equal(await input.inputValue(),prompts[index]);
+        }
+        assert.equal(createRequests().length,0,'choosing a capability must not submit a task');
+        assert.equal(requests.filter(item => item.path === '/api/lab-ai/ask' && item.method === 'POST').length,0,'choosing a capability must not call the model');
+        await input.fill('');
+      }
       assert.equal(await page.locator('.oa-shared-chat a[href="/ai-workbench"]').count(),0);
       assert.equal(await page.getByRole('button',{name:'导入 TXT 或 MD 文档',exact:true}).isVisible(),true);
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
@@ -150,7 +170,7 @@ try {
       assert.ok(requests.filter(item=>item.method==='POST').every(item=>['/api/lab-ai/ask','/api/lab-ai/tasks'].includes(item.path)));
       assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
       await page.screenshot({path:resolve(output,`${name}-conversation.png`),fullPage:true});
-      results.push({name,passed:true,ordinaryChat:true,rawImport:true,safeText:true,documentPreview:true,realDocxDownload:true,continueEditing:true,manualRetry:true,idempotentRecovery:true,cancelLateResponse:true,restoreSaved:true,serviceFailure:true,errors});
+      results.push({name,passed:true,approvedCopy:true,capabilityHints:true,ordinaryChat:true,rawImport:true,safeText:true,documentPreview:true,realDocxDownload:true,continueEditing:true,manualRetry:true,idempotentRecovery:true,cancelLateResponse:true,restoreSaved:true,serviceFailure:true,errors});
       console.log(`${name}: unified chat, import, preview, DOCX, recovery, cancellation and history passed`);
     } catch (error) { await page.screenshot({path:resolve(output,`${name}-failure.png`),fullPage:true}); results.push({name,passed:false,error:error.message,errors}); throw error; }
     finally { await context.close(); }

@@ -6,6 +6,7 @@
 .oa-shared-chat .empty-hero { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; min-height:120px; width:100%; margin:0; padding:32px 12px; text-align:center; }
 .oa-workspace .oa-shared-chat .chat-app .empty-hero { width:100%; max-width:none; align-self:stretch; }
 .oa-shared-chat .empty-hero h2 { font-size:clamp(24px,3.2vw,32px); line-height:1.4; font-weight:700; margin:0 0 16px; color:#171717; }
+.oa-shared-chat .empty-hero h2, .oa-shared-chat .empty-hero p { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
 .oa-shared-chat .empty-hero p { margin:0; color:#808080; font-size:16px; line-height:1.6; }
 .oa-shared-chat .oa-chat-turn { width:100%; min-width:0; max-width:none; margin:0 auto 24px; }
 .oa-shared-chat .message { max-width:none; min-width:0; width:100%; margin:0; }
