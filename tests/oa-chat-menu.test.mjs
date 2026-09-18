@@ -15,7 +15,7 @@ test('chat header replaces duplicate identity with the conversation menu and kee
 test('approval dashboard has no AI shortcut while the knowledge sidebar and admission gates remain', async () => {
   const page = await read('app/page.tsx');
   assert.doesNotMatch(page, /dashboard-ai-entry|进入 OA 内部实验室 AI/u);
-  assert.match(page, /tab: "ask", label: "AI 聊天"/u);
+  assert.match(page, /tab: "ask", label: "AI 助手"/u);
   assert.match(page, /className="stats-grid"/u);
   assert.match(page, /if \(needsNda\) return/u);
   assert.match(page, /if \(!session\.registered\) return/u);
@@ -49,4 +49,12 @@ test('accessible header controls restore focus and never use global cross-page c
   assert.match(context,/onCloseAutoFocus=/u);
   assert.match(context,/requestAnimationFrame/u);
   assert.doesNotMatch(panel+context,/dispatchEvent|addEventListener\(['"]clear/u);
+});
+
+test('sidebar uses laboratory model and AI assistant names without changing destinations', async () => {
+  const page = await read('app/page.tsx');
+  assert.ok(page.includes('<span>实验室大模型</span>'));
+  assert.ok(page.includes('aria-label="实验室大模型"'));
+  assert.doesNotMatch(page, /大模型与资料|label: "AI 聊天"/u);
+  assert.ok(page.includes('if (tab === "ask") conversation.showAi(); onKnowledgeTab(tab);'));
 });

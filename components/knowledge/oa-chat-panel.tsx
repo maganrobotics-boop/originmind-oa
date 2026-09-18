@@ -143,10 +143,10 @@ function OaAiChatPanel() {
     catch { setError('浏览器未允许复制，请长按回答选择文字。'); }
   };
 
-  return <section className="oa-shared-chat" aria-label="OA 实验室 AI 聊天">
+  return <section className="oa-shared-chat" aria-label="OA 实验室 AI 助手">
     <div className="chat-app oa-chat-surface">
       <div className="messages oa-chat-messages" ref={scroll} onScroll={() => { const element = scroll.current; if (element) stickToEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96; }}>
-        {timeline.length === 0 ? <section className="empty-hero" aria-labelledby={`${composerId}-welcome`}><h2 id={`${composerId}-welcome`}>需要实验室大模型做什么？</h2><p>知识问答、整理资料、生成文档，都在这里完成</p></section> : timeline.map(entry => {
+        {timeline.length === 0 ? <section className="empty-hero" aria-labelledby={`${composerId}-welcome`}><h2 id={`${composerId}-welcome`}>实验室大模型能做什么</h2><p>知识问答、资料整理、会议纪要、项目总结等</p></section> : timeline.map(entry => {
           if (entry.type !== 'answer') return <OaChatDocumentEvent key={entry.id} entry={entry} documents={documents} />;
           const turn = entry.turn;
           return <div className="oa-chat-turn" key={turn.id}>
@@ -161,7 +161,7 @@ function OaAiChatPanel() {
         {asking && <div className="knowledge-answer-loading" role="status">正在检索并生成回答…</div>}
       </div>
       <div className="composer-area oa-chat-composer-area">
-        {!timeline.length && <div className="oa-chat-examples"><p>可以帮你</p>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} onClick={() => { if (hint.label === '实验室知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>}
+        {!timeline.length && <div className="oa-chat-examples"><p>可以帮你</p>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>}
         {(error || documents.error) && <p className="oa-chat-error" role="alert">{error || documents.error}</p>}
         <OaDocumentSource documents={documents} />
         <form className="composer oa-chat-composer" onSubmit={submit}>

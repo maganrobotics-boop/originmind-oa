@@ -6,9 +6,12 @@ const file = (name, text) => new File([text], name);
 const task = (values = {}) => ({ id: '11111111-2222-4333-8444-555555555555', title: '测试文档', status: 'running', attempts: 1, updated_at: 10, ...values });
 
 test('function hints cover document delivery and ordinary laboratory questions', () => {
-  assert.equal(CHAT_DOCUMENT_HINTS.length, 4);
-  assert.ok(CHAT_DOCUMENT_HINTS.slice(0, 3).every(hint => wantsChatDocument(hint.prompt)));
-  assert.equal(wantsChatDocument(CHAT_DOCUMENT_HINTS[3].prompt), false);
+  assert.deepEqual(CHAT_DOCUMENT_HINTS.map(hint => hint.label), ['知识问答', '资料整理', '会议纪要', '项目总结']);
+  assert.equal(wantsChatDocument(CHAT_DOCUMENT_HINTS[0].prompt), false);
+  assert.ok(CHAT_DOCUMENT_HINTS.slice(1).every(hint => wantsChatDocument(hint.prompt)));
+  assert.equal(planChatDocument(CHAT_DOCUMENT_HINTS[2].prompt).kind, 'meeting_minutes');
+  assert.equal(planChatDocument(CHAT_DOCUMENT_HINTS[3].prompt).kind, 'document');
+  assert.match(CHAT_DOCUMENT_HINTS[3].prompt, /项目总结文档/u);
 });
 test('explicit document requests are routed to task execution', () => {
   for (const value of ['请生成 Word 文档', '把上面的内容整理成会议纪要', '编写一个项目方案', '给我写一份报告', 'create a Word document', '导出 markdown 文件']) assert.equal(wantsChatDocument(value), true, value);
@@ -83,7 +86,7 @@ test('a failed task may advance to an explicitly retried state', () => {
 test('shared chat contains no standalone workbench link and imports through the same timeline', async () => {
   const source = await readFile(new URL('../components/knowledge/oa-chat-panel.tsx', import.meta.url), 'utf8');
   assert.doesNotMatch(source, /href=["']\/ai-workbench/u);
-  for (const marker of ['需要实验室大模型做什么？', 'OaDocumentUpload', 'OaChatDocumentEvent', 'documents.shouldHandle', 'OaDocumentDialogs']) assert.ok(source.includes(marker));
+  for (const marker of ['实验室大模型能做什么', 'OaDocumentUpload', 'OaChatDocumentEvent', 'documents.shouldHandle', 'OaDocumentDialogs']) assert.ok(source.includes(marker));
   assert.ok(source.includes("fetch('/api/lab-ai/ask'"));
 });
 test('document UI preserves owner API, safe rendering, idempotency and cleanup boundaries', async () => {
@@ -94,4 +97,12 @@ test('document UI preserves owner API, safe rendering, idempotency and cleanup b
   assert.ok(source.includes('mounted.current = false'));
   assert.ok(source.includes('controller.abort()'));
   assert.doesNotMatch(source, /dangerouslySetInnerHTML|localStorage\.|fetch\(['"]https?:|\/api\/knowledge/u);
+});
+
+test('laboratory welcome uses approved copy and preserves ordinary-question source reset', async () => {
+  const source = await readFile(new URL('../components/knowledge/oa-chat-panel.tsx', import.meta.url), 'utf8');
+  assert.ok(source.includes('>实验室大模型能做什么</h2>'));
+  assert.ok(source.includes('<p>知识问答、资料整理、会议纪要、项目总结等</p>'));
+  assert.ok(source.includes("hint.label === '知识问答') documents.useSource(null)"));
+  assert.doesNotMatch(source, /需要实验室大模型做什么[？?]|整理资料 · 生成 Word|项目周报 · 编写方案/u);
 });
