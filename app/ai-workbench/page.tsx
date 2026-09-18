@@ -17,8 +17,8 @@ const examples: Record<string, string> = {
 async function request(body?: object, query = ''): Promise<{ task?: Task; tasks?: Task[] }> {
   const response = await fetch(`/api/lab-ai/tasks${query}`, { method: body ? 'POST' : 'GET', headers: { accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}) },
     credentials: 'same-origin', cache: 'no-store', ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(body ? 80000 : 15000) });
-  const data = await response.json().catch(() => ({})) as { task?: Task; tasks?: Task[]; error?: string };
-  if (!response.ok) throw new Error(data.error || '任务服务暂不可用。');
+  const data = await response.json().catch(() => null) as { task?: Task; tasks?: Task[]; error?: string } | null;
+  if (!response.ok || !data || typeof data !== 'object') throw new Error(typeof data?.error === 'string' ? data.error : '任务服务未返回有效结果，请检查登录或服务状态。');
   return data;
 }
 function failureText(code: string) {
@@ -41,11 +41,18 @@ export default function AiWorkbench() {
   const [kind, setKind] = useState('document'), [title, setTitle] = useState(''), [instruction, setInstruction] = useState(''), [material, setMaterial] = useState('');
   const [tasks, setTasks] = useState<Task[]>([]), [selected, setSelected] = useState<Task | null>(null);
   const [error, setError] = useState(''), [busy, setBusy] = useState(false), [loading, setLoading] = useState(true), [ready, setReady] = useState(false);
+  const [serviceError, setServiceError] = useState('');
   const submitGuard = useRef(false), key = useRef({ body: '', id: '' }), pendingActions = useRef(new Set<string>());
   const activeId = useRef(''), mounted = useRef(true);
   const refresh = useCallback(async () => {
-    const data = await request();
-    if (mounted.current) { setTasks(data.tasks || []); setReady(true); }
+    try {
+      const data = await request();
+      if (!Array.isArray(data.tasks)) throw new Error('任务服务响应不完整，暂不能执行。');
+      if (mounted.current) { setTasks(data.tasks); setReady(true); setServiceError(''); }
+    } catch (cause) {
+      if (mounted.current) { setReady(false); setServiceError(cause instanceof Error && cause.name !== 'TimeoutError' ? cause.message : '任务服务连接超时，请重试检查。'); }
+      throw cause;
+    }
     const id = activeId.current;
     if (id) { const detail = await request(undefined, `?id=${encodeURIComponent(id)}`); if (mounted.current && activeId.current === id) setSelected(detail.task || null); }
   }, []);
@@ -53,7 +60,7 @@ export default function AiWorkbench() {
     mounted.current = true;
     const id = new URLSearchParams(window.location.search).get('id');
     if (id && /^[a-f0-9-]{36}$/u.test(id)) activeId.current = id;
-    void refresh().catch(cause => { if (mounted.current) { setReady(false); setError(cause instanceof Error ? cause.message : '任务加载失败。'); } }).finally(() => { if (mounted.current) setLoading(false); });
+    void refresh().catch(() => {}).finally(() => { if (mounted.current) setLoading(false); });
     return () => { mounted.current = false; };
   }, [refresh]);
   useEffect(() => {
@@ -61,6 +68,13 @@ export default function AiWorkbench() {
     const interval = window.setInterval(() => { if (document.visibilityState === 'visible') void refresh().catch(() => {}); }, 5000);
     return () => window.clearInterval(interval);
   }, [tasks, selected?.status, refresh]);
+  async function checkService() {
+    if (pendingActions.current.has('check-service')) return;
+    pendingActions.current.add('check-service'); setLoading(true); setError('');
+    try { await refresh(); }
+    catch (cause) { setError(cause instanceof Error && cause.name !== 'TimeoutError' ? cause.message : '连接超时，未提交任务；原材料仍保留在本页。'); }
+    finally { setLoading(false); pendingActions.current.delete('check-service'); }
+  }
   async function choose(id: string) {
     activeId.current = id; setSelected(null); setError('');
     try { const data = await request(undefined, `?id=${encodeURIComponent(id)}`); if (mounted.current && activeId.current === id) setSelected(data.task || null); }
@@ -74,7 +88,8 @@ export default function AiWorkbench() {
     finally { pendingActions.current.delete(guard); }
   }
   async function submit(event: FormEvent) {
-    event.preventDefault(); if (submitGuard.current || !ready) return;
+    event.preventDefault(); if (submitGuard.current) return;
+    if (!ready) { setError(serviceError || '任务服务尚未就绪，请先检查任务服务；没有提交任务。'); return; }
     submitGuard.current = true; setBusy(true); setError('');
     const resolvedTitle = title.trim() || instruction.trim().split(/[\r\n。！？]/u)[0].slice(0, 100);
     const payload = { kind, title: resolvedTitle, instruction, material }, signature = JSON.stringify(payload);
@@ -102,11 +117,11 @@ export default function AiWorkbench() {
   return <main className="ai-workbench">
     <header><Link href="/">← 返回 OA</Link><h1>AI 工作台</h1><p>交给 AI 完成任务，直接领取可编辑的成果文件。</p></header>
     <div className="workbench-note">文字材料 → 百炼生成正文 → 制作并校验 Word / Markdown → 私有归档。仅本人可见，不自动公开、不代替审批。第一版支持 TXT、Markdown 和粘贴文字；图片与公式暂不转换。</div>
-    {error && <div className="workbench-error" role="alert">{error} <button type="button" onClick={() => { setError(''); void refresh().catch(cause => { setReady(false); setError(cause.message); }); }}>刷新核对</button></div>}
+    {(error || serviceError) && <div className="workbench-error" role="alert">{error || serviceError} <button type="button" disabled={loading} onClick={() => void checkService()}>重新检查（保留材料）</button></div>}
     <div className="workbench-grid">
       <section className="workbench-card"><h2>交给 AI 做什么</h2>
         <div className="workbench-actions" aria-label="常用任务">{Object.entries(TASK_KINDS).map(([value, label]) => <button key={value} type="button" disabled={busy} onClick={() => { setKind(value); setInstruction(examples[value]); }}>{String(label)}</button>)}</div>
-        <form onSubmit={submit}>
+        <form onSubmit={submit} onInvalid={() => setError('请填写完整的任务要求和文字材料；两项都至少需要2个字。')}>
           <label>任务要求<textarea required minLength={2} maxLength={2000} rows={4} value={instruction} onChange={e => setInstruction(e.target.value)} placeholder="例如：把这些汇报整理成项目周报，给我可编辑的 Word 文件。" /></label>
           <label>成果标题（可留空，按任务要求命名）<input maxLength={100} value={title} onChange={e => setTitle(e.target.value)} placeholder="例如：机器人项目周报" /></label>
           <label>文字材料<textarea required minLength={2} maxLength={20000} rows={10} value={material} onChange={e => setMaterial(e.target.value)} placeholder="粘贴需要处理的原文。仅粘贴链接不会读取链接中的内容。" /></label>
@@ -120,7 +135,11 @@ export default function AiWorkbench() {
             } catch (cause) { setError(cause instanceof Error ? cause.message : '读取文件失败。'); }
             finally { picker.value = ''; }
           }} /></label><small>{material.length.toLocaleString()} / 20,000 字</small></div>
-          <button className="workbench-primary" type="submit" disabled={busy || loading || !ready}>{busy ? '任务处理中，可在右侧查看状态…' : '执行任务并交付文件'}</button>
+          <div id="workbench-submit-status" role="status" aria-live="polite" className={(error || serviceError) ? 'workbench-error' : 'workbench-note'}>
+            {loading ? '正在检查任务服务，请稍候…' : (error || serviceError || (ready ? '任务服务已就绪。' : '任务服务尚未就绪，请点击下方按钮检查。'))}
+            {!ready && !loading && <p>尚未提交任务。请保留本页材料，不必反复点击或刷新整个页面。</p>}
+          </div>
+          <button className="workbench-primary" type={ready ? 'submit' : 'button'} disabled={busy || loading} aria-describedby="workbench-submit-status" onClick={ready ? undefined : () => void checkService()}>{loading ? '正在检查任务服务…' : busy ? '任务处理中，请在任务与成果中查看…' : ready ? '执行任务并交付文件' : '检查任务服务（保留材料）'}</button>
         </form>
       </section>
       <section className="workbench-card workbench-output"><h2>任务与成果</h2><div className="workbench-task-list" aria-label="本人任务记录">{loading ? <p>正在读取任务记录…</p> : tasks.length ? tasks.map(task => <button key={task.id} type="button" aria-pressed={selected?.id === task.id} onClick={() => void choose(task.id)}><strong>{task.title}</strong><span>{statuses[task.status] || task.status}</span></button>) : <p>提交任务后，材料与成果会保存在这里，刷新后可重新查看。</p>}</div>
