@@ -11,6 +11,11 @@ on:
         description: 'Type the exact Worker:D1-UUID:hostname confirmation from the production environment'
         required: true
         type: string
+      enable_ai_workbench:
+        description: '初始化并启用 OA AI 工作台（含一次真实百炼自检，使用现有模型预算）'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -88,6 +93,7 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           PUBLIC_LAB_AI_SERVICE_TOKEN: ${{ secrets.PUBLIC_LAB_AI_SERVICE_TOKEN }}
           OA_PRODUCTION_RELEASE_CONFIRM: ${{ inputs.confirmation }}
+          OA_PRODUCTION_ENABLE_AI_WORKBENCH: ${{ inputs.enable_ai_workbench && 'true' || 'false' }}
         run: npm run release:standalone:production
       - name: Preserve immutable release and recovery evidence
         if: always()
