@@ -1,11 +1,12 @@
 "use client";
 
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import { Bot, Forward, MessageCircle, MoreHorizontal, Plus, Trash2 } from 'lucide-react';
+import { Bot, Check, MessageCircle, MoreHorizontal, Plus, RotateCcw, Trash2 } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { DIRECT_MESSAGE_MAX_LENGTH } from '@/lib/direct-message-contract.mjs';
 import { messageEnvelope, sendMemberMessage, type ConversationPeer, type MessageEnvelope } from '@/lib/oa-direct-message-client';
+import type { ChatIndicatorSnapshot } from '@/lib/oa-chat-indicators.mjs';
 import './oa-conversations.css';
 
 type ForwardContent = { body: string; omittedImages?: number };
@@ -13,9 +14,10 @@ type CurrentUser = { email: string; displayName: string };
 type ContextValue = {
   user: CurrentUser; peer: ConversationPeer | null; visible: boolean;
   aiEpoch: number; aiDirty: boolean; setAiDirty: (dirty: boolean) => void; dmClearEpoch: number; messageEpoch: number;
+  requestStatus: ChatIndicatorSnapshot | null; setRequestStatus: (value: ChatIndicatorSnapshot | null) => void;
   lastAnswer: ForwardContent | null; setLastAnswer: (answer: ForwardContent | null) => void;
   drafts: Record<string, string>; setMemberDraft: (email: string, body: string) => void;
-  showAi: () => void; newAi: () => void; clearCurrent: () => boolean;
+  showAi: () => void; openPeer: (peer: ConversationPeer) => void; newAi: () => void; clearCurrent: () => boolean;
   chooseMember: () => void; forward: (content: ForwardContent) => void;
 };
 const Context = createContext<ContextValue | null>(null);
@@ -32,11 +34,12 @@ export function OaConversationProvider({ currentUser, visible, onOpenChat, child
   const [aiDirty, setAiDirty] = useState(false);
   const [dmClearEpoch, setDmClearEpoch] = useState(0);
   const [messageEpoch, setMessageEpoch] = useState(0);
+  const [requestStatus, setRequestStatus] = useState<ChatIndicatorSnapshot | null>(null);
   const [lastAnswer, setLastAnswer] = useState<ForwardContent | null>(null);
   const [drafts, setDrafts] = useState<Record<string, string>>({});
   const [picker, setPicker] = useState<{ content: ForwardContent | null } | null>(null);
   const showAi = () => { setPeer(null); onOpenChat(); };
-  const resetAi = () => { setAiEpoch(value => value + 1); setLastAnswer(null); setAiDirty(false); setPeer(null); onOpenChat(); };
+  const resetAi = () => { setAiEpoch(value => value + 1); setLastAnswer(null); setAiDirty(false); setRequestStatus(null); setPeer(null); onOpenChat(); };
   const newAi = () => { if (window.confirm('开始新的 AI 聊天？仅清除当前 AI 对话，不删除资料、审批或真人消息。')) resetAi(); };
   const clearCurrent = () => {
     if (peer) {
@@ -45,9 +48,9 @@ export function OaConversationProvider({ currentUser, visible, onOpenChat, child
     return false;
   };
   return <Context.Provider value={{
-    user, peer, visible, aiEpoch, aiDirty, setAiDirty, dmClearEpoch, messageEpoch, lastAnswer, setLastAnswer, drafts,
+    user, peer, visible, aiEpoch, aiDirty, setAiDirty, dmClearEpoch, messageEpoch, requestStatus, setRequestStatus, lastAnswer, setLastAnswer, drafts,
     setMemberDraft: (email, body) => setDrafts(current => ({ ...current, [email]: body })),
-    showAi, newAi, clearCurrent, chooseMember: () => setPicker({ content: null }), forward: content => setPicker({ content }),
+    showAi, openPeer: selected => { setPeer(selected); onOpenChat(); }, newAi, clearCurrent, chooseMember: () => setPicker({ content: null }), forward: content => setPicker({ content }),
   }}>
     {children}
     {picker && <MemberPicker key={picker.content ? 'forward' : 'chat'} content={picker.content} user={user} onClose={() => setPicker(null)} onSelect={selected => { setPeer(selected); setPicker(null); onOpenChat(); }} onSent={selected => { setPeer(selected); setMessageEpoch(value => value + 1); setPicker(null); onOpenChat(); }} />}
@@ -60,12 +63,34 @@ export function OaConversationTitle({ children }: { children: ReactNode }) {
 }
 export function OaConversationMenu() {
   const chat = useOaConversation();
+  const userEmail = chat.user.email;
   const focusComposer = useRef(false);
   const pendingNavigation = useRef<(() => void) | null>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const [navigationPending, setNavigationPending] = useState(false);
+  const [open, setOpen] = useState(false);
+  const [members, setMembers] = useState<ConversationPeer[]>([]);
+  const [loadingMembers, setLoadingMembers] = useState(false);
+  const [memberError, setMemberError] = useState('');
+  const [reload, setReload] = useState(0);
+  useEffect(() => {
+    if (!open) return;
+    const controller = new AbortController();
+    setMembers([]); setMemberError(''); setLoadingMembers(true);
+    void (async () => {
+      try {
+        const response = await fetch('/api/direct-messages?summary=1', { credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' }, signal: controller.signal });
+        const data = await response.json() as { conversations?: Array<{ peer: ConversationPeer }>; error?: string };
+        if (!response.ok || !Array.isArray(data.conversations)) throw new Error(data.error || '成员列表暂不可用');
+        const peers = data.conversations.map(item => item.peer).filter(item => item && typeof item.email === 'string' && typeof item.name === 'string' && item.email && item.name && item.email.toLowerCase() !== userEmail.toLowerCase());
+        if (!controller.signal.aborted) setMembers([...new Map(peers.map(item => [item.email.toLowerCase(), item])).values()].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN')));
+      } catch { if (!controller.signal.aborted) setMemberError('成员列表暂不可用，点击重试'); }
+      finally { if (!controller.signal.aborted) setLoadingMembers(false); }
+    })();
+    return () => controller.abort();
+  }, [open, userEmail, reload]);
   const afterMenuCloses = (action: () => void) => { pendingNavigation.current = action; setNavigationPending(true); };
-  return <DropdownMenu modal={false}><DropdownMenuTrigger asChild><button ref={trigger} disabled={navigationPending} type="button" className="oa-conversation-menu oa-chat-more-button" aria-label="聊天选项"><MoreHorizontal size={24} /></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="oa-conversation-popover oa-chat-clear-menu" onCloseAutoFocus={event => {
+  return <DropdownMenu modal={false} open={open} onOpenChange={setOpen}><DropdownMenuTrigger asChild><button ref={trigger} disabled={navigationPending} type="button" className="oa-conversation-menu oa-chat-more-button" aria-label="聊天选项"><MoreHorizontal size={24} /></button></DropdownMenuTrigger><DropdownMenuContent align="end" className="oa-conversation-popover oa-chat-clear-menu" onCloseAutoFocus={event => {
     if (pendingNavigation.current) {
       event.preventDefault();
       const navigate = pendingNavigation.current;
@@ -80,9 +105,13 @@ export function OaConversationMenu() {
       window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(chat.peer ? '.oa-member-chat textarea' : '.oa-conversation-ai:not([hidden]) textarea')?.focus());
     }
   }}>
-    <DropdownMenuItem onSelect={() => afterMenuCloses(chat.chooseMember)}><MessageCircle />与成员聊天</DropdownMenuItem>
-    {chat.peer && <DropdownMenuItem onSelect={() => afterMenuCloses(chat.showAi)}><Bot />返回 AI 聊天</DropdownMenuItem>}
-    {!chat.peer && chat.lastAnswer && <DropdownMenuItem onSelect={() => { const answer = chat.lastAnswer; if (answer) afterMenuCloses(() => chat.forward(answer)); }}><Forward />转发最近回答</DropdownMenuItem>}
+    <DropdownMenuItem aria-current={!chat.peer ? 'true' : undefined} onSelect={() => afterMenuCloses(chat.showAi)}><Bot /><span>AI 助手</span>{!chat.peer && <Check className="oa-conversation-selected" aria-hidden="true" />}</DropdownMenuItem>
+    <div className="oa-conversation-peer-list" role="group" aria-label="可聊天成员">
+      {loadingMembers && <DropdownMenuItem disabled>正在加载成员…</DropdownMenuItem>}
+      {memberError && <DropdownMenuItem onSelect={event => { event.preventDefault(); setReload(value => value + 1); }}><RotateCcw /><span>{memberError}</span></DropdownMenuItem>}
+      {!loadingMembers && !memberError && !members.length && <DropdownMenuItem disabled>暂无可聊天成员</DropdownMenuItem>}
+      {members.map(member => <DropdownMenuItem key={member.email} aria-label={member.name} title={member.name} aria-current={chat.peer?.email === member.email ? 'true' : undefined} onSelect={() => afterMenuCloses(() => chat.openPeer(member))}><MessageCircle /><span>{member.name}</span>{chat.peer?.email === member.email && <Check className="oa-conversation-selected" aria-hidden="true" />}</DropdownMenuItem>)}
+    </div>
     <DropdownMenuSeparator />
     <DropdownMenuItem disabled={!chat.peer && !chat.aiDirty} onSelect={() => { focusComposer.current = chat.clearCurrent(); }}><Trash2 />{chat.peer ? '清空本页显示' : '清空聊天'}</DropdownMenuItem>
   </DropdownMenuContent></DropdownMenu>;
