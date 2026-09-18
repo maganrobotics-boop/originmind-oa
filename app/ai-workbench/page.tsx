@@ -10,7 +10,7 @@ const statuses: Record<string, string> = { queued: '已收材料，待执行', r
 async function request(body?: object, query = ''): Promise<{ task?: Task; tasks?: Task[] }> {
   const response = await fetch(`/api/lab-ai/tasks${query}`, { method: body ? 'POST' : 'GET', headers: { accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}) },
     credentials: 'same-origin', cache: 'no-store', ...(body ? { body: JSON.stringify(body) } : {}), signal: AbortSignal.timeout(body ? 80000 : 15000) });
-  const data = await response.json().catch(() => ({}));
+  const data = await response.json().catch(() => ({})) as { task?: Task; tasks?: Task[]; error?: string };
   if (!response.ok) throw new Error(data.error || '任务服务暂不可用。');
   return data;
 }

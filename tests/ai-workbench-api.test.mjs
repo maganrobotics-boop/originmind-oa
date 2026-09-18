@@ -38,6 +38,8 @@ beforeEach(()=>{
   sqlite.exec(readFileSync(new URL('../migrations/oa/0002_ai_workbench.sql',import.meta.url),'utf8'));
   for(const id of ['alice','bob']){
     sqlite.prepare("INSERT INTO members(id,full_name,chatgpt_account,account_user_id,status,mutation_revision,nda_accepted_at,nda_agreement_version) VALUES (?,?,?,?,'active','revision-1','accepted','nda-1')").run(id,id,`${id}@example.com`,`email:${id}@example.com`);
+    sqlite.prepare("UPDATE members SET nda_approval_id=? WHERE id=?").run(`nda-${id}`,id);
+    sqlite.prepare("INSERT INTO approvals(id,type,title,project,requester_name,requester_email,created_at,updated_at,status,current_step,owner,payload_json) VALUES (?,'保密协议','保密协议','测试',?,?,'now','now','已归档','归档',?,?)").run(`nda-${id}`,id,`${id}@example.com`,id,JSON.stringify({signerAccountUserId:`email:${id}@example.com`,agreementVersion:'nda-1'}));
     sqlite.prepare("INSERT INTO auth_identities(id,member_id,provider,provider_subject) VALUES (?,?,'feishu',?)").run(id,id,`cli_test:tenant_test:ou_${id}123`);
   }
   db={prepare:adapter};env={DB:db,OA_AI_TASKS_ENABLED:'true',FEISHU_AI_TASKS_ENABLED:'true',FEISHU_LOGIN_APP_ID:'cli_test',FEISHU_LOGIN_APP_SECRET:'dummy-test-secret',FEISHU_LOGIN_TENANT_KEY:'tenant_test',FEISHU_AI_ENCRYPT_KEY:'unit-test-encryption-value',FEISHU_AI_VERIFICATION_TOKEN:'unit-test-verification-value'};
@@ -151,4 +153,12 @@ test('revoked members or changed Feishu namespace cannot receive generated conte
 });
 test('disabled task processing does not generate, deliver or consume the source inbox',async()=>{
   await create();env.OA_AI_TASKS_ENABLED='false';await runner.processAiWorkbench(env);assert.equal(modelCalls,0);assert.equal(sent.length,0);
+});
+
+test('revoked NDA archives block new Feishu tasks and late task results despite cached admission',async()=>{
+  const row=await create();
+  await store.runTask(db,row.id,async()=>{sqlite.exec("UPDATE approvals SET status='已作废' WHERE id='nda-alice'");return output;});
+  assert.equal(state(row.id).status,'failed');assert.equal(state(row.id).result,'');
+  const result=await feishu.receiveFeishuTask(await eventRequest(),env);assert.equal((await result.json()).ignored,true);
+  assert.equal(sqlite.prepare('SELECT count(*) n FROM ai_workbench_tasks').get().n,1);
 });

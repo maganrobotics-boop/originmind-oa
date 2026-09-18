@@ -1,6 +1,6 @@
 import { parseFeishuCommand, parseFeishuText, splitFeishuText, validTaskInput } from './ai-workbench-core.mjs';
 import { feishuDigest, readFeishuEvent } from './ai-workbench-feishu-crypto.mjs';
-import { createTask, type TaskActor, type TaskRow } from './ai-workbench-store';
+import { createTask, taskNdaGuard, type TaskActor, type TaskRow } from './ai-workbench-store';
 
 export type TaskEnv = { DB: D1Database; OA_AI_TASKS_ENABLED?: string; FEISHU_AI_TASKS_ENABLED?: string;
   FEISHU_LOGIN_APP_ID?: string; FEISHU_LOGIN_APP_SECRET?: string; FEISHU_LOGIN_TENANT_KEY?: string;
@@ -11,7 +11,7 @@ const namespace = (env: TaskEnv) => `${env.FEISHU_LOGIN_APP_ID}:${env.FEISHU_LOG
 async function actorFor(db: D1Database, subject: string): Promise<TaskActor | null> {
   return db.prepare(`SELECT m.id AS memberId,m.account_user_id AS accountUserId,m.mutation_revision AS memberMutationRevision
     FROM members m JOIN auth_identities a ON a.member_id=m.id WHERE a.provider='feishu' AND a.provider_subject=? AND a.unlinked_at IS NULL
-      AND m.status='active' AND m.account_user_id IS NOT NULL AND m.mutation_revision IS NOT NULL AND m.nda_accepted_at IS NOT NULL AND m.nda_agreement_version IS NOT NULL`).bind(subject).first<TaskActor>();
+      AND m.status='active' AND m.account_user_id IS NOT NULL AND m.mutation_revision IS NOT NULL AND ${taskNdaGuard}`).bind(subject).first<TaskActor>();
 }
 export async function receiveFeishuTask(request: Request, env: TaskEnv) {
   if (!enabled(env)) return json({ error: '飞书 AI 任务入口尚未启用。' }, 503);

@@ -2,7 +2,13 @@ import { validTaskInput } from './ai-workbench-core.mjs';
 export type TaskActor = { memberId: string; accountUserId: string; memberMutationRevision: string };
 export type TaskInput = { kind: string; title: string; instruction: string; material: string };
 export type TaskRow = { id: string; member_id: string; account_user_id: string; member_revision: string; kind: string; title: string; instruction: string; material: string; status: string; result: string; failure_code: string; attempts: number; lease_token: string | null; lease_until: number | null; origin: string; origin_key: string; feishu_subject: string; delivery_parts: number; delivery_started_at: number | null; delivery_status: string; created_at: number; updated_at: number };
-export const taskActorGuard = `EXISTS (SELECT 1 FROM members m WHERE m.id = ? AND m.account_user_id = ? AND m.mutation_revision = ? AND m.status = 'active' AND m.nda_accepted_at IS NOT NULL AND m.nda_agreement_version IS NOT NULL)`;
+// Do not trust a stale admission cache after an NDA archive is revoked.
+export const taskNdaGuard = `m.nda_accepted_at IS NOT NULL AND m.nda_agreement_version IS NOT NULL AND EXISTS (
+ SELECT 1 FROM approvals nda WHERE nda.id=m.nda_approval_id AND nda.type='保密协议' AND nda.status='已归档'
+ AND lower(nda.requester_email)=lower(m.chatgpt_account)
+ AND CASE WHEN json_valid(nda.payload_json) THEN json_extract(nda.payload_json,'$.signerAccountUserId')=m.account_user_id
+ AND json_extract(nda.payload_json,'$.agreementVersion')=m.nda_agreement_version ELSE 0 END)`;
+export const taskActorGuard = `EXISTS (SELECT 1 FROM members m WHERE m.id = ? AND m.account_user_id = ? AND m.mutation_revision = ? AND m.status = 'active' AND ${taskNdaGuard})`;
 const actorArgs = (a: TaskActor) => [a.memberId, a.accountUserId, a.memberMutationRevision];
 export async function createTask(db: D1Database, actor: TaskActor, input: TaskInput, originKey: string, origin = 'oa', feishuSubject = '') {
   if (!validTaskInput(input) || !/^[A-Za-z0-9:_-]{8,180}$/u.test(originKey) || !['oa','feishu'].includes(origin)) throw new Error('TASK_INVALID_INPUT');
@@ -34,7 +40,7 @@ export async function retryTask(db: D1Database, actor: TaskActor, id: string) {
 }
 export async function runTask(db: D1Database, id: string, generate: (input: TaskInput) => Promise<string>) {
   const token = crypto.randomUUID(), now = Date.now();
-  const boundGuard = `EXISTS (SELECT 1 FROM members m WHERE m.id=ai_workbench_tasks.member_id AND m.account_user_id=ai_workbench_tasks.account_user_id AND m.mutation_revision=ai_workbench_tasks.member_revision AND m.status='active' AND m.nda_accepted_at IS NOT NULL AND m.nda_agreement_version IS NOT NULL) AND (ai_workbench_tasks.origin='oa' OR EXISTS (SELECT 1 FROM auth_identities a WHERE a.member_id=ai_workbench_tasks.member_id AND a.provider='feishu' AND a.provider_subject=ai_workbench_tasks.feishu_subject AND a.unlinked_at IS NULL))`;
+  const boundGuard = `EXISTS (SELECT 1 FROM members m WHERE m.id=ai_workbench_tasks.member_id AND m.account_user_id=ai_workbench_tasks.account_user_id AND m.mutation_revision=ai_workbench_tasks.member_revision AND m.status='active' AND ${taskNdaGuard}) AND (ai_workbench_tasks.origin='oa' OR EXISTS (SELECT 1 FROM auth_identities a WHERE a.member_id=ai_workbench_tasks.member_id AND a.provider='feishu' AND a.provider_subject=ai_workbench_tasks.feishu_subject AND a.unlinked_at IS NULL))`;
   // A crashed lease is not automatically re-billed. It becomes retryable failure.
   await db.prepare(`UPDATE ai_workbench_tasks SET status='failed',failure_code='TASK_INTERRUPTED',lease_token=NULL,lease_until=NULL,updated_at=? WHERE id=? AND status='running' AND lease_until<?`).bind(now, id, now).run();
   const row = await db.prepare(`UPDATE ai_workbench_tasks SET status='running',lease_token=?,lease_until=?,attempts=attempts+1,updated_at=? WHERE id=? AND status='queued' AND attempts<3 AND ${boundGuard} RETURNING *`).bind(token, now+120000, now, id).first<TaskRow>();
