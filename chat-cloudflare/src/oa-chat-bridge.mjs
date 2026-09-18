@@ -1,3 +1,4 @@
+import { validTaskInput, buildTaskMessages, validTaskResult } from '../../lib/ai-workbench-core.mjs';
 import { fallbackAnswer } from './knowledge.mjs';
 import { buildGroundedChatMessages } from './grounded-prompt.mjs';
 
@@ -49,6 +50,7 @@ async function authenticatedBody(request, secret, now) {
   return { body, nonce };
 }
 export function validOaChatPayload(value) {
+  if (exactKeys(value, ['operation', 'task']) && value.operation === 'task') return validTaskInput(value.task);
   if (exactKeys(value, ['operation']) && value.operation === 'status') return true;
   if (!exactKeys(value, ['operation', 'question', 'history', 'documents']) || value.operation !== 'answer' || !text(value.question, 2000) || value.question.trim().length < 2 || !Array.isArray(value.history) || value.history.length > 2 || !Array.isArray(value.documents) || value.documents.length > 6) return false;
   if (value.history.some(item => !exactKeys(item, ['role', 'content']) || item.role !== 'user' || !text(item.content, 2000))) return false;
@@ -75,6 +77,16 @@ export async function handleOaChatBridge(context, engine, now = Date.now()) {
     if (payload.operation === 'status') {
       const [model, budgetReady] = await Promise.all([engine.currentModelStatus(context, config, active), engine.modelBudgetReady(context)]);
       return json({ received: true, bridgeReady: true, modelReady: model.ready === true && model.probePending !== true, budgetReady: budgetReady === true });
+    }
+    if (payload.operation === 'task') {
+      // This signed, internal-only path never writes into Chat conversations or public knowledge.
+      // Use the configured Bailian provider only; no quiet provider change for private tasks.
+      if (active.provider !== 'bailian') return json({ error: '任务需要已配置的百炼模型' }, 503);
+      await engine.globalBudget(context);
+      context.modelDeadline = Date.now() + 60000;
+      const answer = await engine.modelCall(context, config, buildTaskMessages(payload.task), 6000);
+      if (!validTaskResult(answer)) return json({ error: '任务未生成完整可用成果' }, 502);
+      return json({ received: true, answer, mode: 'task', provider: 'bailian' });
     }
     const fallback = reason => json({ received: true, answer: fallbackAnswer(payload.documents), mode: 'retrieval', fallbackReason: reason });
     if (!payload.documents.length || !active.provider) return fallback(payload.documents.length ? 'model_unavailable' : 'no_documents');

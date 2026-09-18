@@ -131,6 +131,7 @@ function OaAiChatPanel() {
 
   return <section className="oa-shared-chat" aria-label="OA 实验室 AI 聊天">
     <div className="chat-app oa-chat-surface">
+      <div style={{ padding: "8px 16px", flexShrink: 0 }}><a href="/ai-workbench" style={{ textDecoration: "underline" }}>AI 工作台 · 提交任务、生成 Word</a></div>
       <div className="messages oa-chat-messages" ref={scroll} onScroll={() => { const element = scroll.current; if (element) stickToEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96; }}>
         {turns.length === 0 ? <section className="empty-hero" aria-labelledby={`${composerId}-welcome`}><h2 id={`${composerId}-welcome`}>想了解实验室的什么？</h2><p>从已审核的实验室公开及内部知识中检索并回答</p></section> : turns.map(turn => <div className="oa-chat-turn" key={turn.id}>
           <article className="message user"><div className="message-content"><p>{turn.question}</p><button type="button" className="oa-question-edit" onClick={() => { setQuestion(turn.question); input.current?.focus(); }} disabled={asking}>修改问题</button></div></article>

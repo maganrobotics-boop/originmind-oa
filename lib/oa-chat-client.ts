@@ -116,3 +116,10 @@ export async function answerOaChatQuestion(question: string, ranked: RankedKnowl
   try { images = await answerImages(chunks); } catch { /* A failed image lookup must not discard the complete text. */ }
   return { answer: result.answer, citations, images, mode: result.mode, provider: result.provider, fallbackReason: result.fallbackReason };
 }
+
+/** Task material is supplied by the admitted task owner, not claimed as approved knowledge. */
+export async function generateOaTask(input: { kind: string; title: string; instruction: string; material: string }): Promise<string> {
+  const result = await bridge({ operation: 'task', task: input }, 70000);
+  if (result.mode !== 'task' || typeof result.answer !== 'string' || !result.answer.trim()) throw new Error('TASK_MODEL_UNAVAILABLE');
+  return result.answer;
+}
