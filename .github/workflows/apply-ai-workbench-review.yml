@@ -19,15 +19,16 @@ jobs:
         shell: bash
         run: |
           python3 - <<'PY'
-          import base64, hashlib, lzma, pathlib, subprocess
-          payload = pathlib.Path('.openai/ai-workbench-review.patch.b64')
-          patch = lzma.decompress(base64.b64decode(payload.read_text().strip(), validate=True))
+          import hashlib, lzma, pathlib, subprocess
+          root = pathlib.Path('.openai/ai-workbench-review-parts')
+          packed = b''.join((root / f'part-{i}.bin').read_bytes() for i in range(7))
+          patch = lzma.decompress(packed)
           assert len(patch) < 200000
           assert hashlib.sha256(patch).hexdigest() == 'a6eff222076db89122a333fe4a5f4b4e4113f2d7f04e631b7b0cbd643ead7aee'
           subprocess.run(['git', 'apply', '--check', '-'], input=patch, check=True)
           subprocess.run(['git', 'apply', '--index', '-'], input=patch, check=True)
           PY
-          git rm .openai/ai-workbench-review.patch.b64
+          git rm -r .openai/ai-workbench-review.patch.b64 .openai/ai-workbench-review-parts
           git -c user.name='github-actions[bot]' -c user.email='41898282+github-actions[bot]@users.noreply.github.com' commit -m 'feat: add private OA AI workbench and Feishu document tasks'
           git push origin HEAD:refs/heads/feat/oa-ai-workbench-20260918
           git rev-parse HEAD > "$RUNNER_TEMP/workbench-result-sha.txt"
