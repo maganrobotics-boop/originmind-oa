@@ -4,8 +4,7 @@ import handler from "vinext/server/app-router-entry";
 import { legacyOaRedirect } from "../lib/legacy-oa-redirect.mjs";
 import { ensureMigrationWriteFreezeMarker, isMigrationWriteFrozen, shouldBlockForMigrationFreeze } from "../lib/migration-freeze";
 import { archiveApprovalPdfsToFeishu, type FeishuArchiveEnv } from "../lib/feishu-drive-archive";
-import { processAiWorkbench } from "../lib/ai-workbench-runner";
-import { receiveFeishuTask, type TaskEnv } from "../lib/ai-workbench-feishu";
+import { processAiWorkbench, type TaskEnv } from "../lib/ai-workbench-runner";
 import { processApprovalNotifications } from "../lib/feishu-notifications";
 
 interface Env extends TaskEnv {
@@ -107,8 +106,6 @@ const worker = {
         { status: 503, headers: { "retry-after": "300" } },
       ));
     }
-
-    if (url.pathname === "/api/integrations/feishu/ai-events") return withSecurityHeaders(request, await receiveFeishuTask(request, env));
 
     if (url.pathname === "/_vinext/image") {
       const allowedWidths = [...DEFAULT_DEVICE_SIZES, ...DEFAULT_IMAGE_SIZES];
