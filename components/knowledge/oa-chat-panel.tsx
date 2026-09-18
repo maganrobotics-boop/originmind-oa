@@ -4,16 +4,17 @@ import { FormEvent, useCallback, useEffect, useId, useRef, useState } from 'reac
 import { ArrowUp, Copy, Forward, RotateCcw, Square } from 'lucide-react';
 import { renderAnswerBody, userFacingAnswer } from '@/lib/oa-chat-renderer.mjs';
 import { initialChatIndicators, probeChatIndicators, pendingChatIndicators, replyChatIndicators, failedChatIndicators } from '@/lib/oa-chat-indicators.mjs';
+import { CHAT_DOCUMENT_HINTS } from '@/lib/oa-chat-documents.mjs';
 import type { KnowledgeCitation } from '@/lib/knowledge-types';
 import './shared-chat.generated.css';
 import './oa-chat-panel.css';
 import { useOaConversation } from './oa-conversation-context';
 import { OaMemberChat } from './oa-member-chat';
+import { OaChatDocumentEvent, OaDocumentDialogs, OaDocumentSource, OaDocumentUpload, useOaChatDocuments } from './oa-chat-documents';
 
 type Image = { url: string; alt: string; mimeType: string };
-type Turn = { id: string; question: string; answer: string; citations: KnowledgeCitation[]; images: Image[]; failed?: boolean };
+type Turn = { id: string; order: number; question: string; answer: string; citations: KnowledgeCitation[]; images: Image[]; failed?: boolean };
 type Reply = { answer?: string; citations?: KnowledgeCitation[]; images?: Image[]; error?: string; mode?: string; fallbackReason?: string };
-const EXAMPLES = ['实验室有哪些研究方向？', '机器人底盘急停与恢复的操作流程是什么？', '最近有哪些已审核的测试结论？'];
 
 function RichAnswer({ answer }: { answer: string }) {
   const host = useRef<HTMLDivElement>(null);
@@ -69,6 +70,9 @@ function OaAiChatPanel() {
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const order = useRef(0);
+  const nextOrder = useCallback(() => ++order.current, []);
+  const documents = useOaChatDocuments(nextOrder);
   const requestRef = useRef<AbortController | null>(null);
   const requestSequence = useRef(0);
   const sending = useRef(false);
@@ -76,12 +80,15 @@ function OaAiChatPanel() {
   const input = useRef<HTMLTextAreaElement>(null);
   const composerId = useId();
   const stickToEnd = useRef(true);
-  useEffect(() => { setAiDirty(Boolean(turns.length || question || asking || error)); }, [turns.length, question, asking, error, setAiDirty]);
+  const working = asking || documents.busy;
+  const timeline = [...turns.map(turn => ({ type: 'answer' as const, id: turn.id, order: turn.order, turn })), ...documents.entries].sort((a, b) => a.order - b.order);
+  useEffect(() => { setAiDirty(Boolean(turns.length || question || asking || error || documents.entries.length || documents.busy || documents.error)); }, [turns.length, question, asking, error, documents.entries.length, documents.busy, documents.error, setAiDirty]);
 
   useEffect(() => () => { requestSequence.current++; requestRef.current?.abort(); }, []);
+  useEffect(() => { stickToEnd.current = true; }, [documents.entries.length]);
   useEffect(() => {
     if (stickToEnd.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
-  }, [turns, asking, error]);
+  }, [turns, asking, error, documents.entries, documents.error]);
   useEffect(() => {
     const element = input.current;
     if (!element) return;
@@ -89,10 +96,17 @@ function OaAiChatPanel() {
     element.style.height = `${Math.min(element.scrollHeight, 144)}px`;
   }, [question]);
 
-  const ask = useCallback(async (retry?: Turn) => {
-    if (sending.current) return;
+  const ask = async (retry?: Turn) => {
+    if (sending.current || documents.busy) return;
     const normalized = (retry?.question || question).trim();
     if (normalized.length < 2 || normalized.length > 2000) { setError('问题需为 2–2000 个字符。'); return; }
+    if (!retry && documents.shouldHandle(normalized)) {
+      const previous = [...timeline].reverse().find(entry => entry.type === 'answer' ? Boolean(entry.turn.answer && !entry.turn.failed) : entry.type === 'task' && entry.task?.status === 'succeeded' && Boolean(entry.task.result));
+      const previousAnswer = previous?.type === 'answer' ? previous.turn.answer : previous?.type === 'task' ? previous.task?.result || '' : '';
+      if (documents.submit(normalized, previousAnswer)) { setQuestion(''); setError(''); stickToEnd.current = true; setLastAnswer(null); }
+      return;
+    }
+    documents.dismissError();
     const id = retry?.id || crypto.randomUUID();
     const preceding = retry ? turns.slice(0, turns.findIndex(turn => turn.id === retry.id)) : turns;
     const history = preceding.slice(-2).map(turn => ({ role: 'user', content: turn.question }));
@@ -101,7 +115,7 @@ function OaAiChatPanel() {
     let httpStatus: number | null = null;
     setAsking(true); setError(''); setQuestion(''); stickToEnd.current = true;
     setRequestStatus(pendingChatIndicators()); setLastAnswer(null);
-    setTurns([...preceding, { id, question: normalized, answer: '', citations: [], images: [] }]);
+    setTurns([...preceding, { id, order: retry?.order || nextOrder(), question: normalized, answer: '', citations: [], images: [] }]);
     try {
       const response = await fetch('/api/lab-ai/ask', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ question: normalized, history }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(80000)]) });
       httpStatus = response.status;
@@ -122,7 +136,7 @@ function OaAiChatPanel() {
     } finally {
       if (sequence === requestSequence.current) { sending.current = false; setAsking(false); requestRef.current = null; }
     }
-  }, [question, turns, setLastAnswer, setRequestStatus]);
+  };
   const submit = (event: FormEvent) => { event.preventDefault(); void ask(); };
   const copy = async (turn: Turn) => {
     try { await navigator.clipboard.writeText(userFacingAnswer(turn.answer)); setCopied(turn.id); }
@@ -131,29 +145,35 @@ function OaAiChatPanel() {
 
   return <section className="oa-shared-chat" aria-label="OA 实验室 AI 聊天">
     <div className="chat-app oa-chat-surface">
-      <div style={{ padding: "8px 16px", flexShrink: 0 }}><a href="/ai-workbench" style={{ textDecoration: "underline" }}>AI 工作台 · 提交任务、生成 Word</a></div>
       <div className="messages oa-chat-messages" ref={scroll} onScroll={() => { const element = scroll.current; if (element) stickToEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96; }}>
-        {turns.length === 0 ? <section className="empty-hero" aria-labelledby={`${composerId}-welcome`}><h2 id={`${composerId}-welcome`}>想了解实验室的什么？</h2><p>从已审核的实验室公开及内部知识中检索并回答</p></section> : turns.map(turn => <div className="oa-chat-turn" key={turn.id}>
-          <article className="message user"><div className="message-content"><p>{turn.question}</p><button type="button" className="oa-question-edit" onClick={() => { setQuestion(turn.question); input.current?.focus(); }} disabled={asking}>修改问题</button></div></article>
+        {timeline.length === 0 ? <section className="empty-hero" aria-labelledby={`${composerId}-welcome`}><h2 id={`${composerId}-welcome`}>需要实验室大模型做什么？</h2><p>知识问答、整理资料、生成文档，都在这里完成</p></section> : timeline.map(entry => {
+          if (entry.type !== 'answer') return <OaChatDocumentEvent key={entry.id} entry={entry} documents={documents} />;
+          const turn = entry.turn;
+          return <div className="oa-chat-turn" key={turn.id}>
+          <article className="message user"><div className="message-content"><p>{turn.question}</p><button type="button" className="oa-question-edit" onClick={() => { setQuestion(turn.question); input.current?.focus(); }} disabled={working}>修改问题</button></div></article>
           {turn.answer && <article className="message assistant"><div className="message-content"><RichAnswer answer={turn.answer} />
             {!!turn.images.length && <div className="oa-answer-images">{turn.images.map(image => <figure key={image.url}><img src={image.url} alt={image.alt} loading="lazy" referrerPolicy="no-referrer" onError={event => { event.currentTarget.hidden = true; }} /><figcaption>{image.alt}</figcaption></figure>)}</div>}
             <div className="oa-answer-actions"><button type="button" className="copy-answer" onClick={() => void copy(turn)} aria-label="复制回答"><Copy size={15} />{copied === turn.id ? '已复制' : '复制'}</button><button type="button" aria-label="转发回答给成员" onClick={() => forward({ body: userFacingAnswer(turn.answer), omittedImages: turn.images.length })}><Forward size={15} />转发</button>{!!turn.citations.length && <details><summary>参考已审核资料</summary>{turn.citations.map(citation => <p key={`${citation.id}-${citation.itemId}`}>{citation.title}{citation.sectionTitle ? ` · ${citation.sectionTitle}` : ''}</p>)}</details>}</div>
           </div></article>}
-          {turn.failed && <button type="button" className="oa-chat-retry" disabled={asking} onClick={() => void ask(turn)}><RotateCcw size={16} />重新回答</button>}
-        </div>)}
+          {turn.failed && <button type="button" className="oa-chat-retry" disabled={working} onClick={() => void ask(turn)}><RotateCcw size={16} />重新回答</button>}
+        </div>;
+        })}
         {asking && <div className="knowledge-answer-loading" role="status">正在检索并生成回答…</div>}
       </div>
       <div className="composer-area oa-chat-composer-area">
-        {!turns.length && <div className="oa-chat-examples"><p>推荐问题</p>{EXAMPLES.map(example => <button type="button" key={example} onClick={() => { setQuestion(example); input.current?.focus(); }}>{example}</button>)}</div>}
-        {error && <p className="oa-chat-error" role="alert">{error}</p>}
+        {!timeline.length && <div className="oa-chat-examples"><p>可以帮你</p>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} onClick={() => { if (hint.label === '实验室知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>}
+        {(error || documents.error) && <p className="oa-chat-error" role="alert">{error || documents.error}</p>}
+        <OaDocumentSource documents={documents} />
         <form className="composer oa-chat-composer" onSubmit={submit}>
+          <OaDocumentUpload documents={documents} disabled={asking} />
           <label className="sr-only" htmlFor={composerId}>询问实验室大数据</label>
           <textarea ref={input} id={composerId} value={question} rows={1} maxLength={2000} placeholder="询问实验室大数据" onChange={event => setQuestion(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void ask(); } }} />
           {/* Abort may synchronously replace the control. Cancel its default action
               before aborting and keep stop/send as separate DOM buttons. */}
-          {asking ? <button key="stop" type="button" className="send-button" onClick={event => { event.preventDefault(); requestRef.current?.abort(); }} aria-label="停止等待回答"><Square size={18} /></button> : <button key="send" type="submit" className="send-button" disabled={question.trim().length < 2} aria-label="发送问题"><ArrowUp size={24} /></button>}
+          {asking ? <button key="stop" type="button" className="send-button" onClick={event => { event.preventDefault(); requestRef.current?.abort(); }} aria-label="停止等待回答"><Square size={18} /></button> : <button key="send" type="submit" className="send-button" disabled={documents.busy || question.trim().length < 2} aria-label="发送问题"><ArrowUp size={24} /></button>}
         </form>
       </div>
     </div>
+    <OaDocumentDialogs documents={documents} />
   </section>;
 }

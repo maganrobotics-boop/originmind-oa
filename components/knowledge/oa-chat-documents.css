@@ -1,0 +1,47 @@
+/* Keep uploads, task status and deliverables inside the existing OA conversation. */
+.oa-shared-chat .oa-document-picker { display:none; }
+.oa-shared-chat .oa-chat-composer .oa-document-add { flex:0 0 44px; display:grid; place-items:center; width:44px; height:44px; min-height:44px; padding:0; margin:0; border:0; border-radius:50%; color:#444; background:#f5f5f5; }
+.oa-shared-chat .oa-document-add:disabled { opacity:.45; }
+.oa-shared-chat .oa-document-tools { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 12px; min-width:0; padding:0 4px 8px; }
+.oa-shared-chat .oa-document-text-button { display:inline-flex; align-items:center; gap:5px; background:transparent; color:#666; border:0; padding:4px 0; font-size:13px; text-align:left; }
+.oa-shared-chat .oa-document-source { display:flex; align-items:center; gap:6px; min-width:0; max-width:100%; font-size:13px; color:#444; }
+.oa-shared-chat .oa-document-source > span { overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+.oa-shared-chat .oa-document-source > button { flex:0 0 32px; display:grid; place-items:center; height:32px; background:#f5f5f5; border:0; border-radius:50%; }
+.oa-shared-chat .oa-import-card, .oa-shared-chat .oa-document-card { flex-shrink:0; width:100%; min-width:0; max-width:860px; margin:0 0 20px; padding:16px 18px; border:1px solid #e4e4e4; border-radius:18px; background:#fafafa; color:#202020; overflow-wrap:anywhere; }
+.oa-shared-chat .oa-import-card > header, .oa-shared-chat .oa-document-card > header { display:flex; align-items:center; gap:10px; }
+.oa-shared-chat .oa-import-card > header strong, .oa-shared-chat .oa-document-card > header > div { flex:1; min-width:0; }
+.oa-shared-chat .oa-import-card > header > span { font-size:12px; color:#777; white-space:nowrap; }
+.oa-shared-chat .oa-import-card > header > svg, .oa-shared-chat .oa-document-card > header > svg { flex-shrink:0; }
+.oa-shared-chat .oa-import-text { margin:12px 0 6px; padding:12px; max-height:360px; max-width:100%; overflow:auto; white-space:pre-wrap; overflow-wrap:anywhere; font:inherit; font-size:14px; line-height:1.75; border:0; border-radius:10px; background:#fff; color:#333; }
+.oa-shared-chat .oa-import-card > footer { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px; margin-top:8px; }
+.oa-shared-chat .oa-import-card small { color:#777; font-size:12px; line-height:1.6; }
+.oa-shared-chat .oa-document-card > header p { margin:4px 0 0; font-size:13px; color:#777; }
+.oa-shared-chat .oa-document-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px; margin-top:12px; }
+.oa-shared-chat .oa-document-actions:empty { display:none; }
+.oa-shared-chat .oa-document-actions > button { display:inline-flex; align-items:center; justify-content:center; gap:6px; min-height:40px; border:1px solid #dcdcdc; border-radius:10px; background:#fff; color:#222; padding:8px 12px; font:inherit; font-size:14px; }
+.oa-shared-chat .oa-document-actions > button:disabled { opacity:.45; cursor:wait; }
+.oa-shared-chat .oa-document-filename { margin:14px 0 0; font-size:14px; }
+.oa-shared-chat .oa-document-filename > span { display:inline-block; margin-left:8px; color:#777; font-size:12px; }
+.oa-shared-chat .oa-document-inline-preview { margin-top:14px; font-size:14px; }
+.oa-shared-chat .oa-document-inline-preview > summary { cursor:pointer; color:#666; padding:4px 0; }
+.oa-shared-chat .oa-document-body { margin-top:12px; }
+.oa-shared-chat .oa-document-dialog { position:fixed; inset:0; margin:auto; width:min(900px,calc(100vw - 32px)); height:min(820px,calc(100dvh - 48px)); max-width:calc(100vw - 32px); max-height:calc(100dvh - 48px); padding:0; border:1px solid #ddd; border-radius:20px; background:#fff; color:#222; box-shadow:0 20px 70px #0003; overflow:hidden; }
+.oa-shared-chat .oa-document-dialog:not([open]) { display:none; }
+.oa-shared-chat .oa-document-dialog[open] { display:flex; flex-direction:column; }
+.oa-shared-chat .oa-document-dialog::backdrop { background:#0006; }
+.oa-shared-chat .oa-document-dialog > header { flex:0 0 auto; display:flex; align-items:center; justify-content:space-between; padding:12px 18px; border-bottom:1px solid #eee; }
+.oa-shared-chat .oa-document-dialog > header > button { display:grid; place-items:center; flex:0 0 44px; width:44px; height:44px; border:0; border-radius:50%; background:#f5f5f5; color:#333; }
+.oa-shared-chat .oa-document-dialog-content { flex:1; min-height:0; min-width:0; padding:20px 24px; overflow:auto; overscroll-behavior:contain; overflow-wrap:anywhere; }
+.oa-shared-chat .oa-document-dialog-content h2 { font-size:22px; margin:0 0 16px; }
+.oa-shared-chat .oa-document-dialog > footer { flex:0 0 auto; padding:4px 18px 16px; border-top:1px solid #eee; }
+.oa-shared-chat .oa-document-history { display:flex; flex-direction:column; gap:8px; }
+.oa-shared-chat .oa-document-history > button { display:flex; align-items:center; gap:12px; padding:14px; border:1px solid #e8e8e8; border-radius:12px; background:#fafafa; color:#222; text-align:left; }
+.oa-shared-chat .oa-document-history > button > span { display:flex; flex-direction:column; gap:5px; min-width:0; overflow-wrap:anywhere; }
+.oa-shared-chat .oa-document-history small { color:#777; }
+@media(max-width:560px) {
+  .oa-shared-chat .oa-chat-composer { gap:8px; padding-left:10px; }
+  .oa-shared-chat .oa-import-card, .oa-shared-chat .oa-document-card { padding:14px; }
+  .oa-shared-chat .oa-document-dialog { width:calc(100vw - 16px); max-width:calc(100vw - 16px); height:calc(100dvh - 24px); max-height:calc(100dvh - 24px); border-radius:16px; }
+  .oa-shared-chat .oa-document-dialog-content { padding:16px; }
+  .oa-shared-chat .oa-document-dialog > footer { padding-bottom:max(12px,env(safe-area-inset-bottom)); }
+}
