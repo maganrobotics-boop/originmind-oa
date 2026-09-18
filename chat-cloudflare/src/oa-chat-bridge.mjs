@@ -1,6 +1,8 @@
-import { validTaskInput, buildTaskMessages, validTaskResult } from '../../lib/ai-workbench-core.mjs';
-import { fallbackAnswer } from './knowledge.mjs';
-import { buildGroundedChatMessages } from './grounded-prompt.mjs';
+import { validTaskInput, validTaskResult } from '../../lib/ai-workbench-core.mjs';
+import { executeTaskTools } from '../../lib/ai-workbench-tools.mjs';
+import { createTaskToolModel } from './task-tool-model.mjs';
+import { decryptSecret } from './crypto.mjs';
+import { fallbackAnswer, aliyunEndpoint } from './knowledge.mjs';
 
 export const OA_CHAT_PATH = '/api/internal/oa-answer';
 export const OA_CHAT_ORIGIN = 'https://chat.omindos.ai';
@@ -79,18 +81,26 @@ export async function handleOaChatBridge(context, engine, now = Date.now()) {
       return json({ received: true, bridgeReady: true, modelReady: model.ready === true && model.probePending !== true, budgetReady: budgetReady === true });
     }
     if (payload.operation === 'task') {
-      // This signed, internal-only path never writes into Chat conversations or public knowledge.
-      // Use the configured Bailian provider only; no quiet provider change for private tasks.
+      // Private, allowlisted tools only. Never quietly change the model provider.
       if (active.provider !== 'bailian') return json({ error: '任务需要已配置的百炼模型' }, 503);
-      await engine.globalBudget(context);
-      context.modelDeadline = Date.now() + 60000;
-      const answer = await engine.modelCall(context, config, buildTaskMessages(payload.task), 6000);
-      if (!validTaskResult(answer)) return json({ error: '任务未生成完整可用成果' }, 502);
-      return json({ received: true, answer, mode: 'task', provider: 'bailian' });
+      const deadline = Date.now() + 60000;
+      const callModel = createTaskToolModel({
+        endpoint: aliyunEndpoint(config.baseUrl),
+        apiKey: await decryptSecret(config.encryptedKey, env.APP_ENCRYPTION_KEY),
+        model: config.model,
+        fetcher: (...args) => context.runtime.fetch(...args),
+        consumeBudget: () => engine.globalBudget(context),
+      });
+      const result = await executeTaskTools(payload.task, callModel, { deadline });
+      if (!validTaskResult(result.answer)) return json({ error: '任务未生成完整可用成果' }, 502);
+      // "prepared" is not "saved": the OA task store rechecks owner/NDA/revision
+      // and cancellation before persisting. No tool creates an external side effect.
+      return json({ received: true, ...result, mode: 'task', provider: 'bailian' });
     }
     const fallback = reason => json({ received: true, answer: fallbackAnswer(payload.documents), mode: 'retrieval', fallbackReason: reason });
     if (!payload.documents.length || !active.provider) return fallback(payload.documents.length ? 'model_unavailable' : 'no_documents');
     await engine.globalBudget(context);
+    const { buildGroundedChatMessages } = await import('./grounded-prompt.mjs');
     const messages = buildGroundedChatMessages({ documents: payload.documents, history: [], question: payload.question, messages: [...payload.history, { role: 'user', content: payload.question }], scope: 'internal' });
     context.modelDeadline = Date.now() + 60000;
     let answer; let provider = active.provider;
