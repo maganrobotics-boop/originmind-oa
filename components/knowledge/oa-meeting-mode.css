@@ -18,6 +18,8 @@
 .oa-meeting-mode.meeting-active .oa-meeting-live-notes { max-height: none; }
 .oa-meeting-mode.meeting-active .oa-meeting-actions { flex: 0 0 auto; margin-top: 10px; }
 .oa-meeting-mode.meeting-active > footer { display: none; }
+.oa-meeting-cockpit-active .oa-workspace.oa-chat-open .topbar { display: none; }
+.oa-meeting-cockpit-active .oa-workspace.oa-chat-open .oa-knowledge-pane { height: 100dvh; }
 
 .oa-meeting-header { display: flex; justify-content: space-between; gap: 20px; padding: 22px 24px 18px; border-bottom: 1px solid #e5ebf3; }
 .oa-meeting-header h2 { display: flex; align-items: center; gap: 9px; margin: 8px 0 4px; font-size: 21px; }
@@ -81,6 +83,8 @@
 .oa-meeting-live-notes > h3 { position: sticky; z-index: 1; top: 0; padding: 14px 16px; border-bottom: 1px solid #edf1f5; background: #fff; }
 .oa-meeting-live-notes > h3 small { margin-left: auto; color: #8491a3; font-weight: 500; }
 .oa-meeting-live-notes > section { padding: 12px 16px; border-bottom: 1px solid #edf1f5; }
+.oa-meeting-live-notes > .oa-meeting-ai-minutes { flex: 1 1 auto; padding: 18px; border: 0; }
+.oa-meeting-ai-minutes > div:not(.oa-meeting-empty) { white-space: pre-wrap; overflow-wrap: anywhere; color: #263449; font-size: 14px; line-height: 1.8; }
 .oa-meeting-live-notes h4 { margin: 0 0 10px; color: #435268; font-size: 13px; }
 .oa-meeting-live-notes > section > p:not(.oa-meeting-muted) { display: grid; grid-template-columns: minmax(64px, 82px) minmax(0, 1fr); gap: 8px; margin: 0; padding: 7px 0; border-top: 1px solid #f2f4f7; font-size: 13px; line-height: 1.5; }
 .oa-meeting-live-notes > section > p b { overflow: hidden; color: #52647b; text-overflow: ellipsis; white-space: nowrap; }

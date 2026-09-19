@@ -1,8 +1,8 @@
 'use client';
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Bot, CheckCircle2, CircleDot, ExternalLink, FileText, LogOut, Maximize2, Minimize2, MonitorUp, Plus, RotateCcw, Square, X } from 'lucide-react';
-import { buildMeetingMinutesMaterial, extractFeishuDocumentLinks, isMeetingModeSession, meetingModeStorageKey, MEETING_MARKER_LABELS, type MeetingMarkerType, type MeetingModeSession, type MeetingTranscriptItem } from '@/lib/oa-meeting-mode.mjs';
+import { Bot, CheckCircle2, CircleDot, FileText, LogOut, Maximize2, Minimize2, MonitorUp, RotateCcw, Square, X } from 'lucide-react';
+import { buildMeetingMinutesMaterial, isMeetingModeSession, meetingModeStorageKey, type MeetingModeSession, type MeetingTranscriptItem } from '@/lib/oa-meeting-mode.mjs';
 import { useOaConversation } from './oa-conversation-context';
 import './oa-meeting-mode.css';
 
@@ -60,8 +60,10 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState('发送 @会议模式加九位会议号，即可让 OA 助手入会。');
-  const [markerType, setMarkerType] = useState<MeetingMarkerType>('decision');
-  const [markerText, setMarkerText] = useState('');
+  const [liveMinutes, setLiveMinutes] = useState('');
+  const [minutesUpdating, setMinutesUpdating] = useState(false);
+  const summarizedTranscriptCount = useRef(0);
+  const lastSummaryAt = useRef(0);
   const pageToken = useRef<string | null>(null);
   const [remoteEnded, setRemoteEnded] = useState(false);
   const pollPromise = useRef<Promise<void> | null>(null);
@@ -75,6 +77,12 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
   const [browserFullscreen, setBrowserFullscreen] = useState(false);
 
   useEffect(() => { sessionRef.current = session; }, [session]);
+  useEffect(() => {
+    const root = document.documentElement;
+    const active = session.phase === 'in_meeting';
+    root.classList.toggle('oa-meeting-cockpit-active', active);
+    return () => root.classList.remove('oa-meeting-cockpit-active');
+  }, [session.phase]);
   const stopScreenShare = useCallback(() => {
     const stream = sharedStream.current; sharedStream.current = null;
     for (const track of stream?.getTracks() || []) track.stop();
@@ -165,6 +173,7 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
     if (mutationBusy.current || current.phase !== 'draft') return;
     if (!/^[0-9]{9}$/u.test(normalizedMeeting)) { setError('请发送 @会议模式 加九位飞书会议号，例如 @会议模式919700881。'); return; }
     const prepared = { ...current, title: `飞书会议 ${normalizedMeeting}`, meeting: normalizedMeeting, phase: 'waiting_to_join' as const, exitStatus: 'not_requested' as const };
+    setLiveMinutes(''); summarizedTranscriptCount.current = 0; lastSummaryAt.current = 0;
     sessionRef.current = prepared; setSession(prepared);
     mutationBusy.current = true; setBusy(true); setError(''); setNotice('正在请求 OA 助手加入飞书会议…');
     try {
@@ -243,6 +252,28 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
     return () => { window.clearInterval(timer); document.removeEventListener('visibilitychange', visibleAgain); };
   }, [session.phase, session.meetingId, readEvents]);
 
+  useEffect(() => {
+    if (session.phase !== 'in_meeting' || !session.transcript.length || session.transcript.length === summarizedTranscriptCount.current) return;
+    const controller = new AbortController();
+    const elapsed = Date.now() - lastSummaryAt.current;
+    const delay = Math.max(4000, 30000 - elapsed);
+    const timer = window.setTimeout(async () => {
+      const current = sessionRef.current;
+      if (current.phase !== 'in_meeting' || !current.transcript.length) return;
+      const material = current.transcript.slice(-24).map(item => `${item.speaker}：${item.text}`).join('\n').slice(-1800);
+      setMinutesUpdating(true);
+      try {
+        const response = await fetch('/api/lab-ai/ask', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ question: `只根据以下实时会议字幕，生成简洁的中文实时纪要。按“讨论要点、决定、行动项、风险与未决问题”组织；没有的信息写“暂无”，不得编造。\n\n${material}`, history: [] }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(60000)]) });
+        const data = await response.json().catch(() => ({})) as { answer?: string; error?: string };
+        if (!response.ok || !data.answer?.trim()) throw new Error(data.error || '实时纪要暂未生成。');
+        if (!controller.signal.aborted) { setLiveMinutes(data.answer.trim()); summarizedTranscriptCount.current = current.transcript.length; lastSummaryAt.current = Date.now(); }
+      } catch (cause) {
+        if (!controller.signal.aborted) setLiveMinutes(previous => previous || errorText(cause, '取得字幕后将自动生成实时纪要。'));
+      } finally { if (!controller.signal.aborted) setMinutesUpdating(false); }
+    }, delay);
+    return () => { window.clearTimeout(timer); controller.abort(); };
+  }, [session.phase, session.transcript]);
+
   const submitMinutes = useCallback((completed: MeetingModeSession) => {
     let material = '';
     try { material = buildMeetingMinutesMaterial(completed); }
@@ -297,16 +328,10 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
   }, [session.phase, remoteEnded, finish]);
   useImperativeHandle(ref, () => ({ end: finish, minutes: generateLiveMinutes }), [finish, generateLiveMinutes]);
 
-  const addMarker = () => {
-    const text = markerText.trim(); if (!text || text.length > 2000) { setError('标记内容需为 1–2,000 个字符。'); return; }
-    if (session.markers.length >= 500) { setError('会中标记已达 500 条上限；请结束会议并生成纪要。'); return; }
-    patch({ markers: [...session.markers, { id: crypto.randomUUID(), type: markerType, text, createdAt: new Date().toISOString() }] });
-    setMarkerText(''); setError('');
-  };
   const reset = () => {
     if (session.phase === 'in_meeting' || session.phase === 'waiting_to_join') return;
     try { sessionStorage.removeItem(storageKey); } catch { /* Best effort. */ }
-    stopScreenShare(); setSession(emptySession()); pageToken.current = null; setRemoteEnded(false); setError(''); setNotice('发送 @会议模式加九位会议号，即可让 OA 助手入会。');
+    stopScreenShare(); setLiveMinutes(''); summarizedTranscriptCount.current = 0; lastSummaryAt.current = 0; setSession(emptySession()); pageToken.current = null; setRemoteEnded(false); setError(''); setNotice('发送 @会议模式加九位会议号，即可让 OA 助手入会。');
   };
   const clearJoinLock = () => {
     if (!window.confirm('请先在飞书确认机器人没有入会，或已经由主持人移出。此操作只解除本地锁定，不会控制飞书机器人。确认继续？')) return;
@@ -318,15 +343,13 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
 
   const active = session.phase === 'in_meeting';
   const latestSubtitle = session.transcript.at(-1);
-  const recentDiscussion = session.transcript.slice(-8);
-  const sharedDocuments = extractFeishuDocumentLinks(session.transcript);
   return <article ref={meetingHost} className={`oa-meeting-mode ${active ? 'meeting-active' : ''}`} aria-label="会议模式">
-    <header className="oa-meeting-header"><div><span className={active ? 'live' : ''}><CircleDot size={14} />{phaseLabels[session.phase]}</span><h2><Bot size={22} />会议模式</h2><p>{notice}</p></div>{!active && session.phase === 'draft' && <button type="button" className="oa-meeting-close" aria-label="关闭会议模式" onClick={() => { reset(); onClose(); }}><X size={20} /></button>}</header>
+    <header className="oa-meeting-header"><div><span className={active ? 'live' : ''}><CircleDot size={14} />{phaseLabels[session.phase]}</span><h2><Bot size={22} />{active ? `飞书会议 ${session.meeting}` : '会议模式'}</h2><p>{notice}</p></div>{!active && session.phase === 'draft' && <button type="button" className="oa-meeting-close" aria-label="关闭会议模式" onClick={() => { reset(); onClose(); }}><X size={20} /></button>}</header>
     {session.phase === 'draft' || session.phase === 'waiting_to_join' ? <div className="oa-meeting-compact-start">
       <p>{session.phase === 'waiting_to_join' ? `正在连接飞书会议 ${session.meeting}，请主持人在飞书中放行机器人。` : '在下方聊天框发送 @会议模式加九位会议号，例如 @会议模式919700881。发送即确认已告知参会人 OA 助手将记录会议。'}</p>
       {session.phase === 'waiting_to_join' && <button type="button" className="oa-meeting-recovery" disabled={busy} onClick={clearJoinLock}><RotateCcw size={17} />确认机器人未入会，解除锁定</button>}
     </div> : <div className="oa-meeting-console">
-      <section className="oa-meeting-summary"><div><strong>{session.title}</strong><small>{session.startedAt ? new Date(session.startedAt).toLocaleString('zh-CN') : '尚未开始'} · {session.observedParticipants.length} 位已识别参会人</small></div><span><CircleDot size={14} />{active ? remoteEnded ? '飞书已结束' : '记录中' : phaseLabels[session.phase]}</span></section>
+      <section className="oa-meeting-summary"><div><small>{session.startedAt ? new Date(session.startedAt).toLocaleString('zh-CN') : '尚未开始'} · {session.observedParticipants.length} 位已识别参会人</small></div><span><CircleDot size={14} />{active ? remoteEnded ? '飞书已结束' : '记录中' : phaseLabels[session.phase]}</span></section>
       {active && <div className="oa-meeting-cockpit">
         <section className="oa-meeting-stage" aria-label="飞书共享画面">
           <div className="oa-meeting-stage-toolbar"><h3><MonitorUp size={17} />飞书共享画面</h3><div>{sharingScreen ? <button type="button" onClick={stopScreenShare}><Square size={15} />停止显示</button> : <button type="button" onClick={() => void startScreenShare()}><MonitorUp size={15} />共享飞书窗口</button>}<button type="button" onClick={() => void toggleBrowserFullscreen()}>{browserFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}{browserFullscreen ? '退出全屏' : '全屏'}</button></div></div>
@@ -336,10 +359,8 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
           {shareError && <p className="oa-meeting-share-error" role="alert">{shareError}</p>}
         </section>
         <aside className="oa-meeting-live-notes" aria-label="会议实时纪要">
-          <h3><FileText size={17} />会议实时纪要 <small>{session.transcript.length} 条字幕</small></h3>
-          <section><h4>讨论进展</h4>{recentDiscussion.length ? recentDiscussion.map(item => <p key={item.id}><b>{item.speaker}</b><span>{item.text}</span></p>) : <div className="oa-meeting-empty">取得字幕后，这里会持续显示最新讨论；点击下方按钮可生成 AI 整理版。</div>}</section>
-          <section><h4>决策、待办与风险</h4><div className="oa-meeting-marker-compose"><select value={markerType} onChange={event => setMarkerType(event.target.value as MeetingMarkerType)}>{Object.entries(MEETING_MARKER_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><textarea value={markerText} maxLength={2000} rows={2} onChange={event => setMarkerText(event.target.value)} placeholder="记录决策、待办、风险或重要内容" /><button type="button" disabled={!markerText.trim()} onClick={addMarker}><Plus size={16} />添加</button></div><div className="oa-meeting-markers">{session.markers.map(item => <p key={item.id}><b>{MEETING_MARKER_LABELS[item.type]}</b><span>{item.text}</span><button type="button" aria-label="删除标记" onClick={() => patch({ markers: session.markers.filter(marker => marker.id !== item.id) })}><X size={14} /></button></p>)}</div></section>
-          <section><h4>飞书共享文档</h4>{sharedDocuments.length ? <div className="oa-meeting-documents">{sharedDocuments.map(document => <a key={document.href} href={document.href} target="_blank" rel="noreferrer"><span>{document.label}</span><ExternalLink size={14} /></a>)}</div> : <p className="oa-meeting-muted">字幕中出现受支持的飞书文档链接后，会在这里显示。</p>}</section>
+          <h3><FileText size={17} />会议实时纪要 <small>{minutesUpdating ? '正在更新…' : `${session.transcript.length} 条字幕`}</small></h3>
+          <section className="oa-meeting-ai-minutes">{liveMinutes ? <div>{liveMinutes}</div> : <div className="oa-meeting-empty">取得实时字幕后，OA 会自动生成并持续更新会议纪要，无需人工记录。</div>}</section>
         </aside>
       </div>}
       {session.phase === 'pending_confirmation' && <div className="oa-meeting-complete"><CheckCircle2 size={22} /><div><strong>等待管理员审批</strong><p>会议全文和最终纪要生成后会自动提交 OA；管理员批准后正式归档。</p></div></div>}
