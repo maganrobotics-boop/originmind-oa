@@ -1,7 +1,7 @@
 'use client';
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Bot, CheckCircle2, CircleDot, FileText, LogOut, Maximize2, Minimize2, MonitorUp, RotateCcw, Square, X } from 'lucide-react';
+import { Bot, CheckCircle2, CircleDot, FileText, LogOut, RotateCcw, X } from 'lucide-react';
 import { buildMeetingMinutesMaterial, isMeetingModeSession, meetingModeStorageKey, type MeetingModeSession, type MeetingTranscriptItem } from '@/lib/oa-meeting-mode.mjs';
 import { useOaConversation } from './oa-conversation-context';
 import './oa-meeting-mode.css';
@@ -69,12 +69,6 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
   const pollPromise = useRef<Promise<void> | null>(null);
   const mutationBusy = useRef(false);
   const restored = useRef(false);
-  const sharedVideo = useRef<HTMLVideoElement>(null);
-  const sharedStream = useRef<MediaStream | null>(null);
-  const meetingHost = useRef<HTMLElement>(null);
-  const [sharingScreen, setSharingScreen] = useState(false);
-  const [shareError, setShareError] = useState('');
-  const [browserFullscreen, setBrowserFullscreen] = useState(false);
 
   useEffect(() => { sessionRef.current = session; }, [session]);
   useEffect(() => {
@@ -83,44 +77,6 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
     root.classList.toggle('oa-meeting-cockpit-active', active);
     return () => root.classList.remove('oa-meeting-cockpit-active');
   }, [session.phase]);
-  const stopScreenShare = useCallback(() => {
-    const stream = sharedStream.current; sharedStream.current = null;
-    for (const track of stream?.getTracks() || []) track.stop();
-    if (sharedVideo.current) sharedVideo.current.srcObject = null;
-    setSharingScreen(false);
-  }, []);
-  useEffect(() => () => stopScreenShare(), [stopScreenShare]);
-  useEffect(() => {
-    if (!sharingScreen || !sharedVideo.current || !sharedStream.current) return;
-    sharedVideo.current.srcObject = sharedStream.current;
-    void sharedVideo.current.play().catch(() => setShareError('共享流已取得，但浏览器未能播放。请停止后重新共享飞书窗口。'));
-  }, [sharingScreen]);
-  useEffect(() => {
-    const update = () => setBrowserFullscreen(document.fullscreenElement === meetingHost.current);
-    document.addEventListener('fullscreenchange', update);
-    return () => document.removeEventListener('fullscreenchange', update);
-  }, []);
-  const toggleBrowserFullscreen = useCallback(async () => {
-    try {
-      if (document.fullscreenElement) await document.exitFullscreen();
-      else if (meetingHost.current?.requestFullscreen) await meetingHost.current.requestFullscreen();
-      else setShareError('当前浏览器不支持浏览器级全屏；会议模式仍会自动铺满 OA 窗口。');
-    } catch { setShareError('浏览器拒绝进入全屏，请再次点击或检查浏览器权限。'); }
-  }, []);
-  const startScreenShare = useCallback(async () => {
-    if (!navigator.mediaDevices?.getDisplayMedia) { setShareError('当前内置浏览器不支持窗口共享。请在最新版 Chrome 或 Edge 中打开 OA。'); return; }
-    try {
-      stopScreenShare();
-      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
-      const track = stream.getVideoTracks()[0];
-      if (!track) { for (const item of stream.getTracks()) item.stop(); throw new Error('未取得共享画面。'); }
-      sharedStream.current = stream; track.addEventListener('ended', stopScreenShare, { once: true });
-      setSharingScreen(true); setShareError(''); setError('');
-    } catch (cause) {
-      if (cause instanceof DOMException && cause.name === 'NotAllowedError') setShareError('未取得共享权限。请再次点击，并在浏览器弹窗中选择“窗口”→飞书会议。');
-      else setShareError(errorText(cause, '无法显示共享画面，请重新选择飞书会议窗口。'));
-    }
-  }, [stopScreenShare]);
   useEffect(() => {
     if (restored.current) return;
     restored.current = true;
@@ -317,12 +273,11 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
         if (result.state !== 'leave_api_succeeded') throw new MeetingBotRequestError('退出接口响应不完整，结果暂不明确。', true);
       }
       const safeToSummarize = { ...completed, exitStatus: 'confirmed' as const };
-      stopScreenShare();
       submitMinutes(safeToSummarize);
     } catch (cause) {
       setError(`${errorText(cause, '退出结果未确认。')} 请先在飞书参会人列表核对；确认机器人已离会后，可选择“仅生成纪要”。`);
     } finally { mutationBusy.current = false; setBusy(false); }
-  }, [readEvents, remoteEnded, stopScreenShare, submitMinutes]);
+  }, [readEvents, remoteEnded, submitMinutes]);
   useEffect(() => {
     if (session.phase === 'in_meeting' && remoteEnded && !mutationBusy.current) void finish();
   }, [session.phase, remoteEnded, finish]);
@@ -331,7 +286,7 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
   const reset = () => {
     if (session.phase === 'in_meeting' || session.phase === 'waiting_to_join') return;
     try { sessionStorage.removeItem(storageKey); } catch { /* Best effort. */ }
-    stopScreenShare(); setLiveMinutes(''); summarizedTranscriptCount.current = 0; lastSummaryAt.current = 0; setSession(emptySession()); pageToken.current = null; setRemoteEnded(false); setError(''); setNotice('发送 @会议模式加九位会议号，即可让 OA 助手入会。');
+    setLiveMinutes(''); summarizedTranscriptCount.current = 0; lastSummaryAt.current = 0; setSession(emptySession()); pageToken.current = null; setRemoteEnded(false); setError(''); setNotice('发送 @会议模式加九位会议号，即可让 OA 助手入会。');
   };
   const clearJoinLock = () => {
     if (!window.confirm('请先在飞书确认机器人没有入会，或已经由主持人移出。此操作只解除本地锁定，不会控制飞书机器人。确认继续？')) return;
@@ -343,25 +298,19 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
 
   const active = session.phase === 'in_meeting';
   const latestSubtitle = session.transcript.at(-1);
-  return <article ref={meetingHost} className={`oa-meeting-mode ${active ? 'meeting-active' : ''}`} aria-label="会议模式">
+  return <article className={`oa-meeting-mode ${active ? 'meeting-active' : ''}`} aria-label="会议模式">
     <header className="oa-meeting-header"><div><span className={active ? 'live' : ''}><CircleDot size={14} />{phaseLabels[session.phase]}</span><h2><Bot size={22} />{active ? `飞书会议 ${session.meeting}` : '会议模式'}</h2><p>{notice}</p></div>{!active && session.phase === 'draft' && <button type="button" className="oa-meeting-close" aria-label="关闭会议模式" onClick={() => { reset(); onClose(); }}><X size={20} /></button>}</header>
     {session.phase === 'draft' || session.phase === 'waiting_to_join' ? <div className="oa-meeting-compact-start">
       <p>{session.phase === 'waiting_to_join' ? `正在连接飞书会议 ${session.meeting}，请主持人在飞书中放行机器人。` : '在下方聊天框发送 @会议模式加九位会议号，例如 @会议模式919700881。发送即确认已告知参会人 OA 助手将记录会议。'}</p>
       {session.phase === 'waiting_to_join' && <button type="button" className="oa-meeting-recovery" disabled={busy} onClick={clearJoinLock}><RotateCcw size={17} />确认机器人未入会，解除锁定</button>}
     </div> : <div className="oa-meeting-console">
       <section className="oa-meeting-summary"><div><small>{session.startedAt ? new Date(session.startedAt).toLocaleString('zh-CN') : '尚未开始'} · {session.observedParticipants.length} 位已识别参会人</small></div><span><CircleDot size={14} />{active ? remoteEnded ? '飞书已结束' : '记录中' : phaseLabels[session.phase]}</span></section>
-      {active && <div className="oa-meeting-cockpit">
-        <section className="oa-meeting-stage" aria-label="飞书共享画面">
-          <div className="oa-meeting-stage-toolbar"><h3><MonitorUp size={17} />飞书共享画面</h3><div>{sharingScreen ? <button type="button" onClick={stopScreenShare}><Square size={15} />停止显示</button> : <button type="button" onClick={() => void startScreenShare()}><MonitorUp size={15} />共享飞书窗口</button>}<button type="button" onClick={() => void toggleBrowserFullscreen()}>{browserFullscreen ? <Minimize2 size={15} /> : <Maximize2 size={15} />}{browserFullscreen ? '退出全屏' : '全屏'}</button></div></div>
-          <div className={`oa-meeting-screen ${sharingScreen ? 'sharing' : ''}`}>{sharingScreen ? <video ref={sharedVideo} autoPlay muted playsInline aria-label="用户授权显示的飞书会议窗口" /> : <div><MonitorUp size={38} /><strong>显示飞书正在共享的内容</strong><p>点击“共享飞书窗口”，在浏览器弹窗中选择飞书会议窗口。画面只在本机显示，不会上传或录制。</p></div>}
-            <div className="oa-meeting-subtitle" role="status" aria-live="polite">{latestSubtitle ? <><strong>{latestSubtitle.speaker}</strong><span>{latestSubtitle.text}</span></> : <span>正在等待实时字幕…</span>}</div>
-          </div>
-          {shareError && <p className="oa-meeting-share-error" role="alert">{shareError}</p>}
-        </section>
-        <aside className="oa-meeting-live-notes" aria-label="会议实时纪要">
+      {active && <div className="oa-meeting-live-view">
+        <main className="oa-meeting-live-notes" aria-label="会议实时纪要">
           <h3><FileText size={17} />会议实时纪要 <small>{minutesUpdating ? '正在更新…' : `${session.transcript.length} 条字幕`}</small></h3>
           <section className="oa-meeting-ai-minutes">{liveMinutes ? <div>{liveMinutes}</div> : <div className="oa-meeting-empty">取得实时字幕后，OA 会自动生成并持续更新会议纪要，无需人工记录。</div>}</section>
-        </aside>
+        </main>
+        <div className="oa-meeting-subtitle" role="status" aria-live="polite">{latestSubtitle ? <><strong>{latestSubtitle.speaker}</strong><span>{latestSubtitle.text}</span></> : <span>正在等待实时字幕…</span>}</div>
       </div>}
       {session.phase === 'pending_confirmation' && <div className="oa-meeting-complete"><CheckCircle2 size={22} /><div><strong>等待管理员审批</strong><p>会议全文和最终纪要生成后会自动提交 OA；管理员批准后正式归档。</p></div></div>}
       {session.phase === 'archived' && <div className="oa-meeting-complete"><CheckCircle2 size={22} /><div><strong>会议已归档</strong><p>会议全文和纪要已通过管理员审批并进入 OA 知识库。</p></div></div>}
