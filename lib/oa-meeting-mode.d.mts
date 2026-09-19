@@ -22,5 +22,6 @@ export type MeetingModeSession = {
 export const MEETING_MARKER_LABELS: Readonly<Record<MeetingMarkerType, string>>;
 export function resolveMeetingModeCommand(value: unknown): { action: 'start'; meeting: string } | { action: 'end' } | { action: 'minutes' } | null;
 export function meetingModeStorageKey(email: unknown): string;
+export function extractFeishuDocumentLinks(transcript: unknown): Array<{ href: string; label: string }>;
 export function isMeetingModeSession(value: unknown): value is MeetingModeSession;
 export function buildMeetingMinutesMaterial(session: MeetingModeSession): string;

@@ -1,8 +1,8 @@
 'use client';
 
 import { forwardRef, useCallback, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Bot, CheckCircle2, CircleDot, FileText, Flag, LogOut, Plus, RotateCcw, UsersRound, X } from 'lucide-react';
-import { buildMeetingMinutesMaterial, isMeetingModeSession, meetingModeStorageKey, MEETING_MARKER_LABELS, type MeetingMarkerType, type MeetingModeSession, type MeetingTranscriptItem } from '@/lib/oa-meeting-mode.mjs';
+import { Bot, CheckCircle2, CircleDot, ExternalLink, FileText, LogOut, MonitorUp, Plus, RotateCcw, Square, X } from 'lucide-react';
+import { buildMeetingMinutesMaterial, extractFeishuDocumentLinks, isMeetingModeSession, meetingModeStorageKey, MEETING_MARKER_LABELS, type MeetingMarkerType, type MeetingModeSession, type MeetingTranscriptItem } from '@/lib/oa-meeting-mode.mjs';
 import { useOaConversation } from './oa-conversation-context';
 import './oa-meeting-mode.css';
 
@@ -67,8 +67,33 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
   const pollPromise = useRef<Promise<void> | null>(null);
   const mutationBusy = useRef(false);
   const restored = useRef(false);
+  const sharedVideo = useRef<HTMLVideoElement>(null);
+  const sharedStream = useRef<MediaStream | null>(null);
+  const [sharingScreen, setSharingScreen] = useState(false);
 
   useEffect(() => { sessionRef.current = session; }, [session]);
+  const stopScreenShare = useCallback(() => {
+    const stream = sharedStream.current; sharedStream.current = null;
+    for (const track of stream?.getTracks() || []) track.stop();
+    if (sharedVideo.current) sharedVideo.current.srcObject = null;
+    setSharingScreen(false);
+  }, []);
+  useEffect(() => () => stopScreenShare(), [stopScreenShare]);
+  const startScreenShare = useCallback(async () => {
+    if (!navigator.mediaDevices?.getDisplayMedia) { setError('当前浏览器不支持窗口共享，请使用最新版 Chrome 或 Edge。'); return; }
+    try {
+      stopScreenShare();
+      const stream = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: false });
+      const track = stream.getVideoTracks()[0];
+      if (!track) { for (const item of stream.getTracks()) item.stop(); throw new Error('未取得共享画面。'); }
+      sharedStream.current = stream; track.addEventListener('ended', stopScreenShare, { once: true });
+      setSharingScreen(true); setError('');
+      window.setTimeout(() => { if (sharedVideo.current && sharedStream.current === stream) { sharedVideo.current.srcObject = stream; void sharedVideo.current.play().catch(() => undefined); } }, 0);
+    } catch (cause) {
+      if (cause instanceof DOMException && cause.name === 'NotAllowedError') setError('你取消了共享。需要查看飞书画面时，可再次点击“共享飞书窗口”。');
+      else setError(errorText(cause, '无法显示共享画面，请重新选择飞书会议窗口。'));
+    }
+  }, [stopScreenShare]);
   useEffect(() => {
     if (restored.current) return;
     restored.current = true;
@@ -242,11 +267,12 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
         if (result.state !== 'leave_api_succeeded') throw new MeetingBotRequestError('退出接口响应不完整，结果暂不明确。', true);
       }
       const safeToSummarize = { ...completed, exitStatus: 'confirmed' as const };
+      stopScreenShare();
       submitMinutes(safeToSummarize);
     } catch (cause) {
       setError(`${errorText(cause, '退出结果未确认。')} 请先在飞书参会人列表核对；确认机器人已离会后，可选择“仅生成纪要”。`);
     } finally { mutationBusy.current = false; setBusy(false); }
-  }, [readEvents, remoteEnded, submitMinutes]);
+  }, [readEvents, remoteEnded, stopScreenShare, submitMinutes]);
   useEffect(() => {
     if (session.phase === 'in_meeting' && remoteEnded && !mutationBusy.current) void finish();
   }, [session.phase, remoteEnded, finish]);
@@ -261,7 +287,7 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
   const reset = () => {
     if (session.phase === 'in_meeting' || session.phase === 'waiting_to_join') return;
     try { sessionStorage.removeItem(storageKey); } catch { /* Best effort. */ }
-    setSession(emptySession()); pageToken.current = null; setRemoteEnded(false); setError(''); setNotice('发送 @会议模式加九位会议号，即可让 OA 助手入会。');
+    stopScreenShare(); setSession(emptySession()); pageToken.current = null; setRemoteEnded(false); setError(''); setNotice('发送 @会议模式加九位会议号，即可让 OA 助手入会。');
   };
   const clearJoinLock = () => {
     if (!window.confirm('请先在飞书确认机器人没有入会，或已经由主持人移出。此操作只解除本地锁定，不会控制飞书机器人。确认继续？')) return;
@@ -272,6 +298,9 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
   if (!visible) return null;
 
   const active = session.phase === 'in_meeting';
+  const latestSubtitle = session.transcript.at(-1);
+  const recentDiscussion = session.transcript.slice(-8);
+  const sharedDocuments = extractFeishuDocumentLinks(session.transcript);
   return <article className="oa-meeting-mode" aria-label="会议模式">
     <header className="oa-meeting-header"><div><span className={active ? 'live' : ''}><CircleDot size={14} />{phaseLabels[session.phase]}</span><h2><Bot size={22} />会议模式</h2><p>{notice}</p></div>{!active && session.phase === 'draft' && <button type="button" className="oa-meeting-close" aria-label="关闭会议模式" onClick={() => { reset(); onClose(); }}><X size={20} /></button>}</header>
     {session.phase === 'draft' || session.phase === 'waiting_to_join' ? <div className="oa-meeting-compact-start">
@@ -279,9 +308,19 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
       {session.phase === 'waiting_to_join' && <button type="button" className="oa-meeting-recovery" disabled={busy} onClick={clearJoinLock}><RotateCcw size={17} />确认机器人未入会，解除锁定</button>}
     </div> : <div className="oa-meeting-console">
       <section className="oa-meeting-summary"><div><strong>{session.title}</strong><small>{session.startedAt ? new Date(session.startedAt).toLocaleString('zh-CN') : '尚未开始'} · {session.observedParticipants.length} 位已识别参会人</small></div><span><CircleDot size={14} />{active ? remoteEnded ? '飞书已结束' : '记录中' : phaseLabels[session.phase]}</span></section>
-      {active && <div className="oa-meeting-live-grid">
-        <section><h3><UsersRound size={17} />实时转写 <small>{session.transcript.length} 条</small></h3><div className="oa-meeting-transcript">{session.transcript.length ? session.transcript.slice(-100).map(item => <p key={item.id}><time>{new Date(item.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time><strong>{item.speaker}</strong><span>{item.text}</span></p>) : <div className="oa-meeting-empty">正在等待飞书会中转写；主持人可能需要放行机器人，并确认应用具有事件读取权限。</div>}</div></section>
-        <section><h3><Flag size={17} />会中标记</h3><div className="oa-meeting-marker-compose"><select value={markerType} onChange={event => setMarkerType(event.target.value as MeetingMarkerType)}>{Object.entries(MEETING_MARKER_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><textarea value={markerText} maxLength={2000} rows={3} onChange={event => setMarkerText(event.target.value)} placeholder="记录决策、待办、风险或重要内容" /><button type="button" disabled={!markerText.trim()} onClick={addMarker}><Plus size={16} />添加标记</button></div><div className="oa-meeting-markers">{session.markers.map(item => <p key={item.id}><b>{MEETING_MARKER_LABELS[item.type]}</b><span>{item.text}</span><button type="button" aria-label="删除标记" onClick={() => patch({ markers: session.markers.filter(marker => marker.id !== item.id) })}><X size={14} /></button></p>)}</div></section>
+      {active && <div className="oa-meeting-cockpit">
+        <section className="oa-meeting-stage" aria-label="飞书共享画面">
+          <div className="oa-meeting-stage-toolbar"><h3><MonitorUp size={17} />飞书共享画面</h3>{sharingScreen ? <button type="button" onClick={stopScreenShare}><Square size={15} />停止显示</button> : <button type="button" onClick={() => void startScreenShare()}><MonitorUp size={15} />共享飞书窗口</button>}</div>
+          <div className={`oa-meeting-screen ${sharingScreen ? 'sharing' : ''}`}>{sharingScreen ? <video ref={sharedVideo} autoPlay muted playsInline aria-label="用户授权显示的飞书会议窗口" /> : <div><MonitorUp size={38} /><strong>显示飞书正在共享的内容</strong><p>点击“共享飞书窗口”，在浏览器弹窗中选择飞书会议窗口。画面只在本机显示，不会上传或录制。</p></div>}
+            <div className="oa-meeting-subtitle" role="status" aria-live="polite">{latestSubtitle ? <><strong>{latestSubtitle.speaker}</strong><span>{latestSubtitle.text}</span></> : <span>正在等待实时字幕…</span>}</div>
+          </div>
+        </section>
+        <aside className="oa-meeting-live-notes" aria-label="会议实时纪要">
+          <h3><FileText size={17} />会议实时纪要 <small>{session.transcript.length} 条字幕</small></h3>
+          <section><h4>讨论进展</h4>{recentDiscussion.length ? recentDiscussion.map(item => <p key={item.id}><b>{item.speaker}</b><span>{item.text}</span></p>) : <div className="oa-meeting-empty">取得字幕后，这里会持续显示最新讨论；点击下方按钮可生成 AI 整理版。</div>}</section>
+          <section><h4>决策、待办与风险</h4><div className="oa-meeting-marker-compose"><select value={markerType} onChange={event => setMarkerType(event.target.value as MeetingMarkerType)}>{Object.entries(MEETING_MARKER_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><textarea value={markerText} maxLength={2000} rows={2} onChange={event => setMarkerText(event.target.value)} placeholder="记录决策、待办、风险或重要内容" /><button type="button" disabled={!markerText.trim()} onClick={addMarker}><Plus size={16} />添加</button></div><div className="oa-meeting-markers">{session.markers.map(item => <p key={item.id}><b>{MEETING_MARKER_LABELS[item.type]}</b><span>{item.text}</span><button type="button" aria-label="删除标记" onClick={() => patch({ markers: session.markers.filter(marker => marker.id !== item.id) })}><X size={14} /></button></p>)}</div></section>
+          <section><h4>飞书共享文档</h4>{sharedDocuments.length ? <div className="oa-meeting-documents">{sharedDocuments.map(document => <a key={document.href} href={document.href} target="_blank" rel="noreferrer"><span>{document.label}</span><ExternalLink size={14} /></a>)}</div> : <p className="oa-meeting-muted">字幕中出现受支持的飞书文档链接后，会在这里显示。</p>}</section>
+        </aside>
       </div>}
       {session.phase === 'pending_confirmation' && <div className="oa-meeting-complete"><CheckCircle2 size={22} /><div><strong>等待管理员审批</strong><p>会议全文和最终纪要生成后会自动提交 OA；管理员批准后正式归档。</p></div></div>}
       {session.phase === 'archived' && <div className="oa-meeting-complete"><CheckCircle2 size={22} /><div><strong>会议已归档</strong><p>会议全文和纪要已通过管理员审批并进入 OA 知识库。</p></div></div>}

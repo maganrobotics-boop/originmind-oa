@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { buildMeetingMinutesMaterial, isMeetingModeSession, meetingModeStorageKey, resolveMeetingModeCommand } from '../lib/oa-meeting-mode.mjs';
+import { buildMeetingMinutesMaterial, extractFeishuDocumentLinks, isMeetingModeSession, meetingModeStorageKey, resolveMeetingModeCommand } from '../lib/oa-meeting-mode.mjs';
 
 const session = {
   version: 1, phase: 'in_meeting', title: '机器人项目周会', meeting: '123456789', meetingId: '7512345678901234567',
@@ -37,4 +37,15 @@ test('minutes material is rejected rather than silently truncated', () => {
 });
 test('meeting storage is scoped to the signed-in OA identity', () => {
   assert.equal(meetingModeStorageKey('ADMIN@EXAMPLE.COM'), 'oa:meeting-mode:v1:admin@example.com');
+});
+test('only supported Feishu document links are exposed by the meeting cockpit', () => {
+  const links = extractFeishuDocumentLinks([
+    { text: '请看方案 https://originmind.feishu.cn/docx/abc123 ，继续讨论' },
+    { text: '表格 https://originmind.feishu.cn/sheets/sht123' },
+    { text: '伪造 https://originmind.feishu.cn.evil.test/docx/nope' },
+    { text: '普通网页 https://originmind.feishu.cn/help/index' },
+  ]);
+  assert.equal(links.length, 2);
+  assert.equal(links[0].href, 'https://originmind.feishu.cn/docx/abc123');
+  assert.match(links[0].label, /请看方案/u);
 });

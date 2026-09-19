@@ -150,7 +150,8 @@ test('five capabilities stay outside the timeline conditional and remain at the 
 test('typing the meeting command prefix exposes an accessible autocomplete option', () => {
   assert.match(panel, /meetingSuggestionVisible = \/\^\[@＠\]会议/u);
   assert.match(panel, /role="listbox" aria-label="命令补全"/u);
-  assert.match(panel, /<strong>@会议模式<\/strong>/u);
+  assert.match(panel, /<strong>@会议模式919700881<\/strong>/u);
+  assert.match(panel, /setQuestion\('@会议模式919700881'\)/u);
   assert.match(panel, /\['Enter', 'Tab'\]\.includes\(event\.key\)/u);
 });
 test('short viewports never hide the capability buttons', () => {
