@@ -93,7 +93,7 @@ async function runAsk(question, selectedSource = null) {
     },
     resolveChatCapability, resolveMeetingModeCommand, crypto: { randomUUID: () => 'synthetic-id' }, AbortController, AbortSignal,
     meetingModeOpen: false, meetingMode: { current: null },
-    setMeetingTitle: value => record.meeting.push({ field: 'title', value }), setMeetingCommandEpoch() {}, setMeetingModeOpen: value => record.meeting.push({ field: 'open', value }),
+    setMeetingNumber: value => record.meeting.push({ field: 'meeting', value }), setMeetingCommandEpoch() {}, setMeetingModeOpen: value => record.meeting.push({ field: 'open', value }),
     setQuestion() {}, setError: value => { if (value) record.errors.push(value); }, setLastAnswer() {}, setAsking() {}, setRequestStatus() {}, nextOrder: () => 1,
     setTurns: value => { record.turns = typeof value === 'function' ? value(record.turns) : value; },
     pendingChatIndicators: () => ({}), replyChatIndicators: () => ({}), failedChatIndicators: () => ({}), validImage: () => false, userFacingAnswer: value => value,
@@ -134,15 +134,15 @@ test('actual handler preserves ordinary questions and rejects too-short knowledg
   assert.equal(record.plans.length, 0);
   assert.match(record.errors[0], /至少 2 个字符/u);
 });
-test('actual handler opens meeting mode without sending a model or document request', async () => {
-  const record = await runAsk('@会议模式 机器人项目周会');
+test('actual handler starts meeting mode from a nine-digit number without sending a model or document request', async () => {
+  const record = await runAsk('@会议模式919700881');
   assert.deepEqual(record.requests, []); assert.deepEqual(record.plans, []);
-  assert.deepEqual(record.meeting, [{ field: 'title', value: '机器人项目周会' }, { field: 'open', value: true }]);
+  assert.deepEqual(record.meeting, [{ field: 'meeting', value: '919700881' }, { field: 'open', value: true }]);
 });
 test('five capabilities stay outside the timeline conditional and remain at the composer', () => {
   assert.doesNotMatch(panel, /!timeline\.length\s*&&\s*<div className="oa-chat-examples"/u);
   assert.match(panel, /className="oa-chat-examples" role="group" aria-label="AI 助手五项功能"/u);
-  assert.match(panel, /title="@会议模式"/u);
+  assert.match(panel, /title="@会议模式919700881"/u);
   assert.ok(panel.indexOf('className="oa-chat-examples"') > panel.indexOf('className="composer-area oa-chat-composer-area"'));
   assert.match(panel, /title=\{`@\$\{hint\.label\}`\} disabled=\{working\}/u);
   assert.ok(panel.includes("hint.label === '知识问答') documents.useSource(null)"));

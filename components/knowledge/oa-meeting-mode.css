@@ -15,6 +15,8 @@
 .oa-meeting-header > div > span.live { background: #e8f7ef; color: #167249; }
 .oa-meeting-header > div > span.live svg { fill: #23a36b; }
 .oa-meeting-close { align-self: flex-start; display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 50%; background: #fff; color: #687386; }
+.oa-meeting-compact-start { display: grid; gap: 14px; padding: 18px 24px 22px; }
+.oa-meeting-compact-start p { margin: 0; color: #526174; line-height: 1.7; }
 
 .oa-meeting-setup { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 22px 24px; }
 .oa-meeting-setup label { display: grid; gap: 7px; color: #344155; font-size: 13px; font-weight: 650; }

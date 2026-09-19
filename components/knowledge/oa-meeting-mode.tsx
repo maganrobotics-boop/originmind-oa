@@ -10,13 +10,13 @@ type BotReply = { error?: string; message?: string; state?: string; meetingId?: 
 type EventReply = { error?: string; state?: string; transcript?: MeetingTranscriptItem[]; participants?: string[]; pageToken?: string | null; hasMore?: boolean; contentTruncated?: boolean; meetingEnded?: boolean; meeting?: { topic?: string; startTime?: string; endTime?: string } };
 type Props = {
   visible: boolean;
-  initialTitle?: string;
+  commandMeeting?: string;
   commandEpoch?: number;
   onRestore: () => void;
   onClose: () => void;
-  onMinutes: (title: string, material: string, onAccepted: (taskId: string) => void) => boolean;
+  onMinutes: (title: string, material: string, final: boolean, onAccepted?: (taskId: string) => void) => boolean;
 };
-export type OaMeetingModeHandle = { end: () => Promise<void> };
+export type OaMeetingModeHandle = { end: () => Promise<void>; minutes: () => void };
 
 const emptySession = (title = ''): MeetingModeSession => ({
   version: 1, phase: 'draft', title, meeting: '', meetingId: null, participants: '', agenda: '', startedAt: null, endedAt: null,
@@ -52,16 +52,14 @@ async function botRequest(body: object, timeout = 20000): Promise<BotReply> {
   return data;
 }
 
-export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaMeetingMode({ visible, initialTitle = '', commandEpoch = 0, onRestore, onClose, onMinutes }, ref) {
+export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaMeetingMode({ visible, commandMeeting = '', commandEpoch = 0, onRestore, onClose, onMinutes }, ref) {
   const { user } = useOaConversation();
   const storageKey = meetingModeStorageKey(user.email);
-  const [session, setSession] = useState<MeetingModeSession>(() => emptySession(initialTitle));
+  const [session, setSession] = useState<MeetingModeSession>(() => emptySession());
   const sessionRef = useRef(session);
-  const [password, setPassword] = useState('');
-  const [confirmed, setConfirmed] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
-  const [notice, setNotice] = useState('填写会议信息后，OA 助手会加入正在进行的飞书会议。');
+  const [notice, setNotice] = useState('发送 @会议模式加九位会议号，即可让 OA 助手入会。');
   const [markerType, setMarkerType] = useState<MeetingMarkerType>('decision');
   const [markerText, setMarkerText] = useState('');
   const pageToken = useRef<string | null>(null);
@@ -85,51 +83,72 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
     catch { setNotice('浏览器无法保存会议现场状态；请保持本页打开，并在结束后立即生成纪要。'); }
   }, [session, storageKey, visible]);
   useEffect(() => {
-    if (initialTitle && sessionRef.current.phase === 'draft') setSession(current => ({ ...current, title: initialTitle }));
-  }, [initialTitle, commandEpoch]);
-
-  useEffect(() => {
     if (session.phase !== 'pending_confirmation' || !session.minutesTaskId) return;
     let current = true;
     const verify = async () => {
       try {
-        const response = await fetch(`/api/lab-ai/archive?id=${encodeURIComponent(session.minutesTaskId!)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
-        const data = await response.json().catch(() => ({})) as { lifecycle?: { state?: string } };
-        if (!current || !response.ok || data.lifecycle?.state !== 'submitted') return;
-        setSession(previous => previous.minutesTaskId === session.minutesTaskId ? { ...previous, phase: 'archived' } : previous);
-        setNotice('会议纪要已提交 OA；后续审批与入库状态可在文档卡片和知识管理中核对。'); setError('');
+        const taskResponse = await fetch(`/api/lab-ai/tasks?id=${encodeURIComponent(session.minutesTaskId!)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
+        const taskData = await taskResponse.json().catch(() => ({})) as { task?: { status?: string } };
+        if (!current || !taskResponse.ok) return;
+        const lifecycleResponse = await fetch(`/api/lab-ai/archive?id=${encodeURIComponent(session.minutesTaskId!)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
+        const lifecycleData = await lifecycleResponse.json().catch(() => ({})) as { lifecycle?: { state?: string; knowledgeStatus?: string | null } };
+        if (!current || !lifecycleResponse.ok) return;
+        if (lifecycleData.lifecycle?.state !== 'submitted' && taskData.task?.status === 'succeeded') {
+          const submitResponse = await fetch('/api/lab-ai/archive', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ id: session.minutesTaskId, confirmed: true }), signal: AbortSignal.timeout(90000) });
+          const submitted = await submitResponse.json().catch(() => ({})) as { received?: boolean; item?: { status?: string }; error?: string };
+          if (!current) return;
+          if (!submitResponse.ok || submitted.received !== true) throw new Error(submitted.error || '自动提交 OA 尚未确认。');
+          setNotice(submitted.item?.status === 'active' ? '会议全文和纪要已由管理员批准并归档。' : '会议全文和纪要已自动提交 OA，正在等待管理员审批。');
+          if (submitted.item?.status === 'active') setSession(previous => previous.minutesTaskId === session.minutesTaskId ? { ...previous, phase: 'archived' } : previous);
+          window.dispatchEvent(new Event('oa-files-archived')); setError(''); return;
+        }
+        if (lifecycleData.lifecycle?.state === 'submitted' && lifecycleData.lifecycle.knowledgeStatus === 'active') {
+          setSession(previous => previous.minutesTaskId === session.minutesTaskId ? { ...previous, phase: 'archived' } : previous);
+          setNotice('会议全文和纪要已由管理员批准并归档。'); setError(''); return;
+        }
+        if (lifecycleData.lifecycle?.state === 'submitted') setNotice('会议全文和纪要已自动提交 OA，正在等待管理员审批。');
       } catch { /* The document editor remains the authoritative recovery UI. */ }
     };
     const update = () => { if (document.visibilityState !== 'hidden') void verify(); };
-    void verify(); window.addEventListener('oa-files-archived', update); document.addEventListener('visibilitychange', update);
-    return () => { current = false; window.removeEventListener('oa-files-archived', update); document.removeEventListener('visibilitychange', update); };
+    void verify(); const timer = window.setInterval(update, 5000); window.addEventListener('oa-files-archived', update); document.addEventListener('visibilitychange', update);
+    return () => { current = false; window.clearInterval(timer); window.removeEventListener('oa-files-archived', update); document.removeEventListener('visibilitychange', update); };
   }, [session.phase, session.minutesTaskId]);
 
   const patch = (values: Partial<MeetingModeSession>) => setSession(current => ({ ...current, ...values }));
-  const start = async () => {
+  const start = useCallback(async (meeting: string) => {
+    const normalizedMeeting = meeting.trim();
     const current = sessionRef.current;
     if (mutationBusy.current || current.phase !== 'draft') return;
-    if (!current.title.trim()) { setError('请填写会议标题。'); return; }
-    if (!current.meeting.trim()) { setError('请填写九位会议号或飞书会议链接。'); return; }
-    if (!confirmed) { setError('请先确认已告知参会人 OA 助手将加入并记录会议。'); return; }
-    mutationBusy.current = true; setBusy(true); setError(''); setNotice('正在请求 OA 助手加入飞书会议…'); patch({ phase: 'waiting_to_join', exitStatus: 'not_requested' });
+    if (!/^[0-9]{9}$/u.test(normalizedMeeting)) { setError('请发送 @会议模式 加九位飞书会议号，例如 @会议模式919700881。'); return; }
+    const prepared = { ...current, title: `飞书会议 ${normalizedMeeting}`, meeting: normalizedMeeting, phase: 'waiting_to_join' as const, exitStatus: 'not_requested' as const };
+    sessionRef.current = prepared; setSession(prepared);
+    mutationBusy.current = true; setBusy(true); setError(''); setNotice('正在请求 OA 助手加入飞书会议…');
     try {
-      const data = await botRequest({ action: 'join', meeting: current.meeting, password, confirmed: true });
-      setPassword('');
+      const data = await botRequest({ action: 'join', meeting: normalizedMeeting, confirmed: true });
       if (data.state !== 'join_api_succeeded' || !data.meetingId) {
         patch({ phase: 'waiting_to_join' });
         setError('飞书入会接口已响应，但没有返回可用于退出和读取转写的会议 ID。请先在参会人列表核对，勿重复入会。');
         return;
       }
       const startedAt = new Date().toISOString();
-      patch({ phase: 'in_meeting', meetingId: data.meetingId, meeting: data.meetingNumber || current.meeting, startedAt, endedAt: null, exitStatus: 'not_requested' });
+      patch({ phase: 'in_meeting', meetingId: data.meetingId, meeting: data.meetingNumber || normalizedMeeting, startedAt, endedAt: null, exitStatus: 'not_requested' });
       setNotice(data.message || 'OA 助手已请求入会，正在读取会中事件。'); pageToken.current = null; setRemoteEnded(false);
     } catch (cause) {
       const outcomeUnknown = cause instanceof MeetingBotRequestError && cause.outcomeUnknown;
       patch({ phase: outcomeUnknown ? 'waiting_to_join' : 'draft' });
       setError(outcomeUnknown ? `${errorText(cause, '入会结果未确认。')} 请先查看飞书参会人列表，勿重复入会。` : errorText(cause, '入会请求失败，未确认机器人加入。'));
-    } finally { mutationBusy.current = false; setPassword(''); setBusy(false); }
-  };
+    } finally { mutationBusy.current = false; setBusy(false); }
+  }, []);
+  useEffect(() => {
+    if (!commandMeeting) return;
+    if (['in_meeting', 'waiting_to_join'].includes(sessionRef.current.phase)) {
+      setError(`已有会议 ${sessionRef.current.meeting || ''} 正在连接或记录，请先发送 @结束会议。`); return;
+    }
+    if (sessionRef.current.phase !== 'draft') {
+      const draft = emptySession(); sessionRef.current = draft; setSession(draft);
+    }
+    void start(commandMeeting);
+  }, [commandMeeting, commandEpoch, start]);
 
   const performEventRead = useCallback(async (force = false) => {
     const current = sessionRef.current;
@@ -151,7 +170,7 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
         for (const item of data.transcript || []) if (item?.id && item.text) byId.set(item.id, item);
         const transcript = [...byId.values()].sort((a, b) => Date.parse(a.time) - Date.parse(b.time));
         const participants = [...new Set([...base.observedParticipants, ...(data.participants || [])])].slice(0, 500);
-        const updated = { ...base, title: base.title || data.meeting?.topic || '', transcript, observedParticipants: participants };
+        const updated = { ...base, title: data.meeting?.topic || base.title, transcript, observedParticipants: participants };
         sessionRef.current = updated; setSession(updated);
       }
       pageToken.current = data.hasMore && data.pageToken ? data.pageToken : null;
@@ -190,10 +209,20 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
     sessionRef.current = completed; setSession(completed);
     const identity = `${completed.startedAt || ''}:${completed.endedAt || ''}`;
     const accepted = (taskId: string) => setSession(previous => `${previous.startedAt || ''}:${previous.endedAt || ''}` === identity ? { ...previous, minutesTaskId: taskId } : previous);
-    if (!onMinutes(completed.title || '会议纪要', material, accepted)) { setError('纪要任务未能提交，会议材料仍保留在当前页面。'); return false; }
+    if (!onMinutes(completed.title || '会议纪要', material, true, accepted)) { setError('纪要任务未能提交，会议材料仍保留在当前页面。'); return false; }
     setSession({ ...completed, phase: 'pending_confirmation' });
     setNotice('会议纪要任务已提交。生成后会自动打开；请核对正文，再点击“提交 OA”。'); setError('');
     return true;
+  }, [onMinutes]);
+
+  const generateLiveMinutes = useCallback(() => {
+    const current = sessionRef.current;
+    if (current.phase !== 'in_meeting') { setError('当前没有正在记录的会议。'); return; }
+    let material = '';
+    try { material = buildMeetingMinutesMaterial(current); }
+    catch { setError('当前会议全文过大或格式不完整，暂时无法生成实时纪要。'); return; }
+    if (!onMinutes(current.title || '实时会议纪要', material, false)) { setError('实时纪要任务未能提交，请稍后重试。'); return; }
+    setNotice('已在聊天中生成截至当前的会议全文和实时纪要；会议仍在继续记录。'); setError('');
   }, [onMinutes]);
 
   const finish = useCallback(async () => {
@@ -218,7 +247,10 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
       setError(`${errorText(cause, '退出结果未确认。')} 请先在飞书参会人列表核对；确认机器人已离会后，可选择“仅生成纪要”。`);
     } finally { mutationBusy.current = false; setBusy(false); }
   }, [readEvents, remoteEnded, submitMinutes]);
-  useImperativeHandle(ref, () => ({ end: finish }), [finish]);
+  useEffect(() => {
+    if (session.phase === 'in_meeting' && remoteEnded && !mutationBusy.current) void finish();
+  }, [session.phase, remoteEnded, finish]);
+  useImperativeHandle(ref, () => ({ end: finish, minutes: generateLiveMinutes }), [finish, generateLiveMinutes]);
 
   const addMarker = () => {
     const text = markerText.trim(); if (!text || text.length > 2000) { setError('标记内容需为 1–2,000 个字符。'); return; }
@@ -229,41 +261,34 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
   const reset = () => {
     if (session.phase === 'in_meeting' || session.phase === 'waiting_to_join') return;
     try { sessionStorage.removeItem(storageKey); } catch { /* Best effort. */ }
-    setSession(emptySession()); setPassword(''); setConfirmed(false); pageToken.current = null; setRemoteEnded(false); setError(''); setNotice('填写会议信息后，OA 助手会加入正在进行的飞书会议。');
+    setSession(emptySession()); pageToken.current = null; setRemoteEnded(false); setError(''); setNotice('发送 @会议模式加九位会议号，即可让 OA 助手入会。');
   };
   const clearJoinLock = () => {
     if (!window.confirm('请先在飞书确认机器人没有入会，或已经由主持人移出。此操作只解除本地锁定，不会控制飞书机器人。确认继续？')) return;
     const current = sessionRef.current;
     const draft: MeetingModeSession = { ...current, phase: 'draft', meetingId: null, startedAt: null, endedAt: null, exitStatus: 'not_requested', minutesTaskId: null, transcript: [], observedParticipants: [] };
-    sessionRef.current = draft; setSession(draft); setPassword(''); setConfirmed(false); setError(''); setNotice('本地入会锁定已解除；如需重试，请重新确认参会人知情。');
+    sessionRef.current = draft; setSession(draft); setError(''); setNotice('本地入会锁定已解除；请重新发送 @会议模式加九位会议号。');
   };
   if (!visible) return null;
 
   const active = session.phase === 'in_meeting';
-  const setupLocked = busy || session.phase === 'waiting_to_join';
   return <article className="oa-meeting-mode" aria-label="会议模式">
     <header className="oa-meeting-header"><div><span className={active ? 'live' : ''}><CircleDot size={14} />{phaseLabels[session.phase]}</span><h2><Bot size={22} />会议模式</h2><p>{notice}</p></div>{!active && session.phase === 'draft' && <button type="button" className="oa-meeting-close" aria-label="关闭会议模式" onClick={() => { reset(); onClose(); }}><X size={20} /></button>}</header>
-    {session.phase === 'draft' || session.phase === 'waiting_to_join' ? <div className="oa-meeting-setup">
-      <label>会议标题<input value={session.title} maxLength={100} disabled={setupLocked} onChange={event => patch({ title: event.target.value })} placeholder="例如：机器人项目周会" /></label>
-      <label>飞书会议号或链接<input value={session.meeting} maxLength={512} disabled={setupLocked} onChange={event => patch({ meeting: event.target.value })} placeholder="123456789 或 https://vc.feishu.cn/j/…" /></label>
-      <label>会议密码（没有则留空）<input type="password" value={password} maxLength={128} disabled={setupLocked} onChange={event => setPassword(event.target.value)} autoComplete="off" /></label>
-      <label>参会人<textarea value={session.participants} maxLength={2000} disabled={setupLocked} onChange={event => patch({ participants: event.target.value })} rows={2} placeholder="姓名或团队，一行一个也可以" /></label>
-      <label>议程<textarea value={session.agenda} maxLength={4000} disabled={setupLocked} onChange={event => patch({ agenda: event.target.value })} rows={3} placeholder="本次会议需要讨论和决定什么？" /></label>
-      <label className="oa-meeting-consent"><input type="checkbox" checked={confirmed} disabled={setupLocked} onChange={event => setConfirmed(event.target.checked)} /><span>我确认会议号无误，并已告知参会人 OA 助手将加入、读取会中转写并用于生成内部会议纪要。</span></label>
-      <button type="button" className="oa-meeting-primary" disabled={setupLocked || !confirmed || !session.title.trim() || !session.meeting.trim()} onClick={() => void start()}>{busy ? '正在连接…' : <><Bot size={17} />启动会议模式</>}</button>
-      {session.phase === 'waiting_to_join' && <button type="button" className="oa-meeting-recovery" disabled={busy} onClick={clearJoinLock}><RotateCcw size={17} />主持人已核对，解除入会锁定</button>}
+    {session.phase === 'draft' || session.phase === 'waiting_to_join' ? <div className="oa-meeting-compact-start">
+      <p>{session.phase === 'waiting_to_join' ? `正在连接飞书会议 ${session.meeting}，请主持人在飞书中放行机器人。` : '在下方聊天框发送 @会议模式加九位会议号，例如 @会议模式919700881。发送即确认已告知参会人 OA 助手将记录会议。'}</p>
+      {session.phase === 'waiting_to_join' && <button type="button" className="oa-meeting-recovery" disabled={busy} onClick={clearJoinLock}><RotateCcw size={17} />确认机器人未入会，解除锁定</button>}
     </div> : <div className="oa-meeting-console">
       <section className="oa-meeting-summary"><div><strong>{session.title}</strong><small>{session.startedAt ? new Date(session.startedAt).toLocaleString('zh-CN') : '尚未开始'} · {session.observedParticipants.length} 位已识别参会人</small></div><span><CircleDot size={14} />{active ? remoteEnded ? '飞书已结束' : '记录中' : phaseLabels[session.phase]}</span></section>
       {active && <div className="oa-meeting-live-grid">
         <section><h3><UsersRound size={17} />实时转写 <small>{session.transcript.length} 条</small></h3><div className="oa-meeting-transcript">{session.transcript.length ? session.transcript.slice(-100).map(item => <p key={item.id}><time>{new Date(item.time).toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</time><strong>{item.speaker}</strong><span>{item.text}</span></p>) : <div className="oa-meeting-empty">正在等待飞书会中转写；主持人可能需要放行机器人，并确认应用具有事件读取权限。</div>}</div></section>
         <section><h3><Flag size={17} />会中标记</h3><div className="oa-meeting-marker-compose"><select value={markerType} onChange={event => setMarkerType(event.target.value as MeetingMarkerType)}>{Object.entries(MEETING_MARKER_LABELS).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><textarea value={markerText} maxLength={2000} rows={3} onChange={event => setMarkerText(event.target.value)} placeholder="记录决策、待办、风险或重要内容" /><button type="button" disabled={!markerText.trim()} onClick={addMarker}><Plus size={16} />添加标记</button></div><div className="oa-meeting-markers">{session.markers.map(item => <p key={item.id}><b>{MEETING_MARKER_LABELS[item.type]}</b><span>{item.text}</span><button type="button" aria-label="删除标记" onClick={() => patch({ markers: session.markers.filter(marker => marker.id !== item.id) })}><X size={14} /></button></p>)}</div></section>
       </div>}
-      {session.phase === 'pending_confirmation' && <div className="oa-meeting-complete"><CheckCircle2 size={22} /><div><strong>纪要正在生成或等待确认</strong><p>生成结果会作为“会议纪要”文档出现在聊天中。核对后可提交 OA，审批通过后才进入知识库。</p></div></div>}
-      {session.phase === 'archived' && <div className="oa-meeting-complete"><CheckCircle2 size={22} /><div><strong>会议纪要已提交 OA</strong><p>会议模式已归档；文档仍需按 OA 审批流程核对，审批通过后才进入知识库。</p></div></div>}
+      {session.phase === 'pending_confirmation' && <div className="oa-meeting-complete"><CheckCircle2 size={22} /><div><strong>等待管理员审批</strong><p>会议全文和最终纪要生成后会自动提交 OA；管理员批准后正式归档。</p></div></div>}
+      {session.phase === 'archived' && <div className="oa-meeting-complete"><CheckCircle2 size={22} /><div><strong>会议已归档</strong><p>会议全文和纪要已通过管理员审批并进入 OA 知识库。</p></div></div>}
       {session.phase === 'generating_minutes' && <div className="oa-meeting-complete"><FileText size={22} /><div><strong>会议材料已保留</strong><p>{session.exitStatus === 'uncertain' ? '请先在飞书确认机器人已经离会，再继续生成纪要。' : '纪要任务尚未成功提交，可以重试。'}</p></div></div>}
-      <div className="oa-meeting-actions">{active && <button type="button" className="oa-meeting-danger" disabled={busy} onClick={() => void finish()}><LogOut size={17} />{busy ? '正在结束…' : '结束并生成纪要'}</button>}{session.phase === 'generating_minutes' && <button type="button" disabled={busy} onClick={() => { const current = sessionRef.current; if (current.exitStatus === 'uncertain' && !window.confirm('仅在飞书确认机器人已经离会或会议已经结束后继续。确认生成纪要？')) return; submitMinutes({ ...current, exitStatus: 'confirmed', endedAt: current.endedAt || new Date().toISOString() }); }}><FileText size={17} />{session.exitStatus === 'uncertain' ? '已确认离会，仅生成纪要' : '重新提交纪要'}</button>}{!active && ['pending_confirmation', 'archived'].includes(session.phase) && <button type="button" onClick={reset}><RotateCcw size={17} />新建会议</button>}</div>
+      <div className="oa-meeting-actions">{active && <><button type="button" disabled={busy} onClick={generateLiveMinutes}><FileText size={17} />生成当前全文和纪要</button><button type="button" className="oa-meeting-danger" disabled={busy} onClick={() => void finish()}><LogOut size={17} />{busy ? '正在结束…' : '结束会议'}</button></>}{session.phase === 'generating_minutes' && <button type="button" disabled={busy} onClick={() => { const current = sessionRef.current; if (current.exitStatus === 'uncertain' && !window.confirm('仅在飞书确认机器人已经离会或会议已经结束后继续。确认生成纪要？')) return; submitMinutes({ ...current, exitStatus: 'confirmed', endedAt: current.endedAt || new Date().toISOString() }); }}><FileText size={17} />{session.exitStatus === 'uncertain' ? '已确认离会，生成最终材料' : '重新提交最终材料'}</button>}{!active && ['pending_confirmation', 'archived'].includes(session.phase) && <button type="button" onClick={reset}><RotateCcw size={17} />新建会议</button>}</div>
     </div>}
     {error && <p className="oa-meeting-error" role="alert">{error}</p>}
-    <footer>现场状态仅保存在当前浏览器标签页；密码不会保存。纪要任务提交后沿用 OA 现有权限、保存与审批流程。</footer>
+    <footer>现场状态保存在当前浏览器标签页。发送会议号即表示已告知参会人；会议结束后全文和纪要自动提交 OA，管理员批准后归档。</footer>
   </article>;
 });

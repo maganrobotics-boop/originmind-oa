@@ -20,7 +20,7 @@ export type MeetingModeSession = {
   observedParticipants: string[];
 };
 export const MEETING_MARKER_LABELS: Readonly<Record<MeetingMarkerType, string>>;
-export function resolveMeetingModeCommand(value: unknown): { action: 'open'; title: string } | { action: 'end' } | null;
+export function resolveMeetingModeCommand(value: unknown): { action: 'start'; meeting: string } | { action: 'end' } | { action: 'minutes' } | null;
 export function meetingModeStorageKey(email: unknown): string;
 export function isMeetingModeSession(value: unknown): value is MeetingModeSession;
 export function buildMeetingMinutesMaterial(session: MeetingModeSession): string;

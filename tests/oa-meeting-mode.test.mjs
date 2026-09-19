@@ -10,11 +10,13 @@ const session = {
   markers: [{ id: 'marker:0', type: 'task', text: '李四周五前提交测试记录', createdAt: '2026-09-19T01:02:00.000Z' }],
 };
 
-for (const prefix of ['@', '＠']) test(`${prefix}会议模式 opens the mode`, () => {
-  assert.deepEqual(resolveMeetingModeCommand(`${prefix}会议模式 机器人项目周会`), { action: 'open', title: '机器人项目周会' });
+for (const prefix of ['@', '＠']) test(`${prefix}会议模式 starts from a nine-digit meeting number`, () => {
+  assert.deepEqual(resolveMeetingModeCommand(`${prefix}会议模式919700881`), { action: 'start', meeting: '919700881' });
+  assert.deepEqual(resolveMeetingModeCommand(`${prefix}会议模式 919700881`), { action: 'start', meeting: '919700881' });
   assert.deepEqual(resolveMeetingModeCommand(`${prefix}结束会议`), { action: 'end' });
+  assert.deepEqual(resolveMeetingModeCommand('生成会议纪要'), { action: 'minutes' });
 });
-for (const value of ['解释 @会议模式', '"@会议模式"', '@会议模式ABC', '@结束会议 现在', null, 42]) test(`embedded or malformed command stays ordinary: ${String(value)}`, () => assert.equal(resolveMeetingModeCommand(value), null));
+for (const value of ['解释 @会议模式', '"@会议模式919700881"', '@会议模式', '@会议模式ABC', '@会议模式12345678', '@会议模式1234567890', '@结束会议 现在', null, 42]) test(`embedded or malformed command stays ordinary: ${String(value)}`, () => assert.equal(resolveMeetingModeCommand(value), null));
 test('meeting session validation is strict and never accepts a stored password', () => {
   assert.equal(isMeetingModeSession(session), true);
   assert.equal(isMeetingModeSession({ ...session, password: 'secret' }), false);
