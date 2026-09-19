@@ -37,7 +37,7 @@ test('check probes the join route with credentials and meeting data that cannot 
   assert.equal(result.calls[1].headers.authorization, 'Bearer invalid_transport_probe');
   assert.notEqual(result.calls[1].headers.authorization, 'Bearer real_tenant_token');
   assert.deepEqual(result.calls[1].json, { join_type: 0, join_identify: { meeting_no: '000000000' } });
-  assert.equal(result.calls[1].redirect, 'error');
+  assert.equal(result.calls[1].redirect, 'manual');
   assert.match(result.data.message, /未加入会议/u);
 });
 

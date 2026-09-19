@@ -54,7 +54,7 @@ test('join uses official join_type/join_identify and tenant token, no start acti
   assert.deepEqual(h.calls[0].json, { app_id: env.FEISHU_LOGIN_APP_ID, app_secret: env.FEISHU_LOGIN_APP_SECRET });
   assert.equal(h.calls[1].url, 'https://open.feishu.cn/open-apis/vc/v1/bots/join');
   assert.deepEqual(h.calls[1].json, { join_type: 1, join_identify: { meeting_no: '123456789' }, password: 'private-password' });
-  assert.equal(h.calls[1].headers.authorization, 'Bearer tenant_token_offline'); assert.equal(h.calls[1].redirect, 'error');
+  assert.equal(h.calls[1].headers.authorization, 'Bearer tenant_token_offline'); assert.equal(h.calls[1].redirect, 'manual');
   assert.equal(data.meetingId, id); assert.equal(data.participantVerified, false); assert.equal(data.state, 'join_api_succeeded');
   assert.ok(!JSON.stringify(data).includes('private-password')); assert.ok(!JSON.stringify(data).includes('tenant_token_offline'));
 });
@@ -101,4 +101,3 @@ function routeHarness(user) {
 const admin = { isAdmin: true, ndaCompleted: true, memberId: 'member', accountUserId: 'account', memberMutationRevision: 1 };
 for (const [label, user, status] of [['anonymous', null, 401], ['member', { ...admin, isAdmin: false }, 403], ['NDA incomplete', { ...admin, ndaCompleted: false }, 403], ['missing revision', { ...admin, memberMutationRevision: 0 }, 403]]) test(`route blocks ${label}`, async () => { const h = routeHarness(user); assert.equal((await h.run()).status, status); assert.equal(h.handed(), false); });
 test('route reuses live admin guard and separates emergency-leave rate limit', async () => { const h = routeHarness(admin); assert.equal((await h.run()).status, 200); assert.deepEqual(h.scopes, ['meeting_bot_leave', 'meeting_bot_control']); });
-

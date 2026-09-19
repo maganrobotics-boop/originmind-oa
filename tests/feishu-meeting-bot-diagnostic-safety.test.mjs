@@ -56,7 +56,7 @@ for (const status of [200, 400, 401, 403]) {
     assert.equal(result.calls.length, 2);
     const probe = result.calls[1];
     assert.equal(probe.headers.authorization, 'Bearer invalid_transport_probe');
-    assert.equal(probe.redirect, 'error');
+    assert.equal(probe.redirect, 'manual');
     assert.deepEqual(JSON.parse(probe.body), { join_type: 0, join_identify: { meeting_no: '000000000' } });
     assert.ok(!JSON.stringify(probe).includes('offline_tenant_token'));
     assert.ok(!JSON.stringify(probe).includes('offline_test_secret'));
