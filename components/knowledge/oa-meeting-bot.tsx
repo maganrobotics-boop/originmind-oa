@@ -18,6 +18,7 @@ export function OaMeetingBot({ open, onTask, onDirty }: { open: boolean; onTask:
   const [number, setNumber] = useState(''), [password, setPassword] = useState(''), [consent, setConsent] = useState(false);
   const [status, setStatus] = useState('尚未检查独立入会配置'), [error, setError] = useState('');
   const [count, setCount] = useState(0), [lastSync, setLastSync] = useState(0), [preview, setPreview] = useState('');
+  const [materialsFrozen, setMaterialsFrozen] = useState(false);
   const [tasks, setTasks] = useState<Array<{ id: string; title: string }>>([]);
   const mounted = useRef(true), lock = useRef(false), epoch = useRef(0), timer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const controllers = useRef(new Set<AbortController>()), captured = useRef(new Map<string, MeetingEntry>());
@@ -64,7 +65,6 @@ export function OaMeetingBot({ open, onTask, onDirty }: { open: boolean; onTask:
     void request().then(result => { if (!disposed) { setReady(result.configured === true); setSessions(result.sessions || []); setStatus('独立入会配置可用；尚未核实飞书权限及当前参会状态。'); } }).catch(cause => { if (!disposed) { setReady(false); setError(message(cause)); } });
     return () => { disposed = true; };
     // Opening the panel only reads configuration; it never joins or resumes capture.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const poll = async (version: number) => {
@@ -94,6 +94,7 @@ export function OaMeetingBot({ open, onTask, onDirty }: { open: boolean; onTask:
       const materials = meetingParts(captureText(captured.current, current.meeting.title));
       frozen.current = materials.map((material, index) => ({ requestId: crypto.randomUUID(), title: `${current.meeting.title.slice(0, 65)} · 纪要 ${index + 1}/${materials.length}`, material: `第 ${index + 1}/${materials.length} 段，仅此段材料，不能视为全会总结。\n${material}` }));
     }
+    setMaterialsFrozen(true);
     for (const part of frozen.current) {
       if (!mounted.current) return;
       if (part.done) continue;
@@ -157,7 +158,7 @@ export function OaMeetingBot({ open, onTask, onDirty }: { open: boolean; onTask:
     <label className="oa-meeting-consent"><input type="checkbox" checked={consent} onChange={event => setConsent(event.target.checked)} disabled={busy} />已核对目标会议号并告知参会成员；同意 OA 助手作为可见参会者加入、读取字幕及聊天，纪要提交 OA 审核后才入库。</label>
     <button type="button" disabled={!ready || busy || running || !consent || !number.trim() || count > 0} onClick={() => void perform('join')}>让 OA 助手加入这场会议</button>
     {selected && <p>会议 {selected.meeting.number}：{labels[selected.state] || selected.state}。最近核验：{selected.lastVerifiedAt ? new Date(selected.lastVerifiedAt).toLocaleString() : '尚无'}。</p>}
-    {readable(selected) && !running && <button type="button" disabled={busy || Boolean(frozen.current)} onClick={() => void perform('capture')}>核验入会并开始／继续采集</button>}
+    {readable(selected) && !running && <button type="button" disabled={busy || materialsFrozen} onClick={() => void perform('capture')}>核验入会并开始／继续采集</button>}
     {running && <button type="button" disabled={busy} onClick={() => { pause(); setStatus('本页采集已暂停，机器人仍可能在会中。'); }}>暂停本页采集（不退出会议）</button>}
     {readable(selected) && <button type="button" disabled={busy} onClick={() => void perform('leave')}>让 OA 助手退出会议</button>}
     <small>本页已采集 {count} 条；最近成功读取：{lastSync ? new Date(lastSync).toLocaleTimeString() : '尚无'}。</small>
