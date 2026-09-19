@@ -7,6 +7,17 @@
   background: linear-gradient(180deg, #f7faff 0, #fff 180px);
   box-shadow: 0 16px 40px #1e3a5f0d;
 }
+.oa-meeting-mode.meeting-active { position: fixed; z-index: 100; inset: 0; display: flex; flex-direction: column; width: 100vw; height: 100dvh; max-width: none; margin: 0; border: 0; border-radius: 0; background: #f7faff; box-shadow: none; }
+.oa-meeting-mode.meeting-active .oa-meeting-header { flex: 0 0 auto; padding-block: 12px; }
+.oa-meeting-mode.meeting-active .oa-meeting-header h2 { margin-block: 4px 2px; }
+.oa-meeting-mode.meeting-active .oa-meeting-console { display: flex; flex: 1 1 auto; flex-direction: column; min-height: 0; padding: 14px 18px; overflow: hidden; }
+.oa-meeting-mode.meeting-active .oa-meeting-summary { flex: 0 0 auto; margin-bottom: 10px; }
+.oa-meeting-mode.meeting-active .oa-meeting-cockpit { flex: 1 1 auto; min-height: 0; grid-template-columns: minmax(0, 3fr) minmax(320px, 1fr); }
+.oa-meeting-mode.meeting-active .oa-meeting-stage { display: flex; flex-direction: column; min-height: 0; }
+.oa-meeting-mode.meeting-active .oa-meeting-screen { flex: 1 1 auto; min-height: 0; aspect-ratio: auto; }
+.oa-meeting-mode.meeting-active .oa-meeting-live-notes { max-height: none; }
+.oa-meeting-mode.meeting-active .oa-meeting-actions { flex: 0 0 auto; margin-top: 10px; }
+.oa-meeting-mode.meeting-active > footer { display: none; }
 
 .oa-meeting-header { display: flex; justify-content: space-between; gap: 20px; padding: 22px 24px 18px; border-bottom: 1px solid #e5ebf3; }
 .oa-meeting-header h2 { display: flex; align-items: center; gap: 9px; margin: 8px 0 4px; font-size: 21px; }
@@ -55,12 +66,14 @@
 .oa-meeting-cockpit { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, .85fr); gap: 16px; }
 .oa-meeting-stage, .oa-meeting-live-notes { min-width: 0; overflow: hidden; border: 1px solid #e0e7ef; border-radius: 16px; background: #fff; }
 .oa-meeting-stage-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; border-bottom: 1px solid #edf1f5; }
+.oa-meeting-stage-toolbar > div { display: flex; align-items: center; gap: 7px; }
 .oa-meeting-stage-toolbar h3, .oa-meeting-live-notes > h3 { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; }
 .oa-meeting-stage-toolbar button { display: inline-flex; align-items: center; gap: 6px; min-height: 34px; padding: 7px 10px; border: 0; border-radius: 9px; background: #eef3fa; color: #334155; font: inherit; font-size: 12px; font-weight: 650; }
 .oa-meeting-screen { position: relative; display: grid; place-items: center; aspect-ratio: 16 / 9; min-height: 300px; overflow: hidden; background: #12171f; color: #dce5f0; }
 .oa-meeting-screen > div:first-child { display: grid; justify-items: center; gap: 10px; width: min(520px, 88%); text-align: center; }
 .oa-meeting-screen > div:first-child p { margin: 0; color: #aeb9c7; font-size: 13px; line-height: 1.6; }
 .oa-meeting-screen video { width: 100%; height: 100%; object-fit: contain; background: #090c11; }
+.oa-meeting-share-error { margin: 0; padding: 9px 12px; border-top: 1px solid #f0c9ce; background: #fff0f1; color: #a42f3a; font-size: 13px; line-height: 1.5; }
 .oa-meeting-subtitle { position: absolute; z-index: 2; left: 18px; right: 18px; bottom: 14px; display: flex; align-items: baseline; justify-content: center; gap: 10px; min-height: 42px; padding: 10px 16px; border-radius: 12px; background: #05070bd9; color: #fff; box-shadow: 0 4px 18px #0008; line-height: 1.5; }
 .oa-meeting-subtitle strong { flex: none; color: #8ec1ff; font-size: 13px; }
 .oa-meeting-subtitle span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -113,4 +126,7 @@
   .oa-meeting-mode > footer { padding-left: 16px; padding-right: 16px; }
   .oa-meeting-screen { min-height: 220px; }
   .oa-meeting-live-notes { max-height: none; }
+  .oa-meeting-mode.meeting-active .oa-meeting-console { overflow-y: auto; }
+  .oa-meeting-mode.meeting-active .oa-meeting-cockpit { flex: none; grid-template-columns: 1fr; }
+  .oa-meeting-mode.meeting-active .oa-meeting-screen { min-height: 52dvh; }
 }
