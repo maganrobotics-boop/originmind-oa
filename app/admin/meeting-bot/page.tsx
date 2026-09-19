@@ -6,6 +6,14 @@ import { useEffect, useState } from 'react';
 type Status = { configured: boolean; enabled: boolean; missing: string[]; actorKey: string };
 type RecordItem = { meetingId: string | null; meetingNumber: string; requestedAt: string };
 type Result = { error?: string; message?: string; code?: number; logId?: string; state?: string; meetingId?: string | null; meetingNumber?: string; outcomeUnknown?: boolean };
+function jsonRecord(value: unknown): Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+}
+function isStatus(value: unknown): value is Status {
+  const row = jsonRecord(value);
+  return typeof row.configured === 'boolean' && typeof row.enabled === 'boolean' && typeof row.actorKey === 'string'
+    && Array.isArray(row.missing) && row.missing.every((item: unknown) => typeof item === 'string');
+}
 const endpoint = '/api/admin/meeting-bot';
 const box = { padding: '16px', border: '1px solid #d9dee6', borderRadius: '12px', marginTop: '16px' };
 const inputStyle = { display: 'block', width: '100%', padding: '12px', margin: '8px 0 16px', border: '1px solid #aeb8c6', borderRadius: '8px' };
@@ -26,10 +34,10 @@ export default function MeetingBotPage() {
   useEffect(() => {
     let active = true;
     void fetch(endpoint, { credentials: 'same-origin', cache: 'no-store' }).then(async response => {
-      const data = await response.json();
+      const data: unknown = await response.json();
       if (!active) return;
-      if (!response.ok) { setNotice(data.error || '无法检查管理员权限。'); return; }
-      if (typeof data.configured !== 'boolean' || typeof data.enabled !== 'boolean' || typeof data.actorKey !== 'string' || !Array.isArray(data.missing) || !data.missing.every((item: unknown) => typeof item === 'string')) { setNotice('OA 配置响应不完整；未启用入会。'); return; }
+      if (!response.ok) { const error = jsonRecord(data).error; setNotice(typeof error === 'string' ? error : '无法检查管理员权限。'); return; }
+      if (!isStatus(data)) { setNotice('OA 配置响应不完整；未启用入会。'); return; }
       setStatus(data);
       setNotice(data.configured ? (data.enabled ? '服务器已启用入会入口；尚未验证飞书权限或实际入会。' : '服务器配置已具备，但入会开关尚未启用。可先检查应用连接。') : `服务器还缺少配置：${data.missing.join('、')}。`);
       try {
