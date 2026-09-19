@@ -66,7 +66,7 @@ export default function MeetingBotPage() {
     try {
       const response = await fetch(endpoint, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
       const data = await response.json() as Result;
-      setNotice((data.error || data.message || '接口未返回明确结果，请核对飞书参会人列表。') + (data.diagnostic ? ` 诊断码：${data.diagnostic}。` : '') + (data.code !== undefined ? ` 错误码：${data.code}。` : '') + (data.logId ? ` 日志号：${data.logId}。` : ''));
+      setNotice((data.error || data.message || '接口未返回明确结果，请核对飞书参会人列表。') + (data.diagnostic ? ` 诊断码：${data.diagnostic}。` : '') + (data.code !== undefined ? ` 错误码：${data.code}。` : '') + (data.logId ? ` 日志号：${data.logId}。` : '') + (action === 'check' && (uncertain || Boolean(last)) ? ' 已保留之前的待核对记录；请勿重复入会。' : ''));
       if (!response.ok) {
         if (action === 'join' && data.outcomeUnknown === false) {
           setLast(null); setUncertain(false);
@@ -84,8 +84,13 @@ export default function MeetingBotPage() {
         try { sessionStorage.removeItem(storageKey); } catch { /* Local storage is best effort. */ }
       }
     } catch {
-      setNotice('网络中断，操作结果不明确。请先查看飞书参会人列表，勿重复入会；需要时由主持人移出机器人。');
-      setUncertain(true);
+      if (action === 'check') {
+        // A failed diagnostic must neither create a phantom join nor clear a previous join lock.
+        setNotice('连接检查未完成；本次检查不会执行有效入会或退出。之前的参会记录和待核对状态保持不变。');
+      } else {
+        setNotice('网络中断，操作结果不明确。请先查看飞书参会人列表，勿重复入会；需要时由主持人移出机器人。');
+        setUncertain(true);
+      }
     } finally { setBusy(false); if (action === 'join') setPassword(''); }
   }
   function clearAfterHostCheck() {
