@@ -4,7 +4,7 @@ import { FormEvent, useCallback, useEffect, useId, useRef, useState } from 'reac
 import { ArrowUp, Copy, Forward, RotateCcw, Square } from 'lucide-react';
 import { renderAnswerBody, userFacingAnswer } from '@/lib/oa-chat-renderer.mjs';
 import { initialChatIndicators, probeChatIndicators, pendingChatIndicators, replyChatIndicators, failedChatIndicators } from '@/lib/oa-chat-indicators.mjs';
-import { CHAT_DOCUMENT_HINTS } from '@/lib/oa-chat-documents.mjs';
+import { CHAT_DOCUMENT_HINTS, resolveChatCapability } from '@/lib/oa-chat-documents.mjs';
 import type { KnowledgeCitation } from '@/lib/knowledge-types';
 import './shared-chat.generated.css';
 import './oa-chat-panel.css';
@@ -100,13 +100,18 @@ function OaAiChatPanel() {
     if (sending.current || documents.busy) return;
     const normalized = (retry?.question || question).trim();
     if (normalized.length < 2 || normalized.length > 2000) { setError('问题需为 2–2000 个字符。'); return; }
-    if (!retry && documents.shouldHandle(normalized)) {
+    const capability = resolveChatCapability(normalized);
+    // An explicit knowledge command wins over a selected document source.
+    const documentRequest = capability ? capability.kind !== null : documents.shouldHandle(normalized);
+    if (!retry && documentRequest) {
       const previous = [...timeline].reverse().find(entry => entry.type === 'answer' ? Boolean(entry.turn.answer && !entry.turn.failed) : entry.type === 'task' && entry.task?.status === 'succeeded' && Boolean(entry.task.result));
       const previousAnswer = previous?.type === 'answer' ? previous.turn.answer : previous?.type === 'task' ? previous.task?.result || '' : '';
       if (documents.submit(normalized, previousAnswer)) { setQuestion(''); setError(''); stickToEnd.current = true; setLastAnswer(null); }
       return;
     }
     documents.dismissError();
+    const modelQuestion = capability?.kind === null ? capability.instruction : normalized;
+    if (modelQuestion.length < 2) { setError('请在功能名后填写至少 2 个字符的问题。'); return; }
     const id = retry?.id || crypto.randomUUID();
     const preceding = retry ? turns.slice(0, turns.findIndex(turn => turn.id === retry.id)) : turns;
     const history = preceding.slice(-2).map(turn => ({ role: 'user', content: turn.question }));
@@ -117,7 +122,7 @@ function OaAiChatPanel() {
     setRequestStatus(pendingChatIndicators()); setLastAnswer(null);
     setTurns([...preceding, { id, order: retry?.order || nextOrder(), question: normalized, answer: '', citations: [], images: [] }]);
     try {
-      const response = await fetch('/api/lab-ai/ask', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ question: normalized, history }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(80000)]) });
+      const response = await fetch('/api/lab-ai/ask', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ question: modelQuestion, history }), signal: AbortSignal.any([controller.signal, AbortSignal.timeout(80000)]) });
       httpStatus = response.status;
       const data = await response.json() as Reply;
       if (sequence !== requestSequence.current) return;
@@ -161,13 +166,13 @@ function OaAiChatPanel() {
         {asking && <div className="knowledge-answer-loading" role="status">正在检索并生成回答…</div>}
       </div>
       <div className="composer-area oa-chat-composer-area">
-        {!timeline.length && <div className="oa-chat-examples"><p>可以帮你</p>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>}
+        <div className="oa-chat-examples" role="group" aria-label="AI 助手四项功能"><p id={`${composerId}-capabilities`}>点击功能，或在开头输入 @功能名 调用</p>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} title={`@${hint.label}`} disabled={working} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>
         {(error || documents.error) && <p className="oa-chat-error" role="alert">{error || documents.error}</p>}
         <OaDocumentSource documents={documents} />
         <form className="composer oa-chat-composer" onSubmit={submit}>
           <OaDocumentUpload documents={documents} disabled={asking} />
           <label className="sr-only" htmlFor={composerId}>询问实验室大数据</label>
-          <textarea ref={input} id={composerId} value={question} rows={1} maxLength={2000} placeholder="询问实验室大数据" onChange={event => setQuestion(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void ask(); } }} />
+          <textarea ref={input} id={composerId} aria-describedby={`${composerId}-capabilities`} value={question} rows={1} maxLength={2000} placeholder="询问实验室大数据" onChange={event => setQuestion(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void ask(); } }} />
           {/* Abort may synchronously replace the control. Cancel its default action
               before aborting and keep stop/send as separate DOM buttons. */}
           {asking ? <button key="stop" type="button" className="send-button" onClick={event => { event.preventDefault(); requestRef.current?.abort(); }} aria-label="停止等待回答"><Square size={18} /></button> : <button key="send" type="submit" className="send-button" disabled={documents.busy || question.trim().length < 2} aria-label="发送问题"><ArrowUp size={24} /></button>}
