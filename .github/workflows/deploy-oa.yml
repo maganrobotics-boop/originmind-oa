@@ -16,6 +16,11 @@ on:
         required: false
         default: false
         type: boolean
+      enable_meeting_bot:
+        description: '启用 OA 飞书会议机器人入会开关（未勾选则保留生产现状）'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -94,6 +99,7 @@ jobs:
           PUBLIC_LAB_AI_SERVICE_TOKEN: ${{ secrets.PUBLIC_LAB_AI_SERVICE_TOKEN }}
           OA_PRODUCTION_RELEASE_CONFIRM: ${{ inputs.confirmation }}
           OA_PRODUCTION_ENABLE_AI_WORKBENCH: ${{ inputs.enable_ai_workbench && 'true' || 'false' }}
+          OA_PRODUCTION_ENABLE_MEETING_BOT: ${{ inputs.enable_meeting_bot && 'true' || 'false' }}
         run: npm run release:standalone:production
       - name: Preserve immutable release and recovery evidence
         if: always()
@@ -104,3 +110,4 @@ jobs:
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 30
+
