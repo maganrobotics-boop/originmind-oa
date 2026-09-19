@@ -29,6 +29,17 @@ workbench_deploy_args=()
 if [[ "${workbench_enabled}" == "true" ]]; then
   workbench_deploy_args=(--var OA_AI_TASKS_ENABLED:true)
 fi
+# The meeting bot is also opt-in. An unchecked input preserves the existing
+# provider-managed value; an explicit true asserts only this non-secret flag.
+meeting_bot_enabled="${OA_PRODUCTION_ENABLE_MEETING_BOT:-false}"
+if [[ "${meeting_bot_enabled}" != "true" && "${meeting_bot_enabled}" != "false" ]]; then
+  echo "OA_PRODUCTION_ENABLE_MEETING_BOT must be true or false." >&2
+  exit 64
+fi
+meeting_bot_deploy_args=()
+if [[ "${meeting_bot_enabled}" == "true" ]]; then
+  meeting_bot_deploy_args=(--var OA_MEETING_BOT_ENABLED:true)
+fi
 required_variables=(
   OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID
   OA_PRODUCTION_WORKER_NAME
@@ -226,7 +237,7 @@ node "${script_dir}/check-production-cloudflare-target.mjs" \
 
 # Validate this exact immutable artifact and the explicitly recorded flag before
 # changing production schema. No arbitrary CLI vars or target overrides exist.
-run_wrangler deploy --dry-run --strict --keep-vars --config "${config_path}" "${workbench_deploy_args[@]}"
+run_wrangler deploy --dry-run --strict --keep-vars --config "${config_path}" "${workbench_deploy_args[@]}" "${meeting_bot_deploy_args[@]}"
 (
   cd "${release_root}"
   sha256sum --check artifact-sha256.txt
@@ -276,7 +287,7 @@ fi
 # check leaves the captured rollback point and D1 bookmark for manual review.
 release_message="production ${GITHUB_SHA} run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
 run_wrangler deploy --strict --keep-vars --config "${config_path}" \
-  --message "${release_message}" "${workbench_deploy_args[@]}"
+  --message "${release_message}" "${workbench_deploy_args[@]}" "${meeting_bot_deploy_args[@]}"
 
 run_wrangler secret list --format json --config "${config_path}" > "${secrets_path}"
 run_wrangler deployments list --json --config "${config_path}" > "${deployments_path}"
@@ -304,9 +315,11 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- D1 migration state before release: \`${migration_state}\`"
     echo "- Target and public smoke checks: passed"
     echo "- Workbench activation requested: \`${workbench_enabled}\`"
+    echo "- Meeting bot activation requested: \`${meeting_bot_enabled}\`"
     echo "- Member-session task submission/download: still requires authenticated acceptance"
     echo "- Automatic rollback: disabled"
   } >> "${GITHUB_STEP_SUMMARY}"
 fi
 
 echo "OA production release and public read-only smoke checks passed."
+
