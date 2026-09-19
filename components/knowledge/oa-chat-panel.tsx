@@ -10,6 +10,8 @@ import './shared-chat.generated.css';
 import './oa-chat-panel.css';
 import { useOaConversation } from './oa-conversation-context';
 import { OaMemberChat } from './oa-member-chat';
+import { OaMeetingListener } from './oa-meeting-listener';
+import { isMeetingCommand } from '@/lib/oa-meeting-capture.mjs';
 import { OaChatDocumentEvent, OaDocumentDialogs, OaDocumentSource, OaDocumentUpload, useOaChatDocuments } from './oa-chat-documents';
 
 type Image = { url: string; alt: string; mimeType: string };
@@ -70,6 +72,9 @@ function OaAiChatPanel() {
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const [meetingOpen, setMeetingOpen] = useState(false);
+  const [meetingDirty, setMeetingDirty] = useState(false);
+  const openMeeting = useCallback(() => setMeetingOpen(true), []);
   const order = useRef(0);
   const nextOrder = useCallback(() => ++order.current, []);
   const documents = useOaChatDocuments(nextOrder);
@@ -82,7 +87,7 @@ function OaAiChatPanel() {
   const stickToEnd = useRef(true);
   const working = asking || documents.busy;
   const timeline = [...turns.map(turn => ({ type: 'answer' as const, id: turn.id, order: turn.order, turn })), ...documents.entries].sort((a, b) => a.order - b.order);
-  useEffect(() => { setAiDirty(Boolean(turns.length || question || asking || error || documents.entries.length || documents.busy || documents.error)); }, [turns.length, question, asking, error, documents.entries.length, documents.busy, documents.error, setAiDirty]);
+  useEffect(() => { setAiDirty(Boolean(meetingDirty || turns.length || question || asking || error || documents.entries.length || documents.busy || documents.error)); }, [meetingDirty, turns.length, question, asking, error, documents.entries.length, documents.busy, documents.error, setAiDirty]);
 
   useEffect(() => () => { requestSequence.current++; requestRef.current?.abort(); }, []);
   useEffect(() => { stickToEnd.current = true; }, [documents.entries.length]);
@@ -100,6 +105,7 @@ function OaAiChatPanel() {
     if (sending.current || documents.busy) return;
     const normalized = (retry?.question || question).trim();
     if (normalized.length < 2 || normalized.length > 2000) { setError('问题需为 2–2000 个字符。'); return; }
+    if (!retry && isMeetingCommand(normalized)) { openMeeting(); setQuestion(''); setError(''); return; }
     const capability = resolveChatCapability(normalized);
     // An explicit knowledge command wins over a selected document source.
     const documentRequest = capability ? capability.kind !== null : documents.shouldHandle(normalized);
@@ -165,6 +171,7 @@ function OaAiChatPanel() {
         })}
         {asking && <div className="knowledge-answer-loading" role="status">正在检索并生成回答…</div>}
       </div>
+      <OaMeetingListener open={meetingOpen} onOpen={openMeeting} onTask={documents.restore} onDirty={setMeetingDirty} />
       <div className="composer-area oa-chat-composer-area">
         <div className="oa-chat-examples" role="group" aria-label="AI 助手四项功能"><p id={`${composerId}-capabilities`}>点击功能，或在开头输入 @功能名 调用</p>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} title={`@${hint.label}`} disabled={working} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>
         {(error || documents.error) && <p className="oa-chat-error" role="alert">{error || documents.error}</p>}
