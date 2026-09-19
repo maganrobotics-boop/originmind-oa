@@ -8,6 +8,7 @@ const shell = await readFile(shellPath, 'utf8');
 const workflow = await readFile(new URL('../.github/workflows/deploy-oa.yml', import.meta.url), 'utf8');
 
 test('activation is opt-in on the existing protected manual main release, never PR checks', () => {
+  assert.doesNotMatch(shell, /\r/u);
   assert.match(workflow, /enable_ai_workbench:[\s\S]*?default: false[\s\S]*?type: boolean/u);
   assert.match(workflow, /enable_meeting_bot:[\s\S]*?default: false[\s\S]*?type: boolean/u);
   assert.match(workflow, /name: production-oa/u);
