@@ -87,6 +87,7 @@ function OaAiChatPanel() {
   const composerId = useId();
   const stickToEnd = useRef(true);
   const working = asking || documents.busy;
+  const meetingSuggestionVisible = /^[@＠]会议(?:模)?$/u.test(question.trim());
   const timeline = [...turns.map(turn => ({ type: 'answer' as const, id: turn.id, order: turn.order, turn })), ...documents.entries].sort((a, b) => a.order - b.order);
   useEffect(() => { setAiDirty(Boolean(turns.length || question || asking || error || documents.entries.length || documents.busy || documents.error || meetingModeOpen)); }, [turns.length, question, asking, error, documents.entries.length, documents.busy, documents.error, meetingModeOpen, setAiDirty]);
 
@@ -200,10 +201,11 @@ function OaAiChatPanel() {
         <div className="oa-chat-examples" role="group" aria-label="AI 助手五项功能"><p id={`${composerId}-capabilities`}>点击功能，或在开头输入 @功能名 调用</p><button type="button" title="@会议模式919700881" disabled={working} onClick={() => { setQuestion('@会议模式'); input.current?.focus(); }}>会议模式</button>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} title={`@${hint.label}`} disabled={working} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>
         {(error || documents.error) && <p className="oa-chat-error" role="alert">{error || documents.error}</p>}
         <OaDocumentSource documents={documents} />
+        {meetingSuggestionVisible && <div id={`${composerId}-meeting-suggestion`} className="oa-chat-command-suggestions" role="listbox" aria-label="命令补全"><button type="button" role="option" aria-selected="true" onMouseDown={event => event.preventDefault()} onClick={() => { setQuestion('@会议模式'); input.current?.focus(); }}><strong>@会议模式</strong><span>输入九位会议号后直接启动</span></button></div>}
         <form className="composer oa-chat-composer" onSubmit={submit}>
           <OaDocumentUpload documents={documents} disabled={asking} />
           <label className="sr-only" htmlFor={composerId}>询问实验室大数据</label>
-          <textarea ref={input} id={composerId} aria-describedby={`${composerId}-capabilities`} value={question} rows={1} maxLength={2000} placeholder="询问实验室大数据" onChange={event => setQuestion(event.target.value)} onKeyDown={event => { if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void ask(); } }} />
+          <textarea ref={input} id={composerId} aria-describedby={`${composerId}-capabilities`} aria-autocomplete="list" aria-controls={meetingSuggestionVisible ? `${composerId}-meeting-suggestion` : undefined} value={question} rows={1} maxLength={2000} placeholder="询问实验室大数据" onChange={event => setQuestion(event.target.value)} onKeyDown={event => { if (meetingSuggestionVisible && ['Enter', 'Tab'].includes(event.key) && !event.nativeEvent.isComposing) { event.preventDefault(); setQuestion('@会议模式'); return; } if (event.key === 'Enter' && !event.shiftKey && !event.nativeEvent.isComposing && event.keyCode !== 229) { event.preventDefault(); void ask(); } }} />
           {/* Abort may synchronously replace the control. Cancel its default action
               before aborting and keep stop/send as separate DOM buttons. */}
           {asking ? <button key="stop" type="button" className="send-button" onClick={event => { event.preventDefault(); requestRef.current?.abort(); }} aria-label="停止等待回答"><Square size={18} /></button> : <button key="send" type="submit" className="send-button" disabled={documents.busy || question.trim().length < 2} aria-label="发送问题"><ArrowUp size={24} /></button>}
