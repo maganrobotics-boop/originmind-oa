@@ -31,12 +31,14 @@ export function useOaChatDocuments(nextOrder: () => number) {
   const all = useRef<ChatDocumentEntry[]>([]), mounted = useRef(true), importing = useRef(0);
   const lock = useRef(false), controllers = useRef(new Set<AbortController>()), operations = useRef(new Set<string>());
   const previewed = useRef(new Set<string>()), noAutoPreview = useRef(new Set<string>());
+  const acceptedCallbacks = useRef(new Map<string, (taskId: string) => void>());
   const lastGenerated = useRef<ChatDocumentSource | null>(null);
   const previewDirty = useRef(false);
   const setPreviewDirty = useCallback((dirty: boolean) => { previewDirty.current = dirty; }, []);
   useEffect(() => {
+    const callbacks = acceptedCallbacks.current;
     mounted.current = true;
-    return () => { mounted.current = false; importing.current++; for (const controller of controllers.current) controller.abort(); controllers.current.clear(); };
+    return () => { mounted.current = false; importing.current++; for (const controller of controllers.current) controller.abort(); controllers.current.clear(); callbacks.clear(); };
   }, []);
 
   const change = useCallback((update: (old: ChatDocumentEntry[]) => ChatDocumentEntry[]) => {
@@ -67,6 +69,8 @@ export function useOaChatDocuments(nextOrder: () => number) {
     const task = newerChatDocumentTask(previous?.type === 'task' ? previous.task : undefined, value);
     if (!task) return;
     patch(id, { task, problem: undefined });
+    const accepted = acceptedCallbacks.current.get(id);
+    if (accepted) { acceptedCallbacks.current.delete(id); accepted(task.id); }
     if (task.status === 'succeeded' && task.result && !previewed.current.has(task.id)) {
       previewed.current.add(task.id);
       lastGenerated.current = { name: `${task.title}.md`, text: task.result };
@@ -131,14 +135,17 @@ export function useOaChatDocuments(nextOrder: () => number) {
     finally { lock.current = false; controllers.current.delete(controller); if (mounted.current) { setBusy(false); setImportProgress(''); } }
   };
   const importFile = (file: File) => importFiles([file]);
-  const submit = (instruction: string, previousAnswer = '') => {
+  const submitPlanned = (instruction: string, selectedSource: ChatDocumentSource | null, previousAnswer = '', onAccepted?: (taskId: string) => void) => {
     if (lock.current) return false;
     try {
-      const plan = planChatDocument(instruction, source, previousAnswer || lastGenerated.current?.text || '');
+      const plan = planChatDocument(instruction, selectedSource, previousAnswer || lastGenerated.current?.text || '');
       const entry: TaskEntry = { type: 'task', id: crypto.randomUUID(), order: nextOrder(), requestId: crypto.randomUUID(), plan };
+      if (onAccepted) acceptedCallbacks.current.set(entry.id, onAccepted);
       change(old => [...old, entry]); void create(entry); return true;
     } catch (cause) { setError(message(cause, '请检查材料与任务要求。')); return false; }
   };
+  const submit = (instruction: string, previousAnswer = '') => submitPlanned(instruction, source, previousAnswer);
+  const submitSource = (instruction: string, selectedSource: ChatDocumentSource, onAccepted?: (taskId: string) => void) => submitPlanned(instruction, selectedSource, '', onAccepted);
   const download = async (task: ChatDocumentTask, format: 'docx' | 'md') => {
     const key = `download:${task.id}:${format}`;
     if (operations.current.has(key)) return;
@@ -179,7 +186,7 @@ export function useOaChatDocuments(nextOrder: () => number) {
     finally { if (mounted.current) setHistoryLoading(false); }
   };
   return { entries, source, busy, error, pending, preview, historyOpen, historyLoading, saved, historyError,
-    importFile, importFiles, importProgress, submit, shouldHandle: (instruction: string) => Boolean(source) || wantsChatDocument(instruction),
+    importFile, importFiles, importProgress, submit, submitSource, shouldHandle: (instruction: string) => Boolean(source) || wantsChatDocument(instruction),
     useSource: (value: ChatDocumentSource | null) => { setSource(value); setError(''); },
     dismissError: () => setError(''), operate, recover: create, download, showHistory, restore, acceptSavedTask, setPreviewDirty,
     openPreview: setPreview, closePreview: () => { if (previewDirty.current && !window.confirm('修改尚未保存，确认放弃修改并返回聊天？')) return; previewDirty.current = false; setPreview(null); }, closeHistory: () => setHistoryOpen(false) };

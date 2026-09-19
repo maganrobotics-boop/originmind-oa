@@ -1,0 +1,26 @@
+export type MeetingMarkerType = 'decision' | 'task' | 'risk' | 'highlight';
+export type MeetingTranscriptItem = { id: string; speaker: string; text: string; time: string };
+export type MeetingMarker = { id: string; type: MeetingMarkerType; text: string; createdAt: string };
+export type MeetingModePhase = 'draft' | 'waiting_to_join' | 'in_meeting' | 'generating_minutes' | 'pending_confirmation' | 'archived';
+export type MeetingExitStatus = 'not_requested' | 'uncertain' | 'confirmed';
+export type MeetingModeSession = {
+  version: 1;
+  phase: MeetingModePhase;
+  title: string;
+  meeting: string;
+  meetingId: string | null;
+  participants: string;
+  agenda: string;
+  startedAt: string | null;
+  endedAt: string | null;
+  exitStatus: MeetingExitStatus;
+  minutesTaskId: string | null;
+  transcript: MeetingTranscriptItem[];
+  markers: MeetingMarker[];
+  observedParticipants: string[];
+};
+export const MEETING_MARKER_LABELS: Readonly<Record<MeetingMarkerType, string>>;
+export function resolveMeetingModeCommand(value: unknown): { action: 'open'; title: string } | { action: 'end' } | null;
+export function meetingModeStorageKey(email: unknown): string;
+export function isMeetingModeSession(value: unknown): value is MeetingModeSession;
+export function buildMeetingMinutesMaterial(session: MeetingModeSession): string;

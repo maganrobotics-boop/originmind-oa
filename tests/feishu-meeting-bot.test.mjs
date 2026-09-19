@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
-import { botConfiguration, handleBotRequest, normalizeMeetingNumber } from '../lib/feishu-meeting-bot.mjs';
+import { botConfiguration, handleBotRequest, normalizeMeetingNumber, sanitizeMeetingEvents } from '../lib/feishu-meeting-bot.mjs';
 
 const env = { OA_PUBLIC_ORIGIN: 'https://oa.example.test', OA_MEETING_BOT_ENABLED: 'true', FEISHU_LOGIN_APP_ID: 'cli_test123', FEISHU_LOGIN_APP_SECRET: 'secret_for_offline_tests_only', FEISHU_LOGIN_TENANT_KEY: 'tenant_test' };
 const id = '7512345678901234567';
@@ -12,7 +12,7 @@ const request = (body = join, headers = {}, url = `${env.OA_PUBLIC_ORIGIN}/api/a
 function harness(extra = {}, replies = [{ code: 0, tenant_access_token: 'tenant_token_offline' }, { code: 0, data: { meeting: { id } } }]) {
   const calls = [];
   const options = { env, actorKey: 'admin:1', checkAdmission: async () => true, claimWrite: async () => true, fetchImpl: async (url, init) => {
-    calls.push({ url, ...init, json: JSON.parse(init.body) });
+    calls.push({ url, ...init, json: init.body ? JSON.parse(init.body) : undefined });
     const item = replies[calls.length - 1];
     if (item instanceof Error) throw item;
     if (item instanceof Response) return item;
@@ -26,6 +26,7 @@ for (const value of [123456789, id, '', '12345678', 'https://evil.test/j/1234567
 test('GET reports configuration, not permission/participation verification, and no secrets', async () => {
   const h = harness(); const response = await h.run(new Request(`${env.OA_PUBLIC_ORIGIN}/api/admin/meeting-bot`));
   const data = await response.json(); assert.equal(data.permissionVerified, false); assert.equal(data.configured, true);
+  assert.equal(data.eventScope, 'vc:meeting.meetingevent:read');
   assert.equal(h.calls.length, 0); assert.ok(response.headers.get('cache-control').includes('no-store'));
   assert.ok(!JSON.stringify(data).includes(env.FEISHU_LOGIN_APP_SECRET));
 });
@@ -60,6 +61,50 @@ test('join uses official join_type/join_identify and tenant token, no start acti
 });
 test('connection probe never uses real join credentials and does not assert scope permission', async () => { const h = harness({ env: { ...env, OA_MEETING_BOT_ENABLED: 'false' } }, [{ code: 0, tenant_access_token: 'tenant_token_offline' }, new Response(JSON.stringify({ code: 99991668 }), { status: 400, headers: { 'content-type': 'application/json' } })]); const data = await (await h.run(request({ action: 'check' }))).json(); assert.equal(data.credentialsVerified, true); assert.equal(data.joinTransportVerified, true); assert.equal(data.permissionVerified, false); assert.equal(h.calls.length, 2); assert.equal(h.calls[1].headers.authorization, 'Bearer invalid_transport_probe'); });
 test('leave remains available after joining is disabled and preserves ID precision', async () => { const h = harness({ env: { ...env, OA_MEETING_BOT_ENABLED: 'false' } }); const response = await h.run(request({ action: 'leave', meetingId: id, confirmed: true })); assert.equal(response.status, 200); assert.ok(h.calls[1].url.endsWith('/bots/leave')); assert.deepEqual(h.calls[1].json, { meeting_id: id }); });
+test('events use the official read endpoint and return only bounded transcript fields', async () => {
+  const upstream = { code: 0, data: { has_more: true, page_token: 'next_page', private_field: 'DO_NOT_RETURN', events: [{
+    event_id: 'evt_1', event_time: '1760000000', payload: {
+      meeting: { topic: '研发周会', start_time: '1760000000' },
+      participant_joined_items: [{ participant: { id: 'ou_1', user_name: '张三', private: 'secret' }, join_time: '1760000000' }],
+      transcript_received_items: [{ speaker: { id: 'ou_1', user_name: '张三' }, text: '确认下周完成联调。', start_time_ms: '1760000000123', private: 'secret' }],
+    },
+  }] } };
+  const h = harness({}, [{ code: 0, tenant_access_token: 'token' }, upstream]);
+  const response = await h.run(request({ action: 'events', meetingId: id, pageToken: 'page_1', startTime: '1760000000' }));
+  const data = await response.json();
+  assert.equal(response.status, 200); assert.equal(h.calls.length, 2);
+  assert.equal(h.calls[1].method, 'GET'); assert.equal(h.calls[1].body, undefined);
+  assert.match(h.calls[1].url, /\/vc\/v1\/bots\/events\?/u);
+  const query = new URL(h.calls[1].url).searchParams;
+  assert.equal(query.get('meeting_id'), id); assert.equal(query.get('page_size'), '100'); assert.equal(query.get('page_token'), 'page_1');
+  assert.deepEqual(data.transcript, [{ id: 'evt_1:0:1760000000123:ou_1', speaker: '张三', text: '确认下周完成联调。', time: '2025-10-09T08:53:20.123Z' }]);
+  assert.deepEqual(data.participants, ['张三']); assert.equal(data.meeting.topic, '研发周会'); assert.equal(data.pageToken, 'next_page'); assert.equal(data.contentTruncated, false);
+  assert.doesNotMatch(JSON.stringify(data), /DO_NOT_RETURN|private|secret/u);
+});
+test('meeting event sanitizer detects a meeting-ended signal without exposing raw events', () => {
+  const result = sanitizeMeetingEvents({ events: [{ event_id: 'end', event_type: 'participant_left', payload: { participant_left_items: [{ participant: { user_name: '李四' }, leave_reason: 2, leave_time: '1760000100' }] } }] });
+  assert.equal(result.meetingEnded, true); assert.equal(result.meeting.endTime, '2025-10-09T08:55:00.000Z'); assert.deepEqual(result.participants, ['李四']);
+  assert.equal(result.events, undefined);
+});
+test('meeting metadata with a valid end time is also treated as ended', () => {
+  const result = sanitizeMeetingEvents({ events: [{ event_type: 'meeting_updated', payload: { meeting: { start_time: '1760000000', end_time: '1760000100' } } }] });
+  assert.equal(result.meetingEnded, true); assert.equal(result.meeting.endTime, '2025-10-09T08:55:00.000Z');
+});
+test('oversized transcript text is reported and omitted rather than silently shortened', () => {
+  const result = sanitizeMeetingEvents({ events: [{ event_id: 'long', event_type: 'transcript_received', payload: { transcript_received_items: [{ speaker: { user_name: '张三' }, text: '长'.repeat(4001), start_time_ms: '1760000000123' }] } }] });
+  assert.equal(result.contentTruncated, true); assert.deepEqual(result.transcript, []);
+});
+test('a paginated event response without a next token fails closed', async () => {
+  const h = harness({}, [{ code: 0, tenant_access_token: 'token' }, { code: 0, data: { has_more: true, events: [] } }]);
+  const response = await h.run(request({ action: 'events', meetingId: id })); const data = await response.json();
+  assert.equal(response.status, 502); assert.equal(data.diagnostic, 'EVENTS_RESPONSE_INVALID'); assert.equal(data.outcomeUnknown, false);
+});
+for (const input of [
+  { action: 'events', meetingId: '123456789' },
+  { action: 'events', meetingId: id, pageToken: 'bad\nvalue' },
+  { action: 'events', meetingId: id, startTime: 'yesterday' },
+  { action: 'events', meetingId: id, confirmed: true },
+]) test('invalid event read is rejected before authentication', async () => { const h = harness(); assert.equal((await h.run(request(input))).status, 400); assert.equal(h.calls.length, 0); });
 test('denied admission makes no outbound calls', async () => { const h = harness({ checkAdmission: async () => false }); assert.equal((await h.run()).status, 403); assert.equal(h.calls.length, 0); });
 test('admission revoked during authentication prevents join', async () => { let count = 0; const h = harness({ checkAdmission: async () => ++count === 1 }); assert.equal((await h.run()).status, 403); assert.equal(h.calls.length, 1); });
 test('rate limit prevents token acquisition and join', async () => { const h = harness({ claimWrite: async () => false }); assert.equal((await h.run()).status, 429); assert.equal(h.calls.length, 0); });
@@ -89,7 +134,7 @@ function routeHarness(user) {
     '../../_lib/auth': { getAuthorizedUser: async () => user },
     '../../../../lib/admin-meeting-minutes': { hasMeetingAdminMembership: async () => true },
     '../../../../lib/write-rate-limit': { consumeWriteRateLimit: async (_db, args) => { scopes.push(args.scope); return true; } },
-    '../../../../lib/feishu-meeting-bot.mjs': { handleBotRequest: async (_request, options) => { handedOff = true; await options.claimWrite('leave'); await options.claimWrite('join'); return Response.json({ ok: await options.checkAdmission() }); } },
+    '../../../../lib/feishu-meeting-bot.mjs': { handleBotRequest: async (_request, options) => { handedOff = true; await options.claimWrite('leave'); await options.claimWrite('events'); await options.claimWrite('join'); return Response.json({ ok: await options.checkAdmission() }); } },
     'cloudflare:workers': { env },
   };
   const source = readFileSync(new URL('../app/api/admin/meeting-bot/route.ts', import.meta.url), 'utf8');
@@ -100,4 +145,4 @@ function routeHarness(user) {
 }
 const admin = { isAdmin: true, ndaCompleted: true, memberId: 'member', accountUserId: 'account', memberMutationRevision: 1 };
 for (const [label, user, status] of [['anonymous', null, 401], ['member', { ...admin, isAdmin: false }, 403], ['NDA incomplete', { ...admin, ndaCompleted: false }, 403], ['missing revision', { ...admin, memberMutationRevision: 0 }, 403]]) test(`route blocks ${label}`, async () => { const h = routeHarness(user); assert.equal((await h.run()).status, status); assert.equal(h.handed(), false); });
-test('route reuses live admin guard and separates emergency-leave rate limit', async () => { const h = routeHarness(admin); assert.equal((await h.run()).status, 200); assert.deepEqual(h.scopes, ['meeting_bot_leave', 'meeting_bot_control']); });
+test('route reuses live admin guard and separates leave, events and control rate limits', async () => { const h = routeHarness(admin); assert.equal((await h.run()).status, 200); assert.deepEqual(h.scopes, ['meeting_bot_leave', 'meeting_bot_events', 'meeting_bot_control']); });

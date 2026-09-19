@@ -12,6 +12,7 @@ declare namespace Cloudflare {
     FEISHU_LOGIN_APP_SECRET?: string;
     FEISHU_LOGIN_TENANT_KEY?: string;
     OA_PUBLIC_ORIGIN?: string;
+    OA_MEETING_BOT_ENABLED?: string;
     PUBLIC_LAB_AI_SERVICE_TOKEN: string;
     OA_LAB_AI_ENABLED?: string;
     OA_LAB_AI_ENDPOINT?: string;

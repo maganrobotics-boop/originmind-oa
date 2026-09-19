@@ -5,12 +5,14 @@ import { ArrowUp, Copy, Forward, RotateCcw, Square } from 'lucide-react';
 import { renderAnswerBody, userFacingAnswer } from '@/lib/oa-chat-renderer.mjs';
 import { initialChatIndicators, probeChatIndicators, pendingChatIndicators, replyChatIndicators, failedChatIndicators } from '@/lib/oa-chat-indicators.mjs';
 import { CHAT_DOCUMENT_HINTS, resolveChatCapability } from '@/lib/oa-chat-documents.mjs';
+import { resolveMeetingModeCommand } from '@/lib/oa-meeting-mode.mjs';
 import type { KnowledgeCitation } from '@/lib/knowledge-types';
 import './shared-chat.generated.css';
 import './oa-chat-panel.css';
 import { useOaConversation } from './oa-conversation-context';
 import { OaMemberChat } from './oa-member-chat';
 import { OaChatDocumentEvent, OaDocumentDialogs, OaDocumentSource, OaDocumentUpload, useOaChatDocuments } from './oa-chat-documents';
+import { OaMeetingMode, type OaMeetingModeHandle } from './oa-meeting-mode';
 
 type Image = { url: string; alt: string; mimeType: string };
 type Turn = { id: string; order: number; question: string; answer: string; citations: KnowledgeCitation[]; images: Image[]; failed?: boolean };
@@ -70,6 +72,9 @@ function OaAiChatPanel() {
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const [meetingModeOpen, setMeetingModeOpen] = useState(false);
+  const [meetingTitle, setMeetingTitle] = useState('');
+  const [meetingCommandEpoch, setMeetingCommandEpoch] = useState(0);
   const order = useRef(0);
   const nextOrder = useCallback(() => ++order.current, []);
   const documents = useOaChatDocuments(nextOrder);
@@ -78,11 +83,12 @@ function OaAiChatPanel() {
   const sending = useRef(false);
   const scroll = useRef<HTMLDivElement>(null);
   const input = useRef<HTMLTextAreaElement>(null);
+  const meetingMode = useRef<OaMeetingModeHandle>(null);
   const composerId = useId();
   const stickToEnd = useRef(true);
   const working = asking || documents.busy;
   const timeline = [...turns.map(turn => ({ type: 'answer' as const, id: turn.id, order: turn.order, turn })), ...documents.entries].sort((a, b) => a.order - b.order);
-  useEffect(() => { setAiDirty(Boolean(turns.length || question || asking || error || documents.entries.length || documents.busy || documents.error)); }, [turns.length, question, asking, error, documents.entries.length, documents.busy, documents.error, setAiDirty]);
+  useEffect(() => { setAiDirty(Boolean(turns.length || question || asking || error || documents.entries.length || documents.busy || documents.error || meetingModeOpen)); }, [turns.length, question, asking, error, documents.entries.length, documents.busy, documents.error, meetingModeOpen, setAiDirty]);
 
   useEffect(() => () => { requestSequence.current++; requestRef.current?.abort(); }, []);
   useEffect(() => { stickToEnd.current = true; }, [documents.entries.length]);
@@ -97,9 +103,20 @@ function OaAiChatPanel() {
   }, [question]);
 
   const ask = async (retry?: Turn) => {
-    if (sending.current || documents.busy) return;
+    if (sending.current) return;
     const normalized = (retry?.question || question).trim();
     if (normalized.length < 2 || normalized.length > 2000) { setError('问题需为 2–2000 个字符。'); return; }
+    const meetingCommand = retry ? null : resolveMeetingModeCommand(normalized);
+    if (meetingCommand?.action === 'open') {
+      setMeetingTitle(meetingCommand.title); setMeetingCommandEpoch(value => value + 1); setMeetingModeOpen(true);
+      setQuestion(''); setError(''); stickToEnd.current = true; return;
+    }
+    if (meetingCommand?.action === 'end') {
+      setQuestion('');
+      if (!meetingModeOpen || !meetingMode.current) { setError('当前没有已开启的会议模式。请先输入 @会议模式。'); return; }
+      await meetingMode.current.end(); stickToEnd.current = true; return;
+    }
+    if (documents.busy) return;
     const capability = resolveChatCapability(normalized);
     // An explicit knowledge command wins over a selected document source.
     const documentRequest = capability ? capability.kind !== null : documents.shouldHandle(normalized);
@@ -151,7 +168,13 @@ function OaAiChatPanel() {
   return <section className="oa-shared-chat" aria-label="OA 实验室 AI 助手">
     <div className="chat-app oa-chat-surface">
       <div className="messages oa-chat-messages" ref={scroll} onScroll={() => { const element = scroll.current; if (element) stickToEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96; }}>
-        {timeline.length === 0 ? <section className="empty-hero" aria-labelledby={`${composerId}-welcome`}><h2 id={`${composerId}-welcome`}>实验室大模型能做什么</h2><p>知识问答、资料整理、会议纪要、项目总结等</p></section> : timeline.map(entry => {
+        {timeline.length === 0 && !meetingModeOpen && <section className="empty-hero" aria-labelledby={`${composerId}-welcome`}><h2 id={`${composerId}-welcome`}>实验室大模型能做什么</h2><p>知识问答、资料整理、会议纪要、项目总结等</p></section>}
+        <OaMeetingMode ref={meetingMode} visible={meetingModeOpen} initialTitle={meetingTitle} commandEpoch={meetingCommandEpoch} onRestore={() => setMeetingModeOpen(true)} onClose={() => setMeetingModeOpen(false)} onMinutes={(title, material, onAccepted) => {
+          const submitted = documents.submitSource('@会议纪要 请根据实时转写和会中标记，整理讨论要点、明确决策、行动项、负责人、截止日期、风险和未决问题；材料未明确的信息标注“待补充”。', { name: `${title}.md`, text: material }, onAccepted);
+          if (submitted) { stickToEnd.current = true; setLastAnswer(null); }
+          return submitted;
+        }} />
+        {timeline.map(entry => {
           if (entry.type !== 'answer') return <OaChatDocumentEvent key={entry.id} entry={entry} documents={documents} />;
           const turn = entry.turn;
           return <div className="oa-chat-turn" key={turn.id}>
@@ -166,7 +189,7 @@ function OaAiChatPanel() {
         {asking && <div className="knowledge-answer-loading" role="status">正在检索并生成回答…</div>}
       </div>
       <div className="composer-area oa-chat-composer-area">
-        <div className="oa-chat-examples" role="group" aria-label="AI 助手四项功能"><p id={`${composerId}-capabilities`}>点击功能，或在开头输入 @功能名 调用</p>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} title={`@${hint.label}`} disabled={working} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>
+        <div className="oa-chat-examples" role="group" aria-label="AI 助手五项功能"><p id={`${composerId}-capabilities`}>点击功能，或在开头输入 @功能名 调用</p><button type="button" title="@会议模式" disabled={working} onClick={() => { setMeetingTitle(''); setMeetingCommandEpoch(value => value + 1); setMeetingModeOpen(true); }}>会议模式</button>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} title={`@${hint.label}`} disabled={working} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>
         {(error || documents.error) && <p className="oa-chat-error" role="alert">{error || documents.error}</p>}
         <OaDocumentSource documents={documents} />
         <form className="composer oa-chat-composer" onSubmit={submit}>

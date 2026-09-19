@@ -1,0 +1,38 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { buildMeetingMinutesMaterial, isMeetingModeSession, meetingModeStorageKey, resolveMeetingModeCommand } from '../lib/oa-meeting-mode.mjs';
+
+const session = {
+  version: 1, phase: 'in_meeting', title: '机器人项目周会', meeting: '123456789', meetingId: '7512345678901234567',
+  participants: '张三、李四', agenda: '确认联调计划', startedAt: '2026-09-19T01:00:00.000Z', endedAt: '2026-09-19T02:00:00.000Z', exitStatus: 'confirmed', minutesTaskId: null,
+  observedParticipants: ['张三', '李四'],
+  transcript: [{ id: 'event:0', speaker: '张三', text: '下周完成联调。', time: '2026-09-19T01:01:00.000Z' }],
+  markers: [{ id: 'marker:0', type: 'task', text: '李四周五前提交测试记录', createdAt: '2026-09-19T01:02:00.000Z' }],
+};
+
+for (const prefix of ['@', '＠']) test(`${prefix}会议模式 opens the mode`, () => {
+  assert.deepEqual(resolveMeetingModeCommand(`${prefix}会议模式 机器人项目周会`), { action: 'open', title: '机器人项目周会' });
+  assert.deepEqual(resolveMeetingModeCommand(`${prefix}结束会议`), { action: 'end' });
+});
+for (const value of ['解释 @会议模式', '"@会议模式"', '@会议模式ABC', '@结束会议 现在', null, 42]) test(`embedded or malformed command stays ordinary: ${String(value)}`, () => assert.equal(resolveMeetingModeCommand(value), null));
+test('meeting session validation is strict and never accepts a stored password', () => {
+  assert.equal(isMeetingModeSession(session), true);
+  assert.equal(isMeetingModeSession({ ...session, password: 'secret' }), false);
+  assert.equal(isMeetingModeSession({ ...session, meetingId: 7512345678901234567 }), false);
+  assert.equal(isMeetingModeSession({ ...session, exitStatus: 'probably' }), false);
+  assert.equal(isMeetingModeSession({ ...session, minutesTaskId: '../../other-task' }), false);
+  assert.equal(isMeetingModeSession({ ...session, transcript: [{ ...session.transcript[0], text: 'a'.repeat(4001) }] }), false);
+});
+test('minutes material preserves transcript, agenda and explicit markers', () => {
+  const material = buildMeetingMinutesMaterial(session);
+  assert.match(material, /机器人项目周会/u); assert.match(material, /确认联调计划/u);
+  assert.match(material, /张三：下周完成联调/u); assert.match(material, /## 待办/u); assert.match(material, /李四周五前提交测试记录/u);
+  assert.match(material, /## 决策[\s\S]*- 无/u);
+});
+test('minutes material is rejected rather than silently truncated', () => {
+  const oversized = { ...session, transcript: Array.from({ length: 6 }, (_, index) => ({ id: `e${index}`, speaker: '张三', text: '长'.repeat(3900), time: session.startedAt })) };
+  assert.throws(() => buildMeetingMinutesMaterial(oversized), /MEETING_MATERIAL_TOO_LARGE/u);
+});
+test('meeting storage is scoped to the signed-in OA identity', () => {
+  assert.equal(meetingModeStorageKey('ADMIN@EXAMPLE.COM'), 'oa:meeting-mode:v1:admin@example.com');
+});

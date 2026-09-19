@@ -118,7 +118,7 @@ export default function MeetingBotPage() {
       <input id="bot-password" type="password" style={inputStyle} value={password} onChange={event => setPassword(event.target.value)} maxLength={128} autoComplete="off" disabled={busy} />
       <label><input type="checkbox" checked={confirmed} onChange={event => setConfirmed(event.target.checked)} disabled={busy} /> 我确认会议号无误，已告知参会人将邀请 OA 助手加入。</label>
       <div><button style={buttonStyle} disabled={busy || !status?.configured || !status.enabled || !confirmed || !meeting.trim() || uncertain || Boolean(last)} onClick={() => void perform('join')}>让 OA 助手加入会议</button></div>
-      <p>不会自动接听飞书“呼叫”，不会自动开始会议。本入口尚未接入字幕采集、自动纪要或发言。关闭 OA 页面不会让已入会的机器人退出。</p>
+      <p>不会自动接听飞书“呼叫”，不会自动开始会议，也不会代替用户发言。OA AI 助手中的“@会议模式”可读取飞书会中事件并生成待确认纪要；需另行开通 <code>vc:meeting.meetingevent:read</code>。关闭 OA 页面不会让已入会的机器人退出。</p>
     </section>
     <section style={box}>
       <h2>3. 退出与恢复</h2>

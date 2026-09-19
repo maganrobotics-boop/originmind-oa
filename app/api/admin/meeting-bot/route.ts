@@ -17,7 +17,11 @@ async function handle(request: Request) {
       env: env as unknown as BotEnv,
       actorKey: `${user.memberId}:${user.memberMutationRevision}`,
       checkAdmission: () => hasMeetingAdminMembership(db, actor),
-      claimWrite: async action => consumeWriteRateLimit(await getDb(), { actorSubject: user.accountUserId!, scope: action === 'leave' ? 'meeting_bot_leave' : 'meeting_bot_control', limit: action === 'leave' ? 10 : 6 }),
+      claimWrite: async action => consumeWriteRateLimit(await getDb(), {
+        actorSubject: user.accountUserId!,
+        scope: action === 'leave' ? 'meeting_bot_leave' : action === 'events' ? 'meeting_bot_events' : 'meeting_bot_control',
+        limit: action === 'leave' ? 10 : action === 'events' ? 30 : 6,
+      }),
     });
   } catch { return reply('会议机器人配置或管理员准入检查暂不可用。', 503); }
 }

@@ -7,6 +7,16 @@ export type BotEnv = {
 };
 export function normalizeMeetingNumber(value: unknown): string | null;
 export function botConfiguration(env: BotEnv): { origin: string; missing: string[]; configured: boolean; enabled: boolean };
+export type MeetingEventTranscript = { id: string; speaker: string; text: string; time: string };
+export function sanitizeMeetingEvents(value: unknown): {
+  transcript: MeetingEventTranscript[];
+  participants: string[];
+  meeting: { topic: string; startTime: string; endTime: string };
+  meetingEnded: boolean;
+  hasMore: boolean;
+  pageToken: string | null;
+  contentTruncated: boolean;
+};
 export function handleBotRequest(request: Request, options: {
   env: BotEnv;
   actorKey: string;

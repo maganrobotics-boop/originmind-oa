@@ -1,0 +1,88 @@
+.oa-meeting-mode {
+  width: min(100%, 1040px);
+  margin: 8px auto 24px;
+  overflow: hidden;
+  border: 1px solid #d8e2ef;
+  border-radius: 24px;
+  background: linear-gradient(180deg, #f7faff 0, #fff 180px);
+  box-shadow: 0 16px 40px #1e3a5f0d;
+}
+
+.oa-meeting-header { display: flex; justify-content: space-between; gap: 20px; padding: 22px 24px 18px; border-bottom: 1px solid #e5ebf3; }
+.oa-meeting-header h2 { display: flex; align-items: center; gap: 9px; margin: 8px 0 4px; font-size: 21px; }
+.oa-meeting-header p { margin: 0; color: #637083; line-height: 1.6; }
+.oa-meeting-header > div > span { display: inline-flex; align-items: center; gap: 6px; padding: 4px 9px; border-radius: 999px; background: #e9eef5; color: #536174; font-size: 12px; font-weight: 650; }
+.oa-meeting-header > div > span.live { background: #e8f7ef; color: #167249; }
+.oa-meeting-header > div > span.live svg { fill: #23a36b; }
+.oa-meeting-close { align-self: flex-start; display: grid; place-items: center; width: 34px; height: 34px; border: 0; border-radius: 50%; background: #fff; color: #687386; }
+
+.oa-meeting-setup { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; padding: 22px 24px; }
+.oa-meeting-setup label { display: grid; gap: 7px; color: #344155; font-size: 13px; font-weight: 650; }
+.oa-meeting-setup label:nth-of-type(4),
+.oa-meeting-setup label:nth-of-type(5),
+.oa-meeting-consent,
+.oa-meeting-primary,
+.oa-meeting-recovery { grid-column: 1 / -1; }
+.oa-meeting-setup input,
+.oa-meeting-setup textarea,
+.oa-meeting-marker-compose textarea,
+.oa-meeting-marker-compose select { box-sizing: border-box; width: 100%; padding: 11px 13px; border: 1px solid #ccd6e2; border-radius: 12px; background: #fff; color: #1e293b; font: inherit; line-height: 1.5; resize: vertical; }
+.oa-meeting-setup input:focus,
+.oa-meeting-setup textarea:focus,
+.oa-meeting-marker-compose textarea:focus,
+.oa-meeting-marker-compose select:focus { outline: 2px solid #bed3ff; outline-offset: 1px; border-color: #6f9bea; }
+.oa-meeting-consent { grid-template-columns: auto 1fr !important; align-items: start !important; font-weight: 500 !important; line-height: 1.55; }
+.oa-meeting-consent input { width: 17px; height: 17px; margin-top: 2px; }
+
+.oa-meeting-primary,
+.oa-meeting-recovery,
+.oa-meeting-actions button,
+.oa-meeting-marker-compose button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; width: max-content; padding: 10px 16px; border: 0; border-radius: 11px; background: #1e5fcd; color: #fff; font: inherit; font-size: 14px; font-weight: 650; }
+.oa-meeting-recovery { background: #eef3fa; color: #334155; }
+.oa-meeting-primary:disabled,
+.oa-meeting-recovery:disabled,
+.oa-meeting-actions button:disabled,
+.oa-meeting-marker-compose button:disabled { opacity: .52; cursor: not-allowed; }
+
+.oa-meeting-console { padding: 20px 24px; }
+.oa-meeting-summary { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 18px; }
+.oa-meeting-summary > div { display: grid; gap: 3px; }
+.oa-meeting-summary strong { font-size: 17px; }
+.oa-meeting-summary small { color: #728095; }
+.oa-meeting-summary > span { display: flex; align-items: center; gap: 6px; color: #167249; font-size: 13px; font-weight: 650; }
+.oa-meeting-live-grid { display: grid; grid-template-columns: minmax(0, 1.45fr) minmax(280px, .8fr); gap: 16px; }
+.oa-meeting-live-grid > section { min-width: 0; overflow: hidden; border: 1px solid #e0e7ef; border-radius: 16px; background: #fff; }
+.oa-meeting-live-grid h3 { display: flex; align-items: center; gap: 8px; margin: 0; padding: 14px 16px; border-bottom: 1px solid #edf1f5; font-size: 15px; }
+.oa-meeting-live-grid h3 small { margin-left: auto; color: #8491a3; font-weight: 500; }
+.oa-meeting-transcript { height: 320px; overflow: auto; padding: 10px 16px; }
+.oa-meeting-transcript p { display: grid; grid-template-columns: 62px 92px minmax(0, 1fr); gap: 9px; margin: 0; padding: 9px 0; border-bottom: 1px solid #f0f2f5; line-height: 1.55; }
+.oa-meeting-transcript time { color: #8a96a7; font-size: 12px; }
+.oa-meeting-transcript strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; }
+.oa-meeting-transcript span { overflow-wrap: anywhere; }
+.oa-meeting-empty { padding: 30px 12px; color: #788699; text-align: center; line-height: 1.7; }
+.oa-meeting-marker-compose { display: grid; gap: 9px; padding: 14px 16px; }
+.oa-meeting-marker-compose select { resize: none; }
+.oa-meeting-marker-compose button { justify-self: end; padding: 8px 12px; }
+.oa-meeting-markers { max-height: 140px; overflow: auto; padding: 0 16px 12px; }
+.oa-meeting-markers p { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 8px; margin: 0; padding: 8px 0; border-top: 1px solid #f0f2f5; }
+.oa-meeting-markers b { padding: 2px 6px; border-radius: 6px; background: #eef3fa; color: #52647b; font-size: 11px; }
+.oa-meeting-markers span { overflow-wrap: anywhere; line-height: 1.5; }
+.oa-meeting-markers button { display: grid; place-items: center; border: 0; background: transparent; color: #8591a2; }
+.oa-meeting-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 18px; }
+.oa-meeting-actions button { background: #eef3fa; color: #334155; }
+.oa-meeting-actions .oa-meeting-danger { background: #c73b47; color: #fff; }
+.oa-meeting-complete { display: flex; gap: 12px; padding: 18px; border: 1px solid #cce7d9; border-radius: 16px; background: #f1fbf6; color: #185b3d; }
+.oa-meeting-complete p { margin: 4px 0 0; line-height: 1.6; }
+.oa-meeting-error { margin: 0 24px 16px; padding: 11px 13px; border-radius: 10px; background: #fff0f1; color: #a42f3a; line-height: 1.55; }
+.oa-meeting-mode > footer { padding: 12px 24px; border-top: 1px solid #e7edf4; background: #fbfcfe; color: #7b8797; font-size: 12px; line-height: 1.6; }
+
+@media (max-width: 760px) {
+  .oa-meeting-mode { border-radius: 18px; }
+  .oa-meeting-header, .oa-meeting-setup, .oa-meeting-console { padding-left: 16px; padding-right: 16px; }
+  .oa-meeting-setup, .oa-meeting-live-grid { grid-template-columns: 1fr; }
+  .oa-meeting-setup label { grid-column: 1 / -1; }
+  .oa-meeting-transcript { height: 280px; }
+  .oa-meeting-transcript p { grid-template-columns: 54px minmax(70px, 88px) minmax(0, 1fr); }
+  .oa-meeting-error { margin-left: 16px; margin-right: 16px; }
+  .oa-meeting-mode > footer { padding-left: 16px; padding-right: 16px; }
+}
