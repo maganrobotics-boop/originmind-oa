@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { captureText, MEETING_INSTRUCTION, meetingParts, mergeCapture, type MeetingEntry } from '@/lib/oa-meeting-capture.mjs';
 import './oa-meeting-listener.css';
+import { OaMeetingBot } from './oa-meeting-bot';
 
 type Meeting = { id: string; number: string; title: string };
 type Reply = { error?: string; authorizationUrl?: string; configured?: boolean; authorized?: boolean; name?: string; meetings?: Meeting[]; meeting?: Meeting; listenId?: string; active?: boolean; reason?: string; entries?: MeetingEntry[]; unsupported?: number; cursor?: string; hasMore?: boolean; checkedAt?: number; task?: { id: string; status: string; failure_code?: string } };
@@ -151,11 +152,12 @@ export function OaMeetingListener({ open, onOpen, onTask, onDirty }: { open: boo
     const url = URL.createObjectURL(blob), link = document.createElement('a');
     link.href = url; link.download = '飞书旁听-已采集片段.txt'; document.body.appendChild(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
-  return <section className="oa-meeting-listener" aria-label="飞书会议旁听">
-    <button type="button" className="oa-document-text-button" onClick={onOpen} aria-expanded={open}>会议模式 · 飞书旁听</button>
-    {open && <div className="oa-meeting-body">
+  return <section className="oa-meeting-listener" aria-label="飞书会议模式">
+    <button type="button" className="oa-document-text-button" onClick={onOpen} aria-expanded={open}>会议模式 · OA 助手入会</button>
+    <OaMeetingBot open={open} onTask={onTask} onDirty={onDirty} />
+    {open && <details><summary>备选：用户身份旁听（不显示机器人）</summary><div className="oa-meeting-body">
       <p><strong>用户身份旁听</strong>：您本人须在飞书会议中，不显示独立机器人，不能发声。请保持 OA 页面打开；锁屏、后台节流、断网或关闭页面会中断采集，不保证覆盖全会。</p>
-      <details><summary>首次接入条件</summary><p>飞书灰度账号；客户端 7.68+；应用申请用户身份权限 vc:meeting.meetingevent:read 并发布；会议所有者打开“允许智能体入会”（找不到时先开 AI 总结）。本功能使用文档给出的 HTTP API，不需要在手机安装 CLI。</p></details>
+      <details><summary>首次接入条件</summary><p>飞书灰度账号；客户端 7.68+；应用申请用户身份权限 vc:meeting.meetingevent:read 并发布；会议所有者打开“允许智能体入会”（开关不可用时先核对灰度资格及权限）。本功能使用文档给出的 HTTP API，不需要在手机安装 CLI。</p></details>
       <p role="status">{state}</p>
       <small>已采集 {count} 条；最近成功拉取：{lastSync ? new Date(lastSync).toLocaleTimeString() : '尚无'}</small>
       {error && <p role="alert" className="oa-chat-error">{error}</p>}
@@ -171,6 +173,6 @@ export function OaMeetingListener({ open, onOpen, onTask, onDirty }: { open: boo
       {preview && <pre className="oa-meeting-preview">{preview}</pre>}
       {tasks.map(task => <button type="button" key={task.id} onClick={() => void onTaskRef.current(task.id)}>打开 {task.title}</button>)}
       <p><small>未生成的原文仅保存在本页内存，刷新会丢失。已创建的纪要任务可从“已保存文档”恢复。未读取共享文档、屏幕或原始音视频；没有收到字幕时，不会凭空生成纪要。</small></p>
-    </div>}
+    </div></details>}
   </section>;
 }
