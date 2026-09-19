@@ -5,7 +5,7 @@ import { useEffect, useState } from 'react';
 
 type Status = { configured: boolean; enabled: boolean; missing: string[]; actorKey: string };
 type RecordItem = { meetingId: string | null; meetingNumber: string; requestedAt: string };
-type Result = { error?: string; message?: string; code?: number; logId?: string; state?: string; meetingId?: string | null; meetingNumber?: string; outcomeUnknown?: boolean };
+type Result = { error?: string; message?: string; code?: number; logId?: string; diagnostic?: string; state?: string; meetingId?: string | null; meetingNumber?: string; outcomeUnknown?: boolean };
 function jsonRecord(value: unknown): Record<string, unknown> {
   return value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
@@ -66,7 +66,7 @@ export default function MeetingBotPage() {
     try {
       const response = await fetch(endpoint, { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(30000) });
       const data = await response.json() as Result;
-      setNotice((data.error || data.message || '接口未返回明确结果，请核对飞书参会人列表。') + (data.code !== undefined ? ` 错误码：${data.code}。` : '') + (data.logId ? ` 日志号：${data.logId}。` : ''));
+      setNotice((data.error || data.message || '接口未返回明确结果，请核对飞书参会人列表。') + (data.diagnostic ? ` 诊断码：${data.diagnostic}。` : '') + (data.code !== undefined ? ` 错误码：${data.code}。` : '') + (data.logId ? ` 日志号：${data.logId}。` : ''));
       if (!response.ok) {
         if (action === 'join' && data.outcomeUnknown === false) {
           setLast(null); setUncertain(false);
@@ -126,3 +126,4 @@ export default function MeetingBotPage() {
     </section>
   </main>;
 }
+
