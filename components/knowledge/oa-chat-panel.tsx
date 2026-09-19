@@ -93,7 +93,7 @@ function OaAiChatPanel() {
   useEffect(() => { stickToEnd.current = true; }, [documents.entries.length]);
   useEffect(() => {
     if (stickToEnd.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
-  }, [turns, asking, error, documents.entries, documents.error]);
+  }, [turns, asking, error, documents.entries, documents.error, meetingOpen]);
   useEffect(() => {
     const element = input.current;
     if (!element) return;
@@ -170,8 +170,8 @@ function OaAiChatPanel() {
         </div>;
         })}
         {asking && <div className="knowledge-answer-loading" role="status">正在检索并生成回答…</div>}
+        <OaMeetingListener open={meetingOpen} onOpen={openMeeting} onTask={documents.restore} onDirty={setMeetingDirty} />
       </div>
-      <OaMeetingListener open={meetingOpen} onOpen={openMeeting} onTask={documents.restore} onDirty={setMeetingDirty} />
       <div className="composer-area oa-chat-composer-area">
         <div className="oa-chat-examples" role="group" aria-label="AI 助手四项功能"><p id={`${composerId}-capabilities`}>点击功能，或在开头输入 @功能名 调用</p>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} title={`@${hint.label}`} disabled={working} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>
         {(error || documents.error) && <p className="oa-chat-error" role="alert">{error || documents.error}</p>}
