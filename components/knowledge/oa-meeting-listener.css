@@ -1,0 +1,9 @@
+.oa-meeting-listener { padding: .45rem .65rem; flex: 0 0 auto; border-top: 1px solid var(--border, #ddd); }
+.oa-meeting-body { max-height: min(48dvh, 460px); overflow-y: auto; overflow-wrap: anywhere; padding: .45rem 0; font-size: .875rem; }
+.oa-meeting-body p { margin: .5rem 0; }
+.oa-meeting-body button { padding: .4rem .6rem; margin: .2rem; border: 1px solid var(--border, #ddd); border-radius: .4rem; }
+.oa-meeting-body button:disabled { opacity: .5; cursor: not-allowed; }
+.oa-meeting-body label { display: block; margin: .5rem 0; }
+.oa-meeting-body select { display: block; width: 100%; max-width: 100%; border: 1px solid var(--border, #ddd); padding: .5rem; }
+.oa-meeting-consent input { margin-inline-end: .5rem; }
+.oa-meeting-preview { white-space: pre-wrap; max-height: 10rem; overflow: auto; padding: .5rem; border: 1px solid var(--border, #ddd); }

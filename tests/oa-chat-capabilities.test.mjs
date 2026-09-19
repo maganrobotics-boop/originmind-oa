@@ -4,6 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import { CHAT_DOCUMENT_HINTS, resolveChatCapability, wantsChatDocument, planChatDocument } from '../lib/oa-chat-documents.mjs';
+import { isMeetingCommand } from '../lib/oa-meeting-capture.mjs';
 
 const ts = createRequire(import.meta.url)('typescript');
 const panel = await readFile(new URL('../components/knowledge/oa-chat-panel.tsx', import.meta.url), 'utf8');
@@ -81,7 +82,7 @@ assert.ok(start >= 0 && end > start);
 const expression = panel.slice(start + 'const ask = '.length, end).trim().replace(/;$/u, '');
 const compiled = ts.transpileModule(`(${expression})`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.ESNext } }).outputText;
 async function runAsk(question, selectedSource = null) {
-  const record = { requests: [], plans: [], errors: [], turns: [] };
+  const record = { requests: [], plans: [], errors: [], turns: [], meetingOpens: 0 };
   const state = {
     question, turns: [], timeline: [{ type: 'answer', turn: { answer: '之前的完整回答', failed: false } }],
     sending: { current: false }, requestSequence: { current: 0 }, requestRef: { current: null }, stickToEnd: { current: false },
@@ -90,7 +91,7 @@ async function runAsk(question, selectedSource = null) {
       submit: (instruction, previous) => { record.plans.push(planChatDocument(instruction, selectedSource, previous)); return true; },
       dismissError() {},
     },
-    resolveChatCapability, crypto: { randomUUID: () => 'synthetic-id' }, AbortController, AbortSignal,
+    resolveChatCapability, isMeetingCommand, openMeeting: () => { record.meetingOpens++; }, crypto: { randomUUID: () => 'synthetic-id' }, AbortController, AbortSignal,
     setQuestion() {}, setError: value => { if (value) record.errors.push(value); }, setLastAnswer() {}, setAsking() {}, setRequestStatus() {}, nextOrder: () => 1,
     setTurns: value => { record.turns = typeof value === 'function' ? value(record.turns) : value; },
     pendingChatIndicators: () => ({}), replyChatIndicators: () => ({}), failedChatIndicators: () => ({}), validImage: () => false, userFacingAnswer: value => value,
@@ -103,6 +104,15 @@ async function runAsk(question, selectedSource = null) {
   return record;
 }
 
+test('actual handler opens meeting controls without a model call, task or automatic listening', async () => {
+  for (const command of ['@会议模式', '＠会议模式，开始旁听', '@会议模式 919 700 881']) {
+    const record = await runAsk(command, source);
+    assert.equal(record.meetingOpens, 1);
+    assert.equal(record.requests.length, 0);
+    assert.equal(record.plans.length, 0);
+    assert.equal(record.errors.length, 0);
+  }
+});
 test('actual handler sends @知识问答 to ask even with a selected attachment', async () => {
   const record = await runAsk('@知识问答 如何生成 Word 文档？', source);
   assert.equal(record.plans.length, 0);
