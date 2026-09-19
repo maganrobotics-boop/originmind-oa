@@ -71,5 +71,7 @@ for (const [label, payload] of invalidCodes) {
     const result = await invoke('join', [{ ...payload, tenant_access_token: 'offline_token' }]);
     assert.equal(result.status, 502); assert.equal(result.calls, 1);
     assert.equal(result.data.outcomeUnknown, false);
+    assert.equal(result.data.diagnostic, 'AUTH_RESPONSE_INVALID');
   });
 }
+
