@@ -9,15 +9,16 @@ export async function readFileRetention(db: D1Database, actor: TaskActor, id: st
     .bind(id, actor.memberId, actor.accountUserId, ...args(actor)).first<FileRetention>();
 }
 /** Pin BEFORE the idempotent knowledge write. A lost acknowledgement is recoverable, never garbage collected. */
-export async function pinFileArchive(db: D1Database, actor: TaskActor, id: string, now = Date.now()) {
+export async function pinFileArchive(db: D1Database, actor: TaskActor, id: string, now = Date.now(), expectedUpdatedAt?: number) {
   const pinned = await db.prepare(`INSERT INTO ai_workbench_retention(task_id,state,expires_at,created_at,updated_at)
     SELECT id,'archiving',NULL,?,? FROM ai_workbench_tasks
     WHERE id=? AND origin='oa' AND member_id=? AND account_user_id=? AND status='succeeded' AND ${taskActorGuard}
+      AND (? IS NULL OR updated_at=?)
     ON CONFLICT(task_id) DO UPDATE SET state='archiving',expires_at=NULL,updated_at=excluded.updated_at
     WHERE ai_workbench_retention.state='temporary' RETURNING *`)
-    .bind(now, now, id, actor.memberId, actor.accountUserId, ...args(actor)).first<FileRetention>();
+    .bind(now, now, id, actor.memberId, actor.accountUserId, ...args(actor), expectedUpdatedAt ?? null, expectedUpdatedAt ?? null).first<FileRetention>();
   const result = pinned || await readFileRetention(db, actor, id);
-  if (!result || !['archiving', 'submitted'].includes(result.state)) throw new Error('FILE_ARCHIVE_NOT_AVAILABLE');
+  if (!result || !['archiving', 'submitted'].includes(result.state)) throw new Error(expectedUpdatedAt === undefined ? 'FILE_ARCHIVE_NOT_AVAILABLE' : 'FILE_ARCHIVE_VERSION_CONFLICT');
   return result;
 }
 export async function acknowledgeFileArchive(db: D1Database, actor: TaskActor, id: string, itemId: string) {

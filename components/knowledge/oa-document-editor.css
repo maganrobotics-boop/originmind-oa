@@ -1,0 +1,11 @@
+.oa-document-editor { min-width: 0; }
+.oa-draft-fields { display: grid; gap: 8px; padding: 12px 0; }
+.oa-draft-fields label { font-size: 14px; font-weight: 600; }
+.oa-draft-fields input, .oa-draft-fields textarea { box-sizing: border-box; width: 100%; min-width: 0; padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 9px; background: #fff; color: #17212f; font: inherit; line-height: 1.7; }
+.oa-draft-fields textarea { min-height: 240px; resize: vertical; overflow-wrap: anywhere; }
+.oa-draft-fields small { overflow-wrap: anywhere; }
+.oa-draft-actions { position: sticky; bottom: 0; z-index: 1; padding: 10px 0; background: #fff; flex-wrap: wrap; }
+.oa-draft-actions button { min-height: 44px; }
+.oa-document-editor > p { overflow-wrap: anywhere; }
+@media (max-width: 480px) { .oa-draft-actions { gap: 6px; } .oa-draft-actions button { flex: 1 1 auto; } .oa-draft-fields input, .oa-draft-fields textarea { font-size: 16px; } }
+.oa-document-dialog .oa-document-editor { max-height: 55dvh; overflow: auto; padding: 0 2px; }

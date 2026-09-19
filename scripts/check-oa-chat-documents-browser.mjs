@@ -31,7 +31,7 @@ try {
   for (const [name, width, height] of [['desktop',1280,900],['mobile',390,844],['mobile-small',320,700],['landscape',844,390]]) {
     const context = await browser.newContext({ viewport:{ width,height }, serviceWorkers:'block', acceptDownloads:true });
     const page = await context.newPage(), requests = [], errors = [], held = [], tasks = new Map(), ids = new Map();
-    const archived = new Map(); let failArchive = true;
+    const archived = new Map(); let failArchive = true, failSave = true;
     let clock = 10, mode = 'success', loseCreate = false, unavailable = false;
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/*', async route => {
@@ -48,7 +48,8 @@ try {
           const id = url.searchParams.get('id');
           return route.fulfill({json:{lifecycle:archived.get(id) || {state:'temporary',expiresAt:Date.now()+604800000,knowledgeItemId:null,knowledgeStatus:null}}});
         }
-        assert.deepEqual(Object.keys(body).sort(),['confirmed','id']); assert.equal(body.confirmed,true);
+        assert.deepEqual(Object.keys(body).sort(),['confirmed','expectedUpdatedAt','id']); assert.equal(body.confirmed,true);
+        assert.equal(body.expectedUpdatedAt,tasks.get(body.id)?.updated_at,'archive must use the exact saved version');
         const receipt = {id:body.id,status:'pending',visibility:'internal'};
         archived.set(body.id,{state:'submitted',expiresAt:null,knowledgeItemId:receipt.id,knowledgeStatus:'pending',visibility:'internal'});
         if (failArchive) { failArchive=false; return route.abort('failed'); }
@@ -77,6 +78,15 @@ try {
         }
         const task = tasks.get(body.id);
         if (!task) return route.fulfill({ status:404, json:{error:'无访问权限'} });
+        if (body.action === 'saveDraft') {
+          assert.deepEqual(Object.keys(body).sort(),['action','expectedUpdatedAt','id','result','title']);
+          if (failSave) { failSave=false; return route.fulfill({status:503,json:{error:'合成保存失败，当前修改未提交。'}}); }
+          if (archived.get(body.id)?.state === 'submitted' || body.expectedUpdatedAt !== task.updated_at) return route.fulfill({status:409,json:{error:'版本冲突或已送审，未覆盖。'}});
+          const prepared = await prepareTaskArtifacts(body.title,body.result);
+          task.title=body.title; task.result=prepared.markdown; task.updated_at=++clock;
+          archived.set(body.id,{state:'draft',expiresAt:null,knowledgeItemId:null,knowledgeStatus:null});
+          return route.fulfill({json:{saved:true,task}});
+        }
         if (body.action === 'cancel') { task.status='cancelled'; task.updated_at=++clock; return route.fulfill({ json:{task} }); }
         task.status='running'; task.attempts++; task.updated_at=++clock;
         if (mode === 'hold') { held.push({route, task:{...task}}); return; }
@@ -87,6 +97,7 @@ try {
       return route.fulfill({json:data});
     });
     const createRequests = () => requests.filter(item => item.path === '/api/lab-ai/tasks' && item.body?.action === 'create');
+    const archiveRequests = () => requests.filter(item => item.path === '/api/lab-ai/archive' && item.method === 'POST');
     const importText = async (name, text) => {
       await page.locator('.oa-shared-chat input[type=file][accept*=".markdown"]').setInputFiles({name,mimeType:'text/plain',buffer:Buffer.from(text)});
       await page.getByRole('article',{name:`已导入 ${name}`,exact:true}).waitFor();
@@ -143,15 +154,46 @@ try {
       const path = resolve(output,`${name}-synthetic.docx`); await download.saveAs(path);
       const bytes = await readFile(path); assert.equal(bytes.subarray(0,2).toString(),'PK'); assert.ok(bytes.length>100);
       await page.screenshot({path:resolve(output,`${name}-preview.png`),fullPage:true});
-      // A separate, explicit archive confirmation; a lost reply retries the same task.
-      assert.equal(requests.filter(item=>item.path==='/api/lab-ai/archive' && item.method==='POST').length,0);
-      const archivePanel = preview.getByRole('region',{name:'成果归档与保留期限'});
-      await archivePanel.getByRole('button',{name:'归档成果',exact:true}).click();
-      const confirmArchive = archivePanel.getByRole('button',{name:'确认归档并提交 OA',exact:true});
+      // Editing never starts approval. A failed save preserves input and cannot send stale content.
+      const archivePanel = preview.getByRole('region',{name:'文档编辑保存与提交'});
+      await archivePanel.getByRole('button',{name:'编辑',exact:true}).click();
+      const editedBody = '原型已完成装配；实机测试尚未完成。人工补充：下一步先核对接口，负责人和日期待补充。';
+      await archivePanel.getByLabel('文档标题',{exact:true}).fill('人工核对稿');
+      await archivePanel.getByLabel('文档正文',{exact:true}).fill(editedBody);
+      await archivePanel.getByRole('button',{name:'保存并提交',exact:true}).click();
+      await archivePanel.getByRole('checkbox').check();
+      await archivePanel.getByRole('button',{name:'保存并提交 OA',exact:true}).click();
+      await archivePanel.getByRole('alert').filter({hasText:'合成保存失败'}).waitFor();
+      assert.equal(archiveRequests().length,0,'failed save must not submit the old version');
+      assert.equal(await archivePanel.getByLabel('文档正文',{exact:true}).inputValue(),editedBody);
+      await archivePanel.getByRole('button',{name:'取消',exact:true}).click();
+      await archivePanel.getByRole('button',{name:'保存草稿',exact:true}).click();
+      await archivePanel.getByRole('status').filter({hasText:'草稿已保存 · 未提交 OA'}).waitFor();
+      assert.equal(archiveRequests().length,0,'saving a draft is not approval');
+      const firstTask = [...tasks.values()][0]; assert.equal(firstTask.title,'人工核对稿');
+      assert.equal(firstTask.result,`# 人工核对稿\n\n${editedBody}\n`);
+      const editedDownload = page.waitForEvent('download'); await preview.getByRole('button',{name:'下载 Markdown',exact:true}).click();
+      const editedFile = await editedDownload, editedPath=resolve(output,`${name}-edited.md`); await editedFile.saveAs(editedPath);
+      assert.equal(await readFile(editedPath,'utf8'),firstTask.result);
+      await closePreview();
+      const firstCard=page.locator('.oa-document-card').first();
+      await firstCard.getByRole('button',{name:'打开文档',exact:true}).click(); await preview.waitFor();
+      assert.ok((await preview.innerText()).includes(editedBody));
+      await archivePanel.getByRole('button',{name:'编辑',exact:true}).click();
+      assert.equal(await archivePanel.getByLabel('文档标题',{exact:true}).inputValue(),'人工核对稿');
+      const finalBody=`${editedBody}\n最终确认：保留待验证事项，不宣称实机验收完成。`;
+      await archivePanel.getByLabel('文档正文',{exact:true}).fill(finalBody);
+      await archivePanel.getByRole('button',{name:'保存并提交',exact:true}).click();
+      const confirmArchive = archivePanel.getByRole('button',{name:'保存并提交 OA',exact:true});
       assert.equal(await confirmArchive.isDisabled(),true);
       await archivePanel.getByRole('checkbox').check(); await confirmArchive.click();
-      await archivePanel.getByRole('alert').waitFor(); await confirmArchive.click();
-      await archivePanel.getByRole('status').filter({hasText:'已提交 OA，待审核'}).waitFor();
+      // The server accepted the submission but the reply was lost: reconcile by GET, never duplicate POST.
+      await archivePanel.getByRole('status').filter({hasText:'已提交·待审核'}).waitFor();
+      assert.equal(archiveRequests().length,1); assert.equal(archiveRequests()[0].body.expectedUpdatedAt,firstTask.updated_at);
+      assert.equal(await archivePanel.getByRole('button',{name:'编辑',exact:true}).isDisabled(),true);
+      assert.equal(await archivePanel.getByRole('button',{name:'保存草稿',exact:true}).isDisabled(),true);
+      assert.equal(firstTask.result,`# 人工核对稿\n\n${finalBody}\n`);
+      const confirmedResult=firstTask.result;
       assert.equal(archived.size,1); await page.screenshot({path:resolve(output,`${name}-archive-pending.png`),fullPage:true});
       await closePreview(); assert.equal(new URL(page.url()).pathname,'/');
       await page.getByRole('button',{name:'不再使用这份材料',exact:true}).click();
@@ -159,7 +201,7 @@ try {
       assert.equal(createRequests().length,1,'format questions must remain ordinary chat');
       await page.getByRole('button',{name:'继续修改',exact:true}).click();
       await send('请精简这份文档并生成 Word'); await preview.waitFor();
-      assert.equal(createRequests().at(-1).body.material,result,'continue editing uses the generated document'); await closePreview();
+      assert.equal(createRequests().at(-1).body.material,confirmedResult,'continue editing uses the latest saved document'); await closePreview();
       // Failure must never manufacture an attachment; explicit retry uses the same task.
       mode='failed'; await importText('失败测试.txt','本次只包含真实测试材料。'); await send('整理材料');
       await page.getByRole('button',{name:'重试任务',exact:true}).waitFor();
@@ -183,7 +225,8 @@ try {
       mode='success'; await page.reload(); await page.locator('.empty-hero').waitFor();
       await page.getByRole('button',{name:'已保存文档',exact:true}).click();
       const history=page.getByRole('dialog',{name:'本人已保存文档',exact:true}); await history.waitFor();
-      await history.locator('.oa-document-history button').first().click(); await preview.waitFor(); await closePreview();
+      await history.locator('.oa-document-history button').first().click(); await preview.waitFor();
+      assert.ok((await preview.innerText()).includes(finalBody)); await closePreview();
       assert.equal(new URL(page.url()).pathname,'/');
       // Unsupported import leaves existing material/results intact.
       await page.locator('.oa-shared-chat input[type=file][accept*=".markdown"]').setInputFiles({name:'不支持.pdf',mimeType:'application/pdf',buffer:Buffer.from('not a document')});
@@ -235,8 +278,8 @@ try {
         await page.screenshot({path:resolve(output,`${name}-sidebar-upload.png`),fullPage:true});
       }
       assert.deepEqual(errors,[]); assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
-      results.push({name,passed:true,approvedCopy:true,capabilityHints:true,ordinaryChat:true,rawImport:true,safeText:true,documentPreview:true,realDocxDownload:true,continueEditing:true,manualRetry:true,idempotentRecovery:true,cancelLateResponse:true,restoreSaved:true,serviceFailure:true,zip:true,folder:true,pdf:true,docxImport:true,imagePreview:true,explicitArchive:true,archiveRetry:true,errors});
-      console.log(`${name}: unified chat, import, preview, DOCX, recovery, cancellation and history passed`);
+      results.push({name,passed:true,approvedCopy:true,capabilityHints:true,ordinaryChat:true,rawImport:true,safeText:true,documentPreview:true,realDocxDownload:true,inlineEditing:true,draftPersistence:true,saveFailureStopsSubmission:true,latestVersionSubmission:true,editedDownload:true,continueEditing:true,manualRetry:true,idempotentRecovery:true,cancelLateResponse:true,restoreSaved:true,serviceFailure:true,zip:true,folder:true,pdf:true,docxImport:true,imagePreview:true,explicitArchive:true,archiveReconciliation:true,errors});
+      console.log(`${name}: unified chat, edit, draft save, versioned approval, download, recovery, cancellation and history passed`);
     } catch (error) { await page.screenshot({path:resolve(output,`${name}-failure.png`),fullPage:true}); results.push({name,passed:false,error:error.message,errors}); throw error; }
     finally { await context.close(); }
   }

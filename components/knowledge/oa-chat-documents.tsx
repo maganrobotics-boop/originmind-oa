@@ -7,7 +7,8 @@ import { chatDocumentFailure, isChatDocumentTask, newerChatDocumentTask, planCha
 import { useOaConversation } from './oa-conversation-context';
 import './oa-chat-documents.css';
 import { readChatAttachments, type ChatAttachmentBundle } from '@/lib/oa-chat-attachments.mjs';
-import { OaFilePicker, OaSourceArchive, OaSourceImages, OaTaskArchive } from './oa-file-controls';
+import { OaFilePicker, OaSourceArchive, OaSourceImages } from './oa-file-controls';
+import { OaDocumentEditor } from './oa-document-editor';
 import { AdminMeetingMinutesLink } from './admin-meeting-minutes';
 
 type ImportedEntry = { type: 'import'; id: string; order: number; source: ChatDocumentSource; bundle?: ChatAttachmentBundle };
@@ -31,6 +32,8 @@ export function useOaChatDocuments(nextOrder: () => number) {
   const lock = useRef(false), controllers = useRef(new Set<AbortController>()), operations = useRef(new Set<string>());
   const previewed = useRef(new Set<string>()), noAutoPreview = useRef(new Set<string>());
   const lastGenerated = useRef<ChatDocumentSource | null>(null);
+  const previewDirty = useRef(false);
+  const setPreviewDirty = useCallback((dirty: boolean) => { previewDirty.current = dirty; }, []);
   useEffect(() => {
     mounted.current = true;
     return () => { mounted.current = false; importing.current++; for (const controller of controllers.current) controller.abort(); controllers.current.clear(); };
@@ -71,6 +74,14 @@ export function useOaChatDocuments(nextOrder: () => number) {
       if (autoOpen && !noAutoPreview.current.has(task.id)) setPreview(task);
     }
   }, [patch, setLastAnswer]);
+  const acceptSavedTask = useCallback((task: ChatDocumentTask) => {
+    if (!mounted.current || !isChatDocumentTask(task)) return;
+    change(old => old.map(entry => entry.type === 'task' && entry.task?.id === task.id
+      ? { ...entry, task: newerChatDocumentTask(entry.task, task) || entry.task, problem: undefined } : entry));
+    setPreview(previous => previous?.id === task.id ? newerChatDocumentTask(previous, task) || previous : previous);
+    setSaved(previous => previous.map(item => item.id === task.id ? newerChatDocumentTask(item, task) || item : item));
+    if (task.result) { lastGenerated.current = { name: `${task.title}.md`, text: task.result }; setLastAnswer({ body: task.result, omittedImages: 0 }); }
+  }, [change, setLastAnswer]);
   const operate = useCallback(async (id: string, action: 'run' | 'retry' | 'cancel' | 'refresh') => {
     const entry = all.current.find(item => item.id === id);
     if (entry?.type !== 'task' || !entry.task) return;
@@ -170,8 +181,8 @@ export function useOaChatDocuments(nextOrder: () => number) {
   return { entries, source, busy, error, pending, preview, historyOpen, historyLoading, saved, historyError,
     importFile, importFiles, importProgress, submit, shouldHandle: (instruction: string) => Boolean(source) || wantsChatDocument(instruction),
     useSource: (value: ChatDocumentSource | null) => { setSource(value); setError(''); },
-    dismissError: () => setError(''), operate, recover: create, download, showHistory, restore,
-    openPreview: setPreview, closePreview: () => setPreview(null), closeHistory: () => setHistoryOpen(false) };
+    dismissError: () => setError(''), operate, recover: create, download, showHistory, restore, acceptSavedTask, setPreviewDirty,
+    openPreview: setPreview, closePreview: () => { if (previewDirty.current && !window.confirm('修改尚未保存，确认放弃修改并返回聊天？')) return; previewDirty.current = false; setPreview(null); }, closeHistory: () => setHistoryOpen(false) };
 }
 
 type Documents = ReturnType<typeof useOaChatDocuments>;
@@ -191,8 +202,8 @@ export function OaChatDocumentEvent({ entry, documents }: { entry: ChatDocumentE
   return <div className="oa-chat-turn oa-document-turn">
     <article className="message user"><div className="message-content"><p>{entry.plan?.instruction || task?.instruction || '打开已保存文档'}</p></div></article>
     <article className="oa-document-card" aria-label="文档处理任务"><header><FileText size={24} /><div><strong>{task?.title || entry.plan?.title || '文档处理'}</strong><p role="status">{task ? statusLabels[task.status] : entry.problem ? '提交结果待核对' : '正在提交材料…'}</p></div></header>
-      {task?.status === 'succeeded' && task.result && <><p className="oa-document-filename">{task.title}.docx <span>{task.kind === 'meeting_minutes' ? '本人和 OA 管理员可查看' : '仅本人可访问'}</span></p><div className="oa-document-actions"><button type="button" onClick={() => documents.openPreview(task)}>打开文档</button><button type="button" disabled={documents.pending.includes(`download:${task.id}:docx`)} onClick={() => void documents.download(task, 'docx')}><Download size={16} />下载 Word</button><button type="button" disabled={documents.busy} onClick={() => documents.useSource({ name: `${task.title}.md`, text: task.result! })}>继续修改</button></div><details className="oa-document-inline-preview"><summary>在对话中查看正文</summary><DocumentBody text={task.result} /></details><OaTaskArchive task={task} /></>}
-      {task?.kind === 'meeting_minutes' && <p>会议纪要已提交，OA 管理员可查看材料与处理状态；尚未自动进入知识库。</p>}
+      {task?.status === 'succeeded' && task.result && <><p className="oa-document-filename">{task.title}.docx <span>{task.kind === 'meeting_minutes' ? '本人和 OA 管理员可查看' : '仅本人可访问'}</span></p><div className="oa-document-actions"><button type="button" onClick={() => documents.openPreview(task)}>打开文档</button><button type="button" disabled={documents.pending.includes(`download:${task.id}:docx`)} onClick={() => void documents.download(task, 'docx')}><Download size={16} />下载 Word</button><button type="button" disabled={documents.busy} onClick={() => documents.useSource({ name: `${task.title}.md`, text: task.result! })}>继续修改</button></div><details className="oa-document-inline-preview"><summary>在对话中查看正文</summary><DocumentBody text={task.result} /></details><OaDocumentEditor task={task} onSaved={documents.acceptSavedTask} /></>}
+      {task?.kind === 'meeting_minutes' && <p>会议纪要处理任务已记录，OA 管理员可查看材料与处理状态；成果送审请点击“提交 OA”，审批通过后才入库。</p>}
       {task?.status === 'failed' && <p className="oa-chat-error" role="alert">{chatDocumentFailure(task.failure_code)}</p>}
       {entry.problem && <p className="oa-chat-error" role="alert">{entry.problem}</p>}
       <div className="oa-document-actions">
@@ -219,5 +230,5 @@ function DocumentDialog({ label, open, onClose, children }: { label: string; ope
 export function OaDocumentDialogs({ documents }: { documents: Documents }) {
   const { peer } = useOaConversation();
   const task = documents.preview;
-  return <><DocumentDialog label="文档预览" open={Boolean(task) && !peer} onClose={documents.closePreview}>{task && <><div className="oa-document-dialog-content"><h2>{task.title}</h2><DocumentBody text={task.result || ''} /></div><footer>{documents.error && <p role="alert" className="oa-chat-error">{documents.error}</p>}<div className="oa-document-actions"><button type="button" disabled={documents.pending.includes(`download:${task.id}:docx`)} onClick={() => void documents.download(task, 'docx')}><Download size={16} />下载 Word</button><button type="button" disabled={documents.pending.includes(`download:${task.id}:md`)} onClick={() => void documents.download(task, 'md')}>下载 Markdown</button><button type="button" onClick={documents.closePreview}>返回聊天</button></div><OaTaskArchive task={task} /></footer></>}</DocumentDialog><DocumentDialog label="本人已保存文档" open={documents.historyOpen && !peer} onClose={documents.closeHistory}><div className="oa-document-dialog-content">{documents.historyLoading && <p role="status">正在读取…</p>}{documents.historyError && <p role="alert" className="oa-chat-error">{documents.historyError}</p>}{!documents.historyLoading && !documents.historyError && !documents.saved.length && <p>还没有文档任务。导入材料并发送处理要求后，成果会保存在这里。</p>}<div className="oa-document-history">{documents.saved.map(item => <button key={item.id} type="button" disabled={documents.historyLoading} onClick={() => void documents.restore(item.id)}><FileText size={20} /><span><strong>{item.title}</strong><small>{statusLabels[item.status]}</small></span></button>)}</div></div></DocumentDialog></>;
+  return <><DocumentDialog label="文档预览" open={Boolean(task) && !peer} onClose={documents.closePreview}>{task && <><div className="oa-document-dialog-content"><h2>{task.title}</h2><DocumentBody text={task.result || ''} /></div><footer>{documents.error && <p role="alert" className="oa-chat-error">{documents.error}</p>}<div className="oa-document-actions"><button type="button" disabled={documents.pending.includes(`download:${task.id}:docx`)} onClick={() => void documents.download(task, 'docx')}><Download size={16} />下载 Word</button><button type="button" disabled={documents.pending.includes(`download:${task.id}:md`)} onClick={() => void documents.download(task, 'md')}>下载 Markdown</button><button type="button" onClick={documents.closePreview}>返回聊天</button></div><OaDocumentEditor task={task} onSaved={documents.acceptSavedTask} onDirtyChange={documents.setPreviewDirty} /></footer></>}</DocumentDialog><DocumentDialog label="本人已保存文档" open={documents.historyOpen && !peer} onClose={documents.closeHistory}><div className="oa-document-dialog-content">{documents.historyLoading && <p role="status">正在读取…</p>}{documents.historyError && <p role="alert" className="oa-chat-error">{documents.historyError}</p>}{!documents.historyLoading && !documents.historyError && !documents.saved.length && <p>还没有文档任务。导入材料并发送处理要求后，成果会保存在这里。</p>}<div className="oa-document-history">{documents.saved.map(item => <button key={item.id} type="button" disabled={documents.historyLoading} onClick={() => void documents.restore(item.id)}><FileText size={20} /><span><strong>{item.title}</strong><small>{statusLabels[item.status]}</small></span></button>)}</div></div></DocumentDialog></>;
 }
