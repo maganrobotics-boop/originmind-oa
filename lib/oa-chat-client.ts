@@ -141,7 +141,6 @@ ${result.answer.trim()}`, citations: [], images: [], mode: 'general', provider: 
   }));
   const citations = chunks.map((chunk, index) => ({ id: String(index + 1), itemId: chunk.itemId, revisionId: chunk.revisionId, title: chunk.title, category: chunk.category, sectionTitle: chunk.sectionTitle, paragraphRef: chunk.paragraphRef, excerpt: prefix(chunk.content, 600) }));
   let images: OaChatImage[] = [];
-  const imageRequest = questionRequestsKnowledgeImages(question);
   try { images = await answerImages(chunks, imageRequest); } catch { /* A failed image lookup must not discard the complete text. */ }
   if (imageRequest) {
     if (images.length) return { answer: `已找到 ${images.length} 张与问题相关的已审核资料图片，显示如下。`, citations, images, mode: 'ai', sourceType: 'oa_knowledge_images' };
