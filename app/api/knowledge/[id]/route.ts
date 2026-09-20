@@ -11,6 +11,7 @@ import {
   parseReviewNote,
 } from "../../../../lib/knowledge-policy";
 import {
+  activateAdminKnowledgeEdit,
   findKnowledgeItem,
   getKnowledgeItemDetail,
   knowledgeRevisionHashExists,
@@ -99,12 +100,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       ? new Set(["action", "mutationRevision", "visibility", "publicConfirmation"])
     : action === "approve"
       ? new Set(["action", "mutationRevision", "note", "visibility", "publicConfirmation"])
-      : new Set(["action", "mutationRevision", "note"]);
+      : action === "activate_admin_edit"
+        ? new Set(["action", "mutationRevision"])
+        : new Set(["action", "mutationRevision", "note"]);
   if (Object.keys(body).some((key) => !allowedKeys.has(key))) return privateJson({ error: "知识流转包含不支持的字段。" }, { status: 400 });
   if (typeof body.mutationRevision !== "string" || !body.mutationRevision.trim()) return privateJson({ error: "请刷新知识条目后再操作。" }, { status: 409 });
+  const activatesAdminEdit = action === "activate_admin_edit";
   const changesVisibility = action === "set_visibility";
   const reviewAction = action === "resubmit" || changesVisibility ? null : parseKnowledgeReviewAction(action);
-  if (action !== "resubmit" && !changesVisibility && !reviewAction) return privateJson({ error: "不支持的知识流转动作。" }, { status: 400 });
+  if (action !== "resubmit" && !changesVisibility && !activatesAdminEdit && !reviewAction) return privateJson({ error: "不支持的知识流转动作。" }, { status: 400 });
   const parsedApprovalVisibility = reviewAction === "approve" || changesVisibility ? parseKnowledgeVisibility(body.visibility) : null;
   if ((reviewAction === "approve" || changesVisibility) && !parsedApprovalVisibility) {
     return privateJson({ error: changesVisibility ? "调整可见范围时必须选择对内或对外公开。" : "批准知识时必须选择对内或对外公开。" }, { status: 400 });
@@ -132,6 +136,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const adminSelfManagementAllowed = access.actor.isAdmin
       && submitterIdentityIsExact
       && (changesVisibility || reviewAction === "approve");
+
+    if (activatesAdminEdit) {
+      if (!access.actor.isAdmin) return privateJson({ error: "只有 OA 系统管理员可以启用修改后的正式知识。" }, { status: 403 });
+      if (existing.status !== "active" || existing.revision_status !== "pending" || existing.current_revision_id === existing.active_revision_id) return privateJson({ error: "当前没有等待启用的管理员修改版本。" }, { status: 409 });
+      const db = await getDb();
+      await assertKnowledgeRevisionAssetsReady(db.$client, existing.id, existing.current_revision_id || "");
+      const item = await activateAdminKnowledgeEdit(existing, access.actor);
+      return item ? privateJson({ item }) : privateJson({ error: "知识条目已更新，请刷新后重试。" }, { status: 409 });
+    }
 
     if (action === "resubmit") {
       if (!submitterIdentityIsExact) return privateJson({ error: "知识条目不存在或当前账号不可操作。" }, { status: 404 });

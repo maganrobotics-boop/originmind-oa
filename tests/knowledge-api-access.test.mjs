@@ -96,6 +96,10 @@ const vite = await createServer({
           globalThis.${stateKey}.visibilityCalls.push({ existing, actor, visibility, publicConfirmation });
           return { id: existing.id, status: "active", visibility };
         }
+        export async function activateAdminKnowledgeEdit(existing, actor) {
+          globalThis.${stateKey}.activationCalls.push({ existing, actor });
+          return { id: existing.id, status: "active" };
+        }
         export async function knowledgeRevisionHashExists() { return false; }
         export async function resubmitKnowledgeItem() { throw new Error("not used"); }
         export async function getKnowledgeItemDetail() { return null; }
@@ -135,6 +139,7 @@ beforeEach(() => {
     findCalls: 0,
     reviewCalls: [],
     visibilityCalls: [],
+    activationCalls: [],
     assetChecks: [],
     assetCheckError: "",
   };

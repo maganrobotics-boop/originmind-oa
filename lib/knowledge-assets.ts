@@ -67,7 +67,8 @@ export async function requirePendingKnowledgeAssetRevision(database: D1Database,
   const revision = await database.prepare(`
     SELECT 1 AS allowed FROM knowledge_items i
     JOIN knowledge_revisions r ON r.id = i.current_revision_id AND r.item_id = i.id
-    WHERE i.id = ? AND r.id = ? AND i.status = 'pending' AND r.status = 'pending'
+    WHERE i.id = ? AND r.id = ? AND r.status = 'pending'
+      AND (i.status = 'pending' OR (i.status = 'active' AND i.active_revision_id <> i.current_revision_id))
       AND NOT EXISTS (SELECT 1 FROM migration_control WHERE deactivated_at IS NULL)
   `).bind(itemId, revisionId).first();
   if (!revision) throw new Error("knowledge revision is not pending or migration is frozen");

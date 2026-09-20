@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { after, beforeEach } from 'node:test';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { createServer } from 'vite';
 import { signOaChatRequest } from '../chat-cloudflare/src/oa-chat-bridge.mjs';
@@ -191,4 +192,18 @@ test('invalid JSON or an unacknowledged bridge response cannot count as a genera
     assert.deepEqual(state.warnings.at(-1),['OA_CHAT_BRIDGE_FAILURE','CHAT_BRIDGE_INVALID_RESPONSE']);
   }
   assert.equal(state.publicCalls,0);
+});
+
+test('only OA administrators get an inline answer editor with text and image controls', async () => {
+  const source = await readFile(new URL('../components/knowledge/oa-chat-panel.tsx', import.meta.url), 'utf8');
+  const page = await readFile(new URL('../app/page.tsx', import.meta.url), 'utf8');
+  assert.match(page, /<KnowledgeView[^>]*isAdmin=\{Boolean\(session\.isAdmin\)\}/u);
+  assert.match(source, /isAdmin && !turn\.failed && <button[^>]*oa-admin-edit-answer/u);
+  assert.match(source, />修改回答<\/button>/u);
+  assert.match(source, /添加图片/u);
+  assert.match(source, /删除图片/u);
+  assert.match(source, /回答正文（Markdown）/u);
+  assert.match(source, /保存为正式回答/u);
+  assert.match(source, /action: 'approve'/u);
+  assert.match(source, /PUBLIC_KNOWLEDGE_CONFIRMATION/u);
 });

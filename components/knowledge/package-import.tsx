@@ -16,9 +16,10 @@ function PreviewImage({ file, alt }: { file: File; alt: string }) {
   return url ? <img src={url} alt={alt || file.name} loading="lazy" /> : null;
 }
 
-export function KnowledgePackageImport({ onSubmitted, returnedItem, onCancelReturn }: {
+export function KnowledgePackageImport({ onSubmitted, returnedItem, adminItem, onCancelReturn }: {
   onSubmitted: () => void;
   returnedItem?: { id: string; title: string } | null;
+  adminItem?: { id: string; title: string } | null;
   onCancelReturn?: () => void;
 }) {
   const zipInput = useRef<HTMLInputElement>(null);
@@ -47,7 +48,7 @@ export function KnowledgePackageImport({ onSubmitted, returnedItem, onCancelRetu
     if (!pkg || !confirmed || lock.current || receivedId) return;
     lock.current = true; setBusy(true); setError(""); setAttempted(true);
     try {
-      const result = await submitKnowledgePackage(pkg, { onProgress: setProgress, returnedKnowledgeItemId: returnedItem?.id });
+      const result = await submitKnowledgePackage(pkg, { onProgress: setProgress, returnedKnowledgeItemId: returnedItem?.id, adminKnowledgeItemId: adminItem?.id } as Parameters<typeof submitKnowledgePackage>[1] & { adminKnowledgeItemId?: string });
       setReceivedId(result.item.id); onSubmitted();
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "上传未完成，请保留当前页面重试。");
@@ -55,11 +56,12 @@ export function KnowledgePackageImport({ onSubmitted, returnedItem, onCancelRetu
     } finally { lock.current = false; setBusy(false); }
   }
 
-  if (!returnedItem) return <OaGenericImport onSubmitted={onSubmitted} />;
+  if (!returnedItem && !adminItem) return <OaGenericImport onSubmitted={onSubmitted} />;
   return <section className="oa-package-import" aria-label="图文资料上传">
-    <h2>{returnedItem ? "重新上传退回资料" : "已有 index.md 图文包（不重新解析）"}</h2>
-    <p>ZIP 与文件夹使用同一流程：index.md ＋ assets/ 图片。先本地检查，再完整提交 OA 待审核。</p>
+    <h2>{adminItem ? "管理员修改正式回答" : "重新上传退回资料"}</h2>
+    <p>{adminItem ? "上传新的 index.md 与 assets/ 图片即可修改文字、增删图片并通过 Markdown 调整图片位置。完整保存前，OA 与 Chat 继续使用旧版本。" : "ZIP 与文件夹使用同一流程：index.md ＋ assets/ 图片。先本地检查，再完整提交 OA 待审核。"}</p>
     {returnedItem && <p className="oa-package-warning">正在更新“{returnedItem.title}”，保留原条目与历史审核记录。<Button type="button" variant="outline" onClick={onCancelReturn} disabled={busy}>取消重提</Button></p>}
+    {adminItem && <p className="oa-package-warning">正在修改正式知识“{adminItem.title}”。新版本完整上传后自动生效，旧版本和管理员操作记录永久保留。<Button type="button" variant="outline" onClick={onCancelReturn} disabled={busy}>取消修改</Button></p>}
     <div className="oa-package-actions">
       <Button type="button" variant="outline" onClick={() => zipInput.current?.click()} disabled={busy}>上传 ZIP</Button>
       <Button type="button" variant="outline" onClick={() => folderInput.current?.click()} disabled={busy}>上传文件夹</Button>
@@ -76,7 +78,7 @@ export function KnowledgePackageImport({ onSubmitted, returnedItem, onCancelRetu
       <details><summary>查看 Markdown 原文</summary><pre>{pkg.body}</pre></details>
       <div className="oa-package-images">{pkg.images.map(image => <figure key={`${pkg.id}:${image.path}`}><PreviewImage file={image.file} alt={image.alt} /><figcaption>{image.path}{image.alt ? ` — ${image.alt}` : ""}</figcaption></figure>)}</div>
       <label className="oa-package-confirm"><input type="checkbox" checked={confirmed} disabled={busy || Boolean(receivedId)} onChange={event => setConfirmed(event.target.checked)} /><span>已核对正文、图片和脱敏情况；理解资料须经 OA 审核后才按批准范围参与问答。</span></label>
-      <Button type="button" className="primary-button" onClick={() => void submit()} disabled={busy || !confirmed || pkg.title.trim().length < 2 || Boolean(receivedId)}>{receivedId ? "已完整提交待审核" : busy ? "处理中…" : error ? "重试完整提交" : "提交 OA 待审核"}</Button>
+      <Button type="button" className="primary-button" onClick={() => void submit()} disabled={busy || !confirmed || pkg.title.trim().length < 2 || Boolean(receivedId)}>{receivedId ? adminItem ? "修改已生效" : "已完整提交待审核" : busy ? "处理中…" : error ? "重试完整提交" : adminItem ? "保存并启用新版本" : "提交 OA 待审核"}</Button>
       {receivedId && <p>资料编号：{receivedId}。可在左侧“我的资料”查看审核状态。</p>}
     </div>}
   </section>;

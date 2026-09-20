@@ -1,13 +1,19 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ArrowUp, Copy, Forward, RotateCcw, Square } from 'lucide-react';
+import { ArrowUp, Copy, Forward, ImagePlus, Pencil, RotateCcw, Square, Trash2 } from 'lucide-react';
 import { renderAnswerBody, userFacingAnswer } from '@/lib/oa-chat-renderer.mjs';
 import { initialChatIndicators, probeChatIndicators, pendingChatIndicators, replyChatIndicators, failedChatIndicators } from '@/lib/oa-chat-indicators.mjs';
 import { CHAT_DOCUMENT_HINTS, resolveChatCapability } from '@/lib/oa-chat-documents.mjs';
 import { resolveMeetingModeCommand } from '@/lib/oa-meeting-mode.mjs';
 import { parseKnowledgeUrlCommand } from '@/lib/knowledge-url-import.mjs';
 import type { KnowledgeCitation } from '@/lib/knowledge-types';
+import { PUBLIC_KNOWLEDGE_CONFIRMATION } from '@/lib/knowledge-policy';
+import { prepareKnowledgePackage, submitKnowledgePackage } from '@/lib/knowledge-package.mjs';
+import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { NativeSelect, NativeSelectOption } from '@/components/ui/native-select';
+import { Textarea } from '@/components/ui/textarea';
 import './shared-chat.generated.css';
 import './oa-chat-panel.css';
 import { useOaConversation } from './oa-conversation-context';
@@ -19,6 +25,81 @@ import { toast } from 'sonner';
 type Image = { url: string; alt: string; mimeType: string };
 type Turn = { id: string; order: number; question: string; answer: string; citations: KnowledgeCitation[]; images: Image[]; failed?: boolean };
 type Reply = { answer?: string; citations?: KnowledgeCitation[]; images?: Image[]; error?: string; mode?: string; fallbackReason?: string };
+
+type EditableImage = { path: string; alt: string; file?: File; sourceUrl?: string };
+
+function safeAssetName(value: string, index: number) {
+  const base = value.split(/[?#]/u, 1)[0].split('/').pop()?.replace(/[^A-Za-z0-9._-]/gu, '-') || `image-${index + 1}.png`;
+  return /\.(?:png|webp|jpe?g)$/iu.test(base) ? base : `${base}.png`;
+}
+
+function AdminAnswerEditor({ turn, open, onOpenChange, onSaved }: { turn: Turn | null; open: boolean; onOpenChange: (open: boolean) => void; onSaved: (answer: string) => void }) {
+  const [answer, setAnswer] = useState('');
+  const [images, setImages] = useState<EditableImage[]>([]);
+  const [visibility, setVisibility] = useState<'internal' | 'public'>('internal');
+  const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState('');
+  const [error, setError] = useState('');
+  const editor = useRef<HTMLTextAreaElement>(null);
+  useEffect(() => {
+    if (!turn || !open) return;
+    const nextImages = turn.images.map((image, index) => ({ path: `assets/${safeAssetName(image.url, index)}`, alt: image.alt || `图片 ${index + 1}`, sourceUrl: image.url }));
+    const references = nextImages.map(image => `![${image.alt}](${image.path})`).join('\n\n');
+    setAnswer(`${userFacingAnswer(turn.answer)}${references ? `\n\n${references}` : ''}`);
+    setImages(nextImages); setVisibility('internal'); setProgress(''); setError('');
+  }, [turn, open]);
+  const insertImages = (files: File[]) => {
+    const accepted = files.filter(file => ['image/png', 'image/jpeg', 'image/webp'].includes(file.type)).slice(0, Math.max(0, 20 - images.length));
+    if (!accepted.length) { setError('请选择 PNG、JPG 或 WebP 图片。'); return; }
+    const known = new Set(images.map(image => image.path.toLowerCase()));
+    const additions = accepted.map((file, index) => {
+      let name = safeAssetName(file.name, images.length + index), path = `assets/${name}`, suffix = 2;
+      while (known.has(path.toLowerCase())) { name = name.replace(/(\.[^.]+)$/u, `-${suffix++}$1`); path = `assets/${name}`; }
+      known.add(path.toLowerCase()); return { path, alt: file.name.replace(/\.[^.]+$/u, ''), file };
+    });
+    const textarea = editor.current, start = textarea?.selectionStart ?? answer.length, end = textarea?.selectionEnd ?? start;
+    const markdown = additions.map(image => `![${image.alt}](${image.path})`).join('\n\n');
+    setAnswer(`${answer.slice(0, start)}${start ? '\n\n' : ''}${markdown}${end < answer.length ? '\n\n' : ''}${answer.slice(end)}`);
+    setImages(current => [...current, ...additions]); setError('');
+  };
+  const removeImage = (image: EditableImage) => {
+    const escaped = image.path.replace(/[.*+?^${}()|[\]\\]/gu, '\\$&');
+    setAnswer(current => current.replace(new RegExp(`!?\\[[^\\]]*\\]\\(\\s*<?${escaped}>?[^)]*\\)`, 'gu'), '').replace(/\n{3,}/gu, '\n\n').trim());
+    setImages(current => current.filter(candidate => candidate.path !== image.path));
+  };
+  const save = async () => {
+    if (!turn || busy || answer.trim().length < 10) return;
+    setBusy(true); setError(''); setProgress('正在准备图片…');
+    try {
+      const files: File[] = [new File([`# ${turn.question.slice(0, 96)}\n\n${answer.trim()}`], 'index.md', { type: 'text/markdown' })];
+      for (const image of images) {
+        if (!answer.includes(image.path)) continue;
+        if (image.file) files.push(new File([image.file], image.path, { type: image.file.type }));
+        else if (image.sourceUrl) {
+          const response = await fetch(image.sourceUrl, { credentials: 'same-origin', cache: 'no-store' });
+          if (!response.ok) throw new Error(`无法读取图片：${image.alt}`);
+          files.push(new File([await response.blob()], image.path, { type: response.headers.get('content-type') || 'image/png' }));
+        }
+      }
+      const pkg = await prepareKnowledgePackage(files);
+      const result = await submitKnowledgePackage(pkg, { onProgress: setProgress }) as { item?: { id?: string; mutationRevision?: string } };
+      if (!result.item?.id || !result.item?.mutationRevision) throw new Error('新回答已上传但尚未获得审核凭据。');
+      setProgress('正在启用管理员修订…');
+      const response = await fetch(`/api/knowledge/${encodeURIComponent(result.item.id)}`, { method: 'PATCH', credentials: 'same-origin', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ action: 'approve', mutationRevision: result.item.mutationRevision, note: `管理员修订 AI 回答：${turn.question.slice(0, 120)}`, visibility, ...(visibility === 'public' ? { publicConfirmation: PUBLIC_KNOWLEDGE_CONFIRMATION } : {}) }) });
+      const data = await response.json().catch(() => ({})) as { item?: unknown; error?: string };
+      if (!response.ok || !data.item) throw new Error(data.error || '修改后的回答未能启用。');
+      onSaved(answer.trim()); toast.success('回答修改已生效', { description: '已形成正式知识新版本，OA 与 Chat 后续回答会读取该版本。' }); onOpenChange(false);
+    } catch (cause) { setError(cause instanceof Error ? cause.message : '回答修改失败，请重试。'); }
+    finally { setBusy(false); }
+  };
+  return <Dialog open={open} onOpenChange={value => { if (!busy) onOpenChange(value); }}><DialogContent className="oa-answer-editor-dialog"><DialogHeader><DialogTitle>修改 AI 回答</DialogTitle><DialogDescription>只有 OA 系统管理员可保存。可直接增删文字；图片引用在正文中的位置就是显示位置。保存会形成新的正式知识版本并保留审计记录。</DialogDescription></DialogHeader>
+    <label className="form-field"><span className="field-label">回答正文（Markdown）</span><Textarea ref={editor} value={answer} onChange={event => setAnswer(event.target.value)} rows={16} disabled={busy} /></label>
+    <div className="oa-answer-editor-images"><label className="secondary-action"><ImagePlus className="size-4" />添加图片<input type="file" accept="image/png,image/jpeg,image/webp" multiple hidden disabled={busy} onChange={event => { insertImages(Array.from(event.currentTarget.files || [])); event.currentTarget.value = ''; }} /></label>{images.map(image => <div key={image.path}><span>{image.alt}</span><code>{image.path}</code><button type="button" onClick={() => removeImage(image)} disabled={busy} aria-label={`删除图片 ${image.alt}`}><Trash2 className="size-4" /></button></div>)}</div>
+    <label className="form-field"><span className="field-label">回答范围</span><NativeSelect value={visibility} onChange={event => setVisibility(event.target.value as 'internal' | 'public')} disabled={busy}><NativeSelectOption value="internal">仅 OA 内部</NativeSelectOption><NativeSelectOption value="public">OA 与 Chat 对外回答</NativeSelectOption></NativeSelect></label>
+    {progress && <p role="status">{progress}</p>}{error && <p className="oa-chat-error" role="alert">{error}</p>}
+    <DialogFooter><Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>取消</Button><Button type="button" onClick={() => void save()} disabled={busy || answer.trim().length < 10}>{busy ? '正在保存…' : '保存为正式回答'}</Button></DialogFooter>
+  </DialogContent></Dialog>;
+}
 
 function RichAnswer({ answer }: { answer: string }) {
   const host = useRef<HTMLDivElement>(null);
@@ -62,18 +143,19 @@ export function OaChatStatus() {
   return <div className="oa-chat-title"><strong>AI 助手</strong><details className="oa-chat-status-details"><summary aria-label="查看 AI 助手状态" title={status.summary}><div className="oa-chat-status" aria-label="系统连接状态" data-source={status.source} data-summary={status.summary}>{status.items.map(item => <span key={item.label} className={item.state} title={`${item.label}：${item.detail}`} aria-label={`${item.label}：${item.detail}`} />)}</div></summary><div className="oa-chat-status-panel"><p className="oa-chat-status-stamp">{status.source === 'question' ? '最近一次提问' : '服务检查'} · {status.checkedAt ? new Date(status.checkedAt).toLocaleTimeString() : '尚未检查'}</p><p role="status">{status.summary}</p><dl>{status.items.map(item => <div key={item.label}><dt>{item.label}</dt><dd>{item.detail}</dd></div>)}</dl><small>圆点从左到右对应以上五项。灰色为未知或未执行，黄色为等待或需注意；服务检查不代表回答已生成。</small></div></details></div>;
 }
 
-export function OaChatPanel() {
+export function OaChatPanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const { peer, aiEpoch } = useOaConversation();
-  return <><div className="oa-conversation-ai" hidden={Boolean(peer)}><OaAiChatPanel key={aiEpoch} /></div>{peer && <OaMemberChat key={peer.email} peer={peer} />}</>;
+  return <><div className="oa-conversation-ai" hidden={Boolean(peer)}><OaAiChatPanel key={aiEpoch} isAdmin={isAdmin} /></div>{peer && <OaMemberChat key={peer.email} peer={peer} />}</>;
 }
 
-function OaAiChatPanel() {
+function OaAiChatPanel({ isAdmin = false }: { isAdmin?: boolean }) {
   const { forward, setLastAnswer, setAiDirty, setRequestStatus } = useOaConversation();
   const [question, setQuestion] = useState('');
   const [turns, setTurns] = useState<Turn[]>([]);
   const [asking, setAsking] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState('');
+  const [editingTurn, setEditingTurn] = useState<Turn | null>(null);
   const [meetingModeOpen, setMeetingModeOpen] = useState(false);
   const [meetingNumber, setMeetingNumber] = useState('');
   const [meetingCommandEpoch, setMeetingCommandEpoch] = useState(0);
@@ -231,7 +313,7 @@ function OaAiChatPanel() {
           <article className="message user" title="右键复制问题" onContextMenu={event => { event.preventDefault(); void copyQuestion(turn); }}><div className="message-content"><p>{turn.question}</p></div></article>
           {turn.answer && <article className="message assistant"><div className="message-content"><RichAnswer answer={turn.answer} />
             {!!turn.images.length && <div className="oa-answer-images">{turn.images.map(image => <figure key={image.url}><img src={image.url} alt={image.alt} loading="lazy" referrerPolicy="no-referrer" onError={event => { event.currentTarget.hidden = true; }} /><figcaption>{image.alt}</figcaption></figure>)}</div>}
-            <div className="oa-answer-actions"><button type="button" className="copy-answer" onClick={() => void copy(turn)} aria-label="复制回答"><Copy size={15} />{copied === turn.id ? '已复制' : '复制'}</button><button type="button" aria-label="转发回答给成员" onClick={() => forward({ body: userFacingAnswer(turn.answer), omittedImages: turn.images.length })}><Forward size={15} />转发</button>{!!turn.citations.length && <details><summary>参考已审核资料</summary>{turn.citations.map(citation => <p key={`${citation.id}-${citation.itemId}`}>{citation.title}{citation.sectionTitle ? ` · ${citation.sectionTitle}` : ''}</p>)}</details>}</div>
+            <div className="oa-answer-actions"><button type="button" className="copy-answer" onClick={() => void copy(turn)} aria-label="复制回答"><Copy size={15} />{copied === turn.id ? '已复制' : '复制'}</button><button type="button" aria-label="转发回答给成员" onClick={() => forward({ body: userFacingAnswer(turn.answer), omittedImages: turn.images.length })}><Forward size={15} />转发</button>{isAdmin && !turn.failed && <button type="button" className="oa-admin-edit-answer" onClick={() => setEditingTurn(turn)} aria-label="管理员修改回答"><Pencil size={15} />修改回答</button>}{!!turn.citations.length && <details><summary>参考已审核资料</summary>{turn.citations.map(citation => <p key={`${citation.id}-${citation.itemId}`}>{citation.title}{citation.sectionTitle ? ` · ${citation.sectionTitle}` : ''}</p>)}</details>}</div>
           </div></article>}
           {turn.failed && <button type="button" className="oa-chat-retry" disabled={working} onClick={() => void ask(turn)}><RotateCcw size={16} />重新回答</button>}
         </div>;
@@ -254,5 +336,6 @@ function OaAiChatPanel() {
       </div>
     </div>
     <OaDocumentDialogs documents={documents} />
+    <AdminAnswerEditor turn={editingTurn} open={Boolean(editingTurn)} onOpenChange={open => { if (!open) setEditingTurn(null); }} onSaved={answer => { if (editingTurn) setTurns(current => current.map(turn => turn.id === editingTurn.id ? { ...turn, answer } : turn)); }} />
   </section>;
 }

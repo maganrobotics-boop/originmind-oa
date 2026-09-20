@@ -525,6 +525,7 @@ function itemCapabilities(row: KnowledgeItemRow, actor: KnowledgeActor, canRevie
     canReject: canModerate && row.status === "pending",
     canRevoke: canModerate && row.status === "active",
     canSetVisibility: canApprove && row.status === "active",
+    canAdminEdit: actor.isAdmin && row.status === "active",
   };
 }
 
@@ -886,6 +887,109 @@ export async function resubmitKnowledgeItem(
     activated_at: null,
     retired_at: null,
   }) : null;
+}
+
+/** Stage an administrator-authored replacement while the last approved revision
+ * remains live. Assets can then be uploaded atomically before activation. */
+export async function stageAdminKnowledgeEdit(
+  existing: KnowledgeItemWithRevisionRow,
+  actor: KnowledgeActor,
+  submission: KnowledgeSubmission,
+  contentHash: string,
+  contentParts?: readonly KnowledgeContentPartInput[],
+) {
+  if (!actor.isAdmin || existing.status !== "active" || !existing.active_revision_id) return null;
+  const storageParts = normalizedStorageParts(submission, contentParts);
+  const database = await getD1Database();
+  const now = timestampAfter(existing.updated_at);
+  const revisionId = crypto.randomUUID();
+  const mutationRevision = crypto.randomUUID();
+  const revisionNo = Number(existing.current_revision_no) + 1;
+  const eventId = crypto.randomUUID();
+  const guard = actorGuard(actor, true);
+  const statements: D1PreparedStatement[] = [
+    database.prepare(`
+      UPDATE knowledge_items SET title = ?, category = ?, current_revision_no = ?, current_revision_id = ?,
+        mutation_revision = ?, updated_at = ?
+      WHERE id = ? AND status = 'active' AND active_revision_id = ? AND current_revision_id = active_revision_id
+        AND mutation_revision = ? AND ${guard.sql}
+      RETURNING *
+    `).bind(submission.title, submission.category, revisionNo, revisionId, mutationRevision, now,
+      existing.id, existing.active_revision_id, existing.mutation_revision, ...guard.values),
+    database.prepare(`
+      INSERT INTO knowledge_revisions (
+        id, item_id, revision_no, previous_revision_id, title, category, content, summary, source_label, source_url,
+        content_hash, status, created_by_member_id, created_by_name, created_by_email,
+        reviewed_by_member_id, reviewed_by_name, reviewed_by_email, review_note,
+        created_at, reviewed_at, activated_at, retired_at
+      )
+      SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', ?, ?, ?, NULL, NULL, NULL, '', ?, NULL, NULL, NULL
+      WHERE EXISTS (SELECT 1 FROM knowledge_items WHERE id = ? AND current_revision_id = ? AND mutation_revision = ? AND status = 'active')
+    `).bind(revisionId, existing.id, revisionNo, existing.active_revision_id, submission.title, submission.category,
+      storageParts.length ? "" : submission.content, submission.summary, submission.sourceLabel, submission.sourceUrl,
+      contentHash, actor.memberId, actor.name, normalizeEmail(actor.email), now, existing.id, revisionId, mutationRevision),
+  ];
+  statements.push(...knowledgePartInsertStatements(database, existing.id, revisionId, mutationRevision, now, storageParts));
+  statements.push(database.prepare(`
+    INSERT INTO knowledge_events (id, item_id, revision_id, actor_member_id, actor_name, actor_email, action, note, created_at)
+    SELECT ?, ?, ?, ?, ?, ?, 'admin_edit_staged', '管理员修改正式知识', ?
+    WHERE EXISTS (SELECT 1 FROM knowledge_items WHERE id = ? AND current_revision_id = ? AND mutation_revision = ?)
+  `).bind(eventId, existing.id, revisionId, actor.memberId, actor.name, normalizeEmail(actor.email), now,
+    existing.id, revisionId, mutationRevision));
+  const [itemResult] = await database.batch(statements);
+  const updated = resultRows(itemResult as D1Result<KnowledgeItemRow>)[0];
+  return updated ? serializeItem({ ...updated, summary: submission.summary, source_label: submission.sourceLabel,
+    source_url: submission.sourceUrl, content: submission.content, content_hash: contentHash,
+    content_part_count: storageParts.length, revision_status: "pending", reviewed_by_member_id: null,
+    reviewed_by_name: null, reviewed_by_email: null, review_note: "", reviewed_at: null,
+    activated_at: null, retired_at: null }) : null;
+}
+
+export async function activateAdminKnowledgeEdit(existing: KnowledgeItemWithRevisionRow, actor: KnowledgeActor) {
+  if (!actor.isAdmin || existing.status !== "active" || !existing.current_revision_id
+    || !existing.active_revision_id || existing.current_revision_id === existing.active_revision_id
+    || existing.revision_status !== "pending") return null;
+  const chunks = chunkKnowledgeSubmission({ title: existing.title, category: existing.category,
+    summary: existing.summary || "", sourceLabel: existing.source_label || "", sourceUrl: existing.source_url || "",
+    content: existing.content || "" }, existing.content && existing.content.length > MAX_KNOWLEDGE_CONTENT_LENGTH ? 2_000 : 900);
+  if (chunks.length > MAX_KNOWLEDGE_CHUNKS) throw new Error("knowledge chunk limit exceeded");
+  const database = await getD1Database();
+  const now = timestampAfter(existing.updated_at);
+  const mutationRevision = crypto.randomUUID();
+  const eventId = crypto.randomUUID();
+  const oldRevisionId = existing.active_revision_id;
+  const guard = actorGuard(actor, true);
+  const statements: D1PreparedStatement[] = [database.prepare(`
+    UPDATE knowledge_items SET active_revision_id = current_revision_id, mutation_revision = ?, updated_at = ?
+    WHERE id = ? AND status = 'active' AND current_revision_id = ? AND active_revision_id = ?
+      AND mutation_revision = ? AND ${guard.sql} RETURNING *
+  `).bind(mutationRevision, now, existing.id, existing.current_revision_id, oldRevisionId,
+    existing.mutation_revision, ...guard.values),
+  database.prepare(`UPDATE knowledge_revisions SET status='superseded', retired_at=? WHERE id=? AND item_id=?
+    AND EXISTS (SELECT 1 FROM knowledge_items WHERE id=? AND mutation_revision=? AND active_revision_id=?)`)
+    .bind(now, oldRevisionId, existing.id, existing.id, mutationRevision, existing.current_revision_id),
+  database.prepare(`UPDATE knowledge_revisions SET status='active', reviewed_by_member_id=?, reviewed_by_name=?,
+    reviewed_by_email=?, review_note='管理员直接修改', reviewed_at=?, activated_at=?, retired_at=NULL
+    WHERE id=? AND item_id=? AND status='pending' AND EXISTS (SELECT 1 FROM knowledge_items WHERE id=? AND mutation_revision=?)`)
+    .bind(actor.memberId, actor.name, normalizeEmail(actor.email), now, now, existing.current_revision_id,
+      existing.id, existing.id, mutationRevision),
+  database.prepare(`UPDATE knowledge_chunks SET is_active=0 WHERE item_id=? AND is_active=1
+    AND EXISTS (SELECT 1 FROM knowledge_items WHERE id=? AND mutation_revision=?)`)
+    .bind(existing.id, existing.id, mutationRevision)];
+  statements.push(...knowledgeChunkInsertStatements(database, existing.id, existing.current_revision_id, mutationRevision, now, chunks));
+  statements.push(database.prepare(`INSERT INTO knowledge_events
+    (id,item_id,revision_id,actor_member_id,actor_name,actor_email,action,note,created_at)
+    SELECT ?,?,?,?,?,?,'admin_edited','管理员修改正式知识并启用新版本',?
+    WHERE EXISTS (SELECT 1 FROM knowledge_items WHERE id=? AND mutation_revision=? AND active_revision_id=?)`)
+    .bind(eventId, existing.id, existing.current_revision_id, actor.memberId, actor.name, normalizeEmail(actor.email),
+      now, existing.id, mutationRevision, existing.current_revision_id));
+  const [itemResult] = await database.batch(statements);
+  const updated = resultRows(itemResult as D1Result<KnowledgeItemRow>)[0];
+  return updated ? serializeItem({ ...updated, summary: existing.summary, source_label: existing.source_label,
+    source_url: existing.source_url, content: existing.content, content_hash: existing.content_hash,
+    content_part_count: existing.content_part_count, revision_status: "active", reviewed_by_member_id: actor.memberId,
+    reviewed_by_name: actor.name, reviewed_by_email: normalizeEmail(actor.email), review_note: "管理员直接修改",
+    reviewed_at: now, activated_at: now, retired_at: null }) : null;
 }
 
 export async function reviewKnowledgeItem(

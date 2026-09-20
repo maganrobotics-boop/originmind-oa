@@ -44,7 +44,7 @@ test("keeps returned multipart reuploads inside OA without using the 20k editor"
   // A multipart return must keep its original item and exit before the small editor fetch.
   assert.match(source, /const startEditing = async \(item: KnowledgeItem\) => \{\s*if \(item\.contentPartCount && item\.contentPartCount > 1\) \{ setReturnedPackageItem\(item\); setActiveTab\("submit"\); return; \}/u);
   assert.match(source, /<KnowledgePackageImport[^>]*returnedItem=\{returnedPackageItem\}/u);
-  assert.match(source, /\{!returnedPackageItem && editingItem && <KnowledgeSubmitPanel/u);
+  assert.match(source, /\{!returnedPackageItem && !adminEditItem && editingItem && <KnowledgeSubmitPanel/u);
 });
 
 test("requires the exact second confirmation before publishing knowledge", async () => {

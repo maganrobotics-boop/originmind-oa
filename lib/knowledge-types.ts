@@ -41,6 +41,7 @@ export type KnowledgeItem = {
   canReject?: boolean;
   canRevoke?: boolean;
   canSetVisibility?: boolean;
+  canAdminEdit?: boolean;
 };
 
 export type KnowledgeRevision = {
@@ -122,4 +123,4 @@ export type KnowledgeAskResponse = {
   error?: string;
 };
 
-export type KnowledgeAction = "approve" | "return" | "reject" | "revoke" | "resubmit" | "set_visibility";
+export type KnowledgeAction = "approve" | "return" | "reject" | "revoke" | "resubmit" | "set_visibility" | "activate_admin_edit";
