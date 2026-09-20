@@ -61,17 +61,17 @@ test("shows the system administrator role consistently across account and collab
   assert.match(pageSource, /person\.isAdmin \|\| person\.permissions\.includes\("project_owner"\)/u);
   assert.match(pageSource, /isAdmin: summary\.peer\.isAdmin === true/u);
   assert.match(pageSource, /currentRoleLabel=\{sessionRoleLabel\(currentRole, isAdmin\)\}/u);
-  assert.match(pageSource, /<ChatHub currentUser=\{session\.user\} currentRole=\{session\.role\} isAdmin=\{session\.isAdmin\}/u);
+  assert.match(pageSource, /<PageSecondaryMenu[\s\S]*?isAdmin=\{Boolean\(session\.isAdmin\)\}/u);
   assert.match(peopleRouteSource, /isAdmin: isAdministrator\(row\.chatgptAccount, row\.accountUserId \?\? undefined\)/u);
   assert.match(peopleRouteSource, /isAdmin: owner\.isAdmin/u);
   assert.match(directMessagesSource, /isAdmin: eligibleReviewers\.get\(peerEmail\)\?\.isAdmin === true/u);
   assert.match(directMessagesSource, /isAdmin: owner\.isAdmin/u);
 });
 
-test("keeps the internal laboratory AI behind OA sign-in, registration and NDA admission", async () => {
+test("keeps the laboratory model behind OA sign-in, registration and NDA admission", async () => {
   const pageSource = await readFile(path.join(root, "app/page.tsx"), "utf8");
 
-  assert.match(pageSource, /实验室 AI（内部）/u);
+  assert.match(pageSource, /实验室大模型/u);
   assert.doesNotMatch(pageSource, /className="dashboard-ai-entry"/u);
   assert.match(pageSource, /<OaConversationProvider/u);
   assert.match(pageSource, /if \(!session\) return[\s\S]*?<h1>请登录账号<\/h1>/u);
