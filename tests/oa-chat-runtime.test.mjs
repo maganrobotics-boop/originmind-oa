@@ -116,6 +116,31 @@ test('OA explicit image requests explain when the approved revision has no image
   assert.match(result.answer,/没有可展示的图片/u); assert.equal(state.calls.length,0);
 });
 
+test('OA image requests find a newer asset-bearing result behind three legacy text-only matches', async () => {
+  const state = globalThis[stateKey];
+  state.allowImageDb = true;
+  const legacy = Array.from({ length: 3 }, (_, index) => ({
+    ...chunk,
+    id: `legacy-${index}`,
+    itemId: `legacy-item-${index}`,
+    revisionId: `legacy-revision-${index}`,
+    content: `实验室机器人旧文字资料 ${index + 1}`,
+  }));
+  const illustrated = {
+    ...chunk,
+    id: 'illustrated', itemId: 'illustrated-item', revisionId: 'illustrated-revision',
+    content: 'OriginMind 实验室机器人产品与实验平台',
+  };
+  state.assets = [{
+    itemId: illustrated.itemId, revisionId: illustrated.revisionId,
+    assetPath: 'assets/wheel-legged.webp', mimeType: 'image/webp',
+  }];
+  const result = await client.answerOaChatQuestion('实验室机器人图片', [...legacy, illustrated]);
+  assert.equal(result.images.length, 1);
+  assert.match(result.images[0].url, /illustrated-item/u);
+  assert.equal(state.calls.length, 0);
+});
+
 test('50 image questions either return approved images or an explicit no-image result without model generation', async () => {
   const state = globalThis[stateKey];
   state.allowImageDb = true;
