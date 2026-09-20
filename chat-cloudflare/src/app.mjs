@@ -29,6 +29,7 @@ import {
   fallbackAnswer,
   safeSourceUrl,
 } from "./knowledge.mjs";
+import { generateValidatedAnswer } from "./answer-retry.mjs";
 import {
   inspectOaPublicKnowledge,
   probeOaPublicKnowledge,
@@ -1053,24 +1054,29 @@ async function api(context) {
         : buildGroundedChatMessages({ documents, history, question: last.content, messages: payload.messages });
       context.modelDeadline = Date.now() + 60_000;
       let provider = active.provider;
-      let answer;
-      try {
-        const modelStartedAt = Date.now();
-        try {
+      const modelStartedAt = Date.now();
+      const generated = await generateValidatedAnswer({
+        messages,
+        retryInstruction: generalKnowledge ? undefined : "\n\n上一次生成结果未能通过完整性或资料引用校验。请重新独立作答：只输出完整正文；每个资料事实后紧跟有效的 [编号]；至少使用一个有效编号；不要输出参考资料列表、网址、联系方式、HTML 或未完成的句子。",
+        generate: async (attemptMessages) => {
+          try {
           if (active.provider === "bailian") {
             try {
-              answer = await modelCall(context, config, messages);
+              return await modelCall(context, config, attemptMessages);
             } catch (error) {
               if (typeof context.env.AI?.run !== "function") throw error;
               provider = "workers-ai";
-              answer = await workersAiCall(context, messages);
+              return await workersAiCall(context, attemptMessages);
             }
-          } else {
-            answer = await workersAiCall(context, messages);
+            }
+            return await workersAiCall(context, attemptMessages);
+          } finally {
+            chatTiming.model = Date.now() - modelStartedAt;
           }
-        } finally {
-          chatTiming.model = Date.now() - modelStartedAt;
-        }
+        },
+        validate: (answer) => generalKnowledge ? visibleGeneralAnswer(answer) : visibleAiAnswer(answer, sources.length),
+      });
+      if (generated.visible) {
         try {
           await recordModelStatus(context, config, active, {
             ready: true,
@@ -1080,7 +1086,7 @@ async function api(context) {
         } catch {
           // Status evidence is best effort and must not discard a valid answer.
         }
-      } catch {
+      } else if (generated.failureReason === "generation_failed") {
         try {
           await recordModelStatus(context, config, active, { ready: false, provider: null, model: null });
         } catch {
@@ -1090,24 +1096,23 @@ async function api(context) {
           answer: fallbackAnswer(documents),
           sources,
           mode: "retrieval",
-          fallbackReason: "generation_failed",
+          fallbackReason: generated.failureReason,
           oaPublicStatus: oa.status,
           releaseId: releaseId(context),
         });
       }
-      const visibleAnswer = generalKnowledge ? visibleGeneralAnswer(answer) : visibleAiAnswer(answer, sources.length);
-      if (!visibleAnswer) {
+      if (!generated.visible) {
         return chatResult({
           answer: fallbackAnswer(documents),
           sources,
           mode: "retrieval",
-          fallbackReason: "answer_validation_failed",
+          fallbackReason: generated.failureReason,
           oaPublicStatus: oa.status,
           releaseId: releaseId(context),
         });
       }
       return chatResult({
-        answer: generalKnowledge ? `**来源类型：模型通用知识（未引用公开知识库资料）**\n\n${visibleAnswer}` : visibleAnswer,
+        answer: generalKnowledge ? `**来源类型：模型通用知识（未引用公开知识库资料）**\n\n${generated.visible}` : generated.visible,
         sources: generalKnowledge ? [] : sources,
         mode: generalKnowledge ? "general" : "ai",
         provider,

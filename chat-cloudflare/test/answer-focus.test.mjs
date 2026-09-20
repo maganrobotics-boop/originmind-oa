@@ -16,7 +16,7 @@ const chunks = [{
   excerpt: "示例实验室由周示例老师负责。",
 }];
 
-async function ask(t, { mode = "ai", question = "这个实验室是谁负责的", answer, documents = chunks } = {}) {
+async function ask(t, { mode = "ai", question = "这个实验室是谁负责的", answer, answers, documents = chunks } = {}) {
   let prompt = "";
   let calls = 0;
   const env = {
@@ -29,7 +29,7 @@ async function ask(t, { mode = "ai", question = "这个实验室是谁负责的"
     calls += 1;
     prompt = input.messages[0].content;
     if (mode === "failed") throw new Error("isolated model failure");
-    return { response: answer || "示例实验室由**周示例老师**负责。[2]" };
+    return { response: answers?.[calls - 1] ?? answer ?? "示例实验室由**周示例老师**负责。[2]" };
   } };
   t.after(() => env.DB.close());
   const response = await handleRequest(new Request(`${ORIGIN}/api/chat`, {
@@ -83,6 +83,18 @@ test("direct grounded answer names the responsible person and preserves hidden s
   assert.match(prompt, /不从作者、顾问或项目成员身份推断负责人/u);
   assert.match(prompt, /不沿用摘录中从第七节等位置开始的原始章节编号/u);
   assert.match(prompt, /每个有资料依据的具体事实后必须紧跟 \[1\]/u);
+});
+
+test("invalid grounded output is regenerated once and then shown safely", async (t) => {
+  const { result, calls, prompt } = await ask(t, {
+    question: "实验室机器人图片",
+    answers: ["这里有实验室机器人图片。", "已找到与实验室机器人相关的已审核图片，页面会在回答下方展示关联原图。[1]"],
+  });
+  assert.equal(calls, 2);
+  assert.equal(result.mode, "ai");
+  assert.match(result.answer, /展示关联原图/u);
+  assert.doesNotMatch(result.answer, /\[1\]/u);
+  assert.match(prompt, /上一次生成结果未能通过完整性或资料引用校验/u);
 });
 
 test("an explicitly requested technical explanation remains complete, not globally shortened", async (t) => {

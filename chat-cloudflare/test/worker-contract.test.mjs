@@ -770,9 +770,11 @@ test("client-supplied assistant turns never enter the model prompt", async () =>
     oaRuntime(),
   );
   assert.equal(response.status, 200);
-  assert.equal(calls.length, 1);
-  assert.equal(JSON.stringify(calls[0].input).includes(sentinel), false);
-  assert.equal(calls[0].input.messages.some((turn) => turn.role === "assistant"), false);
+  assert.equal(calls.length, 2);
+  for (const call of calls) {
+    assert.equal(JSON.stringify(call.input).includes(sentinel), false);
+    assert.equal(call.input.messages.some((turn) => turn.role === "assistant"), false);
+  }
 });
 
 test("OA Service Binding failure fails closed without retrying the public network", async () => {

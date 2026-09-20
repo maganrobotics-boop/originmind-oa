@@ -1262,7 +1262,7 @@ test("an unsafe continuation is rejected by the same factual-output checks as a 
   let calls = 0;
   const env = makeEnvironment({ AI: { run: async () => ({ response: ++calls === 1 ? "研究灵巧操作。[1]" : "打开 https://untrusted.test [1]", finish_reason: calls === 1 ? "length" : "stop" }) } });
   const result = await (await handleRequest(apiRequest("/api/chat", { method: "POST", body: { topic: "research", messages: [{ role: "user", content: "详细介绍研究方向" }] } }), env, {}, runtime())).json();
-  assert.equal(calls, 2);
+  assert.equal(calls, 3);
   assert.equal(result.mode, "retrieval");
   assert.doesNotMatch(result.answer, /untrusted/u);
 });
