@@ -3534,9 +3534,10 @@ function createPublicApp() {
         ...(suggestionToken ? { suggestionToken } : {}),
       }));
       reconcileChatOaStatus(payload, oaEvidenceEpoch);
+      const fullAnswer = userFacingAnswer(payload.answer);
       const assistant = {
         role: "assistant",
-        content: userFacingAnswer(payload.answer),
+        content: "",
         ...knowledgeImageFields({
           role: "assistant", images: payload.images,
           publicSources: payload.oaPublicStatus === "connected" && Array.isArray(payload.sources) && payload.sources.length > 0,
@@ -3547,6 +3548,12 @@ function createPublicApp() {
       session.conversationToken = typeof payload.conversationToken === "string" ? payload.conversationToken : "";
       session.tokenSavedAt = Date.now();
       session.messages.push(assistant);
+      for (let length = 8; length < fullAnswer.length; length += 8) {
+        assistant.content = fullAnswer.slice(0, length);
+        if (state.activeConversationId === conversationId) renderMessages({ scrollMode: "end" });
+        await new Promise(resolve => window.setTimeout(resolve, 16));
+      }
+      assistant.content = fullAnswer;
       session.updatedAt = Date.now();
       completed = true;
       return {
