@@ -62,7 +62,7 @@ const vite = await createServer({
         }
       `;
       if (id === "\0lab-ai-ask-client") return `
-        export async function answerOaChatQuestion(question, ranked) {
+  export function questionRequestsKnowledgeImages(question) {\n    return /图片|照片/u.test(question);\n  }\n        export async function answerOaChatQuestion(question, ranked) {
           const state = globalThis.${stateKey};
           state.answerCalls.push({ question, ranked });
           await new Promise((resolve) => setTimeout(resolve, state.answerDelayMs));
