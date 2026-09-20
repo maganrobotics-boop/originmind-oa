@@ -91,19 +91,20 @@ export async function oaChatModelStatus() {
     return { bridgeReady: result.bridgeReady === true, modelReady: result.modelReady === true, budgetReady: result.budgetReady === true };
   } catch { return { bridgeReady: false, modelReady: false, budgetReady: false }; }
 }
-async function answerImages(chunks: RankedKnowledgeChunk[]): Promise<OaChatImage[]> {
-  const references = chunks.map(chunk => ({ chunk, refs: knowledgeImageReferences(chunk.content) })).filter(item => item.refs.size);
+async function answerImages(chunks: RankedKnowledgeChunk[], includeRevisionImages = false): Promise<OaChatImage[]> {
+  const references = chunks.map(chunk => ({ chunk, refs: knowledgeImageReferences(chunk.content) }))
+    .filter(item => includeRevisionImages || item.refs.size);
   if (!references.length) return [];
   const db = await getDb(); const images: OaChatImage[] = []; const seen = new Set<string>();
   for (const { chunk, refs } of references) {
     const assets = await listKnowledgeRevisionAssets(db.$client, chunk.revisionId);
     for (const asset of assets) {
       const identity = `${chunk.itemId}:${chunk.revisionId}:${asset.assetPath}`;
-      if (asset.itemId !== chunk.itemId || !refs.has(asset.assetPath) || seen.has(identity)) continue;
+      if (asset.itemId !== chunk.itemId || (!includeRevisionImages && !refs.has(asset.assetPath)) || seen.has(identity)) continue;
       seen.add(identity);
       images.push({
         url: `/api/knowledge/${encodeURIComponent(chunk.itemId)}/assets/${asset.assetPath.split('/').map(encodeURIComponent).join('/')}?forChat=1&revision=${encodeURIComponent(chunk.revisionId)}`,
-        alt: prefix(refs.get(asset.assetPath) || '资料插图', 300), mimeType: asset.mimeType,
+        alt: prefix(refs.get(asset.assetPath) || asset.assetPath.split('/').at(-1) || '资料插图', 300), mimeType: asset.mimeType,
       });
       if (images.length >= 4) return images;
     }
@@ -135,9 +136,11 @@ export async function answerOaChatQuestion(question: string, ranked: RankedKnowl
   }));
   const citations = chunks.map((chunk, index) => ({ id: String(index + 1), itemId: chunk.itemId, revisionId: chunk.revisionId, title: chunk.title, category: chunk.category, sectionTitle: chunk.sectionTitle, paragraphRef: chunk.paragraphRef, excerpt: prefix(chunk.content, 600) }));
   let images: OaChatImage[] = [];
-  try { images = await answerImages(chunks); } catch { /* A failed image lookup must not discard the complete text. */ }
-  if (questionRequestsKnowledgeImages(question) && images.length) {
-    return { answer: `已找到 ${images.length} 张与问题相关的已审核资料图片，显示如下。`, citations, images, mode: 'ai', sourceType: 'oa_knowledge_images' };
+  const imageRequest = questionRequestsKnowledgeImages(question);
+  try { images = await answerImages(chunks, imageRequest); } catch { /* A failed image lookup must not discard the complete text. */ }
+  if (imageRequest) {
+    if (images.length) return { answer: `已找到 ${images.length} 张与问题相关的已审核资料图片，显示如下。`, citations, images, mode: 'ai', sourceType: 'oa_knowledge_images' };
+    return { answer: '已找到相关文字资料，但当前已审核版本没有可展示的图片。请由管理员在知识资料中补充图片并完成审核后再试。', citations, images: [], mode: 'no_evidence', sourceType: 'oa_knowledge_images_unavailable' };
   }
   let result: BridgeResponse;
   try { result = await groundedBridge({ operation: 'answer', answerType: 'grounded', question, history: history.slice(-2), documents }); }

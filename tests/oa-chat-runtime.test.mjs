@@ -98,6 +98,24 @@ test('OA explicit image requests return authorized revision images without a mod
   assert.equal(state.calls.length,0);
 });
 
+test('OA explicit image requests can use approved revision images not referenced by the matched text chunk', async () => {
+  const state = globalThis[stateKey];
+  state.allowImageDb = true;
+  state.assets = [{ itemId:chunk.itemId, revisionId:chunk.revisionId, assetPath:'assets/platform.jpg', mimeType:'image/jpeg' }];
+  const result = await client.answerOaChatQuestion('实验室机器人图片',[{...chunk, content:'实验室机器人平台介绍'}]);
+  assert.equal(result.mode,'ai'); assert.equal(result.sourceType,'oa_knowledge_images');
+  assert.equal(result.images.length,1); assert.equal(result.images[0].alt,'platform.jpg');
+  assert.equal(state.calls.length,0);
+});
+
+test('OA explicit image requests explain when the approved revision has no images', async () => {
+  const state = globalThis[stateKey];
+  state.allowImageDb = true; state.assets = [];
+  const result = await client.answerOaChatQuestion('实验室机器人图片',[{...chunk, content:'实验室机器人平台介绍'}]);
+  assert.equal(result.mode,'no_evidence'); assert.equal(result.sourceType,'oa_knowledge_images_unavailable');
+  assert.match(result.answer,/没有可展示的图片/u); assert.equal(state.calls.length,0);
+});
+
 test('ordinary general knowledge bypasses weak OA retrieval matches and is labeled', async () => {
   globalThis[stateKey].reply={received:true,answer:'水在标准大气压下的沸点通常是 100 摄氏度。',mode:'general',provider:'bailian'};
   const result=await client.answerOaChatQuestion('水的沸点是多少？',[chunk]);
