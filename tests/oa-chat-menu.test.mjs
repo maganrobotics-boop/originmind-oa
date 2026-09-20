@@ -3,17 +3,17 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 const read = name => readFile(new URL(`../${name}`, import.meta.url), 'utf8');
 
-test('every workspace header uses a right drawer and shows only the current secondary title', async () => {
+test('every workspace header opens chat on the right and centers the current secondary title', async () => {
   const page = await read('app/page.tsx');
-  assert.match(page, /activeView === "knowledge" && knowledgeTab === "ask" \? <OaConversationMenu \/> : <PageSecondaryMenu/u);
-  assert.match(page, /aria-label="打开当前模块目录"/u);
-  assert.match(page, /aria-label="当前模块二级目录"/u);
+  assert.match(page, /<div className="oa-topbar-secondary-title"><strong>\{secondaryTitle\}<\/strong><\/div>/u);
+  assert.match(page, /<div className="topbar-actions">\s*<OaConversationMenu \/>/u);
+  assert.doesNotMatch(page, /PageSecondaryMenu|打开当前模块目录|当前模块二级目录/u);
   const topbar = page.slice(page.indexOf('<header className="topbar">'), page.indexOf('</header>', page.indexOf('<header className="topbar">')));
   assert.doesNotMatch(topbar, /breadcrumb-home|breadcrumb-brand|联合研发 OA/u);
   assert.match(page, /aria-label="打开个人账户菜单"/u);
   assert.match(page, /className="oa-sidebar-account"/u);
   assert.match(page, /<OaConversationProvider/u);
-  assert.match(page, /<OaConversationTitle><OaChatStatus \/><\/OaConversationTitle>/u);
+  assert.match(page, /const secondaryTitle = activeView === "dashboard" \? "审批工作台"/u);
 });
 
 test('approval dashboard has no AI shortcut while the knowledge sidebar and admission gates remain', async () => {

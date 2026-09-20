@@ -88,12 +88,6 @@
 .oa-conversation-drawer-list > p { margin:0; padding:14px 12px; color:#777; font-size:13px; }
 .oa-conversation-drawer-footer { padding:12px; border-top:1px solid #e7e7e7; }
 .oa-conversation-drawer-footer button:disabled { opacity:.45; cursor:not-allowed; }
-.oa-workspace .oa-page-more-button { display:grid; place-items:center; width:44px; height:44px; padding:0; border:0; border-radius:50%; background:#f7f7f7; color:#171717; }
-.oa-page-directory .oa-conversation-drawer-list button svg:last-child { margin-left:auto; }
-.oa-directory-link { display:flex; align-items:center; gap:11px; width:100%; min-height:46px; padding:10px 12px; border-radius:10px; color:#333; text-decoration:none; }
-.oa-directory-link:hover { background:#eaeaea; }
-.oa-directory-link span { min-width:0; flex:1; }
-.oa-directory-link svg { width:20px; height:20px; flex:none; }
 
 /* A tap exposes the label/evidence for every dot, including unknown states. */
 .oa-workspace .oa-chat-status-details { position:relative; pointer-events:auto; }

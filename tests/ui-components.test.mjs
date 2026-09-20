@@ -61,7 +61,7 @@ test("shows the system administrator role consistently across account and collab
   assert.match(pageSource, /person\.isAdmin \|\| person\.permissions\.includes\("project_owner"\)/u);
   assert.match(pageSource, /isAdmin: summary\.peer\.isAdmin === true/u);
   assert.match(pageSource, /currentRoleLabel=\{sessionRoleLabel\(currentRole, isAdmin\)\}/u);
-  assert.match(pageSource, /<PageSecondaryMenu[\s\S]*?isAdmin=\{Boolean\(session\.isAdmin\)\}/u);
+  assert.match(pageSource, /<div className="topbar-actions">\s*<OaConversationMenu \/>/u);
   assert.match(peopleRouteSource, /isAdmin: isAdministrator\(row\.chatgptAccount, row\.accountUserId \?\? undefined\)/u);
   assert.match(peopleRouteSource, /isAdmin: owner\.isAdmin/u);
   assert.match(directMessagesSource, /isAdmin: eligibleReviewers\.get\(peerEmail\)\?\.isAdmin === true/u);

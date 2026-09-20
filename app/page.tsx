@@ -32,7 +32,6 @@ import {
   LogOut,
   Menu,
   MessageCircle,
-  MoreHorizontal,
   PackageCheck,
   Pencil,
   Plus,
@@ -60,7 +59,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select";
-import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { NotificationStatus } from "@/components/notification-status";
 import { OemInbox } from "@/components/oem-inbox";
@@ -70,8 +69,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import { KnowledgeView, type KnowledgeTab } from "@/components/knowledge/knowledge-view";
 import "./oa-workspace.css";
-import { OaChatStatus } from "@/components/knowledge/oa-chat-panel";
-import { OaConversationProvider, OaConversationMenu, OaConversationTitle, OaNewChatButton, useOaConversation } from "@/components/knowledge/oa-conversation-context";
+import { OaConversationProvider, OaConversationMenu, OaNewChatButton, useOaConversation } from "@/components/knowledge/oa-conversation-context";
 import {
   NDA_AGREEMENT_VERSION,
   buildNdaAgreementText,
@@ -374,46 +372,6 @@ function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马�
       </div></div>
     </div>
   </aside>;
-}
-
-function PageSecondaryMenu({ activeView, knowledgeTab, isAdmin, canReviewKnowledge, onNavigate, onKnowledgeTab, onNew, onMyPending }: { activeView: ViewKey; knowledgeTab: KnowledgeTab; isAdmin: boolean; canReviewKnowledge: boolean; onNavigate: (view: ViewKey) => void; onKnowledgeTab: (tab: KnowledgeTab) => void; onNew: () => void; onMyPending: () => void }) {
-  const [open, setOpen] = useState(false);
-  const officeItems = [
-    { key: "dashboard" as ViewKey, label: "审批工作台", icon: LayoutDashboard },
-    { key: "todos" as ViewKey, label: "统一待办", icon: ListTodo },
-    { key: "project" as ViewKey, label: "项目工作台", icon: BriefcaseBusiness },
-    { key: "requests" as ViewKey, label: "全部申请", icon: FolderKanban },
-    { key: "people" as ViewKey, label: "协作成员", icon: UsersRound },
-    ...(isAdmin ? [{ key: "members" as ViewKey, label: "成员审核", icon: ShieldCheck }, { key: "notifications" as ViewKey, label: "飞书提醒", icon: MessageCircle }] : []),
-    { key: "rules" as ViewKey, label: "流程与规则", icon: BookOpen },
-    ...(isAdmin ? [{ key: "oem" as ViewKey, label: "官网 OEM 申请", icon: BriefcaseBusiness }] : []),
-  ];
-  const knowledgeItems = [
-    { tab: "ask" as KnowledgeTab, label: "AI 助手", icon: Bot },
-    { tab: "submit" as KnowledgeTab, label: "上传资料", icon: Plus },
-    { tab: "mine" as KnowledgeTab, label: "我的资料", icon: FolderKanban },
-    ...(canReviewKnowledge ? [{ tab: "review" as KnowledgeTab, label: "资料审核", icon: ShieldCheck }, { tab: "manage" as KnowledgeTab, label: "知识资料管理", icon: BookOpen }] : []),
-  ];
-  const knowledgeSection = activeView === "knowledge";
-  const directoryItems = knowledgeSection ? knowledgeItems : activeView === "profile" ? [] : officeItems;
-  const go = (action: () => void) => { setOpen(false); window.requestAnimationFrame(action); };
-  return <Sheet open={open} onOpenChange={setOpen}>
-    <SheetTrigger asChild><button type="button" className="oa-conversation-menu oa-page-more-button" aria-label="打开当前模块目录"><MoreHorizontal size={24} /></button></SheetTrigger>
-    <SheetContent side="right" className="oa-conversation-drawer oa-page-directory">
-      <SheetHeader><SheetTitle>{knowledgeSection ? "实验室大模型" : activeView === "profile" ? "个人设置" : "审批办公"}</SheetTitle><SheetDescription>选择要打开的二级页面</SheetDescription></SheetHeader>
-      <nav className="oa-conversation-drawer-list" aria-label="当前模块二级目录">
-        {directoryItems.map((item) => {
-          const Icon = item.icon;
-          const selected = "tab" in item ? knowledgeTab === item.tab : activeView === item.key;
-          return <button type="button" key={"tab" in item ? item.tab : item.key} aria-current={selected ? "page" : undefined} onClick={() => go(() => "tab" in item ? onKnowledgeTab(item.tab) : onNavigate(item.key))}><Icon /><span>{item.label}</span>{selected && <Check aria-hidden="true" />}</button>;
-        })}
-        {activeView === "profile" && <button type="button" aria-current="page"><UserRound /><span>个人设置</span><Check aria-hidden="true" /></button>}
-      </nav>
-      <div className="oa-conversation-drawer-footer">
-        {knowledgeSection ? isAdmin && <a className="oa-directory-link" href="https://chat.omindos.ai/manage" target="_blank" rel="noreferrer"><Settings2 /><span>Chat 管理</span><ArrowUpRight /></a> : <><button type="button" onClick={() => go(onMyPending)}><Clock3 /><span>待我审批</span></button><button type="button" onClick={() => go(onNew)}><Plus /><span>新建审核申请</span></button></>}
-      </div>
-    </SheetContent>
-  </Sheet>;
 }
 
 function ApprovalRow({ approval, onOpen }: { approval: Approval; onOpen: (id: string) => void }) {
@@ -2495,6 +2453,7 @@ export default function Home() {
   const openMyPending = () => { setActiveView("todos"); setActiveFilter("全部"); setShowMineOnly(false); setMobileNavOpen(false); };
   const navigate = (view: ViewKey) => { setActiveView(view); setShowMineOnly(false); setMobileNavOpen(false); };
   const openMetricApproval = (id: string) => { setMetricPanel(null); openApproval(id); };
+  const secondaryTitle = activeView === "dashboard" ? "审批工作台" : activeView === "todos" ? "统一待办" : activeView === "project" ? "项目工作台" : activeView === "requests" ? showMineOnly ? "待我审批" : "全部申请" : activeView === "people" ? "协作成员" : activeView === "knowledge" ? knowledgeTab === "ask" ? "AI 助手" : knowledgeTab === "submit" ? "上传资料" : knowledgeTab === "mine" ? "我的资料" : knowledgeTab === "review" ? "资料审核" : "知识资料管理" : activeView === "members" ? "成员审核" : activeView === "oem" ? "官网 OEM 申请" : activeView === "notifications" ? "飞书提醒" : activeView === "profile" ? "个人设置" : "流程与规则";
   if (!session) return <div className="registration-shell"><div className="registration-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><h1>请登录账号</h1><p className="registration-intro">正在确认登录状态。实验室 AI 仅在登录并完成 OA 准入与保密签署后显示。</p></div></div>;
   if (!session.registered && (session.accountBindingRequired || session.accountBindingConflict || session.platformIdentityMissing || session.externalIdentityLinkRequired || session.githubIdentityLinkRequired || session.feishuIdentityLinkRequired)) return <><Toaster position="top-right" /><IdentityAccessGate session={session} onRefresh={refreshSession} /></>;
   if (session.status === "pending") return <><Toaster position="top-right" /><PendingGate session={session} onRefresh={refreshSession} /></>;
@@ -2514,11 +2473,11 @@ export default function Home() {
           <button type="button" className="workspace-sidebar-toggle" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "展开侧栏" : "收起侧栏"} aria-expanded={!sidebarCollapsed} aria-controls="oa-desktop-navigation"><Menu className="size-5" /></button>
           <button ref={mobileMenuButtonRef} className="mobile-menu-button" onClick={() => setMobileNavOpen(true)} aria-label="打开导航" aria-expanded={mobileNavOpen} aria-controls="mobile-navigation"><Menu className="size-5" /></button>
           <div className="breadcrumbs">
-            <strong>{activeView === "dashboard" ? "审批工作台" : activeView === "todos" ? "统一待办" : activeView === "project" ? "项目工作台" : activeView === "requests" ? showMineOnly ? "待我审批" : "全部申请" : activeView === "people" ? "协作成员" : activeView === "knowledge" ? knowledgeTab === "ask" ? "AI 助手" : knowledgeTab === "submit" ? "上传资料" : knowledgeTab === "mine" ? "我的资料" : knowledgeTab === "review" ? "资料审核" : "知识资料管理" : activeView === "members" ? "成员审核" : activeView === "oem" ? "官网 OEM 申请" : activeView === "notifications" ? "飞书提醒" : activeView === "profile" ? "个人设置" : "流程与规则"}</strong>
+            <strong>{secondaryTitle}</strong>
           </div>
-          {activeView === "knowledge" && knowledgeTab === "ask" && <OaConversationTitle><OaChatStatus /></OaConversationTitle>}
+          <div className="oa-topbar-secondary-title"><strong>{secondaryTitle}</strong></div>
           <div className="topbar-actions">
-            {activeView === "knowledge" && knowledgeTab === "ask" ? <OaConversationMenu /> : <PageSecondaryMenu activeView={activeView} knowledgeTab={knowledgeTab} isAdmin={Boolean(session.isAdmin)} canReviewKnowledge={Boolean(session.canReviewKnowledge)} onNavigate={navigate} onKnowledgeTab={(tab) => { setKnowledgeTab(tab); navigate("knowledge"); }} onNew={openNewRequest} onMyPending={openMyPending} />}
+            <OaConversationMenu />
           </div>
         </header>
         <div className="oa-knowledge-pane" hidden={activeView !== "knowledge"}><KnowledgeView canReviewKnowledge={Boolean(session.canReviewKnowledge)} activeSection={knowledgeTab} onSectionChange={setKnowledgeTab} /></div>
