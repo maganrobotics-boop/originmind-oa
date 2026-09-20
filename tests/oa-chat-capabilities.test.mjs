@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import { CHAT_DOCUMENT_HINTS, resolveChatCapability, wantsChatDocument, planChatDocument } from '../lib/oa-chat-documents.mjs';
 import { resolveMeetingModeCommand } from '../lib/oa-meeting-mode.mjs';
+import { parseKnowledgeUrlCommand } from '../lib/knowledge-url-import.mjs';
 
 const ts = createRequire(import.meta.url)('typescript');
 const panel = await readFile(new URL('../components/knowledge/oa-chat-panel.tsx', import.meta.url), 'utf8');
@@ -91,8 +92,9 @@ async function runAsk(question, selectedSource = null) {
       submit: (instruction, previous) => { record.plans.push(planChatDocument(instruction, selectedSource, previous)); return true; },
       dismissError() {},
     },
-    resolveChatCapability, resolveMeetingModeCommand, crypto: { randomUUID: () => 'synthetic-id' }, AbortController, AbortSignal,
+    resolveChatCapability, resolveMeetingModeCommand, parseKnowledgeUrlCommand, crypto: { randomUUID: () => 'synthetic-id' }, AbortController, AbortSignal,
     meetingModeOpen: false, meetingMode: { current: null },
+    adminModeTimer: { current: null }, setAdminModeActive() {}, window: { clearTimeout() {}, setTimeout() { return 1; } },
     setMeetingNumber: value => record.meeting.push({ field: 'meeting', value }), setMeetingCommandEpoch() {}, setMeetingModeOpen: value => record.meeting.push({ field: 'open', value }),
     setQuestion() {}, setError: value => { if (value) record.errors.push(value); }, setLastAnswer() {}, setAsking() {}, setRequestStatus() {}, nextOrder: () => 1,
     setTurns: value => { record.turns = typeof value === 'function' ? value(record.turns) : value; },

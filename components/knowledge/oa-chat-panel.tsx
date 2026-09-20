@@ -94,7 +94,8 @@ function OaAiChatPanel() {
   const timeline = [...turns.map(turn => ({ type: 'answer' as const, id: turn.id, order: turn.order, turn })), ...documents.entries].sort((a, b) => a.order - b.order);
   useEffect(() => { setAiDirty(Boolean(turns.length || question || asking || error || documents.entries.length || documents.busy || documents.error || meetingModeOpen)); }, [turns.length, question, asking, error, documents.entries.length, documents.busy, documents.error, meetingModeOpen, setAiDirty]);
 
-  useEffect(() => () => { requestSequence.current++; requestRef.current?.abort(); if (adminModeTimer.current) window.clearTimeout(adminModeTimer.current); }, []);
+  useEffect(() => () => { requestSequence.current++; requestRef.current?.abort(); }, []);
+  useEffect(() => () => { if (adminModeTimer.current) window.clearTimeout(adminModeTimer.current); }, []);
   useEffect(() => { stickToEnd.current = true; }, [documents.entries.length]);
   useEffect(() => {
     if (stickToEnd.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
@@ -237,7 +238,7 @@ function OaAiChatPanel() {
         {asking && <div className="knowledge-answer-loading" role="status">正在检索并生成回答…</div>}
       </div>
       <div className="composer-area oa-chat-composer-area">
-        <div className="oa-chat-examples" role="group" aria-label="AI 助手功能"><p id={`${composerId}-capabilities`}>{adminModeActive ? '管理员模式已验证 · ' : ''}点击功能，或在开头输入 @功能名 调用</p><button type="button" title="@会议模式919700881" disabled={working} onClick={() => { setQuestion('@会议模式919700881'); input.current?.focus(); }}>会议模式</button>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} title={`@${hint.label}`} disabled={working} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>
+        <div className="oa-chat-examples" role="group" aria-label="AI 助手五项功能"><p id={`${composerId}-capabilities`}>{adminModeActive ? '管理员模式已验证 · ' : ''}点击功能，或在开头输入 @功能名 调用</p><button type="button" title="@会议模式919700881" disabled={working} onClick={() => { setQuestion('@会议模式919700881'); input.current?.focus(); }}>会议模式</button>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} title={`@${hint.label}`} disabled={working} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>
         {(error || documents.error) && <p className="oa-chat-error" role="alert">{error || documents.error}</p>}
         <OaDocumentSource documents={documents} />
         {meetingSuggestionVisible && <div id={`${composerId}-meeting-suggestion`} className="oa-chat-command-suggestions" role="listbox" aria-label="命令补全"><button type="button" role="option" aria-selected="true" onMouseDown={event => event.preventDefault()} onClick={() => { setQuestion('@会议模式919700881'); input.current?.focus(); }}><strong>@会议模式919700881</strong><span>默认联合项目周会 · 发送后直接启动</span></button></div>}
