@@ -1,4 +1,4 @@
-const COMPLEX_TASK = /(?:项目总结|总结.{0,8}(?:项目|文档|报告)|长文档|完整报告|方案设计|深度分析|系统分析|技术路线|可行性分析|对比评估|综合评估|撰写.{0,8}(?:报告|方案|文档))/iu;
+const COMPLEX_TASK = /(?:项目总结|总结.{0,8}(?:项目|文档|报告)|长文档|完整报告|方案设计|设计.{0,12}(?:方案|项目)|深度分析|系统分析|技术路线|可行性分析|对比评估|综合评估|撰写.{0,8}(?:报告|方案|文档))/iu;
 const SHORT_REQUEST = /(?:简短|简要|一句话|精简|不超过\s*\d+\s*字)/iu;
 
 export function answerMode(question) { return COMPLEX_TASK.test(String(question || '')) ? 'deep' : 'fast'; }
