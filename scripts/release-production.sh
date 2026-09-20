@@ -128,7 +128,7 @@ mv "${project_root}/dist" "${release_root}/dist"
 config_path="${release_root}/dist/server/wrangler.json"
 mkdir "${release_root}/workbench"
 if [[ "${workbench_enabled}" == "true" ]]; then
-  cp -a "${project_root}/migrations/oa/0002_ai_workbench.sql" "${project_root}/migrations/oa/0003_ai_workbench_artifacts.sql" "${project_root}/migrations/oa/0004_ai_workbench_retention.sql" "${release_root}/workbench/"
+  cp -a "${project_root}/migrations/oa/0002_ai_workbench.sql" "${project_root}/migrations/oa/0003_ai_workbench_artifacts.sql" "${project_root}/migrations/oa/0004_ai_workbench_retention.sql" "${project_root}/migrations/oa/0005_project_work_items.sql" "${release_root}/workbench/"
   node "${script_dir}/oa-workbench-release.mjs" manifest "${release_root}/workbench" "${release_root}/workbench/activation-plan.json"
 fi
 
@@ -204,7 +204,7 @@ migration_state="$(node "${script_dir}/check-production-migration-state.mjs" bef
 if [[ "${workbench_enabled}" == "true" ]]; then
   # LIMIT 0 validates the admission columns without reading any member records.
   run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "SELECT id,account_user_id,mutation_revision,status,nda_accepted_at,nda_agreement_version,nda_approval_id,chatgpt_account FROM members LIMIT 0; SELECT id,type,status,requester_email,payload_json FROM approvals LIMIT 0" > "${release_root}/workbench-prerequisites.json"
-  task_schema_query="SELECT type,name,sql FROM sqlite_master WHERE (name GLOB 'ai_workbench_*' OR tbl_name GLOB 'ai_workbench_*') AND name NOT GLOB 'sqlite_*' ORDER BY type,name"
+  task_schema_query="SELECT type,name,sql FROM sqlite_master WHERE (name GLOB 'ai_workbench_*' OR tbl_name GLOB 'ai_workbench_*' OR name GLOB 'project_work_items*' OR tbl_name='project_work_items') AND name NOT GLOB 'sqlite_*' ORDER BY type,name"
   run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${task_schema_query}" > "${release_root}/workbench-schema-before.json"
   node "${script_dir}/oa-workbench-release.mjs" before "${release_root}/workbench" "${release_root}/workbench-schema-before.json" "${release_root}/workbench-schema-before-verified.json"
 fi
@@ -269,9 +269,9 @@ node "${script_dir}/check-production-migration-state.mjs" after \
   --migrations-dir "${release_root}/drizzle"
 
 if [[ "${workbench_enabled}" == "true" ]]; then
-  # These three immutable, hash-reviewed CREATE IF NOT EXISTS files are additive.
+  # These immutable, hash-reviewed CREATE IF NOT EXISTS files are additive.
   # Never apply migrations/oa as the Drizzle ledger or change WEBSITE_DB.
-  for task_migration in 0002_ai_workbench.sql 0003_ai_workbench_artifacts.sql 0004_ai_workbench_retention.sql; do
+  for task_migration in 0002_ai_workbench.sql 0003_ai_workbench_artifacts.sql 0004_ai_workbench_retention.sql 0005_project_work_items.sql; do
     run_wrangler d1 execute DB --remote --json --config "${config_path}" --file "${release_root}/workbench/${task_migration}" > "${release_root}/workbench-${task_migration%.sql}-applied.json"
   done
   run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${task_schema_query}" > "${release_root}/workbench-schema-after.json"
@@ -322,4 +322,3 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
 fi
 
 echo "OA production release and public read-only smoke checks passed."
-

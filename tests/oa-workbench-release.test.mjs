@@ -11,7 +11,7 @@ const directory = new URL('../migrations/oa/', import.meta.url);
 async function fixture(run) {
   const dir = await mkdtemp(join(tmpdir(), 'oa-workbench-release-'));
   try {
-    for (const name of ['0002_ai_workbench.sql', '0003_ai_workbench_artifacts.sql', '0004_ai_workbench_retention.sql']) await cp(new URL(name, directory), join(dir, name));
+    for (const name of ['0002_ai_workbench.sql', '0003_ai_workbench_artifacts.sql', '0004_ai_workbench_retention.sql', '0005_project_work_items.sql']) await cp(new URL(name, directory), join(dir, name));
     return await run(dir);
   } finally { await rm(dir, { recursive: true, force: true }); }
 }
@@ -21,7 +21,7 @@ const artifacts = [{ format: 'md', byte_size: 100, sha256: 'a'.repeat(64) }, { f
 const generated = () => ({ received: true, mode: 'task', provider: 'bailian', answer: '这是合成测试报告，接口联调完成，实机验收待开展，负责人和日期待补充。', execution: { version: 1, state: 'prepared', modelCalls: 2, steps: [{ tool: 'read_material', status: 'ok' }, { tool: 'prepare_document', status: 'ok' }] } });
 
 test('only the exact reviewed task migration bytes are accepted', async () => fixture(async dir => {
-  const sql = await reviewedTaskSql(dir); assert.equal(Object.keys(expectedTaskSchema(sql)).length, 8);
+  const sql = await reviewedTaskSql(dir); assert.equal(Object.keys(expectedTaskSchema(sql)).length, 12);
   await writeFile(join(dir, '0003_ai_workbench_artifacts.sql'), `${sql['0003_ai_workbench_artifacts.sql']}\n-- drift`);
   await assert.rejects(reviewedTaskSql(dir), /HASH/);
 }));
@@ -31,7 +31,7 @@ test('unreviewed additional SQL cannot enter the release manifest', async () => 
 }));
 test('empty or compatible partial task schemas may be initialized, but cannot pass the after gate', async () => fixture(async dir => {
   const definitions = expectedTaskSchema(await reviewedTaskSql(dir));
-  assert.equal(checkTaskSchema('before', payload([]), definitions).missing.length, 8);
+  assert.equal(checkTaskSchema('before', payload([]), definitions).missing.length, 12);
   assert.throws(() => checkTaskSchema('after', payload([]), definitions), /INCOMPLETE/);
   const [key, sql] = Object.entries(definitions)[0], [type, name] = key.split(':');
   assert.equal(checkTaskSchema('before', payload([{ type, name, sql }]), definitions).objects.length, 1);

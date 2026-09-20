@@ -96,8 +96,16 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
     const verify = async () => {
       try {
         const taskResponse = await fetch(`/api/lab-ai/tasks?id=${encodeURIComponent(session.minutesTaskId!)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
-        const taskData = await taskResponse.json().catch(() => ({})) as { task?: { status?: string } };
+        const taskData = await taskResponse.json().catch(() => ({})) as { task?: { status?: string; title?: string; result?: string } };
         if (!current || !taskResponse.ok) return;
+        if (taskData.task?.status === 'succeeded' && taskData.task.result?.trim()) {
+          const actionResponse = await fetch('/api/work-items', {
+            method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ action: 'import_meeting', sourceId: session.minutesTaskId }),
+            signal: AbortSignal.timeout(15000),
+          });
+          if (!actionResponse.ok) throw new Error('会议行动项尚未同步到统一待办。');
+        }
         const lifecycleResponse = await fetch(`/api/lab-ai/archive?id=${encodeURIComponent(session.minutesTaskId!)}`, { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
         const lifecycleData = await lifecycleResponse.json().catch(() => ({})) as { lifecycle?: { state?: string; knowledgeStatus?: string | null } };
         if (!current || !lifecycleResponse.ok) return;
@@ -120,7 +128,7 @@ export const OaMeetingMode = forwardRef<OaMeetingModeHandle, Props>(function OaM
     const update = () => { if (document.visibilityState !== 'hidden') void verify(); };
     void verify(); const timer = window.setInterval(update, 5000); window.addEventListener('oa-files-archived', update); document.addEventListener('visibilitychange', update);
     return () => { current = false; window.clearInterval(timer); window.removeEventListener('oa-files-archived', update); document.removeEventListener('visibilitychange', update); };
-  }, [session.phase, session.minutesTaskId]);
+  }, [session.phase, session.minutesTaskId, session.title]);
 
   const patch = (values: Partial<MeetingModeSession>) => setSession(current => ({ ...current, ...values }));
   const start = useCallback(async (meeting: string) => {

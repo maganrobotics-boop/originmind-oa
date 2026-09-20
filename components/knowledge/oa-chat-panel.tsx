@@ -6,6 +6,7 @@ import { renderAnswerBody, userFacingAnswer } from '@/lib/oa-chat-renderer.mjs';
 import { initialChatIndicators, probeChatIndicators, pendingChatIndicators, replyChatIndicators, failedChatIndicators } from '@/lib/oa-chat-indicators.mjs';
 import { CHAT_DOCUMENT_HINTS, resolveChatCapability } from '@/lib/oa-chat-documents.mjs';
 import { resolveMeetingModeCommand } from '@/lib/oa-meeting-mode.mjs';
+import { parseKnowledgeUrlCommand } from '@/lib/knowledge-url-import.mjs';
 import type { KnowledgeCitation } from '@/lib/knowledge-types';
 import './shared-chat.generated.css';
 import './oa-chat-panel.css';
@@ -75,6 +76,8 @@ function OaAiChatPanel() {
   const [meetingModeOpen, setMeetingModeOpen] = useState(false);
   const [meetingNumber, setMeetingNumber] = useState('');
   const [meetingCommandEpoch, setMeetingCommandEpoch] = useState(0);
+  const [adminModeActive, setAdminModeActive] = useState(false);
+  const adminModeTimer = useRef<number | null>(null);
   const order = useRef(0);
   const nextOrder = useCallback(() => ++order.current, []);
   const documents = useOaChatDocuments(nextOrder);
@@ -91,7 +94,7 @@ function OaAiChatPanel() {
   const timeline = [...turns.map(turn => ({ type: 'answer' as const, id: turn.id, order: turn.order, turn })), ...documents.entries].sort((a, b) => a.order - b.order);
   useEffect(() => { setAiDirty(Boolean(turns.length || question || asking || error || documents.entries.length || documents.busy || documents.error || meetingModeOpen)); }, [turns.length, question, asking, error, documents.entries.length, documents.busy, documents.error, meetingModeOpen, setAiDirty]);
 
-  useEffect(() => () => { requestSequence.current++; requestRef.current?.abort(); }, []);
+  useEffect(() => () => { requestSequence.current++; requestRef.current?.abort(); if (adminModeTimer.current) window.clearTimeout(adminModeTimer.current); }, []);
   useEffect(() => { stickToEnd.current = true; }, [documents.entries.length]);
   useEffect(() => {
     if (stickToEnd.current && scroll.current) scroll.current.scrollTop = scroll.current.scrollHeight;
@@ -121,6 +124,38 @@ function OaAiChatPanel() {
       setQuestion('');
       if (!meetingModeOpen || !meetingMode.current) { setError('当前没有正在记录的会议。请先发送 @会议模式加九位会议号。'); return; }
       meetingMode.current.minutes(); stickToEnd.current = true; return;
+    }
+    if (!retry && /^[@＠]管理员模式$/u.test(normalized)) {
+      const id = crypto.randomUUID(); setAsking(true); setError(''); setQuestion('');
+      setTurns(current => [...current, { id, order: nextOrder(), question: normalized, answer: '', citations: [], images: [] }]);
+      try {
+        const response = await fetch('/api/session', { credentials: 'same-origin', cache: 'no-store', signal: AbortSignal.timeout(15000) });
+        const data = await response.json().catch(() => ({})) as { isAdmin?: boolean };
+        if (!response.ok || !data.isAdmin) throw new Error('当前账号不是 OA 管理员，请先退出并使用管理员身份重新登录。');
+        setAdminModeActive(true);
+        if (adminModeTimer.current) window.clearTimeout(adminModeTimer.current);
+        adminModeTimer.current = window.setTimeout(() => { setAdminModeActive(false); adminModeTimer.current = null; }, 10 * 60 * 1000);
+        setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: '管理员模式已开启，有效期 10 分钟。为保护账号，本系统不会在聊天记录中收集密码；所有审批操作仍由服务端再次校验当前管理员会话。' } : turn));
+      } catch (cause) { setTurns(current => current.map(turn => turn.id === id ? { ...turn, failed: true } : turn)); setError(cause instanceof Error ? cause.message : '管理员身份验证失败。'); }
+      finally { setAsking(false); }
+      return;
+    }
+    const sourceUrl = retry ? null : parseKnowledgeUrlCommand(normalized);
+    if (sourceUrl) {
+      const id = crypto.randomUUID();
+      setAsking(true); setError(''); setQuestion(''); stickToEnd.current = true;
+      setTurns(current => [...current, { id, order: nextOrder(), question: normalized, answer: '', citations: [], images: [] }]);
+      try {
+        const response = await fetch('/api/knowledge/import-url', { method: 'POST', credentials: 'same-origin', cache: 'no-store', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ url: sourceUrl }), signal: AbortSignal.timeout(30000) });
+        const data = await response.json().catch(() => ({})) as { title?: string; error?: string };
+        if (!response.ok) throw new Error(data.error || '链接导入失败。');
+        const answer = `已读取“${data.title || '链接资料'}”并提交资料审核。审核人将决定设为对内、对外或退回。`;
+        setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer } : turn));
+      } catch (cause) {
+        setTurns(current => current.map(turn => turn.id === id ? { ...turn, failed: true } : turn));
+        setError(cause instanceof Error ? cause.message : '链接导入失败。'); setQuestion(normalized);
+      } finally { setAsking(false); }
+      return;
     }
     if (documents.busy) return;
     const capability = resolveChatCapability(normalized);
@@ -202,7 +237,7 @@ function OaAiChatPanel() {
         {asking && <div className="knowledge-answer-loading" role="status">正在检索并生成回答…</div>}
       </div>
       <div className="composer-area oa-chat-composer-area">
-        <div className="oa-chat-examples" role="group" aria-label="AI 助手五项功能"><p id={`${composerId}-capabilities`}>点击功能，或在开头输入 @功能名 调用</p><button type="button" title="@会议模式919700881" disabled={working} onClick={() => { setQuestion('@会议模式919700881'); input.current?.focus(); }}>会议模式</button>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} title={`@${hint.label}`} disabled={working} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>
+        <div className="oa-chat-examples" role="group" aria-label="AI 助手功能"><p id={`${composerId}-capabilities`}>{adminModeActive ? '管理员模式已验证 · ' : ''}点击功能，或在开头输入 @功能名 调用</p><button type="button" title="@会议模式919700881" disabled={working} onClick={() => { setQuestion('@会议模式919700881'); input.current?.focus(); }}>会议模式</button>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} title={`@${hint.label}`} disabled={working} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>
         {(error || documents.error) && <p className="oa-chat-error" role="alert">{error || documents.error}</p>}
         <OaDocumentSource documents={documents} />
         {meetingSuggestionVisible && <div id={`${composerId}-meeting-suggestion`} className="oa-chat-command-suggestions" role="listbox" aria-label="命令补全"><button type="button" role="option" aria-selected="true" onMouseDown={event => event.preventDefault()} onClick={() => { setQuestion('@会议模式919700881'); input.current?.focus(); }}><strong>@会议模式919700881</strong><span>默认联合项目周会 · 发送后直接启动</span></button></div>}

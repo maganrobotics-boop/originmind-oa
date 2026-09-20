@@ -10,8 +10,9 @@ export const TASK_MIGRATIONS = Object.freeze({
   '0002_ai_workbench.sql': 'e9343e0f36d1666f18868745b9046837a82e0ca8549d93057452c72fc420ca27',
   '0003_ai_workbench_artifacts.sql': '393f96ef5cba7caced716412e074cbb8c207cd40d9cc222097dfabc3df6cdb92',
   '0004_ai_workbench_retention.sql': '4f10e8ba74eae321befde9a194d6306a08ed0c8bdd4d4f5d1ca9bcba02aba886',
+  '0005_project_work_items.sql': '6e297736b74333c1a1d29d3a370c21155503d45cc82a0ae8452686a9debeeeba',
 });
-export const TASK_SCHEMA_QUERY = "SELECT type,name,sql FROM sqlite_master WHERE (name GLOB 'ai_workbench_*' OR tbl_name GLOB 'ai_workbench_*') AND name NOT GLOB 'sqlite_*' ORDER BY type,name";
+export const TASK_SCHEMA_QUERY = "SELECT type,name,sql FROM sqlite_master WHERE (name GLOB 'ai_workbench_*' OR tbl_name GLOB 'ai_workbench_*' OR name GLOB 'project_work_items*' OR tbl_name='project_work_items') AND name NOT GLOB 'sqlite_*' ORDER BY type,name";
 const hash = value => createHash('sha256').update(value).digest('hex');
 const fail = (code, details = {}) => { throw Object.assign(new Error(code), details); };
 // Only these fixed labels and numeric HTTP statuses may leave this process.
