@@ -116,6 +116,26 @@ test('OA explicit image requests explain when the approved revision has no image
   assert.match(result.answer,/没有可展示的图片/u); assert.equal(state.calls.length,0);
 });
 
+test('50 image questions either return approved images or an explicit no-image result without model generation', async () => {
+  const state = globalThis[stateKey];
+  state.allowImageDb = true;
+  const questions = Array.from({ length: 50 }, (_, index) => `请展示实验室机器人第 ${index + 1} 组图片`);
+  for (const [index, question] of questions.entries()) {
+    state.calls.length = 0;
+    state.assets = index % 2 === 0
+      ? [{ itemId:chunk.itemId, revisionId:chunk.revisionId, assetPath:`assets/robot-${index + 1}.jpg`, mimeType:'image/jpeg' }]
+      : [];
+    const result = await client.answerOaChatQuestion(question,[{...chunk, content:`实验室机器人平台 ${index + 1}`}]);
+    assert.equal(client.questionRequestsKnowledgeImages(question), true, question);
+    if (state.assets.length) {
+      assert.equal(result.sourceType,'oa_knowledge_images'); assert.equal(result.images.length,1);
+    } else {
+      assert.equal(result.sourceType,'oa_knowledge_images_unavailable'); assert.equal(result.images.length,0);
+    }
+    assert.equal(state.calls.length,0);
+  }
+});
+
 test('ordinary general knowledge bypasses weak OA retrieval matches and is labeled', async () => {
   globalThis[stateKey].reply={received:true,answer:'水在标准大气压下的沸点通常是 100 摄氏度。',mode:'general',provider:'bailian'};
   const result=await client.answerOaChatQuestion('水的沸点是多少？',[chunk]);

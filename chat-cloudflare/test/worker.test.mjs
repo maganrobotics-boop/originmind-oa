@@ -1283,6 +1283,18 @@ test("public chat returns verified image metadata without passing capability tok
   assert.match(result.answer, /已审核资料图片/u);
 });
 
+test("public chat explains missing approved images without invoking the text model", async () => {
+  let calls = 0;
+  const env = makeEnvironment({ AI: { run: async () => { calls += 1; return { response: "不应调用" }; } } });
+  const result = await (await handleRequest(apiRequest("/api/chat", { method: "POST", body: {
+    topic: "research", messages: [{ role: "user", content: "实验室机器人图片" }],
+  } }), env, {}, runtime())).json();
+  assert.equal(result.mode, "retrieval");
+  assert.equal(result.fallbackReason, "no_images");
+  assert.match(result.answer, /没有可展示的图片/u);
+  assert.equal(calls, 0);
+});
+
 test("continuation respects the daily model ceiling and does not discard a completed partial answer", async () => {
   let calls = 0;
   const env = makeEnvironment({ AI: { run: async () => { calls += 1; return { response: "研究灵巧操作。[1]", finish_reason: "length" }; } } });

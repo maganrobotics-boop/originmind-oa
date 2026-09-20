@@ -1044,6 +1044,19 @@ async function api(context) {
           releaseId: releaseId(context),
         });
       }
+      if (questionRequestsKnowledgeImages(last.content)) {
+        return chatResult({
+          answer: documents.length
+            ? "已找到相关文字资料，但当前公开审核版本没有可展示的图片。请由管理员补充并审核图片后再试。"
+            : "目前公开知识库没有找到与该问题相关的已审核图片。",
+          sources,
+          images: [],
+          mode: "retrieval",
+          fallbackReason: "no_images",
+          oaPublicStatus: oa.status,
+          releaseId: releaseId(context),
+        });
+      }
       const config = await getModelConfig(context);
       const active = modelProvider(context, config);
       const questionScope = [...retrievalHistory.map(message => message.content), last.content].join(' ');
