@@ -48,9 +48,10 @@ test('shared text cannot set HTML or carry a javascript origin', async () => {
   await assert.rejects(h.createAnswerShareUrl(sample, 'javascript:alert(1)'));
   assert.doesNotMatch(source, /\.innerHTML\s*=|eval\s*\(|new Function\s*\(/);
 });
-test('share import never fetches or sends a chat request', () => {
+test('share import fetches only the bounded snapshot endpoint and never sends a chat request', () => {
   const incoming = source.slice(source.indexOf('async function openIncomingSharedAnswer'));
-  assert.doesNotMatch(incoming, /fetch\(|\/api\/chat|dispatchQuestion|localStorage\.setItem/);
+  assert.match(incoming, /fetch\(`\/api\/shares\//u);
+  assert.doesNotMatch(incoming, /\/api\/chat|dispatchQuestion|localStorage\.setItem/);
   assert.match(incoming, /未经独立核验/);
 });
 

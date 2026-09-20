@@ -48,6 +48,15 @@ async function boundedShareStream(stream) {
 
 async function createAnswerShareUrl(value, origin) {
   const snapshot = answerSnapshot(value);
+  if (typeof fetch === 'function') {
+    const response = await fetch('/api/shares', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json', accept: 'application/json' }, body: JSON.stringify({ question: snapshot.question, answer: snapshot.answer }) });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || typeof data.id !== 'string' || !/^[a-f0-9]{16}$/.test(data.id)) throw new Error(data.error || '短链接生成失败，请稍后重试。');
+    const base = new URL('/', origin);
+    if (!/^https?:$/.test(base.protocol)) throw new Error('分享地址不正确。');
+    base.searchParams.set('share', data.id);
+    return base.href;
+  }
   const bytes = new TextEncoder().encode(JSON.stringify(snapshot));
   let encoding = 'text';
   let payload = bytes;
@@ -173,7 +182,7 @@ function openAnswerShare(snapshot, opener, intent = 'copy') {
   // Build locally, then use a second user gesture to preserve native-share activation.
   void createAnswerShareUrl(snapshot, window.location.origin).then(url => {
     if (!dialog.isConnected) return;
-    status.textContent = '链接包含完整文字和公式；较长链接可能被部分应用截断。';
+    status.textContent = '短链接已生成，有效期 30 天。';
     copy.disabled = false; share.disabled = false;
     copy.addEventListener('click', async () => {
       try { await writeMessageClipboard(url); status.textContent = '分享链接已复制'; }
@@ -247,16 +256,19 @@ function installQuestionActions(article, question, onEdit, onCopy) {
 }
 
 async function openIncomingSharedAnswer() {
-  if (window.location.pathname === '/manage' || !window.location.hash.startsWith(ANSWER_SHARE_PREFIX)) return;
+  const shareId = new URLSearchParams(window.location.search).get('share');
+  if (window.location.pathname === '/manage' || (!window.location.hash.startsWith(ANSWER_SHARE_PREFIX) && !shareId)) return;
   const hash = window.location.hash;
   // Consume the fragment before rendering or loading any optional answer content.
-  window.history.replaceState(window.history.state, '', window.location.pathname + window.location.search);
+  window.history.replaceState(window.history.state, '', window.location.pathname);
   const dialog = messageActionDialog('用户分享的问答', null);
   dialog.append(element('p', { className: 'message-dialog-note', text: '这是分享者提供的文字快照，未经独立核验，不代表新的官方确认；不会自动提问或保存到你的聊天记录。' }));
   const status = element('p', { text: '正在读取分享…', attributes: { role: 'status' } });
   dialog.append(status); dialog.showModal();
   try {
-    const snapshot = await decodeAnswerShare(hash);
+    const snapshot = shareId
+      ? answerSnapshot(await fetch(`/api/shares/${encodeURIComponent(shareId)}`, { headers: { accept: 'application/json' }, credentials: 'same-origin' }).then(async response => { const data = await response.json(); if (!response.ok) throw new Error(data.error || '分享链接无法读取。'); return data; }))
+      : await decodeAnswerShare(hash);
     if (!dialog.isConnected) return;
     status.remove(); answerSharePreview(dialog, snapshot);
   } catch (error) { if (dialog.isConnected) status.textContent = error.message || '分享链接无法读取。'; }

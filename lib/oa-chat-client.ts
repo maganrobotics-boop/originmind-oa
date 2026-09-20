@@ -100,8 +100,7 @@ async function answerImages(chunks: RankedKnowledgeChunk[]): Promise<OaChatImage
  * cannot set documents, visibility, item IDs or a retrieval capability. */
 export async function answerOaChatQuestion(question: string, ranked: RankedKnowledgeChunk[], history: OaChatHistory = []) {
   const chunks = ranked.slice(0, 6);
-  if (!chunks.length) {
-    if (!questionAllowsGeneralKnowledge(question)) return { answer: questionRequiresKnowledgeEvidence(question) ? '目前知识库没有找到足够依据回答这个内部或项目问题。' : '目前没有足够信息回答这个问题。', citations: [], images: [], mode: 'no_evidence', sourceType: 'oa_knowledge_required' };
+  if (questionAllowsGeneralKnowledge(question)) {
     try {
       const result = await bridge({ operation: 'answer', answerType: 'general', question, history: history.slice(-2), documents: [] }, 70000);
       if (result.mode !== 'general' || typeof result.answer !== 'string' || !result.answer.trim() || result.answer.length > 12000 || !result.answer.isWellFormed()) throw new Error('CHAT_BRIDGE_INVALID_ANSWER');
@@ -111,6 +110,7 @@ export async function answerOaChatQuestion(question: string, ranked: RankedKnowl
       return { answer: '这是普通常识问题，但通用知识回答服务暂不可用，请稍后重试。', citations: [], images: [], mode: 'retrieval', fallbackReason: 'general_model_unavailable', sourceType: 'model_general_knowledge' };
     }
   }
+  if (!chunks.length) return { answer: questionRequiresKnowledgeEvidence(question) ? '目前知识库没有找到足够依据回答这个内部或项目问题。' : '目前没有足够信息回答这个问题。', citations: [], images: [], mode: 'no_evidence', sourceType: 'oa_knowledge_required' };
   const documents = chunks.map((chunk, index) => ({
     id: String(index + 1), title: prefix(chunk.title, 300), body: prefix(chunk.content, 3500),
     updatedAt: prefix(chunk.updatedAt || '', 40), origin: 'oa_internal',

@@ -86,9 +86,9 @@ test('no authorized evidence means no model request', async () => {
   assert.equal(result.mode,'no_evidence'); assert.equal(globalThis[stateKey].calls.length,0);
 });
 
-test('ordinary general knowledge may use the model without OA documents and is labeled', async () => {
+test('ordinary general knowledge bypasses weak OA retrieval matches and is labeled', async () => {
   globalThis[stateKey].reply={received:true,answer:'水在标准大气压下的沸点通常是 100 摄氏度。',mode:'general',provider:'bailian'};
-  const result=await client.answerOaChatQuestion('水的沸点是多少？',[]);
+  const result=await client.answerOaChatQuestion('水的沸点是多少？',[chunk]);
   assert.equal(result.mode,'general'); assert.equal(result.sourceType,'model_general_knowledge');
   assert.match(result.answer,/来源类型：模型通用知识/u);
   const payload=JSON.parse(globalThis[stateKey].calls[0].init.body);

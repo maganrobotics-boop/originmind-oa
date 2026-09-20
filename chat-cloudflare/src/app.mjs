@@ -858,6 +858,26 @@ async function api(context) {
       },
     });
     if (method === "POST" || method === "PATCH") sameOrigin(context);
+    if (path === "shares" && method === "POST") {
+      await limit(context, "share", 20, 3600);
+      const input = await readJson(request, 32_000);
+      if (!input || typeof input !== "object" || Array.isArray(input) || Object.keys(input).some((key) => !["question", "answer"].includes(key))
+        || typeof input.question !== "string" || input.question.length > 2_000
+        || typeof input.answer !== "string" || !input.answer.trim() || input.answer.length > 12_000) throw new PublicError("分享内容不正确", 400);
+      const id = randomHex(8), now = Date.now(), expires = now + 30 * 24 * 60 * 60 * 1000;
+      await database(context).prepare("DELETE FROM answer_shares WHERE expires_at<?").bind(now).run();
+      await database(context).prepare("INSERT INTO answer_shares(id,question,answer,created_at,expires_at) VALUES(?,?,?,?,?)")
+        .bind(id, input.question, input.answer, now, expires).run();
+      return json({ id, expiresAt: new Date(expires).toISOString() }, 201);
+    }
+    if (path.startsWith("shares/") && method === "GET") {
+      await limit(context, "share-read", 120, 3600);
+      const id = path.slice("shares/".length);
+      if (!/^[a-f0-9]{16}$/u.test(id)) throw new PublicError("分享链接不正确", 400);
+      const row = await database(context).prepare("SELECT question,answer,expires_at AS expiresAt FROM answer_shares WHERE id=? AND expires_at>=?").bind(id, Date.now()).first();
+      if (!row) throw new PublicError("分享链接不存在或已过期", 404);
+      return json({ v: 1, question: row.question, answer: row.answer, expiresAt: new Date(row.expiresAt).toISOString() });
+    }
     if (path.startsWith("knowledge/assets/") && method === "GET") {
       await limit(context, "knowledge-image", 600);
       return await proxyKnowledgeAsset(context, path.slice("knowledge/assets/".length));
@@ -966,7 +986,7 @@ async function api(context) {
       const chatResult = async (result) => {
         result = {
           ...result,
-          ...(oa.documents.length ? { images: chatKnowledgeImages(documents) } : {}),
+          ...(result.mode !== "general" && oa.documents.length ? { images: chatKnowledgeImages(documents) } : {}),
           answer: cleanAnswerPresentation(cleanPublicChatText(result.answer)) || fallbackAnswer([]),
           sources: result.sources.map((source) => ({
             ...source,
@@ -1014,7 +1034,7 @@ async function api(context) {
       const config = await getModelConfig(context);
       const active = modelProvider(context, config);
       const questionScope = [...retrievalHistory.map(message => message.content), last.content].join(' ');
-      const generalKnowledge = !sourceQuestion && !documents.length && questionAllowsGeneralKnowledge(questionScope);
+      const generalKnowledge = !sourceQuestion && questionAllowsGeneralKnowledge(questionScope);
       if ((!documents.length && !generalKnowledge) || !active.provider) {
         return chatResult({
           answer: fallbackAnswer(documents),
@@ -1086,7 +1106,7 @@ async function api(context) {
       }
       return chatResult({
         answer: generalKnowledge ? `**来源类型：模型通用知识（未引用公开知识库资料）**\n\n${visibleAnswer}` : visibleAnswer,
-        sources,
+        sources: generalKnowledge ? [] : sources,
         mode: generalKnowledge ? "general" : "ai",
         provider,
         oaPublicStatus: oa.status,
