@@ -114,7 +114,7 @@ async function answerImages(chunks: RankedKnowledgeChunk[], includeRevisionImage
 /** Receives only chunks obtained by the authenticated OA route. Browser input
  * cannot set documents, visibility, item IDs or a retrieval capability. */
 export async function answerOaChatQuestion(question: string, ranked: RankedKnowledgeChunk[], history: OaChatHistory = []) {
-  const chunks = ranked.slice(0, 3);
+  const imageRequest = questionRequestsKnowledgeImages(question);\n  // For image requests, keep a broader text-ranked window so a legacy\n  // text-only item cannot mask a newer approved revision with ready assets.\n  const chunks = ranked.slice(0, imageRequest ? 12 : 3);
   const generalKnowledge = chunks.length
     ? questionPrefersGeneralKnowledge(question)
     : questionAllowsGeneralKnowledge(question);
