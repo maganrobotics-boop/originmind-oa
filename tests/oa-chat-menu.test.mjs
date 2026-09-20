@@ -10,6 +10,7 @@ test('every workspace header opens chat on the right and centers the current sec
   assert.doesNotMatch(page, /PageSecondaryMenu|打开当前模块目录|当前模块二级目录/u);
   const topbar = page.slice(page.indexOf('<header className="topbar">'), page.indexOf('</header>', page.indexOf('<header className="topbar">')));
   assert.doesNotMatch(topbar, /breadcrumb-home|breadcrumb-brand|联合研发 OA/u);
+  assert.doesNotMatch(topbar, /className="breadcrumbs"/u);
   assert.match(page, /aria-label="打开个人账户菜单"/u);
   assert.match(page, /className="oa-sidebar-account"/u);
   assert.match(page, /<OaConversationProvider/u);
@@ -72,7 +73,8 @@ test('sidebar uses laboratory model and AI assistant names without changing dest
 test('OA typography uses symmetric header columns and stable Chinese font weights', async () => {
   const css = await read('app/oa-workspace.css');
   assert.match(css, /grid-template-columns:44px minmax\(0,1fr\) 44px/u);
-  assert.match(css, /--oa-font-sans: -apple-system, BlinkMacSystemFont/u);
+  assert.match(css, /--oa-font-sans: "Microsoft YaHei UI", "Microsoft YaHei"/u);
+  assert.match(css, /font-synthesis: none/u);
   assert.match(css, /\.oa-workspace \.oa-topbar-secondary-title \{[\s\S]*?position:static;[\s\S]*?grid-column:2/u);
   assert.match(css, /\.oa-workspace \.topbar-actions \{ grid-column:3/u);
   assert.doesNotMatch(css.slice(css.indexOf('OA typography and header rhythm')), /font-weight:(?:650|750|760)/u);

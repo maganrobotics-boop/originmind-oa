@@ -2472,9 +2472,6 @@ export default function Home() {
         <header className="topbar">
           <button type="button" className="workspace-sidebar-toggle" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "展开侧栏" : "收起侧栏"} aria-expanded={!sidebarCollapsed} aria-controls="oa-desktop-navigation"><Menu className="size-5" /></button>
           <button ref={mobileMenuButtonRef} className="mobile-menu-button" onClick={() => setMobileNavOpen(true)} aria-label="打开导航" aria-expanded={mobileNavOpen} aria-controls="mobile-navigation"><Menu className="size-5" /></button>
-          <div className="breadcrumbs">
-            <strong>{secondaryTitle}</strong>
-          </div>
           <div className="oa-topbar-secondary-title"><strong>{secondaryTitle}</strong></div>
           <div className="topbar-actions">
             <OaConversationMenu />
