@@ -30,7 +30,7 @@ test('confirmed AI clearing remounts fresh local state and invalidates pending r
   const [panel, context] = await Promise.all([read('components/knowledge/oa-chat-panel.tsx'),read('components/knowledge/oa-conversation-context.tsx')]);
   assert.match(context,/window\.confirm\('清空当前 AI 聊天/u);
   assert.match(context,/setAiEpoch\(value => value \+ 1\)/u);
-  assert.match(panel, /<OaAiChatPanel key=\{aiEpoch\} \/>/u);
+  assert.match(panel, /<OaAiChatPanel key=\{aiEpoch\} isAdmin=\{isAdmin\} \/>/u);
   assert.match(panel, /useEffect\(\(\) => \(\) => \{ requestSequence\.current\+\+; requestRef\.current\?\.abort\(\); \}, \[\]\)/u);
   assert.match(panel,/if \(sequence !== requestSequence\.current\) return/u);
   for (const initial of ["useState('')","useState<Turn[]>([])","useState(false)"]) assert.ok(panel.includes(initial));
