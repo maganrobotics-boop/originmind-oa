@@ -3,9 +3,13 @@ import { readFile } from 'node:fs/promises';
 import test from 'node:test';
 const read = name => readFile(new URL(`../${name}`, import.meta.url), 'utf8');
 
-test('chat header replaces duplicate identity with the conversation menu and keeps one sidebar account', async () => {
+test('every workspace header uses a right drawer and shows only the current secondary title', async () => {
   const page = await read('app/page.tsx');
-  assert.match(page, /activeView === "knowledge" && knowledgeTab === "ask" \? <OaConversationMenu \/> : <button/u);
+  assert.match(page, /activeView === "knowledge" && knowledgeTab === "ask" \? <OaConversationMenu \/> : <PageSecondaryMenu/u);
+  assert.match(page, /aria-label="打开当前模块目录"/u);
+  assert.match(page, /aria-label="当前模块二级目录"/u);
+  const topbar = page.slice(page.indexOf('<header className="topbar">'), page.indexOf('</header>', page.indexOf('<header className="topbar">')));
+  assert.doesNotMatch(topbar, /breadcrumb-home|breadcrumb-brand|联合研发 OA/u);
   assert.match(page, /aria-label="打开个人账户菜单"/u);
   assert.match(page, /className="oa-sidebar-account"/u);
   assert.match(page, /<OaConversationProvider/u);
@@ -46,6 +50,15 @@ test('accessible header controls use a right-side drawer and never use global cr
   assert.match(context,/disabled=\{!chat\.peer && !chat\.aiDirty\}/u);
   assert.match(context,/requestAnimationFrame/u);
   assert.doesNotMatch(panel+context,/dispatchEvent|addEventListener\(['"]clear/u);
+});
+
+test('dashboard pending card aggregates approvals, model reviews and assigned action items', async () => {
+  const page = await read('app/page.tsx');
+  assert.match(page, /const pendingCount = myPendingApprovals\.length \+ supplementalPendingCount/u);
+  assert.match(page, /fetch\("\/api\/work-items"/u);
+  assert.match(page, /fetch\("\/api\/knowledge\?scope=review"/u);
+  assert.match(page, /setActiveView\("todos"\)/u);
+  assert.match(page, /审批、资料审核和行动项统一汇总/u);
 });
 
 test('sidebar uses laboratory model and AI assistant names without changing destinations', async () => {
