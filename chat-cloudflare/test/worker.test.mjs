@@ -1270,8 +1270,8 @@ test("an unsafe continuation is rejected by the same factual-output checks as a 
 test("public chat returns verified image metadata without passing capability tokens to the text model", async () => {
   const { createKnowledgeAssetToken } = await import("../src/knowledge-asset-token.mjs");
   const token = await createKnowledgeAssetToken("11111111-2222-4333-8444-555555555555", SERVICE_TOKEN);
-  let prompt;
-  const env = makeEnvironment({ AI: { run: async (_model, input) => { prompt = input.messages[0].content; return { response: "平台用于机器人系统研究。[1]" }; } } });
+  let calls = 0;
+  const env = makeEnvironment({ AI: { run: async () => { calls += 1; return { response: "不应调用" }; } } });
   const result = await (await handleRequest(apiRequest("/api/chat", { method: "POST", body: { topic: "research", messages: [{ role: "user", content: "显示平台图片" }] } }), env, {}, runtime(async () => {
     const source = await oaResponse().json();
     source.chunks[0].assets = [{ token, mimeType: "image/png", alt: "差速轮式小车实验平台" }];
@@ -1279,9 +1279,8 @@ test("public chat returns verified image metadata without passing capability tok
   }))).json();
   assert.equal(result.images[0].url, `/api/knowledge/assets/${token}`);
   assert.equal(result.images[0].alt, "差速轮式小车实验平台");
-  assert.ok(!prompt.includes(token));
-  assert.match(prompt, /差速轮式小车实验平台/u);
-  assert.match(prompt, /没有执行原图像素分析/u);
+  assert.equal(calls, 0);
+  assert.match(result.answer, /已审核资料图片/u);
 });
 
 test("continuation respects the daily model ceiling and does not discard a completed partial answer", async () => {
