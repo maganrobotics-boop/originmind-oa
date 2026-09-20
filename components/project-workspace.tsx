@@ -10,14 +10,16 @@ import type { WorkItem } from '@/lib/project-work-items';
 import './project-workspace.css';
 
 type ApprovalSummary = { id: string; title: string; type: string; status: string; step: string; updatedAt: string; currentReviewerEmail?: string };
+type KnowledgeReviewSummary = { id: string; title: string; category: string; summary?: string; submitterName?: string; submitterEmail?: string; createdAt: string };
 type PersonOption = { email: string; name: string };
-type Props = { mode: 'todos' | 'project'; approvals: ApprovalSummary[]; currentUserEmail?: string; people?: PersonOption[]; onOpenApproval: (id: string) => void };
+type Props = { mode: 'todos' | 'project'; approvals: ApprovalSummary[]; currentUserEmail?: string; people?: PersonOption[]; canReviewKnowledge?: boolean; onOpenApproval: (id: string) => void; onOpenKnowledgeReview: () => void };
 
 const kindLabel: Record<WorkItem['kind'], string> = { task: '任务', meeting_action: '会议行动项', risk: '风险', milestone: '里程碑' };
 const today = () => new Date().toISOString().slice(0, 10);
 
-export function ProjectWorkspace({ mode, approvals, currentUserEmail = '', people = [], onOpenApproval }: Props) {
+export function ProjectWorkspace({ mode, approvals, currentUserEmail = '', people = [], canReviewKnowledge = false, onOpenApproval, onOpenKnowledgeReview }: Props) {
   const [items, setItems] = useState<WorkItem[]>([]);
+  const [knowledgeReviews, setKnowledgeReviews] = useState<KnowledgeReviewSummary[]>([]);
   const [directory, setDirectory] = useState<PersonOption[]>(people);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -31,19 +33,22 @@ export function ProjectWorkspace({ mode, approvals, currentUserEmail = '', peopl
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const [response, peopleResponse] = await Promise.all([
+      const [response, peopleResponse, knowledgeResponse] = await Promise.all([
         fetch('/api/work-items', { credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' } }),
         fetch('/api/people', { credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' } }),
+        canReviewKnowledge ? fetch('/api/knowledge?scope=review', { credentials: 'same-origin', cache: 'no-store', headers: { accept: 'application/json' } }) : Promise.resolve(null),
       ]);
       const data = await response.json() as { items?: WorkItem[]; error?: string };
       if (!response.ok) throw new Error(data.error || '读取失败');
       const peopleData = await peopleResponse.json().catch(() => ({})) as { people?: Array<{ email: string; fullName: string }> };
+      const knowledgeData = knowledgeResponse ? await knowledgeResponse.json().catch(() => ({})) as { items?: KnowledgeReviewSummary[] } : {};
       setItems(data.items || []);
+      if (knowledgeResponse?.ok) setKnowledgeReviews(knowledgeData.items || []);
       if (peopleResponse.ok && peopleData.people?.length) setDirectory(peopleData.people.map(person => ({ email: person.email, name: person.fullName })));
       setError('');
     } catch (cause) { setError(cause instanceof Error ? cause.message : '读取失败'); }
     finally { setLoading(false); }
-  }, []);
+  }, [canReviewKnowledge]);
   useEffect(() => { void load(); }, [load]);
 
   const pendingApprovals = useMemo(() => approvals.filter(item => ['待审核', '审批中'].includes(item.status) && item.currentReviewerEmail?.toLowerCase() === currentUserEmail.toLowerCase()), [approvals, currentUserEmail]);
@@ -77,9 +82,10 @@ export function ProjectWorkspace({ mode, approvals, currentUserEmail = '', peopl
 
   if (mode === 'todos') return <div className="project-page">
     <header className="project-page-head"><div><span>统一待办中心</span><h1>今天需要处理的事</h1><p>审批、项目任务与会议行动项集中在这里，完成状态会回写项目工作台。</p></div><button onClick={() => void load()}><RefreshCw />刷新</button></header>
-    <div className="project-summary-strip"><div><strong>{pendingApprovals.length + mine.length}</strong><span>待我处理</span></div><div><strong>{overdue.filter(item => item.assigneeEmail.toLowerCase() === currentUserEmail.toLowerCase()).length}</strong><span>已经逾期</span></div><div><strong>{mine.filter(item => item.sourceType === 'meeting').length}</strong><span>会议行动项</span></div></div>
+    <div className="project-summary-strip"><div><strong>{pendingApprovals.length + knowledgeReviews.length + mine.length}</strong><span>待我处理</span></div><div><strong>{overdue.filter(item => item.assigneeEmail.toLowerCase() === currentUserEmail.toLowerCase()).length}</strong><span>已经逾期</span></div><div><strong>{mine.filter(item => item.sourceType === 'meeting').length}</strong><span>会议行动项</span></div></div>
     {error && <p className="project-error">{error}</p>}
     <section className="project-panel"><h2><ClipboardCheck />待我审批</h2>{pendingApprovals.length ? pendingApprovals.map(item => <button type="button" className="approval-todo" key={item.id} onClick={() => onOpenApproval(item.id)}><div><strong>{item.title}</strong><span>{item.type} · 当前节点：{item.step}</span></div><b>处理</b></button>) : <p className="project-empty">目前没有待你审批的申请。</p>}</section>
+    {canReviewKnowledge && <section className="project-panel"><h2><ClipboardCheck />大模型与资料审批</h2>{knowledgeReviews.length ? knowledgeReviews.map(item => <button type="button" className="approval-todo" key={item.id} onClick={onOpenKnowledgeReview}><div><strong>{item.title}</strong><span>{item.category} · 提交人：{item.submitterName || item.submitterEmail || '项目成员'}</span></div><b>审核范围</b></button>) : <p className="project-empty">目前没有待审核的大模型成果或资料。</p>}</section>}
     <section className="project-panel"><h2><ListTodo />我的任务与行动项</h2>{loading ? <p className="project-empty">正在读取工作项…</p> : mine.length ? mine.map(item => <WorkItemRow key={item.id} item={item} />) : <p className="project-empty">目前没有分配给你的任务。</p>}</section>
   </div>;
 
