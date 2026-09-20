@@ -141,7 +141,7 @@ test('OA keeps its private retrieval and removes only the requested navigation e
     readFile(new URL('../app/api/lab-ai/ask/route.ts', import.meta.url), 'utf8'),
     readFile(new URL('../app/api/knowledge/[id]/assets/[...assetPath]/route.ts', import.meta.url), 'utf8'),
   ]);
-  const sidebar = page.slice(page.indexOf('function Sidebar('), page.indexOf('function PageSecondaryMenu('));
+  const sidebar = page.slice(page.indexOf('function Sidebar('), page.indexOf('function ApprovalRow('));
   assert.match(sidebar, /data-sidebar-section="office"[\s\S]*?aria-expanded=\{officeOpen\}/u);
   assert.match(sidebar, /data-sidebar-section="knowledge"[\s\S]*?aria-expanded=\{knowledgeOpen\}/u);
   assert.match(sidebar, /hidden=\{!officeOpen\}/u); assert.match(sidebar, /hidden=\{!knowledgeOpen\}/u);
