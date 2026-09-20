@@ -3,8 +3,8 @@ import { getDb } from '../db';
 import { listKnowledgeRevisionAssets } from './knowledge-assets';
 import { knowledgeImageReferences } from './knowledge-image-references.mjs';
 import type { RankedKnowledgeChunk } from './knowledge-policy';
-import { questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
-export { questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
+import { questionAllowsGeneralKnowledge, questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
+export { questionAllowsGeneralKnowledge, questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
 
 export type OaChatImage = { url: string; alt: string; mimeType: string };
 export type OaChatHistory = Array<{ role: 'user'; content: string }>;
@@ -101,7 +101,7 @@ async function answerImages(chunks: RankedKnowledgeChunk[]): Promise<OaChatImage
 export async function answerOaChatQuestion(question: string, ranked: RankedKnowledgeChunk[], history: OaChatHistory = []) {
   const chunks = ranked.slice(0, 6);
   if (!chunks.length) {
-    if (questionRequiresKnowledgeEvidence(question)) return { answer: '目前知识库没有找到足够依据回答这个内部或项目问题。', citations: [], images: [], mode: 'no_evidence', sourceType: 'oa_knowledge_required' };
+    if (!questionAllowsGeneralKnowledge(question)) return { answer: questionRequiresKnowledgeEvidence(question) ? '目前知识库没有找到足够依据回答这个内部或项目问题。' : '目前没有足够信息回答这个问题。', citations: [], images: [], mode: 'no_evidence', sourceType: 'oa_knowledge_required' };
     try {
       const result = await bridge({ operation: 'answer', answerType: 'general', question, history: history.slice(-2), documents: [] }, 70000);
       if (result.mode !== 'general' || typeof result.answer !== 'string' || !result.answer.trim() || result.answer.length > 12000 || !result.answer.isWellFormed()) throw new Error('CHAT_BRIDGE_INVALID_ANSWER');

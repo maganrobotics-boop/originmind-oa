@@ -720,13 +720,13 @@ test("OA Service Binding rejects redirects without invoking the model", async ()
   assert.equal(aiCalls, 0);
 });
 
-test("no matching documents means retrieval mode and no model invocation", async () => {
+test("an ordinary Chinese question without matching documents uses labeled general knowledge", async () => {
   let aiCalls = 0;
   const env = environment({
     AI: {
       async run() {
         aiCalls += 1;
-        return { response: "不应调用" };
+        return { response: "火星天气寒冷且变化显著；土豆配方需根据烹饪方式确定。" };
       },
     },
   });
@@ -738,10 +738,11 @@ test("no matching documents means retrieval mode and no model invocation", async
   );
   const result = await body(response);
   assert.equal(response.status, 200);
-  assert.equal(result.mode, "retrieval");
+  assert.equal(result.mode, "general");
   assert.equal(result.oaPublicStatus, "connected");
   assert.deepEqual(result.sources, []);
-  assert.equal(aiCalls, 0);
+  assert.match(result.answer, /来源类型：模型通用知识/u);
+  assert.equal(aiCalls, 1);
 });
 
 test("client-supplied assistant turns never enter the model prompt", async () => {

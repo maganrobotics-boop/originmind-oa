@@ -1,6 +1,6 @@
 import { buildGeneralChatMessages, buildGroundedChatMessages, boundedUserMessages } from './grounded-prompt.mjs';
 import { handleOaChatBridge } from './oa-chat-bridge.mjs';
-import { questionRequiresKnowledgeEvidence } from './question-scope.mjs';
+import { questionAllowsGeneralKnowledge } from './question-scope.mjs';
 import { chatKnowledgeImages, proxyKnowledgeAsset } from "./knowledge-assets.mjs";
 import { protectAnswerTechnicalText } from "./answer-math.mjs";
 import { cleanAnswerPresentation } from "./answer-presentation.mjs";
@@ -1014,7 +1014,7 @@ async function api(context) {
       const config = await getModelConfig(context);
       const active = modelProvider(context, config);
       const questionScope = [...retrievalHistory.map(message => message.content), last.content].join(' ');
-      const generalKnowledge = !documents.length && !questionRequiresKnowledgeEvidence(questionScope);
+      const generalKnowledge = !sourceQuestion && !documents.length && questionAllowsGeneralKnowledge(questionScope);
       if ((!documents.length && !generalKnowledge) || !active.provider) {
         return chatResult({
           answer: fallbackAnswer(documents),

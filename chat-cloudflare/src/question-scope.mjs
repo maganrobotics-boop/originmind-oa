@@ -5,3 +5,10 @@ const INTERNAL_QUESTION_PATTERN = /(?:我们|我司|本公司|公司内部|内�
 export function questionRequiresKnowledgeEvidence(question) {
   return INTERNAL_QUESTION_PATTERN.test(String(question || '').normalize('NFKC'));
 }
+
+export function questionAllowsGeneralKnowledge(question) {
+  const normalized = String(question || '').normalize('NFKC').trim();
+  if (questionRequiresKnowledgeEvidence(normalized)) return false;
+  return /\p{Script=Han}.*\p{Script=Han}/u.test(normalized)
+    || /\b(?:what|why|how|when|where|who|which|explain|define|calculate|compare|is|are|can|does|do)\b/iu.test(normalized);
+}
