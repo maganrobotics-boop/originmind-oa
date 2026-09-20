@@ -113,7 +113,7 @@ async function answerImages(chunks: RankedKnowledgeChunk[]): Promise<OaChatImage
 /** Receives only chunks obtained by the authenticated OA route. Browser input
  * cannot set documents, visibility, item IDs or a retrieval capability. */
 export async function answerOaChatQuestion(question: string, ranked: RankedKnowledgeChunk[], history: OaChatHistory = []) {
-  const chunks = ranked.slice(0, 6);
+  const chunks = ranked.slice(0, 3);
   const generalKnowledge = chunks.length
     ? questionPrefersGeneralKnowledge(question)
     : questionAllowsGeneralKnowledge(question);
@@ -129,7 +129,7 @@ export async function answerOaChatQuestion(question: string, ranked: RankedKnowl
   }
   if (!chunks.length) return { answer: questionRequiresKnowledgeEvidence(question) ? '目前知识库没有找到足够依据回答这个内部或项目问题。' : '目前没有足够信息回答这个问题。', citations: [], images: [], mode: 'no_evidence', sourceType: 'oa_knowledge_required' };
   const documents = chunks.map((chunk, index) => ({
-    id: String(index + 1), title: prefix(chunk.title, 300), body: prefix(chunk.content, 3500),
+    id: String(index + 1), title: prefix(chunk.title, 300), body: prefix(chunk.content, 2200),
     updatedAt: prefix(chunk.updatedAt || '', 40), origin: 'oa_internal',
     assets: [...knowledgeImageReferences(chunk.content).values()].slice(0, 8).map(alt => ({ alt: prefix(alt, 300) })),
   }));

@@ -30,6 +30,7 @@ import {
   safeSourceUrl,
 } from "./knowledge.mjs";
 import { generateValidatedAnswer } from "./answer-retry.mjs";
+import { answerMode } from "./answer-mode.mjs";
 import {
   inspectOaPublicKnowledge,
   probeOaPublicKnowledge,
@@ -1063,7 +1064,8 @@ async function api(context) {
       const messages = generalKnowledge
         ? buildGeneralChatMessages({ question: last.content, messages: payload.messages })
         : buildGroundedChatMessages({ documents, history, question: last.content, messages: payload.messages });
-      context.modelDeadline = Date.now() + 60_000;
+      const selectedMode = answerMode(last.content);
+      context.modelDeadline = Date.now() + (selectedMode === 'deep' ? 75_000 : 45_000);
       let provider = active.provider;
       const modelStartedAt = Date.now();
       const generated = await generateValidatedAnswer({
@@ -1071,6 +1073,10 @@ async function api(context) {
         retryInstruction: generalKnowledge ? undefined : "\n\n上一次生成结果未能通过完整性或资料引用校验。请重新独立作答：只输出完整正文；每个资料事实后紧跟有效的 [编号]；至少使用一个有效编号；不要输出参考资料列表、网址、联系方式、HTML 或未完成的句子。",
         generate: async (attemptMessages) => {
           try {
+          if (selectedMode === 'deep' && typeof context.env.AI?.run === "function") {
+            provider = "workers-ai";
+            return await workersAiCall(context, attemptMessages, 2_400);
+          }
           if (active.provider === "bailian") {
             try {
               return await modelCall(context, config, attemptMessages);
@@ -1127,6 +1133,7 @@ async function api(context) {
         sources: generalKnowledge ? [] : sources,
         mode: generalKnowledge ? "general" : "ai",
         provider,
+        answerMode: selectedMode,
         oaPublicStatus: oa.status,
         releaseId: releaseId(context),
       });

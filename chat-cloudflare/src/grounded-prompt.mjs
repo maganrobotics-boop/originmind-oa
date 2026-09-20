@@ -1,4 +1,5 @@
 import { cleanAnswerPresentation } from './answer-presentation.mjs';
+import { answerLengthInstruction, answerStructureInstruction } from './answer-mode.mjs';
 
 export function boundedUserMessages(messages, maximum = 3_000) {
   const recent = messages.filter((message) => message.role === "user").slice(-2);
@@ -13,10 +14,12 @@ export function boundedUserMessages(messages, maximum = 3_000) {
 }
 
 export function buildGeneralChatMessages({ question, messages = [] }) {
-  return [{
+  const result = [{
     role: 'system',
     content: `你是 OriginMind OA 的通用知识助手。仅回答不涉及 OriginMind、ARTS Robotics、OA、实验室、公司、项目、人员、客户、合同、内部流程、内部资料、设备状态、实验数据、代码配置或其他组织内部事实的普通常识问题。不得声称了解任何内部事实，不得编造实时信息；若问题实际需要内部资料，明确回答“该问题需要 OA 资料依据，不能用模型通用知识回答”。默认使用自然、专业、简洁的中文，用户使用其他语言时使用相应语言。不要添加资料引用、链接、联系方式或“来源类型”标签，来源标签由 OA 服务端统一添加。当前日期：${new Date().toISOString().slice(0, 10)}。`,
   }, ...boundedUserMessages(messages.length ? messages : [{ role: 'user', content: question }])];
+  result[0].content += `${answerLengthInstruction(question)}${answerStructureInstruction()}`;
+  return result;
 }
 
 
@@ -30,7 +33,7 @@ export function buildGroundedChatMessages({ documents, history = [], question, m
             title: document.title,
             date: document.updatedAt,
             sourceType: document.origin,
-            content: cleanAnswerPresentation(document.body, { title: document.title, document: true }).slice(0, 3_500),
+            content: cleanAnswerPresentation(document.body, { title: document.title, document: true }).slice(0, 2_200),
             imageCaptions: (document.assets || []).map((asset) => asset.alt),
           }),
         )
@@ -56,5 +59,6 @@ export function buildGroundedChatMessages({ documents, history = [], question, m
     messages[0].content = messages[0].content.replace('经 OA 审核公开的参考资料', '经 OA 审核、当前 OA 成员有权访问的内部及公开参考资料');
     messages[0].content += '\n本次是已登录的 OA 内部问答。内部资料仅用于本次成员问答，不表示资料已对公众公开。不得把内部内容写入公开资料、公开分享或对外统计。';
   }
+  messages[0].content += `${answerLengthInstruction(question)}${answerStructureInstruction()}`;
   return messages;
 }

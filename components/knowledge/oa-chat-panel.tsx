@@ -27,6 +27,7 @@ type Turn = { id: string; order: number; question: string; answer: string; citat
 type Reply = { answer?: string; citations?: KnowledgeCitation[]; images?: Image[]; error?: string; mode?: string; fallbackReason?: string };
 
 type EditableImage = { path: string; alt: string; file?: File; sourceUrl?: string };
+const revealDelay = () => new Promise(resolve => window.setTimeout(resolve, 16));
 
 function safeAssetName(value: string, index: number) {
   const base = value.split(/[?#]/u, 1)[0].split('/').pop()?.replace(/[^A-Za-z0-9._-]/gu, '-') || `image-${index + 1}.png`;
@@ -269,7 +270,13 @@ function OaAiChatPanel({ isAdmin = false }: { isAdmin?: boolean }) {
       const images = (Array.isArray(data.images) ? data.images : []).filter(validImage).slice(0, 4);
       const fallback = data.mode === 'retrieval' && data.fallbackReason !== 'no_documents';
       setRequestStatus(replyChatIndicators(data));
-      setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: data.answer!, citations: data.citations || [], images, failed: fallback } : turn));
+      const fullAnswer = data.answer!;
+      for (const length of Array.from({ length: Math.floor((fullAnswer.length - 1) / 8) }, (_, index) => (index + 1) * 8)) {
+        if (sequence !== requestSequence.current || controller.signal.aborted) return;
+        setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: fullAnswer.slice(0, length), citations: [], images: [] } : turn));
+        await revealDelay();
+      }
+      setTurns(current => current.map(turn => turn.id === id ? { ...turn, answer: fullAnswer, citations: data.citations || [], images, failed: fallback } : turn));
       setLastAnswer(fallback ? null : { body: userFacingAnswer(data.answer), omittedImages: images.length });
     } catch (cause) {
       if (sequence !== requestSequence.current) return;

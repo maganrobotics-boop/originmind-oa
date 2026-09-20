@@ -6,6 +6,7 @@ import { createTaskToolModel } from './task-tool-model.mjs';
 import { decryptSecret } from './crypto.mjs';
 import { fallbackAnswer, aliyunEndpoint } from './knowledge.mjs';
 import { generateValidatedAnswer } from './answer-retry.mjs';
+import { answerMode } from './answer-mode.mjs';
 
 export const OA_CHAT_PATH = '/api/internal/oa-answer';
 export const OA_CHAT_ORIGIN = 'https://chat.omindos.ai';
@@ -135,12 +136,17 @@ export async function handleOaChatBridge(context, engine, now = Date.now()) {
     const messages = answerType === 'general'
       ? buildGeneralChatMessages({ question: payload.question, messages: [...payload.history, { role: 'user', content: payload.question }] })
       : buildGroundedChatMessages({ documents: payload.documents, history: [], question: payload.question, messages: [...payload.history, { role: 'user', content: payload.question }], scope: 'internal' });
-    context.modelDeadline = Date.now() + 60000;
+    const selectedMode = answerMode(payload.question);
+    context.modelDeadline = Date.now() + (selectedMode === 'deep' ? 75000 : 45000);
     let provider = active.provider;
     const generated = await generateValidatedAnswer({
       messages,
       retryInstruction: answerType === 'general' ? undefined : '\n\n上一次生成结果未能通过完整性或资料引用校验。请重新独立作答：只输出完整正文；每个资料事实后紧跟有效的 [编号]；至少使用一个有效编号；不要输出参考资料列表、网址、联系方式、HTML 或未完成的句子。',
       generate: async attemptMessages => {
+        if (selectedMode === 'deep' && typeof env.AI?.run === 'function') {
+          provider = 'workers-ai';
+          return engine.workersAiCall(context, attemptMessages, 2400);
+        }
         if (provider === 'bailian') {
         try { return await engine.modelCall(context, config, attemptMessages); }
         catch (error) {
@@ -153,7 +159,7 @@ export async function handleOaChatBridge(context, engine, now = Date.now()) {
       validate: answer => answerType === 'general' ? engine.visibleGeneralAnswer(answer) : engine.visibleAiAnswer(answer, payload.documents.length),
     });
     if (!generated.visible) return fallback(generated.failureReason);
-    return json({ received: true, answer: generated.visible, mode: answerType === 'general' ? 'general' : 'ai', provider });
+    return json({ received: true, answer: generated.visible, mode: answerType === 'general' ? 'general' : 'ai', provider, answerMode: selectedMode });
   } catch (error) {
     if (payload.operation !== 'task') return json({ error: '问答服务暂不可用，请稍后重试' }, 503);
     const diagnostic = taskFailureDiagnostic(error, taskPhase);

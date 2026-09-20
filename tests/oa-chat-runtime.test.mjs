@@ -68,9 +68,9 @@ test('OA uses the signed service binding even when same-zone public fetch is una
 
 test('OA sends a bounded authorized context and keeps internal image access local', async () => {
   const result=await client.answerOaChatQuestion('请说明测试结果',Array.from({length:8},(_,index)=>({...chunk,title:`资料 ${index}`,content:'甲'.repeat(4000)})),[{role:'user',content:'之前的问题'}]);
-  assert.equal(result.answer,'**完整回答**。'); assert.equal(result.citations.length,6); assert.deepEqual(result.images,[]);
+  assert.equal(result.answer,'**完整回答**。'); assert.equal(result.citations.length,3); assert.deepEqual(result.images,[]);
   const payload=JSON.parse(globalThis[stateKey].calls[0].init.body);
-  assert.equal(payload.documents.length,6); assert.ok(payload.documents.every(document=>document.body.length===3500 && document.origin==='oa_internal'));
+  assert.equal(payload.documents.length,3); assert.ok(payload.documents.every(document=>document.body.length===2200 && document.origin==='oa_internal'));
   assert.deepEqual(payload.history,[{role:'user',content:'之前的问题'}]);
 });
 

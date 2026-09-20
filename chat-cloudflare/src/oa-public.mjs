@@ -12,7 +12,14 @@ const MAX_RESPONSE_BYTES = 16 * 1024;
 // Large public-knowledge searches can legitimately exceed the former 3-second
 // cutoff. Keep this below the release preflight's 15-second deadline while
 // leaving enough room for production D1 variance.
-const TIMEOUT_MS = 12_000;
+const TIMEOUT_MS = 8_000;
+const RETRIEVAL_CACHE_TTL_MS = 5 * 60_000;
+const retrievalCaches = new WeakMap();
+function retrievalCache(context) {
+  let cache = retrievalCaches.get(context.env);
+  if (!cache) { cache = new Map(); retrievalCaches.set(context.env, cache); }
+  return cache;
+}
 // The status probe only needs to exercise authentication, rate limiting, D1,
 // and the response contract. A rare single term avoids turning every health
 // check into an expensive multi-term ranking query.
@@ -253,6 +260,9 @@ export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS) {
     return { status: "not_configured", documents: [] };
   }
   if (normalized.length < 2) return { status: "invalid_question", documents: [] };
+  const cache = retrievalCache(context);
+  const cached = cache.get(normalized);
+  if (cached && Date.now() - cached.storedAt < RETRIEVAL_CACHE_TTL_MS) return cached.value;
   try {
     const init = {
       method: "POST",
@@ -279,9 +289,9 @@ export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS) {
     } catch {
       return { status: "invalid_response", documents: [] };
     }
-    return {
+    const value = {
       status: "connected",
-      documents: chunks.map((item) => ({
+      documents: chunks.slice(0, 3).map((item) => ({
         id: `oa:${item.id}`,
         title: item.title,
         body: item.excerpt,
@@ -296,6 +306,9 @@ export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS) {
         ...(item.assets?.length ? { assets: item.assets } : {}),
       })),
     };
+    if (cache.size >= 100) cache.delete(cache.keys().next().value);
+    cache.set(normalized, { storedAt: Date.now(), value });
+    return value;
   } catch (error) {
     return { status: requestFailureStatus(error), documents: [] };
   }
