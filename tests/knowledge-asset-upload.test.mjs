@@ -58,10 +58,10 @@ function fixture(t, through = 3) {
   t.after(() => sqlite.close());
   sqlite.exec(`
     CREATE TABLE migration_control (id TEXT PRIMARY KEY, deactivated_at TEXT);
-    CREATE TABLE knowledge_items (id TEXT PRIMARY KEY, current_revision_id TEXT, status TEXT);
+    CREATE TABLE knowledge_items (id TEXT PRIMARY KEY, current_revision_id TEXT, active_revision_id TEXT, status TEXT);
     CREATE TABLE knowledge_revisions (id TEXT PRIMARY KEY, item_id TEXT, status TEXT, content TEXT DEFAULT '');
     CREATE TABLE knowledge_revision_parts (revision_id TEXT, item_id TEXT, part_no INTEGER, content TEXT);
-    INSERT INTO knowledge_items VALUES ('item', 'revision', 'pending');
+    INSERT INTO knowledge_items VALUES ('item', 'revision', NULL, 'pending');
     INSERT INTO knowledge_revisions VALUES ('revision', 'item', 'pending', '');
   `);
   for (const migration of migrations.slice(0, through)) sqlite.exec(migration);
