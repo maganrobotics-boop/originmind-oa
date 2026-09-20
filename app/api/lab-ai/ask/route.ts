@@ -1,6 +1,6 @@
 import { getDb } from "../../../../db";
 import { readBoundedJsonObject } from "../../../../lib/bounded-json-request";
-import { answerOaChatQuestion, type OaChatHistory } from "../../../../lib/oa-chat-client";
+import { answerOaChatQuestion, questionRequestsKnowledgeImages, type OaChatHistory } from "../../../../lib/oa-chat-client";
 import { isWellFormedUnicode, rankKnowledgeChunks } from "../../../../lib/knowledge-policy";
 import { getActiveKnowledgeChunks, type KnowledgeActor } from "../../../../lib/knowledge-store";
 import { consumeWriteRateLimit } from "../../../../lib/write-rate-limit";
@@ -83,7 +83,7 @@ export async function POST(request: Request) {
     const retrievalQuery = history.length && question.length <= 80 ? `${history.at(-1)!.content} ${question}` : question;
     const ranked = await measureWaiting(timings, "lookup", async () => {
       const candidates = await getActiveKnowledgeChunks(actor, retrievalQuery);
-      return rankKnowledgeChunks(retrievalQuery, candidates, 6);
+      // Image questions must inspect more than the three strongest text hits:\n      // an older text-only article can otherwise hide a newer approved package\n      // whose revision owns the requested images.\n      return rankKnowledgeChunks(retrievalQuery, candidates, questionRequestsKnowledgeImages(question) ? 12 : 6);
     });
     const answer = await measureWaiting(timings, "answer", () => answerOaChatQuestion(question, ranked, history));
     return finish(privateJson(answer));
