@@ -981,7 +981,7 @@ async function api(context) {
       const oaStartedAt = Date.now();
       let oa;
       try {
-        oa = await retrieveOa(sourceQuestion || retrievalQuestion(last.content, retrievalHistory), context);
+        oa = await retrieveOa(sourceQuestion || retrievalQuestion(last.content, retrievalHistory), context, undefined, !sourceQuestion);
       } finally {
         chatTiming.oa = Date.now() - oaStartedAt;
       }

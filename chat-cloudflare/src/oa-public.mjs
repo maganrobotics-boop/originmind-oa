@@ -253,7 +253,7 @@ export async function retrieveOaSuggestions(context) {
   }
 }
 
-export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS) {
+export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS, cacheEnabled = true) {
   const token = context.env.PUBLIC_LAB_AI_SERVICE_TOKEN || "";
   const normalized = normalizedQuestion(question);
   if (!PUBLIC_LAB_AI_SERVICE_TOKEN_PATTERN.test(token)) {
@@ -262,7 +262,7 @@ export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS) {
   if (normalized.length < 2) return { status: "invalid_question", documents: [] };
   const cache = retrievalCache(context);
   const cached = cache.get(normalized);
-  if (cached && Date.now() - cached.storedAt < RETRIEVAL_CACHE_TTL_MS) return cached.value;
+  if (cacheEnabled && cached && Date.now() - cached.storedAt < RETRIEVAL_CACHE_TTL_MS) return cached.value;
   try {
     const init = {
       method: "POST",
@@ -307,7 +307,7 @@ export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS) {
       })),
     };
     if (cache.size >= 100) cache.delete(cache.keys().next().value);
-    cache.set(normalized, { storedAt: Date.now(), value });
+    if (cacheEnabled) cache.set(normalized, { storedAt: Date.now(), value });
     return value;
   } catch (error) {
     return { status: requestFailureStatus(error), documents: [] };

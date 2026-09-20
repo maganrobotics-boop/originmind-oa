@@ -15,9 +15,9 @@ test('applies default, short and deep answer length policies', () => {
   assert.match(answerStructureInstruction(), /说明 \/ 依据 \/ 下一步/u);
 });
 
-test('OA and public Chat both reveal completed validated answers progressively', async () => {
+test('OA reveals completed validated answers progressively while Chat preserves immediate durable history', async () => {
   const oa = await readFile(new URL('../components/knowledge/oa-chat-panel.tsx', import.meta.url), 'utf8');
   const chat = await readFile(new URL('../chat-cloudflare/frontend/app.js', import.meta.url), 'utf8');
   assert.match(oa, /fullAnswer\.slice\(0, length\)/u);
-  assert.match(chat, /assistant\.content = fullAnswer\.slice\(0, length\)/u);
+  assert.match(chat, /content:\s*userFacingAnswer\(payload\.answer\)/u);
 });
