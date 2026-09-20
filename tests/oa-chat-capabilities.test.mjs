@@ -161,3 +161,8 @@ test('short viewports never hide the capability buttons', () => {
   assert.match(css, /grid-template-columns:repeat\(5,minmax\(0,1fr\)\)/u);
   assert.match(css, /\.oa-chat-examples button:focus-visible/u);
 });
+test('questions copy from the context menu without a visible copy control', () => {
+  assert.match(panel, /title="右键复制问题" onContextMenu=\{event => \{ event\.preventDefault\(\); void copyQuestion\(turn\); \}\}/u);
+  assert.doesNotMatch(panel, /className="oa-question-edit"/u);
+  assert.match(panel, /toast\.success\('问题已复制'\)/u);
+});

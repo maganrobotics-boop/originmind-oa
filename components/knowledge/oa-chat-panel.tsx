@@ -14,6 +14,7 @@ import { useOaConversation } from './oa-conversation-context';
 import { OaMemberChat } from './oa-member-chat';
 import { OaChatDocumentEvent, OaDocumentDialogs, OaDocumentSource, OaDocumentUpload, useOaChatDocuments } from './oa-chat-documents';
 import { OaMeetingMode, type OaMeetingModeHandle } from './oa-meeting-mode';
+import { toast } from 'sonner';
 
 type Image = { url: string; alt: string; mimeType: string };
 type Turn = { id: string; order: number; question: string; answer: string; citations: KnowledgeCitation[]; images: Image[]; failed?: boolean };
@@ -207,8 +208,8 @@ function OaAiChatPanel() {
     catch { setError('浏览器未允许复制，请长按回答选择文字。'); }
   };
   const copyQuestion = async (turn: Turn) => {
-    try { await navigator.clipboard.writeText(turn.question); setCopied(`question:${turn.id}`); }
-    catch { setError('浏览器未允许复制，请长按提问选择文字。'); }
+    try { await navigator.clipboard.writeText(turn.question); toast.success('问题已复制'); }
+    catch { setError('浏览器未允许复制，请选择问题文字后复制。'); }
   };
 
   return <section className="oa-shared-chat" aria-label="OA 实验室 AI 助手">
@@ -227,7 +228,7 @@ function OaAiChatPanel() {
           if (entry.type !== 'answer') return <OaChatDocumentEvent key={entry.id} entry={entry} documents={documents} />;
           const turn = entry.turn;
           return <div className="oa-chat-turn" key={turn.id}>
-          <article className="message user"><div className="message-content"><p>{turn.question}</p><button type="button" className="oa-question-edit" onClick={() => void copyQuestion(turn)}><Copy size={14} />{copied === `question:${turn.id}` ? '已复制' : '复制'}</button></div></article>
+          <article className="message user" title="右键复制问题" onContextMenu={event => { event.preventDefault(); void copyQuestion(turn); }}><div className="message-content"><p>{turn.question}</p></div></article>
           {turn.answer && <article className="message assistant"><div className="message-content"><RichAnswer answer={turn.answer} />
             {!!turn.images.length && <div className="oa-answer-images">{turn.images.map(image => <figure key={image.url}><img src={image.url} alt={image.alt} loading="lazy" referrerPolicy="no-referrer" onError={event => { event.currentTarget.hidden = true; }} /><figcaption>{image.alt}</figcaption></figure>)}</div>}
             <div className="oa-answer-actions"><button type="button" className="copy-answer" onClick={() => void copy(turn)} aria-label="复制回答"><Copy size={15} />{copied === turn.id ? '已复制' : '复制'}</button><button type="button" aria-label="转发回答给成员" onClick={() => forward({ body: userFacingAnswer(turn.answer), omittedImages: turn.images.length })}><Forward size={15} />转发</button>{!!turn.citations.length && <details><summary>参考已审核资料</summary>{turn.citations.map(citation => <p key={`${citation.id}-${citation.itemId}`}>{citation.title}{citation.sectionTitle ? ` · ${citation.sectionTitle}` : ''}</p>)}</details>}</div>
