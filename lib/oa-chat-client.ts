@@ -71,6 +71,20 @@ function reportBridgeFailure(error: unknown) {
       ? 'CHAT_BRIDGE_TIMEOUT' : 'CHAT_BRIDGE_TRANSPORT_ERROR';
   console.warn('OA_CHAT_BRIDGE_FAILURE', code);
 }
+function retryableBridgeFailure(error: unknown): boolean {
+  if (!(error instanceof Error)) return true;
+  if (['AbortError', 'TimeoutError'].includes(error.name)) return true;
+  if (error.message === 'CHAT_BRIDGE_TRANSPORT_ERROR') return true;
+  const status = error.message.match(/^CHAT_BRIDGE_HTTP_(\d{3})$/u)?.[1];
+  return status ? Number(status) === 429 || Number(status) >= 500 : !error.message.startsWith('CHAT_BRIDGE_');
+}
+async function groundedBridge(payload: object): Promise<BridgeResponse> {
+  try { return await bridge(payload, 70000); }
+  catch (error) {
+    if (!retryableBridgeFailure(error)) throw error;
+    return bridge(payload, 70000);
+  }
+}
 export async function oaChatModelStatus() {
   try {
     const result = await bridge({ operation: 'status' }, 12000);
@@ -120,7 +134,7 @@ export async function answerOaChatQuestion(question: string, ranked: RankedKnowl
     assets: [...knowledgeImageReferences(chunk.content).values()].slice(0, 8).map(alt => ({ alt: prefix(alt, 300) })),
   }));
   let result: BridgeResponse;
-  try { result = await bridge({ operation: 'answer', answerType: 'grounded', question, history: history.slice(-2), documents }, 70000); }
+  try { result = await groundedBridge({ operation: 'answer', answerType: 'grounded', question, history: history.slice(-2), documents }); }
   catch (error) {
     reportBridgeFailure(error);
     return { answer: '已检索到相关资料，但问答服务暂未能生成完整答复，请稍后重试。', citations: [], images: [], mode: 'retrieval', fallbackReason: 'shared_model_unavailable' };

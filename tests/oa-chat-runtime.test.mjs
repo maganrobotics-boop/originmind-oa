@@ -138,7 +138,7 @@ for (const status of [301,302,303,307,308,401,403,404,429,503]) {
     assert.equal(result.fallbackReason,'shared_model_unavailable');
     assert.deepEqual(state.warnings,[['OA_CHAT_BRIDGE_FAILURE',`CHAT_BRIDGE_HTTP_${status}`]]);
     assert.ok(!JSON.stringify(result).includes(chunk.content));
-    assert.equal(state.calls.length,1); assert.equal(state.publicCalls,0);
+    assert.equal(state.calls.length,status === 429 || status >= 500 ? 2 : 1); assert.equal(state.publicCalls,0);
   });
 }
 
@@ -151,7 +151,19 @@ test('transport errors and timeouts never log private upstream exception message
     assert.equal(result.fallbackReason,'shared_model_unavailable');
     assert.deepEqual(state.warnings.at(-1),['OA_CHAT_BRIDGE_FAILURE',name === 'Error' ? 'CHAT_BRIDGE_TRANSPORT_ERROR' : 'CHAT_BRIDGE_TIMEOUT']);
   }
-  assert.equal(state.publicCalls,0);
+  assert.equal(state.publicCalls,0); assert.equal(state.calls.length,6);
+});
+
+test('one transient grounded failure is retried and can recover without exposing evidence', async () => {
+  const state = globalThis[stateKey]; let attempts = 0;
+  state.env.CHAT_SERVICE.fetch = async function(url, init) {
+    state.calls.push({url,init}); attempts++;
+    if (attempts === 1) return new Response('', { status: 503 });
+    return Response.json({ received:true, answer:'重试后生成的完整回答。', mode:'ai', provider:'bailian' });
+  };
+  const result = await client.answerOaChatQuestion('请说明测试结果',[chunk]);
+  assert.equal(result.answer,'重试后生成的完整回答。'); assert.equal(state.calls.length,2);
+  assert.deepEqual(state.warnings,[]);
 });
 
 test('invalid JSON or an unacknowledged bridge response cannot count as a generated answer', async () => {
