@@ -95,6 +95,15 @@ test('ordinary general knowledge bypasses weak OA retrieval matches and is label
   assert.equal(payload.answerType,'general'); assert.deepEqual(payload.documents,[]);
 });
 
+test('retrieval is bypassed only for unmistakable general questions', () => {
+  for (const question of ['今天深圳天气如何？','水的沸点是多少？','100 美元换算成人民币']) {
+    assert.equal(client.questionPrefersGeneralKnowledge(question),true,question);
+  }
+  for (const question of ['研究方向是什么？','详细介绍研究方向','请解释数学模型']) {
+    assert.equal(client.questionPrefersGeneralKnowledge(question),false,question);
+  }
+});
+
 test('internal and project questions still require approved OA evidence', async () => {
   for (const question of ['我们项目进度怎么样？','OA 审批流程是什么？','机器人底盘如何复位？']) {
     assert.equal(client.questionRequiresKnowledgeEvidence(question),true);

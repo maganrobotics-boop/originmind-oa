@@ -3,8 +3,8 @@ import { getDb } from '../db';
 import { listKnowledgeRevisionAssets } from './knowledge-assets';
 import { knowledgeImageReferences } from './knowledge-image-references.mjs';
 import type { RankedKnowledgeChunk } from './knowledge-policy';
-import { questionAllowsGeneralKnowledge, questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
-export { questionAllowsGeneralKnowledge, questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
+import { questionAllowsGeneralKnowledge, questionPrefersGeneralKnowledge, questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
+export { questionAllowsGeneralKnowledge, questionPrefersGeneralKnowledge, questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
 
 export type OaChatImage = { url: string; alt: string; mimeType: string };
 export type OaChatHistory = Array<{ role: 'user'; content: string }>;
@@ -100,7 +100,10 @@ async function answerImages(chunks: RankedKnowledgeChunk[]): Promise<OaChatImage
  * cannot set documents, visibility, item IDs or a retrieval capability. */
 export async function answerOaChatQuestion(question: string, ranked: RankedKnowledgeChunk[], history: OaChatHistory = []) {
   const chunks = ranked.slice(0, 6);
-  if (questionAllowsGeneralKnowledge(question)) {
+  const generalKnowledge = chunks.length
+    ? questionPrefersGeneralKnowledge(question)
+    : questionAllowsGeneralKnowledge(question);
+  if (generalKnowledge) {
     try {
       const result = await bridge({ operation: 'answer', answerType: 'general', question, history: history.slice(-2), documents: [] }, 70000);
       if (result.mode !== 'general' || typeof result.answer !== 'string' || !result.answer.trim() || result.answer.length > 12000 || !result.answer.isWellFormed()) throw new Error('CHAT_BRIDGE_INVALID_ANSWER');
