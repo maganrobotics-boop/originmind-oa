@@ -1,6 +1,6 @@
 import { buildGeneralChatMessages, buildGroundedChatMessages, boundedUserMessages } from './grounded-prompt.mjs';
 import { handleOaChatBridge } from './oa-chat-bridge.mjs';
-import { questionAllowsGeneralKnowledge, questionPrefersGeneralKnowledge } from './question-scope.mjs';
+import { questionAllowsGeneralKnowledge, questionPrefersGeneralKnowledge, questionRequestsKnowledgeImages } from './question-scope.mjs';
 import { chatKnowledgeImages, proxyKnowledgeAsset } from "./knowledge-assets.mjs";
 import { protectAnswerTechnicalText } from "./answer-math.mjs";
 import { cleanAnswerPresentation } from "./answer-presentation.mjs";
@@ -1024,6 +1024,7 @@ async function api(context) {
         ...document,
         title: displayKnowledgeTitle(document),
       }));
+      const knowledgeImages = chatKnowledgeImages(documents);
       const sources = documents.map((document) => ({
         id: document.id,
         title: document.title,
@@ -1032,6 +1033,16 @@ async function api(context) {
         updatedAt: document.updatedAt,
         origin: document.origin,
       }));
+      if (questionRequestsKnowledgeImages(last.content) && knowledgeImages.length) {
+        return chatResult({
+          answer: `已找到 ${knowledgeImages.length} 张与问题相关的已审核资料图片，显示如下。`,
+          sources,
+          images: knowledgeImages,
+          mode: "ai",
+          oaPublicStatus: oa.status,
+          releaseId: releaseId(context),
+        });
+      }
       const config = await getModelConfig(context);
       const active = modelProvider(context, config);
       const questionScope = [...retrievalHistory.map(message => message.content), last.content].join(' ');

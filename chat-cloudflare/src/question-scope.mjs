@@ -7,6 +7,11 @@ export function questionRequiresKnowledgeEvidence(question) {
   return INTERNAL_QUESTION_PATTERN.test(String(question || '').normalize('NFKC'));
 }
 
+export function questionRequestsKnowledgeImages(question) {
+  const value = String(question || '').normalize('NFKC').trim();
+  return /(?:图片|照片|图像|原图|相片|看图|展示.{0,6}图)/u.test(value);
+}
+
 export function questionAllowsGeneralKnowledge(question) {
   const normalized = String(question || '').normalize('NFKC').trim();
   if (questionRequiresKnowledgeEvidence(normalized)) return false;

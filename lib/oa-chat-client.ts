@@ -3,8 +3,8 @@ import { getDb } from '../db';
 import { listKnowledgeRevisionAssets } from './knowledge-assets';
 import { knowledgeImageReferences } from './knowledge-image-references.mjs';
 import type { RankedKnowledgeChunk } from './knowledge-policy';
-import { questionAllowsGeneralKnowledge, questionPrefersGeneralKnowledge, questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
-export { questionAllowsGeneralKnowledge, questionPrefersGeneralKnowledge, questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
+import { questionAllowsGeneralKnowledge, questionPrefersGeneralKnowledge, questionRequestsKnowledgeImages, questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
+export { questionAllowsGeneralKnowledge, questionPrefersGeneralKnowledge, questionRequestsKnowledgeImages, questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
 
 export type OaChatImage = { url: string; alt: string; mimeType: string };
 export type OaChatHistory = Array<{ role: 'user'; content: string }>;
@@ -133,6 +133,12 @@ export async function answerOaChatQuestion(question: string, ranked: RankedKnowl
     updatedAt: prefix(chunk.updatedAt || '', 40), origin: 'oa_internal',
     assets: [...knowledgeImageReferences(chunk.content).values()].slice(0, 8).map(alt => ({ alt: prefix(alt, 300) })),
   }));
+  const citations = chunks.map((chunk, index) => ({ id: String(index + 1), itemId: chunk.itemId, revisionId: chunk.revisionId, title: chunk.title, category: chunk.category, sectionTitle: chunk.sectionTitle, paragraphRef: chunk.paragraphRef, excerpt: prefix(chunk.content, 600) }));
+  let images: OaChatImage[] = [];
+  try { images = await answerImages(chunks); } catch { /* A failed image lookup must not discard the complete text. */ }
+  if (questionRequestsKnowledgeImages(question) && images.length) {
+    return { answer: `已找到 ${images.length} 张与问题相关的已审核资料图片，显示如下。`, citations, images, mode: 'ai', sourceType: 'oa_knowledge_images' };
+  }
   let result: BridgeResponse;
   try { result = await groundedBridge({ operation: 'answer', answerType: 'grounded', question, history: history.slice(-2), documents }); }
   catch (error) {
@@ -140,9 +146,6 @@ export async function answerOaChatQuestion(question: string, ranked: RankedKnowl
     return { answer: '已检索到相关资料，但问答服务暂未能生成完整答复，请稍后重试。', citations: [], images: [], mode: 'retrieval', fallbackReason: 'shared_model_unavailable' };
   }
   if (typeof result.answer !== 'string' || !result.answer.trim() || result.answer.length > 12000 || !result.answer.isWellFormed()) throw new Error('CHAT_BRIDGE_INVALID_ANSWER');
-  const citations = chunks.map((chunk, index) => ({ id: String(index + 1), itemId: chunk.itemId, revisionId: chunk.revisionId, title: chunk.title, category: chunk.category, sectionTitle: chunk.sectionTitle, paragraphRef: chunk.paragraphRef, excerpt: prefix(chunk.content, 600) }));
-  let images: OaChatImage[] = [];
-  try { images = await answerImages(chunks); } catch { /* A failed image lookup must not discard the complete text. */ }
   return { answer: result.answer, citations, images, mode: result.mode, provider: result.provider, fallbackReason: result.fallbackReason };
 }
 

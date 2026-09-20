@@ -97,6 +97,16 @@ test("invalid grounded output is regenerated once and then shown safely", async 
   assert.match(prompt, /上一次生成结果未能通过完整性或资料引用校验/u);
 });
 
+test("an explicit image request displays approved images without depending on model generation", async (t) => {
+  const token = `v1_${"A".repeat(80)}`;
+  const documents = [{ ...chunks[0], assets: [{ token, mimeType: "image/png", alt: "实验室机器人平台" }] }];
+  const { result, calls } = await ask(t, { mode: "unavailable", question: "实验室机器人图片", documents });
+  assert.equal(calls, 0);
+  assert.equal(result.mode, "ai");
+  assert.match(result.answer, /已审核资料图片/u);
+  assert.deepEqual(result.images, [{ url: `/api/knowledge/assets/${token}`, mimeType: "image/png", alt: "实验室机器人平台" }]);
+});
+
 test("an explicitly requested technical explanation remains complete, not globally shortened", async (t) => {
   const detail = "系统先完成定位，再执行规划、动作与反馈验证，出现异常时重新检查状态并恢复任务。";
   const answer = `## 系统流程\n\n${`${detail}[1]\n\n`.repeat(90)}## 验证\n\n采用公式 \\( L = T - V \\)。[1]\n\n最后验证恢复后的任务结果，确认闭环完成。[1]`;

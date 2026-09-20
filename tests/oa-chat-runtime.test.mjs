@@ -20,15 +20,15 @@ const vite = await createServer({ appType:'custom', configFile:false, root,
     },
     load(id) {
       if (id === '\0oa-chat-test-env') return `export const env = new Proxy({}, { get(_target,key) { return globalThis.${stateKey}.env[key]; } });`;
-      if (id === '\0oa-chat-test-db') return 'export async function getDb() { throw new Error("Unexpected image database access"); }';
-      if (id === '\0oa-chat-test-assets') return 'export async function listKnowledgeRevisionAssets() { return []; }';
+      if (id === '\0oa-chat-test-db') return `export async function getDb() { if (globalThis.${stateKey}.allowImageDb) return {$client:{}}; throw new Error("Unexpected image database access"); }`;
+      if (id === '\0oa-chat-test-assets') return `export async function listKnowledgeRevisionAssets() { return globalThis.${stateKey}.assets || []; }`;
       return null;
     },
   }],
 });
 const client = await vite.ssrLoadModule('/lib/oa-chat-client.ts');
 beforeEach(() => {
-  globalThis[stateKey] = { env:{PUBLIC_LAB_AI_SERVICE_TOKEN:'s'.repeat(43)}, calls:[], publicCalls:0, warnings:[], reply:{received:true,bridgeReady:true,modelReady:true,budgetReady:true,answer:'**完整回答**。',mode:'ai'} };
+  globalThis[stateKey] = { env:{PUBLIC_LAB_AI_SERVICE_TOKEN:'s'.repeat(43)}, calls:[], publicCalls:0, warnings:[], assets:[], reply:{received:true,bridgeReady:true,modelReady:true,budgetReady:true,answer:'**完整回答**。',mode:'ai'} };
   const state = globalThis[stateKey];
   console.warn = (...args) => state.warnings.push(args);
   globalThis.fetch = async () => {
@@ -84,6 +84,17 @@ test('a missing Worker credential fails closed before any outbound request or ra
 test('no authorized evidence means no model request', async () => {
   const result=await client.answerOaChatQuestion('请说明测试结果',[]);
   assert.equal(result.mode,'no_evidence'); assert.equal(globalThis[stateKey].calls.length,0);
+});
+
+test('OA explicit image requests return authorized revision images without a model call', async () => {
+  const state = globalThis[stateKey];
+  state.allowImageDb = true;
+  state.assets = [{ itemId:chunk.itemId, revisionId:chunk.revisionId, assetPath:'assets/robot.png', mimeType:'image/png' }];
+  const imageChunk = {...chunk, content:'机器人平台\n![实验室机器人平台](assets/robot.png)'};
+  const result = await client.answerOaChatQuestion('实验室机器人图片',[imageChunk]);
+  assert.equal(result.mode,'ai'); assert.equal(result.sourceType,'oa_knowledge_images');
+  assert.equal(result.images.length,1); assert.match(result.images[0].url,/\/api\/knowledge\/.*\/assets\/assets\/robot\.png\?forChat=1/u);
+  assert.equal(state.calls.length,0);
 });
 
 test('ordinary general knowledge bypasses weak OA retrieval matches and is labeled', async () => {
