@@ -68,3 +68,12 @@ test('sidebar uses laboratory model and AI assistant names without changing dest
   assert.doesNotMatch(page, /大模型与资料|label: "AI 聊天"/u);
   assert.ok(page.includes('if (tab === "ask") conversation.showAi(); onKnowledgeTab(tab);'));
 });
+
+test('OA typography uses symmetric header columns and stable Chinese font weights', async () => {
+  const css = await read('app/oa-workspace.css');
+  assert.match(css, /grid-template-columns:44px minmax\(0,1fr\) 44px/u);
+  assert.match(css, /--oa-font-sans: -apple-system, BlinkMacSystemFont/u);
+  assert.match(css, /\.oa-workspace \.oa-topbar-secondary-title \{[\s\S]*?position:static;[\s\S]*?grid-column:2/u);
+  assert.match(css, /\.oa-workspace \.topbar-actions \{ grid-column:3/u);
+  assert.doesNotMatch(css.slice(css.indexOf('OA typography and header rhythm')), /font-weight:(?:650|750|760)/u);
+});
