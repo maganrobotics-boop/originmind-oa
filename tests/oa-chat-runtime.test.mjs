@@ -107,12 +107,17 @@ test('ordinary general knowledge bypasses weak OA retrieval matches and is label
 });
 
 test('retrieval is bypassed only for unmistakable general questions', () => {
-  for (const question of ['今天深圳天气如何？','水的沸点是多少？','100 美元换算成人民币']) {
+  for (const question of ['今天深圳天气如何？','水的沸点是多少？','100 美元换算成人民币','小白如何学习机器人？','什么是机器人？']) {
     assert.equal(client.questionPrefersGeneralKnowledge(question),true,question);
   }
   for (const question of ['研究方向是什么？','详细介绍研究方向','请解释数学模型']) {
     assert.equal(client.questionPrefersGeneralKnowledge(question),false,question);
   }
+});
+
+test('robot learning questions are general, while organization and repair questions stay grounded', () => {
+  for (const question of ['小白如何学习机器人？','机器人入门需要哪些基础知识？','什么是机器人？']) assert.equal(client.questionRequiresKnowledgeEvidence(question),false,question);
+  for (const question of ['实验室有哪些机器人？','我们项目的机器人进度？','机器人底盘如何复位？']) assert.equal(client.questionRequiresKnowledgeEvidence(question),true,question);
 });
 
 test('internal and project questions still require approved OA evidence', async () => {
