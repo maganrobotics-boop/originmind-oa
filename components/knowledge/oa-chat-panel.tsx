@@ -33,21 +33,18 @@ function safeAssetName(value: string, index: number) {
   return /\.(?:png|webp|jpe?g)$/iu.test(base) ? base : `${base}.png`;
 }
 
-function AdminAnswerEditor({ turn, open, onOpenChange, onSaved }: { turn: Turn | null; open: boolean; onOpenChange: (open: boolean) => void; onSaved: (answer: string) => void }) {
-  const [answer, setAnswer] = useState('');
-  const [images, setImages] = useState<EditableImage[]>([]);
+function AdminAnswerEditor({ turn, onOpenChange, onSaved }: { turn: Turn; onOpenChange: (open: boolean) => void; onSaved: (answer: string) => void }) {
+  const initialImages = turn.images.map((image, index) => ({ path: `assets/${safeAssetName(image.url, index)}`, alt: image.alt || `图片 ${index + 1}`, sourceUrl: image.url }));
+  const [images, setImages] = useState<EditableImage[]>(initialImages);
+  const [answer, setAnswer] = useState(() => {
+    const references = initialImages.map(image => `![${image.alt}](${image.path})`).join('\n\n');
+    return `${userFacingAnswer(turn.answer)}${references ? `\n\n${references}` : ''}`;
+  });
   const [visibility, setVisibility] = useState<'internal' | 'public'>('internal');
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState('');
   const [error, setError] = useState('');
   const editor = useRef<HTMLTextAreaElement>(null);
-  useEffect(() => {
-    if (!turn || !open) return;
-    const nextImages = turn.images.map((image, index) => ({ path: `assets/${safeAssetName(image.url, index)}`, alt: image.alt || `图片 ${index + 1}`, sourceUrl: image.url }));
-    const references = nextImages.map(image => `![${image.alt}](${image.path})`).join('\n\n');
-    setAnswer(`${userFacingAnswer(turn.answer)}${references ? `\n\n${references}` : ''}`);
-    setImages(nextImages); setVisibility('internal'); setProgress(''); setError('');
-  }, [turn, open]);
   const insertImages = (files: File[]) => {
     const accepted = files.filter(file => ['image/png', 'image/jpeg', 'image/webp'].includes(file.type)).slice(0, Math.max(0, 20 - images.length));
     if (!accepted.length) { setError('请选择 PNG、JPG 或 WebP 图片。'); return; }
@@ -92,7 +89,7 @@ function AdminAnswerEditor({ turn, open, onOpenChange, onSaved }: { turn: Turn |
     } catch (cause) { setError(cause instanceof Error ? cause.message : '回答修改失败，请重试。'); }
     finally { setBusy(false); }
   };
-  return <Dialog open={open} onOpenChange={value => { if (!busy) onOpenChange(value); }}><DialogContent className="oa-answer-editor-dialog"><DialogHeader><DialogTitle>修改 AI 回答</DialogTitle><DialogDescription>只有 OA 系统管理员可保存。可直接增删文字；图片引用在正文中的位置就是显示位置。保存会形成新的正式知识版本并保留审计记录。</DialogDescription></DialogHeader>
+  return <Dialog open onOpenChange={value => { if (!busy) onOpenChange(value); }}><DialogContent className="oa-answer-editor-dialog"><DialogHeader><DialogTitle>修改 AI 回答</DialogTitle><DialogDescription>只有 OA 系统管理员可保存。可直接增删文字；图片引用在正文中的位置就是显示位置。保存会形成新的正式知识版本并保留审计记录。</DialogDescription></DialogHeader>
     <label className="form-field"><span className="field-label">回答正文（Markdown）</span><Textarea ref={editor} value={answer} onChange={event => setAnswer(event.target.value)} rows={16} disabled={busy} /></label>
     <div className="oa-answer-editor-images"><label className="secondary-action"><ImagePlus className="size-4" />添加图片<input type="file" accept="image/png,image/jpeg,image/webp" multiple hidden disabled={busy} onChange={event => { insertImages(Array.from(event.currentTarget.files || [])); event.currentTarget.value = ''; }} /></label>{images.map(image => <div key={image.path}><span>{image.alt}</span><code>{image.path}</code><button type="button" onClick={() => removeImage(image)} disabled={busy} aria-label={`删除图片 ${image.alt}`}><Trash2 className="size-4" /></button></div>)}</div>
     <label className="form-field"><span className="field-label">回答范围</span><NativeSelect value={visibility} onChange={event => setVisibility(event.target.value as 'internal' | 'public')} disabled={busy}><NativeSelectOption value="internal">仅 OA 内部</NativeSelectOption><NativeSelectOption value="public">OA 与 Chat 对外回答</NativeSelectOption></NativeSelect></label>
@@ -336,6 +333,6 @@ function OaAiChatPanel({ isAdmin = false }: { isAdmin?: boolean }) {
       </div>
     </div>
     <OaDocumentDialogs documents={documents} />
-    <AdminAnswerEditor turn={editingTurn} open={Boolean(editingTurn)} onOpenChange={open => { if (!open) setEditingTurn(null); }} onSaved={answer => { if (editingTurn) setTurns(current => current.map(turn => turn.id === editingTurn.id ? { ...turn, answer } : turn)); }} />
+    {editingTurn && <AdminAnswerEditor key={editingTurn.id} turn={editingTurn} onOpenChange={open => { if (!open) setEditingTurn(null); }} onSaved={answer => setTurns(current => current.map(turn => turn.id === editingTurn.id ? { ...turn, answer } : turn))} />}
   </section>;
 }
