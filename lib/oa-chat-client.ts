@@ -114,7 +114,10 @@ async function answerImages(chunks: RankedKnowledgeChunk[], includeRevisionImage
 /** Receives only chunks obtained by the authenticated OA route. Browser input
  * cannot set documents, visibility, item IDs or a retrieval capability. */
 export async function answerOaChatQuestion(question: string, ranked: RankedKnowledgeChunk[], history: OaChatHistory = []) {
-  const imageRequest = questionRequestsKnowledgeImages(question);\n  // For image requests, keep a broader text-ranked window so a legacy\n  // text-only item cannot mask a newer approved revision with ready assets.\n  const chunks = ranked.slice(0, imageRequest ? 12 : 3);
+  const imageRequest = questionRequestsKnowledgeImages(question);
+  // For image requests, keep a broader text-ranked window so a legacy
+  // text-only item cannot mask a newer approved revision with ready assets.
+  const chunks = ranked.slice(0, imageRequest ? 12 : 3);
   const generalKnowledge = chunks.length
     ? questionPrefersGeneralKnowledge(question)
     : questionAllowsGeneralKnowledge(question);
@@ -122,7 +125,9 @@ export async function answerOaChatQuestion(question: string, ranked: RankedKnowl
     try {
       const result = await bridge({ operation: 'answer', answerType: 'general', question, history: history.slice(-2), documents: [] }, 70000);
       if (result.mode !== 'general' || typeof result.answer !== 'string' || !result.answer.trim() || result.answer.length > 12000 || !result.answer.isWellFormed()) throw new Error('CHAT_BRIDGE_INVALID_ANSWER');
-      return { answer: `**来源类型：模型通用知识（未引用 OA 资料）**\n\n${result.answer.trim()}`, citations: [], images: [], mode: 'general', provider: result.provider, sourceType: 'model_general_knowledge' };
+      return { answer: `**来源类型：模型通用知识（未引用 OA 资料）**
+
+${result.answer.trim()}`, citations: [], images: [], mode: 'general', provider: result.provider, sourceType: 'model_general_knowledge' };
     } catch (error) {
       reportBridgeFailure(error);
       return { answer: '这是普通常识问题，但通用知识回答服务暂不可用，请稍后重试。', citations: [], images: [], mode: 'retrieval', fallbackReason: 'general_model_unavailable', sourceType: 'model_general_knowledge' };
