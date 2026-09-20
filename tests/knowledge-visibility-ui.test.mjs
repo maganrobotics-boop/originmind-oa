@@ -44,7 +44,7 @@ test("keeps returned multipart reuploads inside OA without using the 20k editor"
   // A multipart return must keep its original item and exit before the small editor fetch.
   assert.match(source, /const startEditing = async \(item: KnowledgeItem\) => \{\s*if \(item\.contentPartCount && item\.contentPartCount > 1\) \{ setReturnedPackageItem\(item\); setActiveTab\("submit"\); return; \}/u);
   assert.match(source, /<KnowledgePackageImport[^>]*returnedItem=\{returnedPackageItem\}/u);
-  assert.match(source, /\{!returnedPackageItem && <KnowledgeSubmitPanel/u);
+  assert.match(source, /\{!returnedPackageItem && editingItem && <KnowledgeSubmitPanel/u);
 });
 
 test("requires the exact second confirmation before publishing knowledge", async () => {
@@ -142,8 +142,8 @@ test("debounces only the knowledge management query and sends the selected serve
   assert.match(source, /fetch\(`\/api\/knowledge\?\$\{params\.toString\(\)\}`/u);
 
   const initialLoadEffect = source.slice(
-    source.indexOf("useEffect(() => {\n    const controller = new AbortController();"),
-    source.indexOf("useEffect(() => {\n    const normalizedQuery = normalizeKnowledgeListQuery(manageQuery);")
+    source.search(/useEffect\(\(\) => \{\r?\n    const controller = new AbortController\(\);/u),
+    source.search(/useEffect\(\(\) => \{\r?\n    const normalizedQuery = normalizeKnowledgeListQuery\(manageQuery\);/u)
   );
   assert.match(initialLoadEffect, /loadMine\(controller\.signal\)/u);
   assert.match(initialLoadEffect, /loadReview\(controller\.signal\)/u);

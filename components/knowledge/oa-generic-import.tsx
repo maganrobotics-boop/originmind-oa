@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { readChatAttachments, type ChatAttachmentBundle } from '@/lib/oa-chat-attachments.mjs';
-import { OaFilePicker, OaSourceArchive, OaSourceImages } from './oa-file-controls';
+import { OaFilePicker, OaSourceArchive } from './oa-file-controls';
 
 /** Sidebar and in-chat entry points share parsing and the same explicit OA submission. */
 export function OaGenericImport({ onSubmitted }: { onSubmitted: () => void }) {
@@ -14,15 +14,19 @@ export function OaGenericImport({ onSubmitted }: { onSubmitted: () => void }) {
     const controller = new AbortController(); active.current = controller; setBusy(true); setError('');
     try {
       const next = await readChatAttachments(files, { folder, signal: controller.signal, onProgress: text => { if (live.current) setProgress(text); } });
-      if (live.current) { setBundle(next); setProgress('已解析，请核对正文和图片后归档。'); }
+      if (live.current) { setBundle(next); setProgress('已自动填写题目和内容，请核对后提交审核。'); }
     } catch (cause) { if (live.current) { setError(cause instanceof Error ? cause.message : '解析失败，请重试。'); setProgress(''); } }
     finally { active.current = null; if (live.current) setBusy(false); }
   }
   return <section className="oa-generic-source" aria-label="通用资料上传">
-    <h2>文件、图片、文件夹与 ZIP</h2>
-    <p>支持 TXT、MD、DOCX、PDF、PNG、JPG、WebP。解析后不自动入库，点击归档才提交 OA 审批。</p>
+    <h2>上传资料</h2>
+    <p>选择文件后，OA 会自动填写题目和内容。提交后由审核人决定对内、对外公开或退回。</p>
     <OaFilePicker disabled={busy} onFiles={(files, folder) => void select(files, folder)} />
     {progress && <p role="status">{progress}</p>}{error && <p role="alert" className="oa-file-warning">{error}</p>}
-    {bundle && <div key={bundle.id}><h3>{bundle.name}</h3><details><summary>核对完整解析正文（{bundle.text.length.toLocaleString()} 字）</summary><pre>{bundle.text}</pre></details><OaSourceImages bundle={bundle} /><OaSourceArchive bundle={bundle} onSubmitted={onSubmitted} /></div>}
+    {bundle && <div className="oa-generic-preview" key={bundle.id}>
+      <label><span>题目</span><input value={bundle.pkg.title} readOnly /></label>
+      <label><span>内容</span><textarea value={bundle.pkg.body} rows={14} readOnly /></label>
+      <OaSourceArchive bundle={bundle} onSubmitted={onSubmitted} />
+    </div>}
   </section>;
 }

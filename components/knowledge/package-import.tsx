@@ -55,7 +55,8 @@ export function KnowledgePackageImport({ onSubmitted, returnedItem, onCancelRetu
     } finally { lock.current = false; setBusy(false); }
   }
 
-  return <>{!returnedItem && <OaGenericImport onSubmitted={onSubmitted} />}<section className="oa-package-import" aria-label="图文资料上传">
+  if (!returnedItem) return <OaGenericImport onSubmitted={onSubmitted} />;
+  return <section className="oa-package-import" aria-label="图文资料上传">
     <h2>{returnedItem ? "重新上传退回资料" : "已有 index.md 图文包（不重新解析）"}</h2>
     <p>ZIP 与文件夹使用同一流程：index.md ＋ assets/ 图片。先本地检查，再完整提交 OA 待审核。</p>
     {returnedItem && <p className="oa-package-warning">正在更新“{returnedItem.title}”，保留原条目与历史审核记录。<Button type="button" variant="outline" onClick={onCancelReturn} disabled={busy}>取消重提</Button></p>}
@@ -78,5 +79,5 @@ export function KnowledgePackageImport({ onSubmitted, returnedItem, onCancelRetu
       <Button type="button" className="primary-button" onClick={() => void submit()} disabled={busy || !confirmed || pkg.title.trim().length < 2 || Boolean(receivedId)}>{receivedId ? "已完整提交待审核" : busy ? "处理中…" : error ? "重试完整提交" : "提交 OA 待审核"}</Button>
       {receivedId && <p>资料编号：{receivedId}。可在左侧“我的资料”查看审核状态。</p>}
     </div>}
-  </section></>;
+  </section>;
 }

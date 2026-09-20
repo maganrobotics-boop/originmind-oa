@@ -366,7 +366,7 @@ function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马�
     <button type="button" data-sidebar-section="knowledge" className="sidebar-section-label sidebar-group-toggle" aria-expanded={knowledgeOpen} aria-controls={knowledgeId} onClick={() => setKnowledgeOpen(open => !open)}><span>实验室大模型</span><ChevronRight className="size-3.5" /></button>
     <nav id={knowledgeId} hidden={!knowledgeOpen} className="oa-knowledge-nav" aria-label="实验室大模型">
       {([{ tab: "ask", label: "AI 助手", icon: Bot }, { tab: "submit", label: "上传资料", icon: Plus }, { tab: "mine", label: "我的资料", icon: FolderKanban }, ...(canReviewKnowledge ? [{ tab: "review", label: "资料审核", icon: ShieldCheck }, { tab: "manage", label: "知识资料管理", icon: BookOpen }] : [])] as { tab: KnowledgeTab; label: string; icon: typeof Bot }[]).map(({ tab, label, icon: Icon }) => <button type="button" key={tab} className={`sidebar-nav-item ${activeView === "knowledge" && selectedKnowledgeTab === tab ? "active" : ""}`} onClick={() => { if (tab === "ask") conversation.showAi(); onKnowledgeTab(tab); }}><Icon className="size-[17px]" /><span>{label}</span>{tab === "review" && pendingKnowledgeCount > 0 && <span className="nav-count nav-count-alert">{pendingKnowledgeCount > 99 ? "99+" : pendingKnowledgeCount}</span>}</button>)}
-      {isAdmin && <a className="sidebar-nav-item" href="https://chat.omindos.ai/manage" target="_blank" rel="noreferrer"><Settings2 className="size-[17px]" /><span>Chat 后台（原入口）</span></a>}
+      {isAdmin && <a className="sidebar-nav-item" href="https://chat.omindos.ai/manage" target="_blank" rel="noreferrer"><Settings2 className="size-[17px]" /><span>Chat 管理</span></a>}
     </nav>
     </div>
     <div className="oa-sidebar-bottom">
