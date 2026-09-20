@@ -3,6 +3,8 @@ import { getDb } from '../db';
 import { listKnowledgeRevisionAssets } from './knowledge-assets';
 import { knowledgeImageReferences } from './knowledge-image-references.mjs';
 import type { RankedKnowledgeChunk } from './knowledge-policy';
+import { questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
+export { questionRequiresKnowledgeEvidence } from '../chat-cloudflare/src/question-scope.mjs';
 
 export type OaChatImage = { url: string; alt: string; mimeType: string };
 export type OaChatHistory = Array<{ role: 'user'; content: string }>;
@@ -98,14 +100,24 @@ async function answerImages(chunks: RankedKnowledgeChunk[]): Promise<OaChatImage
  * cannot set documents, visibility, item IDs or a retrieval capability. */
 export async function answerOaChatQuestion(question: string, ranked: RankedKnowledgeChunk[], history: OaChatHistory = []) {
   const chunks = ranked.slice(0, 6);
-  if (!chunks.length) return { answer: '目前知识库没有找到足够依据回答这个问题。', citations: [], images: [], mode: 'no_evidence' };
+  if (!chunks.length) {
+    if (questionRequiresKnowledgeEvidence(question)) return { answer: '目前知识库没有找到足够依据回答这个内部或项目问题。', citations: [], images: [], mode: 'no_evidence', sourceType: 'oa_knowledge_required' };
+    try {
+      const result = await bridge({ operation: 'answer', answerType: 'general', question, history: history.slice(-2), documents: [] }, 70000);
+      if (result.mode !== 'general' || typeof result.answer !== 'string' || !result.answer.trim() || result.answer.length > 12000 || !result.answer.isWellFormed()) throw new Error('CHAT_BRIDGE_INVALID_ANSWER');
+      return { answer: `**来源类型：模型通用知识（未引用 OA 资料）**\n\n${result.answer.trim()}`, citations: [], images: [], mode: 'general', provider: result.provider, sourceType: 'model_general_knowledge' };
+    } catch (error) {
+      reportBridgeFailure(error);
+      return { answer: '这是普通常识问题，但通用知识回答服务暂不可用，请稍后重试。', citations: [], images: [], mode: 'retrieval', fallbackReason: 'general_model_unavailable', sourceType: 'model_general_knowledge' };
+    }
+  }
   const documents = chunks.map((chunk, index) => ({
     id: String(index + 1), title: prefix(chunk.title, 300), body: prefix(chunk.content, 3500),
     updatedAt: prefix(chunk.updatedAt || '', 40), origin: 'oa_internal',
     assets: [...knowledgeImageReferences(chunk.content).values()].slice(0, 8).map(alt => ({ alt: prefix(alt, 300) })),
   }));
   let result: BridgeResponse;
-  try { result = await bridge({ operation: 'answer', question, history: history.slice(-2), documents }, 70000); }
+  try { result = await bridge({ operation: 'answer', answerType: 'grounded', question, history: history.slice(-2), documents }, 70000); }
   catch (error) {
     reportBridgeFailure(error);
     return { answer: '已检索到相关资料，但问答服务暂未能生成完整答复，请稍后重试。', citations: [], images: [], mode: 'retrieval', fallbackReason: 'shared_model_unavailable' };

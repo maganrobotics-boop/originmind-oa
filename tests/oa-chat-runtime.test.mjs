@@ -86,6 +86,24 @@ test('no authorized evidence means no model request', async () => {
   assert.equal(result.mode,'no_evidence'); assert.equal(globalThis[stateKey].calls.length,0);
 });
 
+test('ordinary general knowledge may use the model without OA documents and is labeled', async () => {
+  globalThis[stateKey].reply={received:true,answer:'水在标准大气压下的沸点通常是 100 摄氏度。',mode:'general',provider:'bailian'};
+  const result=await client.answerOaChatQuestion('水的沸点是多少？',[]);
+  assert.equal(result.mode,'general'); assert.equal(result.sourceType,'model_general_knowledge');
+  assert.match(result.answer,/来源类型：模型通用知识/u);
+  const payload=JSON.parse(globalThis[stateKey].calls[0].init.body);
+  assert.equal(payload.answerType,'general'); assert.deepEqual(payload.documents,[]);
+});
+
+test('internal and project questions still require approved OA evidence', async () => {
+  for (const question of ['我们项目进度怎么样？','OA 审批流程是什么？','机器人底盘如何复位？']) {
+    assert.equal(client.questionRequiresKnowledgeEvidence(question),true);
+    const result=await client.answerOaChatQuestion(question,[]);
+    assert.equal(result.mode,'no_evidence'); assert.equal(result.sourceType,'oa_knowledge_required');
+  }
+  assert.equal(globalThis[stateKey].calls.length,0);
+});
+
 test('oversized model answers are rejected rather than silently truncated', async () => {
   globalThis[stateKey].reply.answer='甲'.repeat(12001);
   await assert.rejects(client.answerOaChatQuestion('请说明测试结果',[chunk]),/CHAT_BRIDGE_INVALID_ANSWER/u);

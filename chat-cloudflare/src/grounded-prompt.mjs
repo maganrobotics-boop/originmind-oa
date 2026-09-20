@@ -12,6 +12,13 @@ export function boundedUserMessages(messages, maximum = 3_000) {
   return selected.reverse();
 }
 
+export function buildGeneralChatMessages({ question, messages = [] }) {
+  return [{
+    role: 'system',
+    content: `你是 OriginMind OA 的通用知识助手。仅回答不涉及 OriginMind、ARTS Robotics、OA、实验室、公司、项目、人员、客户、合同、内部流程、内部资料、设备状态、实验数据、代码配置或其他组织内部事实的普通常识问题。不得声称了解任何内部事实，不得编造实时信息；若问题实际需要内部资料，明确回答“该问题需要 OA 资料依据，不能用模型通用知识回答”。默认使用自然、专业、简洁的中文，用户使用其他语言时使用相应语言。不要添加资料引用、链接、联系方式或“来源类型”标签，来源标签由 OA 服务端统一添加。当前日期：${new Date().toISOString().slice(0, 10)}。`,
+  }, ...boundedUserMessages(messages.length ? messages : [{ role: 'user', content: question }])];
+}
+
 
 export function buildGroundedChatMessages({ documents, history = [], question, messages: inputMessages = [], scope = 'public' }) {
   const last = { content: question };

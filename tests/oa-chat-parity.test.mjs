@@ -26,6 +26,7 @@ function isolatedEngine() {
     modelCall: async (_context, config, messages) => { assert.equal(config.model, 'configured-qwen'); state.model++; state.prompts.push(messages); return '**先解除急停**，再执行复位。[1]'; },
     workersAiCall: async () => { throw Error('unexpected fallback'); },
     visibleAiAnswer: answer => answer.replace('[1]', ''),
+    visibleGeneralAnswer: answer => answer,
   };
   return { engine, state };
 }
@@ -77,6 +78,19 @@ test('payload contract excludes assistant history, arbitrary fields, oversized c
   assert.equal(validOaChatPayload({ ...payload(), documents: Array(7).fill(documents[0]) }), false);
   assert.equal(validOaChatPayload({ ...payload(), documents: [{ ...documents[0], body: '甲'.repeat(3501) }] }), false);
   assert.equal(validOaChatPayload({ ...payload(), question: '\ud800' }), false);
+  assert.equal(validOaChatPayload({ operation:'answer',answerType:'general',question:'水的沸点是多少？',history:[],documents:[] }), true);
+  assert.equal(validOaChatPayload({ ...payload(), answerType:'general' }), false);
+});
+
+test('general knowledge requests contain no OA evidence and return an explicit general mode', async () => {
+  const { engine, state } = isolatedEngine();
+  engine.modelCall = async (_context, _config, messages) => { state.model++; state.prompts.push(messages); return '水在标准大气压下通常于 100 摄氏度沸腾。'; };
+  const request = await signedRequest({ operation:'answer',answerType:'general',question:'水的沸点是多少？',history:[],documents:[] });
+  const response = await handleOaChatBridge({ request, env:{ PUBLIC_LAB_AI_SERVICE_TOKEN:secret } }, engine);
+  const result = await response.json();
+  assert.equal(result.mode,'general'); assert.equal(result.provider,'bailian'); assert.equal(state.model,1);
+  assert.doesNotMatch(state.prompts[0][0].content,/PRIVATE-OA|内部机器人测试记录/u);
+  assert.match(state.prompts[0][0].content,/普通常识问题/u);
 });
 
 test('generation failure never turns internal excerpts into a claimed answer', async () => {

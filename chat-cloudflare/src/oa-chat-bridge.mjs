@@ -56,8 +56,10 @@ async function authenticatedBody(request, secret, now) {
 export function validOaChatPayload(value) {
   if (exactKeys(value, ['operation', 'task']) && value.operation === 'task') return validTaskInput(value.task);
   if (exactKeys(value, ['operation']) && value.operation === 'status') return true;
-  if (!exactKeys(value, ['operation', 'question', 'history', 'documents']) || value.operation !== 'answer' || !text(value.question, 2000) || value.question.trim().length < 2 || !Array.isArray(value.history) || value.history.length > 2 || !Array.isArray(value.documents) || value.documents.length > 6) return false;
+  const answerType = value?.answerType || 'grounded';
+  if (!exactKeys(value, ['operation', 'answerType', 'question', 'history', 'documents']) || value.operation !== 'answer' || !['grounded', 'general'].includes(answerType) || !text(value.question, 2000) || value.question.trim().length < 2 || !Array.isArray(value.history) || value.history.length > 2 || !Array.isArray(value.documents) || value.documents.length > 6) return false;
   if (value.history.some(item => !exactKeys(item, ['role', 'content']) || item.role !== 'user' || !text(item.content, 2000))) return false;
+  if (answerType === 'general' && value.documents.length !== 0) return false;
   return value.documents.every(item => exactKeys(item, ['id', 'title', 'body', 'updatedAt', 'origin', 'assets']) && text(item.id, 100) && text(item.title, 300) && text(item.body, 3500) && text(item.updatedAt, 40) && ['oa_internal', 'oa_public'].includes(item.origin) && Array.isArray(item.assets) && item.assets.length <= 8 && item.assets.every(asset => exactKeys(asset, ['alt']) && text(asset.alt, 300)));
 }
 
@@ -124,10 +126,14 @@ export async function handleOaChatBridge(context, engine, now = Date.now()) {
       return json({ received: true, ...result, mode: 'task', provider: 'bailian' });
     }
     const fallback = reason => json({ received: true, answer: fallbackAnswer(payload.documents), mode: 'retrieval', fallbackReason: reason });
-    if (!payload.documents.length || !active.provider) return fallback(payload.documents.length ? 'model_unavailable' : 'no_documents');
+    const answerType = payload.answerType || 'grounded';
+    if (answerType === 'grounded' && !payload.documents.length) return fallback('no_documents');
+    if (!active.provider) return fallback('model_unavailable');
     await engine.globalBudget(context);
-    const { buildGroundedChatMessages } = await import('./grounded-prompt.mjs');
-    const messages = buildGroundedChatMessages({ documents: payload.documents, history: [], question: payload.question, messages: [...payload.history, { role: 'user', content: payload.question }], scope: 'internal' });
+    const { buildGeneralChatMessages, buildGroundedChatMessages } = await import('./grounded-prompt.mjs');
+    const messages = answerType === 'general'
+      ? buildGeneralChatMessages({ question: payload.question, messages: [...payload.history, { role: 'user', content: payload.question }] })
+      : buildGroundedChatMessages({ documents: payload.documents, history: [], question: payload.question, messages: [...payload.history, { role: 'user', content: payload.question }], scope: 'internal' });
     context.modelDeadline = Date.now() + 60000;
     let answer; let provider = active.provider;
     try {
@@ -139,9 +145,9 @@ export async function handleOaChatBridge(context, engine, now = Date.now()) {
         }
       } else { answer = await engine.workersAiCall(context, messages); }
     } catch { return fallback('generation_failed'); }
-    const visible = engine.visibleAiAnswer(answer, payload.documents.length);
+    const visible = answerType === 'general' ? engine.visibleGeneralAnswer(answer) : engine.visibleAiAnswer(answer, payload.documents.length);
     if (!visible) return fallback('answer_validation_failed');
-    return json({ received: true, answer: visible, mode: 'ai', provider });
+    return json({ received: true, answer: visible, mode: answerType === 'general' ? 'general' : 'ai', provider });
   } catch (error) {
     if (payload.operation !== 'task') return json({ error: '问答服务暂不可用，请稍后重试' }, 503);
     const diagnostic = taskFailureDiagnostic(error, taskPhase);

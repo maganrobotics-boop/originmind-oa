@@ -109,3 +109,15 @@ for (const mode of ["ai", "retrieval", "rejected"]) {
     assert.ok(result.conversationToken);
   });
 }
+
+test("public Chat answers ordinary general knowledge without public documents and labels the source type", async(t) => {
+  const origin="https://chat.omindos.ai"; let prompt="";
+  const env={DB:new D1DatabaseAdapter(),APP_ORIGIN:origin,ADMIN_EMAIL:"owner@example.test",APP_ENCRYPTION_KEY:"e".repeat(48),RATE_LIMIT_HMAC_KEY:"r".repeat(48),PUBLIC_LAB_AI_SERVICE_TOKEN:"A".repeat(43),AI:{run:async(_model,input)=>{prompt=input.messages[0].content;return {response:"水在标准大气压下通常于 100 摄氏度沸腾。"};}}};
+  t.after(()=>env.DB.close());
+  const response=await handleRequest(new Request(`${origin}/api/chat`,{method:"POST",headers:{Origin:origin,"Content-Type":"application/json","CF-Connecting-IP":"203.0.113.94"},body:JSON.stringify({topic:"business",messages:[{role:"user",content:"水的沸点是多少？"}]})}),env,{}, {fetch:async()=>Response.json(buildPublicLabAiRetrieveResponse([]))});
+  assert.equal(response.status,200);
+  const result=await response.json();
+  assert.equal(result.mode,"general"); assert.deepEqual(result.sources,[]);
+  assert.match(result.answer,/来源类型：模型通用知识（未引用公开知识库资料）/u);
+  assert.match(prompt,/普通常识问题/u); assert.doesNotMatch(prompt,/公开审核资料|private-chunk/u);
+});

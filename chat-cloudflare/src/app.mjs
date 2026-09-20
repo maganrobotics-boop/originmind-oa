@@ -1,5 +1,6 @@
-import { buildGroundedChatMessages, boundedUserMessages } from './grounded-prompt.mjs';
+import { buildGeneralChatMessages, buildGroundedChatMessages, boundedUserMessages } from './grounded-prompt.mjs';
 import { handleOaChatBridge } from './oa-chat-bridge.mjs';
+import { questionRequiresKnowledgeEvidence } from './question-scope.mjs';
 import { chatKnowledgeImages, proxyKnowledgeAsset } from "./knowledge-assets.mjs";
 import { protectAnswerTechnicalText } from "./answer-math.mjs";
 import { cleanAnswerPresentation } from "./answer-presentation.mjs";
@@ -756,6 +757,15 @@ function visibleAiAnswer(answer, sourceCount) {
   return visible && !hasResidualMarker ? technical.restore(visible) : null;
 }
 
+function visibleGeneralAnswer(answer) {
+  if (typeof answer !== 'string' || !answer.trim() || answer.length > 12_000 || !answer.isWellFormed()) return null;
+  const visible = cleanAnswerPresentation(answer).trim();
+  if (!visible || /\b(?:https?:\/\/|www\.)\S+/iu.test(visible)) return null;
+  if (/[\p{L}\p{N}._%+-]+@[\p{L}\p{N}.-]+\.[\p{L}]{2,}/iu.test(visible)) return null;
+  if (/(?:^|\D)1[3-9]\d{9}(?:\D|$)/u.test(visible)) return null;
+  return visible;
+}
+
 async function localDrafts(context) {
   const result = await database(context)
     .prepare(
@@ -841,7 +851,7 @@ async function api(context) {
   try {
     if (path === "internal/oa-answer") return handleOaChatBridge(context, {
       getModelConfig, modelProvider, currentModelStatus, modelBudgetReady,
-      globalBudget, modelCall, workersAiCall, visibleAiAnswer,
+      globalBudget, modelCall, workersAiCall, visibleAiAnswer, visibleGeneralAnswer,
       claimRequest: async (nonce) => {
         await consumeCounter(context, `oa-chat-bridge:${nonce}`, 1, Math.floor(Date.now() / 1000) + 120);
         await database(context).prepare("DELETE FROM limits WHERE expires < ?").bind(Math.floor(Date.now() / 1000)).run();
@@ -1003,7 +1013,9 @@ async function api(context) {
       }));
       const config = await getModelConfig(context);
       const active = modelProvider(context, config);
-      if (!documents.length || !active.provider) {
+      const questionScope = [...retrievalHistory.map(message => message.content), last.content].join(' ');
+      const generalKnowledge = !documents.length && !questionRequiresKnowledgeEvidence(questionScope);
+      if ((!documents.length && !generalKnowledge) || !active.provider) {
         return chatResult({
           answer: fallbackAnswer(documents),
           sources,
@@ -1014,7 +1026,9 @@ async function api(context) {
         });
       }
       await globalBudget(context);
-      const messages = buildGroundedChatMessages({ documents, history, question: last.content, messages: payload.messages });
+      const messages = generalKnowledge
+        ? buildGeneralChatMessages({ question: last.content, messages: payload.messages })
+        : buildGroundedChatMessages({ documents, history, question: last.content, messages: payload.messages });
       context.modelDeadline = Date.now() + 60_000;
       let provider = active.provider;
       let answer;
@@ -1059,7 +1073,7 @@ async function api(context) {
           releaseId: releaseId(context),
         });
       }
-      const visibleAnswer = visibleAiAnswer(answer, sources.length);
+      const visibleAnswer = generalKnowledge ? visibleGeneralAnswer(answer) : visibleAiAnswer(answer, sources.length);
       if (!visibleAnswer) {
         return chatResult({
           answer: fallbackAnswer(documents),
@@ -1071,9 +1085,9 @@ async function api(context) {
         });
       }
       return chatResult({
-        answer: visibleAnswer,
+        answer: generalKnowledge ? `**来源类型：模型通用知识（未引用公开知识库资料）**\n\n${visibleAnswer}` : visibleAnswer,
         sources,
-        mode: "ai",
+        mode: generalKnowledge ? "general" : "ai",
         provider,
         oaPublicStatus: oa.status,
         releaseId: releaseId(context),
