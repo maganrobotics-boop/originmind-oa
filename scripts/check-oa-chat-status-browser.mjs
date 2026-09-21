@@ -67,7 +67,7 @@ try {
       const failed = ['ready', 'ready', 'unavailable', 'ready', 'unavailable'];
       assert.deepEqual(await states(), failed);
       await page.waitForFunction(() => document.querySelector('.message.assistant')?.textContent?.includes('暂未能生成完整答复'));
-      assert.equal(await page.getByRole('button', { name: '重新回答', exact: true }).isVisible(), true);
+      await page.getByRole('button', { name: '重新回答', exact: true }).waitFor();
       await legend.click();
       await page.screenshot({ path: resolve(output, `${name}-generation-failure.png`), fullPage: true });
       await legend.click();
