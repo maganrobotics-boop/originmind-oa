@@ -988,7 +988,7 @@ async function api(context) {
       const chatResult = async (result) => {
         result = {
           ...result,
-          ...(result.mode !== "general" && oa.documents.length ? { images: chatKnowledgeImages(documents) } : {}),
+          ...(result.mode !== "general" && oa.documents.length ? { images: chatKnowledgeImages(documents, last.content) } : {}),
           answer: cleanAnswerPresentation(cleanPublicChatText(result.answer)) || fallbackAnswer([]),
           sources: result.sources.map((source) => ({
             ...source,
@@ -1025,7 +1025,7 @@ async function api(context) {
         ...document,
         title: displayKnowledgeTitle(document),
       }));
-      const knowledgeImages = chatKnowledgeImages(documents);
+      const knowledgeImages = chatKnowledgeImages(documents, last.content);
       const sources = documents.map((document) => ({
         id: document.id,
         title: document.title,
@@ -1463,3 +1463,4 @@ export async function handleRequest(request, env, executionContext, runtime = ru
     return json({ error: "服务暂时不可用，请稍后重试。" }, 503);
   }
 }
+
