@@ -396,8 +396,19 @@ test("empty chats use the laboratory assistant brand, scoped guidance and data p
     const hero = nodes(app.root, "section").find((node) => node.className === "empty-hero");
     assert.ok(hero, pathname);
     assert.equal(hero.getAttribute("aria-labelledby"), "empty-chat-title");
-    assert.equal(nodes(hero, "h2")[0].textContent, "想了解实验室的什么？");
+    assert.equal(nodes(hero, "h2")[0].textContent, "需要实验室大模型做什么？");
     assert.equal(nodes(hero, "p")[0].textContent, expectedSubtitle);
+    assert.deepEqual(
+      nodes(hero, "button")
+        .filter((node) => node.className === "empty-capability-card")
+        .map((node) => node.textContent),
+      [
+        "知识问答检索实验室资料并回答",
+        "项目总结整理进展、问题与下一步",
+        "资料处理导入 TXT/MD/PDF 后处理",
+        "会议纪要生成纪要与行动项",
+      ],
+    );
     assert.equal(app.input().getAttribute("placeholder"), "询问实验室大数据");
     assert.equal(app.all.find((node) => node.id === "new-chat-question").getAttribute("placeholder"), "询问实验室大数据");
 
@@ -407,8 +418,8 @@ test("empty chats use the laboratory assistant brand, scoped guidance and data p
     const brandSubtitles = nodes(app.root, "span")
       .filter((node) => node.className === "sidebar-brand-subtitle")
       .map((node) => node.textContent);
-    assert.deepEqual(brandTitles, ["实验室助手", "实验室助手"]);
-    assert.deepEqual(brandSubtitles, ["ARTS Robotics", "ARTS Robotics"]);
+    assert.deepEqual(brandTitles, ["联合研发 OA", "联合研发 OA"]);
+    assert.deepEqual(brandSubtitles, ["ORIGINMIND × ARTS ROBOTICS", "ORIGINMIND × ARTS ROBOTICS"]);
   }
 });
 
@@ -463,7 +474,7 @@ test("install controls provide platform guidance and complete the browser instal
     ],
     [
       { userAgent: "Mozilla/5.0 (Linux; Android 16)", platform: "Linux armv8l", maxTouchPoints: 5 },
-      "安装实验室助手",
+      "安装联合研发 OA",
       /浏览器菜单添加到桌面/u,
       ["打开浏览器菜单", "选择“安装应用”或“添加到桌面”", "按系统提示确认"],
     ],
@@ -471,7 +482,7 @@ test("install controls provide platform guidance and complete the browser instal
     const app = publicAppHarness(storage(), { navigatorOptions });
     const installButton = nodes(app.root, "button").find((node) => node.className === "sidebar-install-button");
     assert.equal(installButton.textContent, "⇩安装应用");
-    assert.equal(installButton.getAttribute("aria-label"), "安装实验室助手");
+    assert.equal(installButton.getAttribute("aria-label"), "安装联合研发 OA");
     assert.equal(installButton.getAttribute("aria-haspopup"), "dialog");
     installButton.fire("click");
 
@@ -496,7 +507,7 @@ test("install controls provide platform guidance and complete the browser instal
   await settle();
   assert.equal(prevented, 1);
   assert.equal(prompted, 1);
-  assert.match(app.root.textContent, /正在安装实验室助手/u);
+  assert.match(app.root.textContent, /正在安装联合研发 OA/u);
 
   const installDialog = nodes(app.root, "dialog").find((node) => node.id === "install-dialog");
   installDialog.showModal();
@@ -505,13 +516,13 @@ test("install controls provide platform guidance and complete the browser instal
   assert.equal(installButtons.every((button) => button.disabled === true), true);
   assert.equal(installButtons.every((button) => button.textContent === "⇩已安装"), true);
   assert.equal(installButtons.every((button) => button.getAttribute("aria-haspopup") === "false"), true);
-  assert.match(app.root.textContent, /实验室助手已安装到桌面/u);
+  assert.match(app.root.textContent, /联合研发 OA 已安装到桌面/u);
 
   const standaloneApp = publicAppHarness(storage(), { standalone: true });
   const standaloneButtons = nodes(standaloneApp.root, "button")
     .filter((node) => node.className === "sidebar-install-button");
   assert.equal(standaloneButtons.every((button) => button.disabled === true), true);
-  assert.equal(standaloneButtons.every((button) => button.getAttribute("aria-label") === "实验室助手已安装"), true);
+  assert.equal(standaloneButtons.every((button) => button.getAttribute("aria-label") === "联合研发 OA 已安装"), true);
 });
 
 test("the complete UI migrates v1 through startup, saves drafts and clears the active v2 conversation", async () => {

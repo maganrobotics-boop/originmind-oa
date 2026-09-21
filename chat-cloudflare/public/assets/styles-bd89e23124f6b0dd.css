@@ -3502,18 +3502,18 @@ body.public-chat-page {
 
 .chat-app .sidebar-brand-title {
   overflow: hidden;
-  font-size: 17px;
-  font-weight: 650;
-  letter-spacing: -0.02em;
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
 .chat-app .sidebar-brand-subtitle {
   overflow: hidden;
-  color: #818181;
+  color: #6f7682;
   font-size: 10px;
-  font-weight: 560;
+  font-weight: 650;
   letter-spacing: 0.045em;
   text-overflow: ellipsis;
   text-transform: uppercase;
@@ -3821,6 +3821,7 @@ body.public-chat-page {
   align-self: stretch;
   justify-items: center;
   align-content: center;
+  gap: 2px;
   padding: 5px 0;
 }
 
@@ -3828,6 +3829,16 @@ body.public-chat-page {
   color: #171717;
   font-size: 16px;
   font-weight: 600;
+  line-height: 1.2;
+  text-align: center;
+}
+
+.chat-app .site-header .topic-subtitle {
+  margin: 0;
+  color: #777f8d;
+  font-size: 11px;
+  font-weight: 550;
+  line-height: 1.2;
   text-align: center;
 }
 
@@ -3891,6 +3902,44 @@ body.public-chat-page {
   color: #7a7a7a;
   font-size: 15px;
   line-height: 1.6;
+}
+
+.chat-app .empty-capability-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin: 26px auto 0;
+}
+
+.chat-app .empty-capability-card {
+  display: grid;
+  min-height: 86px;
+  align-content: start;
+  gap: 7px;
+  padding: 15px 14px;
+  border: 1px solid #e5e7eb;
+  border-radius: 14px;
+  background: #ffffff;
+  color: #171717;
+  text-align: left;
+  box-shadow: 0 8px 26px rgba(17, 24, 39, 0.06);
+}
+
+.chat-app .empty-capability-card:hover {
+  border-color: #cfd7e6;
+  background: #f8fafc;
+}
+
+.chat-app .empty-capability-card strong {
+  font-size: 15px;
+  font-weight: 650;
+  line-height: 1.25;
+}
+
+.chat-app .empty-capability-card span {
+  color: #747b88;
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .chat-app .message-list {
@@ -4631,6 +4680,10 @@ body.public-chat-page {
     padding: 24px 16px 18px;
   }
 
+  .chat-app .empty-capability-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .chat-app .composer-suggestions {
     padding: 3px 12px 6px;
   }
@@ -4746,6 +4799,10 @@ body.public-chat-page {
 
   .chat-app .suggestion-button {
     max-width: 94%;
+  }
+
+  .chat-app .empty-capability-grid {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .new-chat-context {

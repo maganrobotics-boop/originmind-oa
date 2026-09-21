@@ -277,6 +277,8 @@ async function openIncomingSharedAnswer() {
 "use strict";
 
 const APP_NAME = "ARTS Robotics AI Assistant";
+const OA_PREVIEW_NAME = "联合研发 OA";
+const OA_PREVIEW_BRAND = "ORIGINMIND × ARTS ROBOTICS";
 const OFFICIAL_SITE = "https://omindos.ai";
 const BAILIAN_CONSOLE = "https://bailian.console.aliyun.com/";
 const OA_KNOWLEDGE_URL = "https://oa.omindos.ai/";
@@ -520,6 +522,12 @@ const TOPICS = [
 const CHAT_TOPICS = Object.freeze([GENERAL_CHAT_TOPIC, ...TOPICS]);
 const DEFAULT_TOPIC_ID = GENERAL_CHAT_TOPIC.id;
 const TOPIC_ID_BY_PATH = new Map(CHAT_TOPICS.map((topic) => [topic.path, topic.id]));
+const LAB_MODEL_CAPABILITIES = Object.freeze([
+  { command: "@知识问答", title: "知识问答", detail: "检索实验室资料并回答" },
+  { command: "@项目总结", title: "项目总结", detail: "整理进展、问题与下一步" },
+  { command: "@资料处理", title: "资料处理", detail: "导入 TXT/MD/PDF 后处理" },
+  { command: "@会议纪要", title: "会议纪要", detail: "生成纪要与行动项" },
+]);
 
 function topicIdForPath(pathname) {
   return TOPIC_ID_BY_PATH.get(pathname) || DEFAULT_TOPIC_ID;
@@ -1969,7 +1977,7 @@ function createPublicApp() {
   const app = element("div", { className: "chat-app" });
   const header = element("header", { className: "topbar site-header" });
   const menuButton = textButton("", "menu-button");
-  menuButton.setAttribute("aria-label", "打开主题菜单");
+  menuButton.setAttribute("aria-label", "打开导航菜单");
   menuButton.setAttribute("aria-controls", "topic-drawer");
   menuButton.setAttribute("aria-expanded", "false");
   menuButton.append(element("span", {
@@ -1979,7 +1987,8 @@ function createPublicApp() {
     element("span", { className: "menu-line" }),
     element("span", { className: "menu-line" }),
   ]));
-  const topicTitle = element("h1", { className: "topic-title", text: topicFor().title });
+  const topicTitle = element("h1", { className: "topic-title", text: "聊天" });
+  const topicSubtitle = element("p", { className: "topic-subtitle", text: "实验室大模型" });
   const systemStatus = textButton("", "system-status-strip");
   systemStatus.setAttribute("aria-label", "系统连接状态：正在检测");
   systemStatus.setAttribute("aria-controls", "system-status-details");
@@ -2028,10 +2037,18 @@ function createPublicApp() {
   }
   const topicHeader = element("div", { className: "topic-header" }, [
     topicTitle,
+    topicSubtitle,
     systemStatus,
     systemStatusDetails,
     systemStatusAnnouncement,
   ]);
+
+  function useCapability(command) {
+    const current = questionInput.value.trim();
+    questionInput.value = current ? `${command} ${current}` : `${command} `;
+    questionInput.dispatchEvent(new Event("input", { bubbles: true }));
+    questionInput.focus({ preventScroll: true });
+  }
 
   function setSystemStatusDetailsOpen(open) {
     const nextOpen = open === true;
@@ -2088,8 +2105,8 @@ function createPublicApp() {
     const shell = element("div", { className: "sidebar-shell" });
     const sidebarHeader = element("div", { className: "sidebar-header" });
     const sidebarBrand = element("div", { className: "sidebar-brand" }, [
-      element("strong", { className: "sidebar-brand-title", text: "实验室助手" }),
-      element("span", { className: "sidebar-brand-subtitle", text: "ARTS Robotics" }),
+      element("strong", { className: "sidebar-brand-title", text: OA_PREVIEW_NAME }),
+      element("span", { className: "sidebar-brand-subtitle", text: OA_PREVIEW_BRAND }),
     ]);
     const sidebarSearch = textButton("⌕", "sidebar-search");
     sidebarSearch.setAttribute("aria-label", "搜索最近聊天");
@@ -2105,7 +2122,7 @@ function createPublicApp() {
 
     const pinnedLabel = element("p", {
       className: "sidebar-section-label",
-      text: "置顶",
+      text: "大模型与资料",
     });
     const pinned = element("nav", {
       className: "sidebar-topic-list",
@@ -2132,7 +2149,7 @@ function createPublicApp() {
 
     const recentLabel = element("p", {
       className: "sidebar-section-label sidebar-recent-label",
-      text: "最近",
+      text: "最近聊天",
     });
     const recentList = element("div", {
       className: "sidebar-recent-list",
@@ -2143,6 +2160,7 @@ function createPublicApp() {
     const sidebarBottom = element("div", { className: "sidebar-bottom" });
     const utilityLinks = element("div", { className: "sidebar-utility-links" });
     const officialLink = externalLink("官网", OFFICIAL_SITE, "sidebar-utility-link");
+    const oaLink = externalLink("进入 OA", OA_KNOWLEDGE_URL, "sidebar-utility-link");
     const manageLink = element("a", {
       className: "sidebar-utility-link",
       attributes: { href: "/manage" },
@@ -2159,6 +2177,7 @@ function createPublicApp() {
     installButton.addEventListener("click", () => { void requestAppInstall(installButton); });
     installControls.push({ button: installButton, label: installLabel });
     if (officialLink) utilityLinks.append(officialLink);
+    if (oaLink) utilityLinks.append(oaLink);
     utilityLinks.append(manageLink, installButton);
     const bottomRow = element("div", { className: "sidebar-bottom-row" });
     const chatButton = textButton("", "sidebar-chat-button");
@@ -2414,7 +2433,7 @@ function createPublicApp() {
   });
   const installPanel = element("div", { className: "install-panel" });
   const installHeader = element("header", { className: "install-header" });
-  const installTitle = element("h2", { id: "install-dialog-title", text: "安装实验室助手" });
+  const installTitle = element("h2", { id: "install-dialog-title", text: "安装联合研发 OA" });
   const installClose = textButton("×", "install-close");
   installClose.setAttribute("aria-label", "关闭安装说明");
   installHeader.append(installTitle, installClose);
@@ -2432,7 +2451,7 @@ function createPublicApp() {
     for (const { button, label } of installControls) {
       button.disabled = installedWebApp;
       label.textContent = installedWebApp ? "已安装" : "安装应用";
-      button.setAttribute("aria-label", installedWebApp ? "实验室助手已安装" : "安装实验室助手");
+      button.setAttribute("aria-label", installedWebApp ? "联合研发 OA 已安装" : "安装联合研发 OA");
       button.setAttribute("aria-haspopup", installedWebApp ? "false" : "dialog");
     }
   }
@@ -2458,7 +2477,7 @@ function createPublicApp() {
         installSteps.append(element("li", { text: step }));
       }
     } else {
-      installTitle.textContent = "安装实验室助手";
+      installTitle.textContent = "安装联合研发 OA";
       installDescription.textContent = "当前浏览器暂未提供站内安装确认。你仍可通过浏览器菜单添加到桌面。";
       for (const step of ["打开浏览器菜单", "选择“安装应用”或“添加到桌面”", "按系统提示确认"]) {
         installSteps.append(element("li", { text: step }));
@@ -2472,7 +2491,7 @@ function createPublicApp() {
     if (installedWebApp || isStandaloneWebApp()) {
       installedWebApp = true;
       updateInstallControls();
-      topicStatus.textContent = "实验室助手已作为桌面应用打开";
+      topicStatus.textContent = "联合研发 OA 已作为桌面应用打开";
       return;
     }
     const promptEvent = deferredInstallPrompt;
@@ -2487,7 +2506,7 @@ function createPublicApp() {
       await promptEvent.prompt();
       const choice = await promptEvent.userChoice;
       if (choice?.outcome === "accepted") {
-        topicStatus.textContent = "正在安装实验室助手";
+        topicStatus.textContent = "正在安装联合研发 OA";
       }
     } catch {
       openInstallGuidance(opener);
@@ -2511,7 +2530,7 @@ function createPublicApp() {
     trackInstallSuccessOnce();
     updateInstallControls();
     closeInstallDialog();
-    topicStatus.textContent = "实验室助手已安装到桌面";
+    topicStatus.textContent = "联合研发 OA 已安装到桌面";
   });
   updateInstallControls();
 
@@ -3446,19 +3465,30 @@ function createPublicApp() {
         );
       }
     } else {
+      const capabilityGrid = element("div", { className: "empty-capability-grid" });
+      for (const item of LAB_MODEL_CAPABILITIES) {
+        const button = textButton("", "empty-capability-card");
+        button.append(
+          element("strong", { text: item.title }),
+          element("span", { text: item.detail }),
+        );
+        button.addEventListener("click", () => useCapability(item.command));
+        capabilityGrid.append(button);
+      }
       content.append(element("section", {
         className: "empty-hero",
         attributes: { "aria-labelledby": "empty-chat-title" },
       }, [
         element("h2", {
           id: "empty-chat-title",
-          text: "想了解实验室的什么？",
+          text: "需要实验室大模型做什么？",
         }),
         element("p", {
           text: topic.id === GENERAL_CHAT_TOPIC.id
             ? "从已审核的实验室公开知识中检索并回答"
             : `从“${topic.title}”公开知识中检索并回答`,
         }),
+        capabilityGrid,
       ]));
     }
     messageScroll.setAttribute("aria-live", "off");

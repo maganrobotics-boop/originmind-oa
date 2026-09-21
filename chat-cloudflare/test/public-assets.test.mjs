@@ -384,10 +384,10 @@ test("HTML uses only self-hosted generated assets and retains public metadata", 
   assert.match(html, /<meta\b[^>]*\bname=["']description["']/iu);
   assert.match(html, /<meta\b[^>]*\bname=["']theme-color["'][^>]*\bcontent=["']#ffffff["']/iu);
   assert.match(html, /<meta\b[^>]*\bname=["']apple-mobile-web-app-capable["'][^>]*\bcontent=["']yes["']/iu);
-  assert.match(html, /<meta\b[^>]*\bname=["']apple-mobile-web-app-title["'][^>]*\bcontent=["']实验室助手["']/iu);
+  assert.match(html, /<meta\b[^>]*\bname=["']apple-mobile-web-app-title["'][^>]*\bcontent=["']联合研发 OA["']/iu);
   assert.match(html, /<link\b[^>]*\brel=["']manifest["'][^>]*\bhref=["']\/manifest\.webmanifest["']/iu);
   assert.match(html, /<link\b[^>]*\brel=["']apple-touch-icon["'][^>]*\bhref=["']\/assets\/pwa\/apple-touch-icon-180-v1\.png["']/iu);
-  assert.ok(html.includes("ARTS Robotics AI Assistant"));
+  assert.ok(html.includes("联合研发 OA"));
   assert.ok(html.includes(`/assets/${expected.appName}`));
   assert.ok(html.includes(`/assets/${expected.styleName}`));
 
@@ -405,8 +405,8 @@ test("HTML uses only self-hosted generated assets and retains public metadata", 
 test("installable web app metadata has complete versioned icons", async () => {
   const manifest = JSON.parse(await readFile(path.join(publicDir, "manifest.webmanifest"), "utf8"));
   assert.equal(manifest.id, "/");
-  assert.equal(manifest.name, "实验室助手");
-  assert.equal(manifest.short_name, "实验室助手");
+  assert.equal(manifest.name, "联合研发 OA");
+  assert.equal(manifest.short_name, "联合研发 OA");
   assert.equal(manifest.start_url, "/");
   assert.equal(manifest.scope, "/");
   assert.equal(manifest.display, "standalone");
@@ -1126,11 +1126,11 @@ test("public chat presents four fixed knowledge domains in desktop and mobile si
   assert.match(script, /desktopSidebar\.append\(sidebarContent\(\)\)/u);
   assert.match(
     script,
-    /const pinnedLabel[\s\S]{0,180}?text:\s*["']置顶["'][\s\S]{0,300}?className:\s*["']sidebar-topic-list["']/u,
+    /const pinnedLabel[\s\S]{0,180}?text:\s*["']大模型与资料["'][\s\S]{0,300}?className:\s*["']sidebar-topic-list["']/u,
   );
   assert.match(
     script,
-    /const recentLabel[\s\S]{0,200}?text:\s*["']最近["'][\s\S]{0,320}?className:\s*["']sidebar-recent-list["']/u,
+    /const recentLabel[\s\S]{0,200}?text:\s*["']最近聊天["'][\s\S]{0,320}?className:\s*["']sidebar-recent-list["']/u,
   );
   const recentStart = script.indexOf("function renderRecentConversations()");
   const recentEnd = script.indexOf("function createConversation", recentStart);
@@ -1347,7 +1347,8 @@ test("public chat keeps five compact live status lights below the fixed header t
   ]) {
     assert.match(script, new RegExp(`key:\\s*["']${key}["']\\s*,\\s*label:\\s*["']${label}["']`, "u"), key);
   }
-  assert.match(script, /className:\s*["']topic-header["'][\s\S]{0,160}?\[\s*topicTitle,\s*systemStatus,/u);
+  assert.match(script, /className:\s*["']topic-header["'][\s\S]{0,220}?\[\s*topicTitle,\s*topicSubtitle,\s*systemStatus,/u);
+  assert.match(script, /LAB_MODEL_CAPABILITIES[\s\S]*@知识问答[\s\S]*@项目总结[\s\S]*@资料处理[\s\S]*@会议纪要/u);
   assert.match(script, /header\.append\(menuButton,\s*topicHeader,\s*chatInfoButton/u);
   assert.match(script, /SYSTEM_STATUS_REFRESH_MS\s*=\s*60_000/u);
   assert.match(script, /SYSTEM_STATUS_RETRY_MS\s*=\s*5_000/u);

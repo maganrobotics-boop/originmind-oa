@@ -1,8 +1,8 @@
 {
   "id": "/",
-  "name": "实验室助手",
-  "short_name": "实验室助手",
-  "description": "从经审核的实验室公开知识中检索并回答问题。",
+  "name": "联合研发 OA",
+  "short_name": "联合研发 OA",
+  "description": "OriginMind × ARTS Robotics 联合研发 OA 预览聊天。",
   "lang": "zh-CN",
   "dir": "ltr",
   "start_url": "/",
