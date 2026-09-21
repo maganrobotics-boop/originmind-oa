@@ -25,7 +25,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
     environment:
-      name: preview-chat
+      name: production-oa
       url: https://preview.omindos.ai
     concurrency:
       group: chat-cloudflare-preview
