@@ -21,6 +21,11 @@ on:
         required: false
         default: false
         type: boolean
+      enable_feishu_webmail:
+        description: '启用 OA 邮箱入口并指向实验室飞书 Web 邮箱（未勾选则保留生产现状）'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -100,6 +105,7 @@ jobs:
           OA_PRODUCTION_RELEASE_CONFIRM: ${{ inputs.confirmation }}
           OA_PRODUCTION_ENABLE_AI_WORKBENCH: ${{ inputs.enable_ai_workbench && 'true' || 'false' }}
           OA_PRODUCTION_ENABLE_MEETING_BOT: ${{ inputs.enable_meeting_bot && 'true' || 'false' }}
+          OA_PRODUCTION_ENABLE_FEISHU_WEBMAIL: ${{ inputs.enable_feishu_webmail && 'true' || 'false' }}
         run: npm run release:standalone:production
       - name: Preserve immutable release and recovery evidence
         if: always()
