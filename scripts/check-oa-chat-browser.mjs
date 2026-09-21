@@ -99,6 +99,7 @@ try {
       assert.equal(requests.filter(request => request.path === '/api/lab-ai/ask').length,previousRequests,'IME composition must not submit');
       await input.press('Enter');
       await page.waitForFunction(() => document.querySelectorAll('.message.assistant math').length === 4);
+      await page.waitForFunction(() => document.querySelector('.message.assistant')?.textContent?.includes('完整结尾'));
       assert.equal(await page.locator('.message.assistant table').count(),1);
       assert.ok(await page.locator('.message.assistant strong').count() >= 3, 'the conclusion and two emphasized steps must render');
       assert.ok((await page.locator('.message.assistant').innerText()).includes('完整结尾'));
