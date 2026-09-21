@@ -79,10 +79,12 @@ try {
       reply = complete;
       await page.getByRole('button', { name: '重新回答', exact: true }).click();
       await page.waitForFunction(() => document.querySelectorAll('.oa-chat-status > .ready').length === 5);
+      await page.waitForFunction(() => document.querySelector('.message.assistant')?.textContent?.includes('这是本次完整的测试回答'));
       assert.equal(await page.locator('.message.user').count(), 1, 'retry must replace the failed attempt, not add a duplicate question');
       reply = { answer: '目前知识库没有找到足够依据回答这个问题。', mode: 'no_evidence', citations: [], images: [] };
       await ask('模拟未找到知识资料');
       await page.waitForFunction(() => document.querySelector('.oa-chat-status')?.dataset.summary.includes('未找到足够资料'));
+      await page.waitForFunction(() => [...document.querySelectorAll('.message.assistant')].some(element => element.textContent?.includes('目前知识库没有找到足够依据')));
       assert.deepEqual(await states(), ['ready', 'ready', 'unknown', 'warning', 'unknown']);
       httpStatus = 401; reply = { error: '请先完成成员注册。' };
       await ask('模拟身份校验失败');
