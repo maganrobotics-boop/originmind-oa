@@ -100,7 +100,7 @@ try {
       await input.press('Enter');
       await page.waitForFunction(() => document.querySelectorAll('.message.assistant math').length === 4);
       assert.equal(await page.locator('.message.assistant table').count(),1);
-      assert.ok(await page.locator('.message.assistant strong').count() >= 5);
+      assert.equal(await page.locator('.message.assistant strong').count(), 4, 'all four emphasized answer fragments must render');
       assert.ok((await page.locator('.message.assistant').innerText()).includes('完整结尾'));
       assert.equal(await page.locator('.message.assistant .copy-answer').count(),1);
       const after = await metrics();
