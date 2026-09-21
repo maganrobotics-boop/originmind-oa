@@ -70,6 +70,9 @@ export type SearchableKnowledgeChunk = {
   content: string;
   searchText: string;
   updatedAt: string;
+  // Server-only scope for resolving revision assets after ranking. Public JSON
+  // uses an explicit response contract and never serializes these identifiers.
+  assetScope?: { itemId: string; revisionId: string };
 };
 
 export type RankedKnowledgeChunk = SearchableKnowledgeChunk & { score: number };

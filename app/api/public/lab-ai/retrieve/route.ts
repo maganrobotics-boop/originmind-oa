@@ -6,6 +6,7 @@ import {
 } from "../../../../../lib/knowledge-policy";
 import { getPublicActiveKnowledgeChunks } from "../../../../../lib/knowledge-store";
 import { isMigrationWriteFrozen } from "../../../../../lib/migration-freeze";
+import { getPublicKnowledgeAssetsForChunks } from "../../../../../lib/public-knowledge-assets";
 import { consumePublicLabAiRetrieveRateLimit } from "../_lib/rate-limit";
 import { buildPublicLabAiRetrieveResponse, publicLabAiJson } from "../_lib/response-contract";
 import { authorizePublicLabAiRequest } from "../_lib/service-auth";
@@ -51,7 +52,8 @@ export async function POST(request: Request): Promise<Response> {
     }
     const candidates = await getPublicActiveKnowledgeChunks(question);
     const ranked = rankKnowledgeChunks(question, candidates, 6);
-    return publicLabAiJson(buildPublicLabAiRetrieveResponse(ranked));
+    const assets = await getPublicKnowledgeAssetsForChunks(publicEnv.DB, ranked);
+    return publicLabAiJson(buildPublicLabAiRetrieveResponse(ranked, assets));
   } catch {
     return errorResponse("公共知识检索暂不可用。", 503);
   }

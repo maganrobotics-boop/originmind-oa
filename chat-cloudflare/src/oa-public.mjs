@@ -7,7 +7,8 @@ import {
 } from "./constants.mjs";
 
 const MAX_QUESTION_LENGTH = 500;
-const MAX_RESPONSE_BYTES = 16 * 1024;
+const MAX_RESPONSE_BYTES = 32 * 1024;
+const PUBLIC_ASSET_URL = /^https:\/\/oa\.omindos\.ai\/api\/public\/lab-ai\/assets\/[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
 // Large public-knowledge searches can legitimately exceed the former 3-second
 // cutoff. Keep this below the release preflight's 15-second deadline while
 // leaving enough room for production D1 variance.
@@ -111,10 +112,10 @@ function stringField(value, { min = 0, max, trim = false, pattern } = {}) {
   return result;
 }
 
-function exactObject(value, names) {
+function exactObject(value, names, optional = []) {
   if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("OA_RESPONSE_INVALID");
   const keys = Object.keys(value);
-  if (keys.length !== names.length || names.some((name) => !Object.hasOwn(value, name))) {
+  if (keys.some((key) => !names.includes(key) && !optional.includes(key)) || names.some((name) => !Object.hasOwn(value, name))) {
     throw new Error("OA_RESPONSE_INVALID");
   }
   return value;
@@ -150,7 +151,7 @@ export function parseOaResult(value) {
       "excerpt",
       "sourceLabel",
       "updatedAt",
-    ]);
+    ], ["assets"]);
     const updatedAt = stringField(item.updatedAt, { max: 10, pattern: DATE_PATTERN });
     const parsed = {
       id: stringField(item.id, { max: 1, pattern: /^[1-6]$/u }),
@@ -163,12 +164,26 @@ export function parseOaResult(value) {
       updatedAt,
     };
     if (!validDate(updatedAt) || parsed.id !== String(index + 1)) throw new Error("OA_RESPONSE_INVALID");
+    if (item.assets !== undefined) {
+      if (!Array.isArray(item.assets) || item.assets.length > 2) throw new Error("OA_RESPONSE_INVALID");
+      parsed.assets = item.assets.map((candidate) => {
+        const asset = exactObject(candidate, ["url", "alt", "mimeType"]);
+        const mimeType = stringField(asset.mimeType, { max: 10, pattern: /^image\/(?:png|jpeg|webp)$/u });
+        return {
+          url: stringField(asset.url, { max: 120, pattern: PUBLIC_ASSET_URL }),
+          alt: cleanPublicChatText(stringField(asset.alt, { trim: true, max: 200 })),
+          mimeType,
+        };
+      });
+      if (new Set(parsed.assets.map((asset) => asset.url)).size !== parsed.assets.length) throw new Error("OA_RESPONSE_INVALID");
+    }
     return parsed;
   });
   if (items.reduce((total, item) => total + item.excerpt.length, 0) > 3_000) {
     throw new Error("OA_RESPONSE_INVALID");
   }
-  if (items.reduce((total, item) => total + Object.values(item).reduce((sum, field) => sum + field.length, 0), 0) > 4_096) {
+  if (items.reduce((total, item) => total + Object.values(item).reduce((sum, field) => sum + (typeof field === "string" ? field.length : 0), 0), 0) > 4_096
+    || items.reduce((total, item) => total + (item.assets?.length || 0), 0) > 6) {
     throw new Error("OA_RESPONSE_INVALID");
   }
   return items;
@@ -289,6 +304,7 @@ export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS) {
         paragraphRef: item.paragraphRef,
         sourceLabel: item.sourceLabel,
         origin: "oa_public",
+        ...(item.assets ? { assets: item.assets } : {}),
       })),
     };
   } catch (error) {

@@ -6,7 +6,7 @@
   Cross-Origin-Resource-Policy: same-origin
   Strict-Transport-Security: max-age=31536000
   X-Frame-Options: DENY
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https://oa.omindos.ai/api/public/lab-ai/assets/; connect-src 'self' https://oa.omindos.ai; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'
   X-Robots-Tag: noindex, nofollow
 
 /assets/*

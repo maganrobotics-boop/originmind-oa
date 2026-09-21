@@ -115,6 +115,8 @@ export class MockD1 {
 
     if (query.includes("from documents") && query.startsWith("select id,title,body,url,category")) {
       const rows = [...this.documents.values()]
+        .filter((document) => !query.includes("coalesce(oa_submission_state,'unknown') != 'submitted'")
+          || (document.oaSubmissionState ?? document.oa_submission_state ?? "unknown") !== "submitted")
         .sort((left, right) => String(right.updatedAt ?? right.updated_at).localeCompare(String(left.updatedAt ?? left.updated_at)))
         .map((document) => ({
           id: document.id,

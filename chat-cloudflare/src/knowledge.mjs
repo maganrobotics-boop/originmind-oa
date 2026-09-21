@@ -24,6 +24,7 @@ export function fallbackAnswer(documents) {
   for (const document of documents) {
     const clean = typeof document?.body === "string"
       ? document.body
+        .replace(/!\[([^\]\r\n]*)\]\([^\r\n)]*\)/gu, "$1")
         .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/gu, " ")
         .replace(/\s+/gu, " ")
         .trim()
@@ -31,9 +32,7 @@ export function fallbackAnswer(documents) {
     const key = clean.normalize("NFKC").toLocaleLowerCase("zh-CN");
     if (!clean || seen.has(key)) continue;
     seen.add(key);
-    const characters = Array.from(clean);
-    excerpts.push(characters.length > 520 ? `${characters.slice(0, 519).join("")}…` : clean);
-    if (excerpts.length === 3) break;
+    excerpts.push(clean);
   }
   if (!excerpts.length) {
     return "目前没有足够信息回答这个问题。你可以补充具体方向、对象或时间范围；如需团队确认，请点击“提交咨询”。";

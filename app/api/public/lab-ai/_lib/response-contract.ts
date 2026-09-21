@@ -1,13 +1,14 @@
 import { cleanPublicChatText } from "../../../../../chat-cloudflare/src/public-text.mjs";
 import { knowledgeSearchTerms, type RankedKnowledgeChunk } from "../../../../../lib/knowledge-policy";
 import type { PublicKnowledgeSuggestionCandidate } from "../../../../../lib/knowledge-store";
+import type { PublicKnowledgeAsset } from "../../../../../lib/public-knowledge-assets";
 
 export const PUBLIC_LAB_AI_MAX_CHUNKS = 6;
 export const PUBLIC_LAB_AI_MAX_SUGGESTIONS = 5;
 export const PUBLIC_LAB_AI_MAX_EXCERPT_CHARS = 600;
 export const PUBLIC_LAB_AI_MAX_TOTAL_EXCERPT_CHARS = 3_000;
 export const PUBLIC_LAB_AI_MAX_TOTAL_TEXT_CHARS = 4_096;
-export const PUBLIC_LAB_AI_MAX_RESPONSE_BYTES = 16 * 1_024;
+export const PUBLIC_LAB_AI_MAX_RESPONSE_BYTES = 32 * 1_024;
 
 type PublicLabAiChunk = {
   id: string;
@@ -18,6 +19,7 @@ type PublicLabAiChunk = {
   excerpt: string;
   sourceLabel: string;
   updatedAt: string;
+  assets?: PublicKnowledgeAsset[];
 };
 
 export type PublicLabAiRetrieveResponse = { chunks: PublicLabAiChunk[] };
@@ -86,11 +88,14 @@ function validDate(value: string): string | null {
   return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === date ? date : null;
 }
 
-function textLength(value: Omit<PublicLabAiChunk, "excerpt">): number {
+function textLength(value: Omit<PublicLabAiChunk, "excerpt" | "assets">): number {
   return Object.values(value).reduce((total, field) => total + field.length, 0);
 }
 
-export function buildPublicLabAiRetrieveResponse(ranked: RankedKnowledgeChunk[]): PublicLabAiRetrieveResponse {
+export function buildPublicLabAiRetrieveResponse(
+  ranked: RankedKnowledgeChunk[],
+  assets: ReadonlyMap<string, PublicKnowledgeAsset[]> = new Map(),
+): PublicLabAiRetrieveResponse {
   const candidates = ranked.slice(0, PUBLIC_LAB_AI_MAX_CHUNKS).flatMap((chunk, index) => {
     const title = boundedLine(chunk.title, 100);
     const category = boundedLine(chunk.category, 40);
@@ -98,6 +103,7 @@ export function buildPublicLabAiRetrieveResponse(ranked: RankedKnowledgeChunk[])
     const updatedAt = validDate(chunk.updatedAt);
     if (title.length < 2 || !category || !content || !updatedAt) return [];
     return [{
+      assets: assets.get(chunk.id),
       metadata: {
         id: String(index + 1),
         title,
@@ -124,7 +130,7 @@ export function buildPublicLabAiRetrieveResponse(ranked: RankedKnowledgeChunk[])
     const excerpt = boundedExcerpt(candidate.content, allowance);
     if (!excerpt) return [];
     excerptBudget -= excerpt.length;
-    return [{ ...candidate.metadata, excerpt }];
+    return [{ ...candidate.metadata, excerpt, ...(candidate.assets?.length ? { assets: candidate.assets } : {}) }];
   });
   chunks.forEach((chunk, index) => { chunk.id = String(index + 1); });
   return { chunks };
