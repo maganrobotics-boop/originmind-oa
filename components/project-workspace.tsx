@@ -80,8 +80,11 @@ export function ProjectWorkspace({ mode, approvals, currentUserEmail = '', peopl
     setBackfillStatus('正在读取历史会议并提取行动项…');
     try {
       const response = await fetch('/api/work-items', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'backfill_meetings' }) });
-      const data = await response.json() as { meetings?: number; discovered?: number; error?: string };
+      const payload = await response.text();
+      let data: { meetings?: number; discovered?: number; error?: string } = {};
+      try { data = payload ? JSON.parse(payload) as typeof data : {}; } catch { /* A proxy may replace an upstream error with a non-JSON response. */ }
       if (!response.ok) throw new Error(data.error || '历史会议导入失败');
+      if (!payload) throw new Error('服务器没有返回导入结果，请稍后重试。');
       await load();
       const message = `已检查 ${data.meetings || 0} 场历史会议，并同步 ${data.discovered || 0} 条行动项；已有项目不会重复创建。`;
       setBackfillStatus(message);
