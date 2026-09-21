@@ -222,7 +222,8 @@ try {
       await page.waitForTimeout(100); assert.equal(await preview.isVisible(),false);
       assert.equal(await page.locator('.oa-document-card').last().getByRole('button',{name:'下载 Word',exact:true}).count(),0);
       // Reload can restore owner-authorized saved documents without a separate page.
-      mode='success'; await page.reload(); await page.locator('.empty-hero').waitFor();
+      mode='success'; await page.reload(); await page.locator('.collaboration-workspace').waitFor();
+      await page.locator('.collaboration-ai-entry').click(); await page.locator('.empty-hero').waitFor();
       await page.getByRole('button',{name:'已保存文档',exact:true}).click();
       const history=page.getByRole('dialog',{name:'本人已保存文档',exact:true}); await history.waitFor();
       await history.locator('.oa-document-history button').first().click(); await preview.waitFor();
