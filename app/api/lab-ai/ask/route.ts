@@ -82,13 +82,16 @@ export async function POST(request: Request) {
     };
     const retrievalQuery = history.length && question.length <= 80 ? `${history.at(-1)!.content} ${question}` : question;
     const ranked = await measureWaiting(timings, "lookup", async () => {
-      const candidates = await getActiveKnowledgeChunks(actor, retrievalQuery);
+      const imageRequest = questionRequestsKnowledgeImages(question);
+      const [candidates, recent] = await Promise.all([
+        getActiveKnowledgeChunks(actor, retrievalQuery),
+        imageRequest ? getActiveKnowledgeChunks(actor) : Promise.resolve([]),
+      ]);
       // Image questions must inspect more than the three strongest text hits:
       // an older text-only article can otherwise hide a newer approved package
       // whose revision owns the requested images.
-      if (!questionRequestsKnowledgeImages(question)) return rankKnowledgeChunks(retrievalQuery, candidates, 6);
+      if (!imageRequest) return rankKnowledgeChunks(retrievalQuery, candidates, 6);
       const relevant = rankKnowledgeChunks(retrievalQuery, candidates, 8);
-      const recent = await getActiveKnowledgeChunks(actor);
       const seen = new Set(relevant.map(chunk => chunk.id));
       return [...relevant.slice(0, 6), ...recent.filter(chunk => !seen.has(chunk.id)).slice(0, 6).map(chunk => ({ ...chunk, score: 0 }))];
     });

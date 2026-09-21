@@ -51,11 +51,13 @@ export async function POST(request: Request): Promise<Response> {
     if (!(await consumePublicLabAiRetrieveRateLimit(publicEnv.DB))) {
       return errorResponse("检索过于频繁，请稍后再试。", 429, { "retry-after": "60" });
     }
-    const candidates = await getPublicActiveKnowledgeChunks(question);
     const imageRequest = questionRequestsKnowledgeImages(question);
+    const [candidates, recent] = await Promise.all([
+      getPublicActiveKnowledgeChunks(question),
+      imageRequest ? getPublicActiveKnowledgeChunks() : Promise.resolve([]),
+    ]);
     let ranked = rankKnowledgeChunks(question, candidates, imageRequest ? 8 : 6);
     if (imageRequest) {
-      const recent = await getPublicActiveKnowledgeChunks();
       const identity = (chunk: { title: string; updatedAt: string; content: string }) => `${chunk.title}\u0000${chunk.updatedAt}\u0000${chunk.content}`;
       const seen = new Set(ranked.map(identity));
       ranked = [...ranked.slice(0, 6), ...recent.filter((chunk) => !seen.has(identity(chunk))).slice(0, 6)]

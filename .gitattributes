@@ -1,1 +1,8 @@
 *.sh text eol=lf
+
+# Migration byte hashes are release security boundaries and must be stable on Windows and Linux.
+drizzle/*.sql text eol=lf
+migrations/**/*.sql text eol=lf
+
+# The KaTeX module filename contains a content hash verified by the release tests.
+chat-cloudflare/public/assets/katex-*.mjs text eol=lf

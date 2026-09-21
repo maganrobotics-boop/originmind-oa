@@ -12,7 +12,7 @@ function imageDocumentScore(question, document) {
   let score = 0;
   if (/(?:OriginMind|ARTS\s*Robotics|机器人产品|实验平台)/iu.test(haystack)) score += 500;
   if (/(?:实验室|机器人)/u.test(haystack)) score += 120;
-  if (/(?:硕士学位论文|博士学位论文|论文封面|公式|示意图)/u.test(haystack)) score -= 500;
+  if (/(?:硕士.{0,8}论文|博士.{0,8}论文|论文封面|论文算法|公式|示意图|算法框图)/u.test(haystack)) score -= 500;
   if (assets.length) score += 80;
   const updated = Date.parse(document.updatedAt || '');
   if (Number.isFinite(updated)) score += updated / 1e11;
@@ -22,7 +22,7 @@ export function chatKnowledgeImages(documents, question = '') {
   const images = [];
   const seen = new Set();
   const ranked = question
-    ? documents.map(document => ({ document, score: imageDocumentScore(question, document) })).filter(item => item.score > -10_000).sort((a, b) => b.score - a.score).slice(0, 1).map(item => item.document)
+    ? documents.map(document => ({ document, score: imageDocumentScore(question, document) })).filter(item => item.score > 0).sort((a, b) => b.score - a.score).slice(0, 1).map(item => item.document)
     : documents;
   for (const document of ranked) {
     for (const asset of parseKnowledgeAssets(document.assets || [])) {
