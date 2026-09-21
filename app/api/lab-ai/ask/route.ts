@@ -86,7 +86,11 @@ export async function POST(request: Request) {
       // Image questions must inspect more than the three strongest text hits:
       // an older text-only article can otherwise hide a newer approved package
       // whose revision owns the requested images.
-      return rankKnowledgeChunks(retrievalQuery, candidates, questionRequestsKnowledgeImages(question) ? 12 : 6);
+      if (!questionRequestsKnowledgeImages(question)) return rankKnowledgeChunks(retrievalQuery, candidates, 6);
+      const relevant = rankKnowledgeChunks(retrievalQuery, candidates, 8);
+      const recent = await getActiveKnowledgeChunks(actor);
+      const seen = new Set(relevant.map(chunk => chunk.id));
+      return [...relevant.slice(0, 6), ...recent.filter(chunk => !seen.has(chunk.id)).slice(0, 6).map(chunk => ({ ...chunk, score: 0 }))];
     });
     const answer = await measureWaiting(timings, "answer", () => answerOaChatQuestion(question, ranked, history));
     return finish(privateJson(answer));
@@ -94,3 +98,4 @@ export async function POST(request: Request) {
     return finish(privateJson({ error: "实验室知识问答暂不可用，请稍后重试。" }, { status: 500 }));
   }
 }
+
