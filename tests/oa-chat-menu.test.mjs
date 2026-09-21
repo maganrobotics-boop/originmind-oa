@@ -5,7 +5,7 @@ const read = name => readFile(new URL(`../${name}`, import.meta.url), 'utf8');
 
 test('every workspace header opens chat on the right and centers the current secondary title', async () => {
   const page = await read('app/page.tsx');
-  assert.match(page, /<div className="oa-topbar-secondary-title"><strong>\{secondaryTitle\}<\/strong><\/div>/u);
+  assert.match(page, /<OaConversationTitle><div className="oa-topbar-secondary-title"><strong>\{secondaryTitle\}<\/strong><\/div><\/OaConversationTitle>/u);
   assert.match(page, /<div className="topbar-actions">\s*<OaConversationMenu \/>/u);
   assert.doesNotMatch(page, /PageSecondaryMenu|打开当前模块目录|当前模块二级目录/u);
   const topbar = page.slice(page.indexOf('<header className="topbar">'), page.indexOf('</header>', page.indexOf('<header className="topbar">')));

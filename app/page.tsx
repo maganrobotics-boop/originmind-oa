@@ -69,7 +69,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
 import { KnowledgeView, type KnowledgeTab } from "@/components/knowledge/knowledge-view";
 import "./oa-workspace.css";
-import { OaConversationProvider, OaConversationMenu, OaNewChatButton, useOaConversation } from "@/components/knowledge/oa-conversation-context";
+import { OaConversationProvider, OaConversationMenu, OaConversationTitle, OaNewChatButton, useOaConversation } from "@/components/knowledge/oa-conversation-context";
 import {
   NDA_AGREEMENT_VERSION,
   buildNdaAgreementText,
@@ -2472,7 +2472,7 @@ export default function Home() {
         <header className="topbar">
           <button type="button" className="workspace-sidebar-toggle" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "展开侧栏" : "收起侧栏"} aria-expanded={!sidebarCollapsed} aria-controls="oa-desktop-navigation"><Menu className="size-5" /></button>
           <button ref={mobileMenuButtonRef} className="mobile-menu-button" onClick={() => setMobileNavOpen(true)} aria-label="打开导航" aria-expanded={mobileNavOpen} aria-controls="mobile-navigation"><Menu className="size-5" /></button>
-          <div className="oa-topbar-secondary-title"><strong>{secondaryTitle}</strong></div>
+          <OaConversationTitle><div className="oa-topbar-secondary-title"><strong>{secondaryTitle}</strong></div></OaConversationTitle>
           <div className="topbar-actions">
             <OaConversationMenu />
           </div>

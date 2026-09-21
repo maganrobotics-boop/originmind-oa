@@ -59,7 +59,7 @@ export function OaConversationProvider({ currentUser, visible, onOpenChat, child
 
 export function OaConversationTitle({ children }: { children: ReactNode }) {
   const { peer } = useOaConversation();
-  return peer ? <div className="oa-chat-title oa-member-title"><strong>{peer.name}</strong><small>成员私聊</small></div> : children;
+  return peer ? <div className="oa-topbar-secondary-title oa-member-title"><strong>{peer.name}</strong><small>成员私聊</small></div> : children;
 }
 export function OaConversationMenu() {
   const chat = useOaConversation();
