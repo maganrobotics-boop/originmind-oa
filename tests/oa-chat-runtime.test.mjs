@@ -141,6 +141,47 @@ test('OA image requests find a newer asset-bearing result behind three legacy te
   assert.equal(state.calls.length, 0);
 });
 
+test('OA robot image requests prefer the robot product package over unrelated thesis figures', async () => {
+  const state = globalThis[stateKey];
+  state.allowImageDb = true;
+  const thesis = {
+    ...chunk, id:'thesis', itemId:'thesis-item', revisionId:'thesis-revision',
+    title:'机器人定位硕士学位论文', content:'硕士学位论文\n![论文封面](assets/image1.jpg)\n![公式示意图](assets/image12.png)', updatedAt:'2026-09-20',
+  };
+  const robots = {
+    ...chunk, id:'robots', itemId:'robots-item', revisionId:'robots-revision',
+    title:'OriginMind × ARTS Robotics 机器人产品与实验平台', content:'实验室机器人产品\n![四足机器人原图](assets/quadruped.webp)', updatedAt:'2026-09-21',
+  };
+  state.assets = [
+    { itemId:thesis.itemId, revisionId:thesis.revisionId, assetPath:'assets/image1.jpg', mimeType:'image/jpeg' },
+    { itemId:robots.itemId, revisionId:robots.revisionId, assetPath:'assets/quadruped.webp', mimeType:'image/webp' },
+  ];
+  const result = await client.answerOaChatQuestion('实验室机器人图片',[thesis, robots]);
+  assert.equal(result.images.length,1);
+  assert.match(result.images[0].url,/robots-item/u);
+  assert.doesNotMatch(result.images[0].url,/thesis-item/u);
+});
+
+test('OA specific robot image requests reject a different robot type', async () => {
+  const state = globalThis[stateKey];
+  state.allowImageDb = true;
+  const wheeled = {
+    ...chunk, id:'wheeled', itemId:'wheeled-item', revisionId:'wheeled-revision',
+    title:'OriginMind 轮式机器人', content:'![轮式机器人原图](assets/wheeled.webp)',
+  };
+  const quadruped = {
+    ...chunk, id:'quadruped', itemId:'quadruped-item', revisionId:'quadruped-revision',
+    title:'OriginMind 四足机器人', content:'![四足机器人原图](assets/quadruped.webp)',
+  };
+  state.assets = [
+    { itemId:wheeled.itemId, revisionId:wheeled.revisionId, assetPath:'assets/wheeled.webp', mimeType:'image/webp' },
+    { itemId:quadruped.itemId, revisionId:quadruped.revisionId, assetPath:'assets/quadruped.webp', mimeType:'image/webp' },
+  ];
+  const result = await client.answerOaChatQuestion('实验室四足机器人照片',[wheeled, quadruped]);
+  assert.equal(result.images.length,1);
+  assert.match(result.images[0].url,/quadruped-item/u);
+});
+
 test('50 image questions either return approved images or an explicit no-image result without model generation', async () => {
   const state = globalThis[stateKey];
   state.allowImageDb = true;
@@ -270,3 +311,4 @@ test('only OA administrators get an inline answer editor with text and image con
   assert.match(source, /action: 'approve'/u);
   assert.match(source, /PUBLIC_KNOWLEDGE_CONFIRMATION/u);
 });
+
