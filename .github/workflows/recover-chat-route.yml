@@ -12,6 +12,7 @@ jobs:
     env:
       CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
       CF_ACCOUNT_ID: ${{ vars.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}
+      OA_DATABASE_ID: ${{ vars.OA_PRODUCTION_D1_DATABASE_ID }}
       CHAT_HOST: chat.omindos.ai
       CHAT_WORKER: originmind-public-chat-production
     steps:
@@ -23,6 +24,7 @@ jobs:
           (async () => {
             const token = process.env.CF_API_TOKEN;
             const accountId = process.env.CF_ACCOUNT_ID;
+            const databaseId = process.env.OA_DATABASE_ID;
             const host = process.env.CHAT_HOST;
             const worker = process.env.CHAT_WORKER;
             const expectedOrigin = '43.138.161.143';
@@ -73,6 +75,15 @@ jobs:
               for (const domain of domains.body.result) {
                 report.push('Worker domain: ' + JSON.stringify({ id: domain.id, hostname: domain.hostname, service: domain.service, environment: domain.environment, zone_id: domain.zone_id }));
               }
+              const ledger = await call('D1 migration ledger', 'https://api.cloudflare.com/client/v4/accounts/' + accountId + '/d1/database/' + databaseId + '/query', {
+                method: 'POST',
+                body: JSON.stringify({ sql: 'SELECT id, name FROM d1_migrations ORDER BY id' }),
+              });
+              if (!ledger.response.ok || !ledger.body.success || ledger.body.result?.length !== 1 || ledger.body.result[0]?.success !== true) {
+                throw new Error('D1 migration ledger query failed');
+              }
+              const migrationNames = ledger.body.result[0].results?.map((item) => item.name) || [];
+              report.push('D1 migration names: ' + JSON.stringify(migrationNames));
               const pattern = host + '/*';
               const route = listed.body.result.find((item) => item.pattern === pattern);
               const changed = route
