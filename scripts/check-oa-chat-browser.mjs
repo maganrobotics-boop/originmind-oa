@@ -129,7 +129,10 @@ try {
       assert.equal(await nav.getByRole('button',{name:'打开个人账户菜单',exact:true}).isVisible(),true);
       await page.screenshot({ path:resolve(output,`${name}-navigation.png`),fullPage:true });
       await nav.getByRole('button',{name:'上传资料',exact:true}).click();
-      assert.equal(await page.getByRole('button',{name:'上传 ZIP',exact:true}).isVisible(),true);
+      const uploadPicker = page.getByRole('button',{name:'上传文件、图片、ZIP 或文件夹',exact:true});
+      assert.equal(await uploadPicker.isVisible(),true);
+      await uploadPicker.click();
+      assert.equal(await page.getByRole('button',{name:'上传文件 / 图片 / ZIP',exact:true}).isVisible(),true);
       assert.equal(await page.getByRole('button',{name:'上传文件夹',exact:true}).isVisible(),true);
       if (!desktop) await page.getByRole('button',{name:'打开导航',exact:true}).click();
       await nav.getByRole('button',{name:'审批工作台',exact:true}).click();
