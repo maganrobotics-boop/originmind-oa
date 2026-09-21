@@ -1,4 +1,5 @@
 import { collectPublicKnowledgeAssets } from "../../../../../lib/public-knowledge-assets.mjs";
+import { questionRequestsKnowledgeImages } from "../../../../../chat-cloudflare/src/question-scope.mjs";
 import { readBoundedJsonObject } from "../../../../../lib/bounded-json-request";
 import {
   isWellFormedUnicode,
@@ -51,7 +52,7 @@ export async function POST(request: Request): Promise<Response> {
       return errorResponse("检索过于频繁，请稍后再试。", 429, { "retry-after": "60" });
     }
     const candidates = await getPublicActiveKnowledgeChunks(question);
-    const ranked = rankKnowledgeChunks(question, candidates, 6);
+    const ranked = rankKnowledgeChunks(question, candidates, questionRequestsKnowledgeImages(question) ? 12 : 6);
     let assets = new Map();
     try {
       assets = await collectPublicKnowledgeAssets(ranked, publicEnv.DB, publicEnv.PUBLIC_LAB_AI_SERVICE_TOKEN);
@@ -63,3 +64,4 @@ export async function POST(request: Request): Promise<Response> {
     return errorResponse("公共知识检索暂不可用。", 503);
   }
 }
+
