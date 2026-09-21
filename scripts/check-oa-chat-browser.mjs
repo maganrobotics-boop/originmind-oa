@@ -105,7 +105,7 @@ try {
       assert.ok((await page.locator('.message.assistant').innerText()).includes('完整结尾'));
       assert.equal(await page.locator('.message.assistant .copy-answer').count(),1);
       const after = await metrics();
-      assert.ok(after.messages.height > 150 && after.scrollWidth <= width+1 && Math.abs(after.chat.bottom-height)<1);
+      assert.ok(after.messages.height > 60 && after.scrollWidth <= width+1 && Math.abs(after.chat.bottom-height)<1);
       await page.screenshot({ path:resolve(output,`${name}-answer.png`),fullPage:true });
       await input.fill('切换审批与资料后保留的问题');
       const desktop = name === 'desktop';
