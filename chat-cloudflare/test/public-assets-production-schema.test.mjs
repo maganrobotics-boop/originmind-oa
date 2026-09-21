@@ -108,6 +108,16 @@ for (const [name, options] of [
   });
 }
 
+test("explicit image retrieval can use a ready image elsewhere in the same approved revision", async () => {
+  const f = fixture({ content: "OriginMind 实验室机器人产品与实验平台" });
+  try {
+    assert.equal((await collectPublicKnowledgeAssets(ranked, f.database, secret)).size, 0);
+    const images = (await collectPublicKnowledgeAssets(ranked, f.database, secret, { includeRevisionImages: true })).get("public-chunk-1");
+    assert.equal(images?.length, 1);
+    assert.equal(images[0].alt, "figure1.png");
+  } finally { f.sqlite.close(); }
+});
+
 test("production lifecycle revocation invalidates a previously issued image token", async () => {
   const f = fixture();
   try {
@@ -153,3 +163,4 @@ for (const options of [{ ready: false }, { approved: false }]) {
     } finally { f.sqlite.close(); }
   });
 }
+
