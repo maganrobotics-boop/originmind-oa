@@ -71,7 +71,7 @@ try {
     await toolbar.locator('.copy-answer-link').click();
     const shareDialog = page.locator('.message-action-dialog');
     await shareDialog.getByRole('button',{name:'确认并复制链接',exact:true}).click();
-    await page.waitForFunction(()=>window.__copied.at(-1)?.includes('#answer='));
+    await page.waitForFunction(()=>window.__copied.at(-1)?.includes('?share='));
     const link = await page.evaluate(()=>window.__copied.at(-1));
     assert.equal(new URL(link).search,'?share=0123456789abcdef');
     assert.equal(new URL(link).hash,'');
