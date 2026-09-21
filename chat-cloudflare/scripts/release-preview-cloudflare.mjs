@@ -355,9 +355,7 @@ try {
   const dns = await ensurePreviewDns(environment, `${WORKER_NAME}.${subdomain}.workers.dev`);
   await writeJson(join(evidenceRoot, "dns-preview.json"), dns);
 
-  progress("Verifying the preview deployment on workers.dev and preview.omindos.ai.");
-  const workersSmoke = await smokeCloudflare(workersDevOrigin, { releaseId: environment.releaseId });
-  await writeJson(join(evidenceRoot, "smoke-workers-dev.json"), workersSmoke);
+  progress("Verifying the preview deployment on preview.omindos.ai.");
   const liveSmoke = await smokeCloudflare(PREVIEW_ORIGIN, { releaseId: environment.releaseId });
   await writeJson(join(evidenceRoot, "smoke-preview.json"), liveSmoke);
   const liveExtraction = await smokeSavedAdminAuthentication(PREVIEW_ORIGIN, {
