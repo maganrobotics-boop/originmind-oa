@@ -11,6 +11,7 @@ jobs:
     environment: production-oa
     env:
       CF_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CF_ACCOUNT_ID: ${{ vars.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}
       CHAT_HOST: chat.omindos.ai
       CHAT_WORKER: originmind-public-chat-production
     steps:
@@ -21,6 +22,7 @@ jobs:
           const fs = require('node:fs');
           (async () => {
             const token = process.env.CF_API_TOKEN;
+            const accountId = process.env.CF_ACCOUNT_ID;
             const host = process.env.CHAT_HOST;
             const worker = process.env.CHAT_WORKER;
             const headers = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
@@ -36,9 +38,22 @@ jobs:
               const zone = await call('Zone lookup', 'https://api.cloudflare.com/client/v4/zones?name=omindos.ai');
               if (!zone.response.ok || !zone.body.success || !zone.body.result.length) throw new Error('Zone lookup failed');
               const zoneId = zone.body.result[0].id;
+              const dns = await call('DNS lookup', 'https://api.cloudflare.com/client/v4/zones/' + zoneId + '/dns_records?name=' + encodeURIComponent(host));
+              if (!dns.response.ok || !dns.body.success) throw new Error('DNS lookup failed');
+              for (const record of dns.body.result) {
+                report.push('DNS record: ' + JSON.stringify({ id: record.id, type: record.type, name: record.name, content: record.content, ttl: record.ttl, proxied: record.proxied }));
+              }
               const api = 'https://api.cloudflare.com/client/v4/zones/' + zoneId + '/workers/routes';
               const listed = await call('Route list', api);
               if (!listed.response.ok || !listed.body.success) throw new Error('Route list failed');
+              for (const item of listed.body.result.filter((candidate) => candidate.pattern.includes(host))) {
+                report.push('Matching route: ' + JSON.stringify({ id: item.id, pattern: item.pattern, script: item.script }));
+              }
+              const domains = await call('Worker domain list', 'https://api.cloudflare.com/client/v4/accounts/' + accountId + '/workers/domains?hostname=' + encodeURIComponent(host));
+              if (!domains.response.ok || !domains.body.success) throw new Error('Worker domain list failed');
+              for (const domain of domains.body.result) {
+                report.push('Worker domain: ' + JSON.stringify({ id: domain.id, hostname: domain.hostname, service: domain.service, environment: domain.environment, zone_id: domain.zone_id }));
+              }
               const pattern = host + '/*';
               const route = listed.body.result.find((item) => item.pattern === pattern);
               const changed = route
@@ -50,6 +65,7 @@ jobs:
               report.push('Result: ' + error.message);
             }
             fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY, '## Chat route recovery\n\n' + report.map((line) => '- ' + line).join('\n') + '\n');
+            console.log(report.join('\n'));
             if (!report.includes('Result: Chat Worker route restored.')) process.exit(1);
           })();
           NODE
