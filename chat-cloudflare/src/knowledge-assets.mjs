@@ -3,10 +3,28 @@ import { KNOWLEDGE_ASSET_TOKEN_PATTERN, KNOWLEDGE_ASSET_MAX_BYTES, KNOWLEDGE_ASS
 import { PublicError } from "./errors.mjs";
 import { cleanPublicChatText } from "./public-text.mjs";
 
-export function chatKnowledgeImages(documents) {
+const ROBOT_IMAGE_KIND_PATTERN = /(?:四足|轮足|轮式|双臂|机械臂|开放式|人形|履带|无人机)/gu;
+function imageDocumentScore(question, document) {
+  const assets = parseKnowledgeAssets(document.assets || []);
+  const haystack = `${document.title || ''}\n${document.body || ''}\n${assets.map(asset => asset.alt).join('\n')}`.normalize('NFKC');
+  const kinds = [...new Set(String(question || '').normalize('NFKC').match(ROBOT_IMAGE_KIND_PATTERN) || [])];
+  if (kinds.length && !kinds.every(kind => haystack.includes(kind))) return -10_000;
+  let score = 0;
+  if (/(?:OriginMind|ARTS\s*Robotics|机器人产品|实验平台)/iu.test(haystack)) score += 500;
+  if (/(?:实验室|机器人)/u.test(haystack)) score += 120;
+  if (/(?:硕士学位论文|博士学位论文|论文封面|公式|示意图)/u.test(haystack)) score -= 500;
+  if (assets.length) score += 80;
+  const updated = Date.parse(document.updatedAt || '');
+  if (Number.isFinite(updated)) score += updated / 1e11;
+  return score;
+}
+export function chatKnowledgeImages(documents, question = '') {
   const images = [];
   const seen = new Set();
-  for (const document of documents) {
+  const ranked = question
+    ? documents.map(document => ({ document, score: imageDocumentScore(question, document) })).filter(item => item.score > -10_000).sort((a, b) => b.score - a.score).slice(0, 1).map(item => item.document)
+    : documents;
+  for (const document of ranked) {
     for (const asset of parseKnowledgeAssets(document.assets || [])) {
       if (seen.has(asset.token)) continue;
       seen.add(asset.token);
@@ -70,3 +88,4 @@ export async function proxyKnowledgeAsset(context, token) {
     "cross-origin-resource-policy": "same-origin", "Referrer-Policy": "no-referrer",
   } });
 }
+
