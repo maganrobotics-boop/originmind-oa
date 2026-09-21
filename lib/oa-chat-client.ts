@@ -91,13 +91,33 @@ export async function oaChatModelStatus() {
     return { bridgeReady: result.bridgeReady === true, modelReady: result.modelReady === true, budgetReady: result.budgetReady === true };
   } catch { return { bridgeReady: false, modelReady: false, budgetReady: false }; }
 }
-async function answerImages(chunks: RankedKnowledgeChunk[], includeRevisionImages = false): Promise<OaChatImage[]> {
+const ROBOT_IMAGE_KIND_PATTERN = /(?:四足|轮足|轮式|双臂|机械臂|开放式|人形|履带|无人机)/gu;
+function imageChunkScore(question: string, chunk: RankedKnowledgeChunk, refs: Map<string, string>): number {
+  const haystack = `${chunk.title}\n${chunk.sectionTitle || ''}\n${chunk.content}\n${[...refs.values()].join('\n')}`.normalize('NFKC');
+  const kinds = [...new Set(question.normalize('NFKC').match(ROBOT_IMAGE_KIND_PATTERN) || [])];
+  if (kinds.length && !kinds.every(kind => haystack.includes(kind))) return -10_000;
+  let score = 0;
+  if (/(?:OriginMind|ARTS\s*Robotics|机器人产品|实验平台)/iu.test(haystack)) score += 500;
+  if (/(?:实验室|机器人)/u.test(haystack)) score += 120;
+  if (/(?:硕士学位论文|博士学位论文|论文封面|公式|示意图)/u.test(haystack)) score -= 500;
+  if (refs.size) score += 80;
+  const updated = Date.parse(chunk.updatedAt || '');
+  if (Number.isFinite(updated)) score += updated / 1e11;
+  return score;
+}
+async function answerImages(question: string, chunks: RankedKnowledgeChunk[], includeRevisionImages = false): Promise<OaChatImage[]> {
   const references = chunks.map(chunk => ({ chunk, refs: knowledgeImageReferences(chunk.content) }))
     .filter(item => includeRevisionImages || item.refs.size);
   if (!references.length) return [];
-  const db = await getDb(); const images: OaChatImage[] = []; const seen = new Set<string>();
+  const db = await getDb(); const candidates: Array<{ chunk: RankedKnowledgeChunk; refs: Map<string, string>; assets: Awaited<ReturnType<typeof listKnowledgeRevisionAssets>>; score: number }> = [];
   for (const { chunk, refs } of references) {
     const assets = await listKnowledgeRevisionAssets(db.$client, chunk.revisionId);
+    if (assets.some(asset => asset.itemId === chunk.itemId)) candidates.push({ chunk, refs, assets, score: imageChunkScore(question, chunk, refs) });
+  }
+  const selected = candidates.filter(candidate => candidate.score > -10_000).sort((a, b) => b.score - a.score)[0];
+  if (!selected) return [];
+  const images: OaChatImage[] = []; const seen = new Set<string>();
+  for (const { chunk, refs, assets } of [selected]) {
     for (const asset of assets) {
       const identity = `${chunk.itemId}:${chunk.revisionId}:${asset.assetPath}`;
       if (asset.itemId !== chunk.itemId || (!includeRevisionImages && !refs.has(asset.assetPath)) || seen.has(identity)) continue;
@@ -125,9 +145,7 @@ export async function answerOaChatQuestion(question: string, ranked: RankedKnowl
     try {
       const result = await bridge({ operation: 'answer', answerType: 'general', question, history: history.slice(-2), documents: [] }, 70000);
       if (result.mode !== 'general' || typeof result.answer !== 'string' || !result.answer.trim() || result.answer.length > 12000 || !result.answer.isWellFormed()) throw new Error('CHAT_BRIDGE_INVALID_ANSWER');
-      return { answer: `**来源类型：模型通用知识（未引用 OA 资料）**
-
-${result.answer.trim()}`, citations: [], images: [], mode: 'general', provider: result.provider, sourceType: 'model_general_knowledge' };
+      return { answer: `**来源类型：模型通用知识（未引用 OA 资料）**\n\n${result.answer.trim()}`, citations: [], images: [], mode: 'general', provider: result.provider, sourceType: 'model_general_knowledge' };
     } catch (error) {
       reportBridgeFailure(error);
       return { answer: '这是普通常识问题，但通用知识回答服务暂不可用，请稍后重试。', citations: [], images: [], mode: 'retrieval', fallbackReason: 'general_model_unavailable', sourceType: 'model_general_knowledge' };
@@ -141,7 +159,7 @@ ${result.answer.trim()}`, citations: [], images: [], mode: 'general', provider: 
   }));
   const citations = chunks.map((chunk, index) => ({ id: String(index + 1), itemId: chunk.itemId, revisionId: chunk.revisionId, title: chunk.title, category: chunk.category, sectionTitle: chunk.sectionTitle, paragraphRef: chunk.paragraphRef, excerpt: prefix(chunk.content, 600) }));
   let images: OaChatImage[] = [];
-  try { images = await answerImages(chunks, imageRequest); } catch { /* A failed image lookup must not discard the complete text. */ }
+  try { images = await answerImages(question, chunks, imageRequest); } catch { /* A failed image lookup must not discard the complete text. */ }
   if (imageRequest) {
     if (images.length) return { answer: `已找到 ${images.length} 张与问题相关的已审核资料图片，显示如下。`, citations, images, mode: 'ai', sourceType: 'oa_knowledge_images' };
     return { answer: '已找到相关文字资料，但当前已审核版本没有可展示的图片。请由管理员在知识资料中补充图片并完成审核后再试。', citations, images: [], mode: 'no_evidence', sourceType: 'oa_knowledge_images_unavailable' };
@@ -162,3 +180,4 @@ export async function generateOaTask(input: { kind: string; title: string; instr
   if (result.mode !== 'task' || typeof result.answer !== 'string' || !result.answer.trim()) throw new Error('TASK_MODEL_UNAVAILABLE');
   return result.answer;
 }
+
