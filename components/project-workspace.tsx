@@ -4,7 +4,7 @@
 /* eslint-disable react-hooks/set-state-in-effect */
 
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, ClipboardCheck, Flag, ListTodo, Plus, RefreshCw, Target, UsersRound } from 'lucide-react';
+import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, ClipboardCheck, Flag, History, ListTodo, Plus, RefreshCw, Target, UsersRound } from 'lucide-react';
 import { toast } from 'sonner';
 import type { WorkItem } from '@/lib/project-work-items';
 import './project-workspace.css';
@@ -12,12 +12,12 @@ import './project-workspace.css';
 type ApprovalSummary = { id: string; title: string; type: string; status: string; step: string; updatedAt: string; currentReviewerEmail?: string };
 type KnowledgeReviewSummary = { id: string; title: string; category: string; summary?: string; submitterName?: string; submitterEmail?: string; createdAt: string };
 type PersonOption = { email: string; name: string };
-type Props = { mode: 'todos' | 'project'; approvals: ApprovalSummary[]; currentUserEmail?: string; people?: PersonOption[]; canReviewKnowledge?: boolean; onOpenApproval: (id: string) => void; onOpenKnowledgeReview: () => void };
+type Props = { mode: 'todos' | 'project'; approvals: ApprovalSummary[]; currentUserEmail?: string; people?: PersonOption[]; canReviewKnowledge?: boolean; canManageProject?: boolean; onOpenApproval: (id: string) => void; onOpenKnowledgeReview: () => void };
 
 const kindLabel: Record<WorkItem['kind'], string> = { task: '任务', meeting_action: '会议行动项', risk: '风险', milestone: '里程碑' };
 const today = () => new Date().toISOString().slice(0, 10);
 
-export function ProjectWorkspace({ mode, approvals, currentUserEmail = '', people = [], canReviewKnowledge = false, onOpenApproval, onOpenKnowledgeReview }: Props) {
+export function ProjectWorkspace({ mode, approvals, currentUserEmail = '', people = [], canReviewKnowledge = false, canManageProject = false, onOpenApproval, onOpenKnowledgeReview }: Props) {
   const [items, setItems] = useState<WorkItem[]>([]);
   const [knowledgeReviews, setKnowledgeReviews] = useState<KnowledgeReviewSummary[]>([]);
   const [directory, setDirectory] = useState<PersonOption[]>(people);
@@ -29,6 +29,7 @@ export function ProjectWorkspace({ mode, approvals, currentUserEmail = '', peopl
   const [priority, setPriority] = useState<'low' | 'normal' | 'high'>('normal');
   const [dueAt, setDueAt] = useState('');
   const [assigneeEmail, setAssigneeEmail] = useState(currentUserEmail);
+  const [backfilling, setBackfilling] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -73,6 +74,18 @@ export function ProjectWorkspace({ mode, approvals, currentUserEmail = '', peopl
     if (!response.ok || !data.item) { toast.error(data.error || '工作项未创建'); return; }
     setItems(current => [data.item!, ...current]); setTitle(''); setDueAt(''); setCreating(false); toast.success('工作项已加入统一待办');
   };
+  const backfillMeetings = async () => {
+    if (!window.confirm('从已有会议纪要提取行动项并写入项目工作台？现有工作项不会被覆盖或重复创建。')) return;
+    setBackfilling(true);
+    try {
+      const response = await fetch('/api/work-items', { method: 'POST', credentials: 'same-origin', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ action: 'backfill_meetings' }) });
+      const data = await response.json() as { meetings?: number; discovered?: number; error?: string };
+      if (!response.ok) throw new Error(data.error || '历史会议导入失败');
+      await load();
+      toast.success(`已检查 ${data.meetings || 0} 场历史会议，并同步 ${data.discovered || 0} 条行动项`);
+    } catch (cause) { toast.error(cause instanceof Error ? cause.message : '历史会议导入失败'); }
+    finally { setBackfilling(false); }
+  };
 
   const WorkItemRow = ({ item }: { item: WorkItem }) => <article className={`project-task ${item.priority === 'high' ? 'urgent' : ''}`}>
     <button type="button" className="project-task-check" onClick={() => void update(item, item.status === 'done' ? 'open' : 'done')} aria-label={item.status === 'done' ? '重新打开' : '标记完成'}>{item.status === 'done' ? <CheckCircle2 /> : <CircleDot />}</button>
@@ -90,7 +103,7 @@ export function ProjectWorkspace({ mode, approvals, currentUserEmail = '', peopl
   </div>;
 
   return <div className="project-page">
-    <header className="project-page-head"><div><span>项目工作台</span><h1>OriginMind × ARTS Robotics 联合研发项目</h1><p>进度、任务、会议决定与风险集中展示。</p></div><button className="project-primary" onClick={() => setCreating(value => !value)}><Plus />新建工作项</button></header>
+    <header className="project-page-head"><div><span>项目工作台</span><h1>OriginMind × ARTS Robotics 联合研发项目</h1><p>进度、任务、会议决定与风险集中展示；后续组会行动项会自动同步。</p></div><div className="project-head-actions">{canManageProject && <button type="button" disabled={backfilling} onClick={() => void backfillMeetings()}><History />{backfilling ? '正在读取历史会议…' : '从历史会议初始化'}</button>}<button className="project-primary" onClick={() => setCreating(value => !value)}><Plus />新建工作项</button></div></header>
     {creating && <form className="project-create" onSubmit={create}><input required maxLength={240} value={title} onChange={event => setTitle(event.target.value)} placeholder="工作项标题" /><select value={kind} onChange={event => setKind(event.target.value as typeof kind)}><option value="task">任务</option><option value="milestone">里程碑</option><option value="risk">风险</option></select><select value={priority} onChange={event => setPriority(event.target.value as typeof priority)}><option value="normal">普通</option><option value="high">高优先级</option><option value="low">低优先级</option></select><select value={assigneeEmail} onChange={event => setAssigneeEmail(event.target.value)}><option value="">待指定负责人</option>{people.map(person => <option key={person.email} value={person.email}>{person.name}</option>)}</select><input type="date" value={dueAt} onChange={event => setDueAt(event.target.value)} /><button type="submit">添加</button></form>}
     {error && <p className="project-error">{error}</p>}
     <section className="project-metrics"><div><Target /><span>总体完成</span><strong>{completion}%</strong></div><div><ListTodo /><span>未完成任务</span><strong>{openItems.length}</strong></div><div><AlertTriangle /><span>风险与逾期</span><strong>{new Set([...risks, ...overdue].map(item => item.id)).size}</strong></div><div><UsersRound /><span>项目成员</span><strong>{directory.length || '—'}</strong></div></section>

@@ -41,6 +41,17 @@ export async function POST(request: Request) {
   const input = parsed.value;
   const db = await getD1Database();
   const now = new Date().toISOString();
+  if (input.action === 'backfill_meetings') {
+    if (!user.isAdmin && user.role !== 'project_owner') return json({ error: '只有系统管理员或项目负责人可以从历史会议初始化项目。' }, 403);
+    const meetings = await db.prepare(`SELECT id,title,result FROM ai_workbench_tasks
+      WHERE origin='oa' AND kind='meeting_minutes' AND status='succeeded' AND length(trim(result))>0
+      ORDER BY created_at ASC LIMIT 200`).all<{ id: string; title: string; result: string }>();
+    const statements = meetings.results.flatMap(source => extractMeetingActions(source.result).map((title, index) => db.prepare(`INSERT INTO project_work_items(id,project,title,detail,kind,status,priority,assignee_name,assignee_email,due_at,source_type,source_id,source_key,created_by_name,created_by_email,created_at,updated_at)
+      VALUES(?,?,?,?,?,'open','normal','','',NULL,'meeting',?,?,?,?,?,?) ON CONFLICT(source_key) DO NOTHING`)
+      .bind(crypto.randomUUID(), OA_PROJECT, title, `来自历史会议：${text(source.title, 180)}`, 'meeting_action', source.id, `meeting:${source.id}:${index}`, user.user.displayName, user.user.email.toLowerCase(), now, now)));
+    for (let offset = 0; offset < statements.length; offset += 50) await db.batch(statements.slice(offset, offset + 50));
+    return json({ meetings: meetings.results.length, discovered: statements.length });
+  }
   if (input.action === 'import_meeting') {
     const sourceId = uuid(input.sourceId);
     if (!sourceId || !user.accountUserId) return json({ error: '会议纪要来源不完整。' }, 400);
