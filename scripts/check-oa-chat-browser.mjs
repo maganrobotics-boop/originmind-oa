@@ -79,14 +79,17 @@ try {
       assert.equal(await page.locator('.topbar .chat-hub').isVisible(), false, 'old private-chat toolbar must not duplicate the Chat header');
       assert.equal(await page.locator('.topbar .oa-topbar-user').count(), 0, 'chat identity belongs in the lower-left account area');
       const more = page.getByRole('button', {name:'聊天选项',exact:true});
+      const drawer = page.locator('.oa-conversation-drawer');
+      const clearChat = drawer.getByRole('button',{name:'清空聊天',exact:true});
       await more.waitFor();
       assert.equal(await page.locator('.oa-conversation-tools').count(),0);
       const moreBox = await more.boundingBox();
       assert.ok(moreBox.width >= 44 && moreBox.height >= 44 && moreBox.x >= width-70, 'three-dot control belongs at the top right');
       await more.click();
-      assert.equal(await page.getByRole('menuitem',{name:'清空聊天',exact:true}).getAttribute('data-disabled'), '');
+      await drawer.waitFor();
+      assert.equal(await clearChat.isDisabled(), true, 'an empty conversation cannot be cleared');
       await page.keyboard.press('Escape');
-      await page.getByRole('menu').waitFor({state:'hidden'});
+      await drawer.waitFor({state:'hidden'});
       assert.equal(await more.evaluate(element=>element===document.activeElement),true);
       await page.screenshot({ path:resolve(output,`${name}-welcome.png`),fullPage:true });
       const input = page.getByPlaceholder('询问实验室大数据');
@@ -149,17 +152,19 @@ try {
       // Cancelling a clear operation retains the current messages and draft.
       await input.fill('尚未发送的问题');
       await more.click();
+      await drawer.waitFor();
       await page.screenshot({path:resolve(output,`${name}-chat-menu.png`),fullPage:true});
       page.once('dialog',dialog=>dialog.dismiss());
-      await page.getByRole('menuitem',{name:'清空聊天',exact:true}).click();
-      await page.getByRole('menu').waitFor({state:'detached'});
+      await clearChat.click();
+      await drawer.waitFor({state:'hidden'});
       await page.waitForFunction(()=>document.activeElement?.getAttribute('aria-label')==='聊天选项');
       assert.equal(await input.inputValue(),'尚未发送的问题');
       assert.equal(await page.locator('.message.assistant math').count(),8);
       await more.click();
+      await drawer.waitFor();
       page.once('dialog',dialog=>dialog.accept());
-      await page.getByRole('menuitem',{name:'清空聊天',exact:true}).click();
-      await page.getByRole('menu').waitFor({state:'detached'});
+      await clearChat.click();
+      await drawer.waitFor({state:'hidden'});
       await page.locator('.empty-hero').waitFor();
       assert.equal(await input.inputValue(),'');
       assert.equal(await page.locator('.message').count(),0);
@@ -168,9 +173,9 @@ try {
       held.length=0; holdAnswer=true;
       await input.fill('清空正在生成的回答'); await input.press('Enter');
       await page.getByRole('button',{name:'停止等待回答',exact:true}).waitFor();
-      await more.click(); page.once('dialog',dialog=>dialog.accept());
-      await page.getByRole('menuitem',{name:'清空聊天',exact:true}).click();
-      await page.getByRole('menu').waitFor({state:'detached'});
+      await more.click(); await drawer.waitFor(); page.once('dialog',dialog=>dialog.accept());
+      await clearChat.click();
+      await drawer.waitFor({state:'hidden'});
       await page.locator('.empty-hero').waitFor();
       holdAnswer=false;
       for (const route of held) { try { await route.fulfill({json:responseBody}); } catch { /* the client already aborted */ } }
