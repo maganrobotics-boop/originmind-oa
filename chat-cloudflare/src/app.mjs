@@ -1,5 +1,6 @@
 import { buildGeneralChatMessages, buildGroundedChatMessages, boundedUserMessages } from './grounded-prompt.mjs';
 import { handleOaChatBridge } from './oa-chat-bridge.mjs';
+import { handleOaAdminBridge } from './oa-admin-bridge.mjs';
 import { questionAllowsGeneralKnowledge, questionPrefersGeneralKnowledge, questionRequestsKnowledgeImages } from './question-scope.mjs';
 import { chatKnowledgeImages, proxyKnowledgeAsset } from "./knowledge-assets.mjs";
 import { protectAnswerTechnicalText } from "./answer-math.mjs";
@@ -10,6 +11,7 @@ import { analyticsReport, recordAnalyticsEvents } from "./analytics.mjs";
 import {
   decryptSecret,
   encryptSecret,
+  createPasswordRecord,
   randomHex,
   sha256Hex,
   verifyPassword,
@@ -759,6 +761,142 @@ function visibleAiAnswer(answer, sourceCount) {
   return visible && !hasResidualMarker ? technical.restore(visible) : null;
 }
 
+function modelConfigView(context, config) {
+  return {
+    baseUrl: config?.baseUrl || "",
+    model: config?.model || DEFAULT_MODEL,
+    keyConfigured: Boolean(config?.encryptedKey),
+    encryptionReady: context.env.APP_ENCRYPTION_KEY.length >= 40,
+    activeProvider: modelProvider(context, config).provider,
+    workersAiReady: typeof context.env.AI?.run === "function",
+    verifiedAt: config?.verifiedAt || null,
+  };
+}
+
+async function saveModelConfig(context, payload) {
+  const parsed = parseModelConfigPayload(payload);
+  const baseUrl = aliyunEndpoint(parsed.baseUrl);
+  const previous = await getModelConfig(context);
+  if (!parsed.apiKey?.trim() && !previous?.encryptedKey) throw new PublicError("请先填写百炼 API Key");
+  const value = {
+    baseUrl,
+    model: parsed.model,
+    encryptedKey: parsed.apiKey?.trim()
+      ? await encryptSecret(parsed.apiKey.trim(), context.env.APP_ENCRYPTION_KEY)
+      : previous.encryptedKey,
+  };
+  // Verify the candidate before replacing the last working configuration.
+  await modelCall(context, value, [{ role: "user", content: "请只回复：连接成功" }], 20);
+  value.verifiedAt = new Date().toISOString();
+  await database(context)
+    .prepare("INSERT INTO settings (id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value")
+    .bind("model", JSON.stringify(value))
+    .run();
+  try {
+    await recordModelStatus(context, value, modelProvider(context, value), {
+      ready: true, provider: "bailian", model: value.model,
+    });
+  } catch {
+    // Saving a verified configuration must not depend on status-cache writes.
+  }
+  return { saved: true, connected: true, activeProvider: "bailian", verifiedAt: value.verifiedAt };
+}
+
+async function testModelConfig(context) {
+  const config = await getModelConfig(context);
+  if (!config) throw new PublicError("请先保存模型配置");
+  const active = modelProvider(context, config);
+  try {
+    await modelCall(context, config, [{ role: "user", content: "请只回复：连接成功" }], 20);
+  } catch (error) {
+    try { await recordModelStatus(context, config, active, await probeWorkersQwen(context)); }
+    catch { /* Preserve the model-test error if status recording is unavailable. */ }
+    throw error;
+  }
+  const verifiedConfig = { ...config, verifiedAt: new Date().toISOString() };
+  const result = await database(context)
+    .prepare("UPDATE settings SET value=? WHERE id=? AND value=?")
+    .bind(JSON.stringify(verifiedConfig), "model", JSON.stringify(config))
+    .run();
+  if (!result.meta.changes) throw new PublicError("配置已发生变化，请刷新后重新检测。", 409);
+  try {
+    await recordModelStatus(context, verifiedConfig, modelProvider(context, verifiedConfig), {
+      ready: true, provider: "bailian", model: verifiedConfig.model,
+    });
+  } catch {
+    // A verified configuration remains valid even if status recording fails.
+  }
+  return { connected: true, verifiedAt: verifiedConfig.verifiedAt };
+}
+
+async function hasAdminSession(context, token) {
+  if (!/^[a-f0-9]{64}$/u.test(token || "")) return false;
+  return Boolean(await database(context).prepare("SELECT 1 AS present FROM sessions WHERE hash=? AND expires>?")
+    .bind(await sha256Hex(token), Date.now()).first());
+}
+
+async function createAdminSession(context) {
+  const token = randomHex(32);
+  const now = Date.now();
+  await database(context).prepare("DELETE FROM sessions WHERE expires<=?").bind(now).run();
+  await database(context).prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+    .bind(await sha256Hex(token), now + SESSION_SECONDS * 1_000).run();
+  return token;
+}
+
+async function requireAdminSession(context, token) {
+  if (!await hasAdminSession(context, token)) throw new PublicError("管理会话已失效，请重新输入管理员密码。", 401);
+}
+
+async function handleOaAdminOperation(context, payload) {
+  if (payload.operation === "status") {
+    const account = await database(context).prepare("SELECT 1 AS present FROM admin_account WHERE id=1").first();
+    const signedIn = payload.sessionToken ? await hasAdminSession(context, payload.sessionToken) : false;
+    return {
+      initialized: Boolean(account), signedIn,
+      ...(signedIn ? modelConfigView(context, await getModelConfig(context)) : {}),
+    };
+  }
+  if (payload.operation === "set_password") {
+    const record = await createPasswordRecord(payload.password);
+    const token = randomHex(32); const now = Date.now();
+    await database(context).batch([
+      database(context).prepare(`INSERT INTO admin_account(id,algorithm,iterations,salt,hash) VALUES (1,?,?,?,?)
+        ON CONFLICT(id) DO UPDATE SET algorithm=excluded.algorithm,iterations=excluded.iterations,salt=excluded.salt,hash=excluded.hash`)
+        .bind(record.algorithm, record.iterations, record.salt, record.hash),
+      database(context).prepare("DELETE FROM sessions"),
+      database(context).prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+        .bind(await sha256Hex(token), now + SESSION_SECONDS * 1_000),
+    ]);
+    console.info("OA_ADMIN_PASSWORD_UPDATED", { actorHash: (await sha256Hex(payload.actor)).slice(0, 16) });
+    return { initialized: true, signedIn: true, sessionToken: token, ...modelConfigView(context, await getModelConfig(context)) };
+  }
+  if (payload.operation === "login") {
+    const now = Date.now();
+    await consumeCounter(context, `oa-admin-login:${Math.floor(now / 900_000)}`, 30, Math.floor(now / 1000) + 1800);
+    const account = await database(context).prepare("SELECT algorithm,iterations,salt,hash FROM admin_account WHERE id=1").first();
+    if (!account) throw new PublicError("管理员密码尚未设置。", 409);
+    if (!await verifyPassword(payload.password, account)) throw new PublicError("密码不正确。", 401);
+    const token = await createAdminSession(context);
+    return { initialized: true, signedIn: true, sessionToken: token, ...modelConfigView(context, await getModelConfig(context)) };
+  }
+  if (payload.operation === "logout") {
+    await database(context).prepare("DELETE FROM sessions WHERE hash=?").bind(await sha256Hex(payload.sessionToken)).run();
+    return { initialized: true, signedIn: false };
+  }
+  await requireAdminSession(context, payload.sessionToken);
+  if (payload.operation === "config_get") return modelConfigView(context, await getModelConfig(context));
+  if (payload.operation === "config_save") {
+    await consumeCounter(context, "oa-admin-config", 20, Math.floor(Date.now() / 1000) + 3600);
+    return { ...await saveModelConfig(context, { baseUrl: payload.baseUrl, model: payload.model, ...(payload.apiKey === undefined ? {} : { apiKey: payload.apiKey }) }), ...modelConfigView(context, await getModelConfig(context)) };
+  }
+  if (payload.operation === "test") {
+    await consumeCounter(context, "oa-admin-test", 20, Math.floor(Date.now() / 1000) + 3600);
+    return { ...await testModelConfig(context), ...modelConfigView(context, await getModelConfig(context)) };
+  }
+  throw new PublicError("请求内容不正确", 400);
+}
+
 function visibleGeneralAnswer(answer) {
   if (typeof answer !== 'string' || !answer.trim() || answer.length > 12_000 || !answer.isWellFormed()) return null;
   const visible = cleanAnswerPresentation(answer).trim();
@@ -851,6 +989,13 @@ async function api(context) {
     ? { startedAt: Date.now(), oa: 0, model: 0 }
     : null;
   try {
+    if (path === "internal/oa-admin") return handleOaAdminBridge(context, {
+      claimRequest: async (nonce) => {
+        await consumeCounter(context, `oa-admin-bridge:${nonce}`, 1, Math.floor(Date.now() / 1000) + 120);
+        await database(context).prepare("DELETE FROM limits WHERE expires < ?").bind(Math.floor(Date.now() / 1000)).run();
+      },
+      handle: (payload) => handleOaAdminOperation(context, payload),
+    });
     if (path === "internal/oa-answer") return handleOaChatBridge(context, {
       getModelConfig, modelProvider, currentModelStatus, modelBudgetReady,
       globalBudget, modelCall, workersAiCall, visibleAiAnswer, visibleGeneralAnswer,
@@ -1192,80 +1337,15 @@ async function api(context) {
       return json(await analyticsReport(database(context), days));
     }
     if (path === "admin/config" && method === "GET") {
-      const config = await getModelConfig(context);
-      return json({
-        baseUrl: config?.baseUrl || "",
-        model: config?.model || DEFAULT_MODEL,
-        keyConfigured: Boolean(config?.encryptedKey),
-        encryptionReady: context.env.APP_ENCRYPTION_KEY.length >= 40,
-        activeProvider: modelProvider(context, config).provider,
-        workersAiReady: typeof context.env.AI?.run === "function",
-        verifiedAt: config?.verifiedAt || null,
-      });
+      return json(modelConfigView(context, await getModelConfig(context)));
     }
     if (path === "admin/config" && method === "POST") {
       await limit(context, "test", 10);
-      const payload = parseModelConfigPayload(await readJson(request, 2_500));
-      const baseUrl = aliyunEndpoint(payload.baseUrl);
-      const previous = await getModelConfig(context);
-      if (!payload.apiKey?.trim() && !previous?.encryptedKey) throw new PublicError("请先填写百炼 API Key");
-      const value = {
-        baseUrl,
-        model: payload.model,
-        encryptedKey: payload.apiKey?.trim()
-          ? await encryptSecret(payload.apiKey.trim(), context.env.APP_ENCRYPTION_KEY)
-          : previous.encryptedKey,
-      };
-      // Verify the candidate before replacing the last working configuration.
-      // Saving the same values must never silently disable an existing connection.
-      await modelCall(context, value, [{ role: "user", content: "请只回复：连接成功" }], 20);
-      value.verifiedAt = new Date().toISOString();
-      await database(context)
-        .prepare("INSERT INTO settings (id,value) VALUES (?,?) ON CONFLICT(id) DO UPDATE SET value=excluded.value")
-        .bind("model", JSON.stringify(value))
-        .run();
-      try {
-        await recordModelStatus(context, value, modelProvider(context, value), {
-          ready: true,
-          provider: "bailian",
-          model: value.model,
-        });
-      } catch {
-        // Saving a verified configuration must not depend on status-cache writes.
-      }
-      return json({ saved: true, connected: true, activeProvider: "bailian", verifiedAt: value.verifiedAt });
+      return json(await saveModelConfig(context, await readJson(request, 2_500)));
     }
     if (path === "admin/test" && method === "POST") {
       await limit(context, "test", 10);
-      const config = await getModelConfig(context);
-      if (!config) throw new PublicError("请先保存模型配置");
-      const active = modelProvider(context, config);
-      try {
-        await modelCall(context, config, [{ role: "user", content: "请只回复：连接成功" }], 20);
-      } catch (error) {
-        try {
-          await recordModelStatus(context, config, active, await probeWorkersQwen(context));
-        } catch {
-          // Preserve the model-test error if status recording is unavailable.
-        }
-        throw error;
-      }
-      const verifiedConfig = { ...config, verifiedAt: new Date().toISOString() };
-      const result = await database(context)
-        .prepare("UPDATE settings SET value=? WHERE id=? AND value=?")
-        .bind(JSON.stringify(verifiedConfig), "model", JSON.stringify(config))
-        .run();
-      if (!result.meta.changes) throw new PublicError("配置已发生变化，请刷新后重新检测。", 409);
-      try {
-        await recordModelStatus(context, verifiedConfig, modelProvider(context, verifiedConfig), {
-          ready: true,
-          provider: "bailian",
-          model: verifiedConfig.model,
-        });
-      } catch {
-        // A verified configuration remains valid even if status recording fails.
-      }
-      return json({ connected: true });
+      return json(await testModelConfig(context));
     }
     if (path === "admin/oa-test" && method === "POST") {
       return json({ oaPublicKnowledge: await probeOaPublicKnowledge(context) });

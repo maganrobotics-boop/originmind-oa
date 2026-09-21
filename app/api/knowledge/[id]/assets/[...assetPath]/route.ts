@@ -1,7 +1,7 @@
 import { getDb } from "../../../../../../db";
 import { getKnowledgeAssetsBucket } from "../../../../../../lib/knowledge-assets-env";
 import { listKnowledgeRevisionAssets, normalizeKnowledgeAssetPath } from "../../../../../../lib/knowledge-assets";
-import { findKnowledgeItem, getKnowledgeItemDetail, type KnowledgeActor } from "../../../../../../lib/knowledge-store";
+import { getKnowledgeItemDetail, type KnowledgeActor } from "../../../../../../lib/knowledge-store";
 import { getAuthorizedUser, isProjectOwner, type AuthorizedUser } from "../../../../_lib/auth";
 
 const SAFE_KNOWLEDGE_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
@@ -54,18 +54,25 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const safe = await safeParams(params);
   if (!safe) return privateJson({ error: "知识图片不存在。" }, { status: 404 });
   try {
-    const detail = await getKnowledgeItemDetail(safe.id, access.actor, canReviewKnowledge(access.authorized));
     const query = new URL(request.url).searchParams;
     const forChat = query.has("forChat") || query.has("revision");
     const requestedRevision = query.get("revision");
-    const currentItem = forChat ? await findKnowledgeItem(safe.id, access.actor) : null;
     if (forChat && (query.get("forChat") !== "1" || !requestedRevision || !SAFE_KNOWLEDGE_ID.test(requestedRevision)
-      || [...query.keys()].some(key => !["forChat", "revision"].includes(key))
+      || [...query.keys()].some(key => !["forChat", "revision"].includes(key)))) return privateJson({ error: "知识图片不存在或版本已失效。" }, { status: 404 });
+    const db = await getDb();
+    // Chat only renders assets from an active revision. This small metadata
+    // lookup avoids rebuilding a potentially multi-megabyte knowledge body
+    // twice before every image response.
+    const currentItem = forChat ? await db.$client.prepare(`
+      SELECT status, current_revision_id, active_revision_id
+      FROM knowledge_items WHERE id = ? LIMIT 1
+    `).bind(safe.id).first<{ status: string; current_revision_id: string | null; active_revision_id: string | null }>() : null;
+    if (forChat && (query.get("forChat") !== "1" || !requestedRevision || !SAFE_KNOWLEDGE_ID.test(requestedRevision)
       || currentItem?.status !== "active" || currentItem.active_revision_id !== requestedRevision
       || currentItem.current_revision_id !== requestedRevision)) return privateJson({ error: "知识图片不存在或版本已失效。" }, { status: 404 });
+    const detail = forChat ? null : await getKnowledgeItemDetail(safe.id, access.actor, canReviewKnowledge(access.authorized));
     const revisionId = forChat ? requestedRevision : (detail?.item as { currentRevisionId?: string } | undefined)?.currentRevisionId;
     if (!revisionId) return privateJson({ error: "知识图片不存在。" }, { status: 404 });
-    const db = await getDb();
     const assets = await listKnowledgeRevisionAssets(db.$client, revisionId);
     const asset = assets.find((item) => item.assetPath === safe.assetPath);
     if (!asset) return privateJson({ error: "知识图片不存在。" }, { status: 404 });

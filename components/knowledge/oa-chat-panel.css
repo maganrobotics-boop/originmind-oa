@@ -45,6 +45,9 @@
 .oa-shared-chat .oa-answer-images figure { margin:0; min-width:0; }
 .oa-shared-chat .oa-answer-images img { max-width:100%; max-height:420px; width:100%; object-fit:contain; }
 .oa-shared-chat .oa-answer-images figcaption { font-size:13px; color:#777; line-height:1.7; margin-top:6px; }
+.oa-shared-chat .oa-answer-image-status { display:flex; min-height:180px; align-items:center; justify-content:center; gap:10px; border:1px solid #e2e5e7; border-radius:12px; background:#f7f8f8; color:#697278; font-size:14px; }
+.oa-shared-chat .oa-answer-image.error .oa-answer-image-status { color:#9b403b; background:#fff7f5; }
+.oa-shared-chat .oa-answer-image-status button { border:1px solid #d1d7da; border-radius:8px; padding:6px 10px; background:#fff; color:#334148; }
 .oa-shared-chat .oa-chat-retry { display:inline-flex; align-items:center; gap:8px; background:#f4f4f4; border-radius:18px; padding:8px 14px; }
 .oa-shared-chat .oa-chat-error { margin:0 0 10px; color:#a23737; font-size:14px; }
 .oa-shared-chat .knowledge-answer-loading { color:#777; padding:12px 0; font-size:14px; }
