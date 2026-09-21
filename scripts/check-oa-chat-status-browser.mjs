@@ -55,7 +55,7 @@ try {
       await page.goto(origin);
       await page.waitForFunction(() => document.querySelectorAll('.oa-chat-status > .ready').length === 4);
       assert.deepEqual(await states(), ['ready', 'ready', 'ready', 'ready', 'unknown']);
-      assert.equal(await page.locator('.oa-chat-title > strong').innerText(), 'AI 助手');
+      assert.equal(await page.locator('.oa-topbar-secondary-title > strong').innerText(), 'AI 助手');
       const legend = page.locator('.oa-chat-status-details > summary');
       await legend.click();
       assert.equal(await page.locator('.oa-chat-status-panel').isVisible(), true);
@@ -102,7 +102,7 @@ try {
       for (const route of held) { try { await route.abort(); } catch { /* Client already cancelled. */ } }
       await page.getByRole('button', { name: '聊天选项', exact: true }).click();
       page.once('dialog', dialog => dialog.accept());
-      await page.getByRole('menuitem', { name: '清空聊天', exact: true }).click();
+      await page.getByRole('button', { name: '清空聊天', exact: true }).click();
       await page.locator('.empty-hero').waitFor();
       assert.equal(await page.locator('.oa-chat-status').getAttribute('data-source'), 'probe');
       assert.equal((await states())[4], 'unknown', 'new conversation cannot inherit old generation success or failure');

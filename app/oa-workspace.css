@@ -120,6 +120,8 @@
   text-align:center;
 }
 .oa-workspace .oa-topbar-secondary-title strong { font-size:17px; font-weight:700; line-height:1.35; letter-spacing:0; }
+.oa-workspace .oa-topbar-secondary-title .oa-chat-title { position:static; transform:none; pointer-events:auto; }
+.oa-workspace .oa-topbar-secondary-title .oa-chat-title > strong { display:none; }
 .oa-workspace .topbar-actions { grid-column:3; grid-row:1; justify-self:end; margin:0; }
 .oa-workspace .topbar-actions > .oa-conversation-menu { width:44px; height:44px; border-radius:50%; }
 .oa-workspace .brand-name { font-size:17px; font-weight:700; letter-spacing:-.01em; }
