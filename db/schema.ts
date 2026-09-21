@@ -259,6 +259,201 @@ export const directMessages = sqliteTable(
   ],
 );
 
+// OA V2 keeps the existing member and authentication records authoritative.
+// Organization, project, and conversation records refer to members by their
+// stable member ID; email/name snapshots live only on historical messages.
+export const departments = sqliteTable(
+  "departments",
+  {
+    id: text("id").primaryKey(),
+    code: text("code").notNull(),
+    name: text("name").notNull(),
+    parentId: text("parent_id"),
+    status: text("status").notNull().default("active"),
+    sortOrder: integer("sort_order").notNull().default(0),
+    createdByMemberId: text("created_by_member_id").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    check("departments_code_check", sql`length(trim(${table.code})) BETWEEN 1 AND 64`),
+    check("departments_name_check", sql`length(trim(${table.name})) BETWEEN 1 AND 120`),
+    check("departments_status_check", sql`${table.status} IN ('active', 'archived')`),
+    uniqueIndex("departments_code_unique").on(table.code),
+    index("departments_parent_sort_idx").on(table.parentId, table.sortOrder, table.name),
+  ],
+);
+
+export const departmentMemberships = sqliteTable(
+  "department_memberships",
+  {
+    id: text("id").primaryKey(),
+    departmentId: text("department_id").notNull(),
+    memberId: text("member_id").notNull(),
+    membershipType: text("membership_type").notNull().default("primary"),
+    title: text("title").notNull().default(""),
+    joinedAt: text("joined_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    leftAt: text("left_at"),
+    createdByMemberId: text("created_by_member_id").notNull(),
+  },
+  (table) => [
+    check("department_memberships_type_check", sql`${table.membershipType} IN ('primary', 'collaborator')`),
+    uniqueIndex("department_memberships_active_unique")
+      .on(table.departmentId, table.memberId)
+      .where(sql`${table.leftAt} IS NULL`),
+    uniqueIndex("department_memberships_member_primary_unique")
+      .on(table.memberId)
+      .where(sql`${table.leftAt} IS NULL AND ${table.membershipType} = 'primary'`),
+    index("department_memberships_member_active_idx").on(table.memberId, table.leftAt),
+  ],
+);
+
+export const projects = sqliteTable(
+  "projects",
+  {
+    id: text("id").primaryKey(),
+    projectKey: text("project_key").notNull(),
+    name: text("name").notNull(),
+    summary: text("summary").notNull().default(""),
+    status: text("status").notNull().default("active"),
+    ownerMemberId: text("owner_member_id").notNull(),
+    createdByMemberId: text("created_by_member_id").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    archivedAt: text("archived_at"),
+  },
+  (table) => [
+    check("projects_key_check", sql`length(trim(${table.projectKey})) BETWEEN 1 AND 80`),
+    check("projects_name_check", sql`length(trim(${table.name})) BETWEEN 1 AND 160`),
+    check("projects_status_check", sql`${table.status} IN ('planned', 'active', 'paused', 'completed', 'archived')`),
+    uniqueIndex("projects_key_unique").on(table.projectKey),
+    index("projects_status_updated_idx").on(table.status, table.updatedAt),
+  ],
+);
+
+export const projectMembers = sqliteTable(
+  "project_members",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    memberId: text("member_id").notNull(),
+    role: text("role").notNull().default("member"),
+    joinedAt: text("joined_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    leftAt: text("left_at"),
+    addedByMemberId: text("added_by_member_id").notNull(),
+  },
+  (table) => [
+    check("project_members_role_check", sql`${table.role} IN ('owner', 'manager', 'member', 'observer')`),
+    uniqueIndex("project_members_active_unique")
+      .on(table.projectId, table.memberId)
+      .where(sql`${table.leftAt} IS NULL`),
+    index("project_members_member_active_idx").on(table.memberId, table.leftAt),
+  ],
+);
+
+export const projectLinks = sqliteTable(
+  "project_links",
+  {
+    id: text("id").primaryKey(),
+    projectId: text("project_id").notNull(),
+    resourceType: text("resource_type").notNull(),
+    resourceId: text("resource_id").notNull(),
+    label: text("label").notNull().default(""),
+    linkedByMemberId: text("linked_by_member_id").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    check("project_links_type_check", sql`${table.resourceType} IN ('approval', 'knowledge', 'meeting', 'work_item', 'conversation', 'email')`),
+    uniqueIndex("project_links_resource_unique").on(table.projectId, table.resourceType, table.resourceId),
+    index("project_links_resource_idx").on(table.resourceType, table.resourceId),
+  ],
+);
+
+export const conversations = sqliteTable(
+  "conversations",
+  {
+    id: text("id").primaryKey(),
+    type: text("type").notNull(),
+    title: text("title").notNull().default(""),
+    directKey: text("direct_key"),
+    projectId: text("project_id"),
+    createdByMemberId: text("created_by_member_id").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    archivedAt: text("archived_at"),
+  },
+  (table) => [
+    check("conversations_type_check", sql`${table.type} IN ('direct', 'group', 'project', 'ai')`),
+    check("conversations_direct_key_check", sql`(${table.type} = 'direct' AND ${table.directKey} IS NOT NULL) OR (${table.type} <> 'direct' AND ${table.directKey} IS NULL)`),
+    check("conversations_project_check", sql`(${table.type} = 'project' AND ${table.projectId} IS NOT NULL) OR ${table.type} <> 'project'`),
+    uniqueIndex("conversations_direct_key_unique")
+      .on(table.directKey)
+      .where(sql`${table.directKey} IS NOT NULL`),
+    index("conversations_project_updated_idx").on(table.projectId, table.updatedAt),
+  ],
+);
+
+export const conversationMembers = sqliteTable(
+  "conversation_members",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id").notNull(),
+    memberId: text("member_id").notNull(),
+    role: text("role").notNull().default("member"),
+    joinedAt: text("joined_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    leftAt: text("left_at"),
+    lastReadMessageId: text("last_read_message_id"),
+    lastReadAt: text("last_read_at"),
+    addedByMemberId: text("added_by_member_id").notNull(),
+  },
+  (table) => [
+    check("conversation_members_role_check", sql`${table.role} IN ('owner', 'admin', 'member')`),
+    uniqueIndex("conversation_members_active_unique")
+      .on(table.conversationId, table.memberId)
+      .where(sql`${table.leftAt} IS NULL`),
+    index("conversation_members_member_active_idx").on(table.memberId, table.leftAt, table.conversationId),
+  ],
+);
+
+export const conversationMessages = sqliteTable(
+  "conversation_messages",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id").notNull(),
+    senderMemberId: text("sender_member_id").notNull(),
+    senderName: text("sender_name").notNull(),
+    body: text("body").notNull(),
+    messageType: text("message_type").notNull().default("text"),
+    replyToMessageId: text("reply_to_message_id"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    editedAt: text("edited_at"),
+    deletedAt: text("deleted_at"),
+  },
+  (table) => [
+    check("conversation_messages_body_check", sql`length(${table.body}) BETWEEN 1 AND 16000`),
+    check("conversation_messages_type_check", sql`${table.messageType} IN ('text', 'system', 'file')`),
+    index("conversation_messages_conversation_created_idx").on(table.conversationId, table.createdAt, table.id),
+    index("conversation_messages_sender_created_idx").on(table.senderMemberId, table.createdAt),
+  ],
+);
+
+export const conversationEvents = sqliteTable(
+  "conversation_events",
+  {
+    id: text("id").primaryKey(),
+    conversationId: text("conversation_id").notNull(),
+    actorMemberId: text("actor_member_id").notNull(),
+    action: text("action").notNull(),
+    subjectMemberId: text("subject_member_id"),
+    detailJson: text("detail_json").notNull().default("{}"),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [
+    check("conversation_events_action_check", sql`${table.action} IN ('created', 'renamed', 'member_added', 'member_removed', 'archived', 'restored')`),
+    index("conversation_events_conversation_created_idx").on(table.conversationId, table.createdAt),
+  ],
+);
+
 export const knowledgeItems = sqliteTable(
   "knowledge_items",
   {

@@ -1,6 +1,6 @@
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { getDb } from "../../../db";
-import { accountProfiles, members } from "../../../db/schema";
+import { accountProfiles, departmentMemberships, departments, members } from "../../../db/schema";
 import { getAuthorizedUser, getReviewerDirectory, isAdministrator, isNdaAdmittedMember, parseAccountProfile, parseMemberPermissions } from "../_lib/auth";
 import { memberDepartmentLabel } from "../../../lib/member-attributes";
 
@@ -11,15 +11,15 @@ function isOnline(lastSeenAt: string) {
   return Number.isFinite(timestamp) && Date.now() - timestamp <= ONLINE_WINDOW_MS;
 }
 
-function profileForViewer(profile: ReturnType<typeof parseAccountProfile>, isSelf: boolean, departmentCode = "") {
+function profileForViewer(profile: ReturnType<typeof parseAccountProfile>, isSelf: boolean, departmentCode = "", departmentName = "", canSeeDepartment = isSelf) {
   const officialProfile = {
     ...profile,
-    department: memberDepartmentLabel(departmentCode),
+    department: departmentName || memberDepartmentLabel(departmentCode),
   };
   if (isSelf) return officialProfile;
   return {
     ...officialProfile,
-    department: officialProfile.visibility.department ? officialProfile.department : "",
+    department: canSeeDepartment ? officialProfile.department : "",
     position: officialProfile.visibility.position ? officialProfile.position : "",
     phone: officialProfile.visibility.phone ? officialProfile.phone : "",
     bio: officialProfile.visibility.bio ? officialProfile.bio : "",
@@ -33,7 +33,7 @@ export async function GET(request: Request) {
   const includeAwaitingConfidentiality = new URL(request.url).searchParams.get("scope") === "directory";
   try {
     const db = await getDb();
-    const [memberRows, profileRows] = await Promise.all([
+    const [memberRows, profileRows, membershipRows] = await Promise.all([
       db.select({ id: members.id, fullName: members.fullName, chatgptAccount: members.chatgptAccount, accountUserId: members.accountUserId, role: members.role, permissionsJson: members.permissionsJson, departmentCode: members.departmentCode, ndaAcceptedAt: members.ndaAcceptedAt, ndaAgreementVersion: members.ndaAgreementVersion, lastSeenAt: members.lastSeenAt }).from(members).where(eq(members.status, "active")).orderBy(desc(members.lastSeenAt)),
       db.select({
         chatgptAccount: accountProfiles.chatgptAccount,
@@ -41,8 +41,13 @@ export async function GET(request: Request) {
         profileJson: accountProfiles.profileJson,
         lastSeenAt: accountProfiles.lastSeenAt,
       }).from(accountProfiles),
+      db.select({ memberId: departmentMemberships.memberId, departmentId: departments.id, departmentName: departments.name })
+        .from(departmentMemberships)
+        .innerJoin(departments, eq(departmentMemberships.departmentId, departments.id))
+        .where(and(isNull(departmentMemberships.leftAt), eq(departmentMemberships.membershipType, "primary"), eq(departments.status, "active"))),
     ]);
     const profiles = new Map(profileRows.map((row) => [row.chatgptAccount, row]));
+    const primaryDepartments = new Map(membershipRows.map((row) => [row.memberId, row]));
     const reviewerDirectory = await getReviewerDirectory({ ...authorized.user, accountUserId: authorized.accountUserId });
     const owners = new Map<string, { email: string; displayName: string; isAdmin: boolean }>(reviewerDirectory
       .filter((reviewer) => reviewer.ndaCompleted && reviewer.permissions.includes("project_owner"))
@@ -61,6 +66,7 @@ export async function GET(request: Request) {
       lastSeenAt: string;
       online: boolean;
       ndaCompleted: boolean;
+      departmentId: string;
     }>();
     for (const row of memberRows) {
       const confidentialityCompleted = isNdaAdmittedMember(row);
@@ -70,14 +76,16 @@ export async function GET(request: Request) {
       const profile = parseAccountProfile(profileRow?.profileJson);
       const permissions = parseMemberPermissions(row.role, row.permissionsJson);
       const lastSeenAt = profileRow?.lastSeenAt || row.lastSeenAt;
-      people.set(email, { id: row.id, fullName: owners.get(email)?.displayName || row.fullName, email, role: permissions.includes("project_owner") ? "project_owner" : permissions.includes("technical_advisor") ? "technical_advisor" : "member", permissions, isAdmin: isAdministrator(row.chatgptAccount, row.accountUserId ?? undefined), avatarDataUrl: profileRow?.avatarDataUrl || "", profile: profileForViewer(profile, email === currentEmail, row.departmentCode), lastSeenAt, online: confidentialityCompleted && isOnline(lastSeenAt), ndaCompleted: confidentialityCompleted });
+      const officialDepartment = primaryDepartments.get(row.id);
+      const canSeeDepartment = email === currentEmail || authorized.isAdmin || profile.visibility.department;
+      people.set(email, { id: row.id, fullName: owners.get(email)?.displayName || row.fullName, email, role: permissions.includes("project_owner") ? "project_owner" : permissions.includes("technical_advisor") ? "technical_advisor" : "member", permissions, isAdmin: isAdministrator(row.chatgptAccount, row.accountUserId ?? undefined), avatarDataUrl: profileRow?.avatarDataUrl || "", profile: profileForViewer(profile, email === currentEmail, row.departmentCode, officialDepartment?.departmentName, canSeeDepartment), lastSeenAt, online: confidentialityCompleted && isOnline(lastSeenAt), ndaCompleted: confidentialityCompleted, departmentId: canSeeDepartment ? officialDepartment?.departmentId || "" : "" });
     }
     for (const owner of owners.values()) {
       if (people.has(owner.email)) continue;
       const profileRow = profiles.get(owner.email);
       const profile = parseAccountProfile(profileRow?.profileJson);
       const lastSeenAt = profileRow?.lastSeenAt || "";
-      people.set(owner.email, { id: `account:${owner.email}`, fullName: owner.displayName, email: owner.email, role: "project_owner", permissions: ["technical_advisor", "project_owner"], isAdmin: owner.isAdmin, avatarDataUrl: profileRow?.avatarDataUrl || "", profile: profileForViewer(profile, owner.email === currentEmail), lastSeenAt, online: isOnline(lastSeenAt), ndaCompleted: true });
+      people.set(owner.email, { id: `account:${owner.email}`, fullName: owner.displayName, email: owner.email, role: "project_owner", permissions: ["technical_advisor", "project_owner"], isAdmin: owner.isAdmin, avatarDataUrl: profileRow?.avatarDataUrl || "", profile: profileForViewer(profile, owner.email === currentEmail, "", "", owner.email === currentEmail || profile.visibility.department), lastSeenAt, online: isOnline(lastSeenAt), ndaCompleted: true, departmentId: "" });
     }
     return Response.json({ people: Array.from(people.values()).sort((left, right) => Number(right.online) - Number(left.online) || left.fullName.localeCompare(right.fullName, "zh-CN")), currentUserEmail: authorized.user.email });
   } catch {

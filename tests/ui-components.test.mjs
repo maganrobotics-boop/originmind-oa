@@ -220,14 +220,14 @@ test("lets a pending applicant sign out into a QR-first account switch screen", 
   assert.match(gateSource, /切换登录方式不会删除原账户的注册、审核或业务记录/u);
 });
 
-test("returns successful external sign-ins to the OA Chat workspace", async () => {
+test("returns successful external sign-ins to the unified OA chat workspace", async () => {
   const pageSource = await readFile(path.join(root, "app/page.tsx"), "utf8");
-  assert.match(pageSource, /useState<ViewKey>\("knowledge"\)/u);
+  assert.match(pageSource, /useState<ViewKey>\("chat"\)/u);
   assert.match(pageSource, /useState<KnowledgeTab>\("ask"\)/u);
 
   for (const provider of ["github", "feishu"]) {
     const signedInBranch = new RegExp(
-      `${provider}Status === "signed-in"\\) \\{[\\s\\S]*?setActiveView\\("knowledge"\\);[\\s\\S]*?setShowMineOnly\\(false\\);[\\s\\S]*?setMobileNavOpen\\(false\\);[\\s\\S]*?window\\.scrollTo\\(\\{ top: 0, left: 0, behavior: "auto" \\}\\);`,
+      `${provider}Status === "signed-in"\\) \\{[\\s\\S]*?setActiveView\\("chat"\\);[\\s\\S]*?setShowMineOnly\\(false\\);[\\s\\S]*?setMobileNavOpen\\(false\\);[\\s\\S]*?window\\.scrollTo\\(\\{ top: 0, left: 0, behavior: "auto" \\}\\);`,
       "u",
     );
     assert.match(pageSource, signedInBranch);

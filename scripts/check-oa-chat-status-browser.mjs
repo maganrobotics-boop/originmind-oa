@@ -19,7 +19,7 @@ const server = createServer(async (req, res) => {
 });
 await new Promise(done => server.listen(0, '127.0.0.1', done));
 const origin = `http://127.0.0.1:${server.address().port}`;
-const browser = await chromium.launch({ headless: true });
+const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}) });
 const results = [];
 const healthy = { authorized: true, bridgeReady: true, modelReady: true, budgetReady: true, knowledgeReady: true, retrievalReady: true };
 const complete = { answer: '这是本次完整的测试回答。', mode: 'ai', citations: [], images: [] };
@@ -53,6 +53,8 @@ try {
     const ask = async question => { await page.getByRole('button', { name: '发送问题', exact: true }).waitFor(); const input = page.getByPlaceholder('询问实验室大数据'); await input.fill(question); await input.press('Enter'); };
     try {
       await page.goto(origin);
+      await page.locator('.collaboration-workspace').waitFor();
+      await page.locator('.collaboration-ai-entry').click();
       await page.waitForFunction(() => document.querySelectorAll('.oa-chat-status > .ready').length === 4);
       assert.deepEqual(await states(), ['ready', 'ready', 'ready', 'ready', 'unknown']);
       assert.equal(await page.locator('.oa-topbar-secondary-title > strong').innerText(), 'AI 助手');

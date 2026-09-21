@@ -2,8 +2,8 @@ import { readdir, readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 
 import {
-  REVIEWED_KNOWLEDGE_MIGRATIONS,
-  productionKnowledgeDefinitions,
+  REVIEWED_PRODUCTION_MIGRATIONS,
+  productionSchemaDefinitions,
   validateProductionMigrationManifest,
   validateProductionMigrationState,
 } from "../lib/production-release.mjs";
@@ -32,18 +32,18 @@ const migrationEntries = await readdir(drizzleRoot, { withFileTypes: true });
 const sqlEntries = migrationEntries.filter((entry) => entry.name.endsWith(".sql"));
 if (sqlEntries.some((entry) => !entry.isFile())) throw new Error("Every production migration must be a regular file, not a symlink or special file");
 const migrationSqlByName = Object.fromEntries(await Promise.all(
-  Object.keys(REVIEWED_KNOWLEDGE_MIGRATIONS).map(async (name) => [name, await readFile(resolve(drizzleRoot, name), "utf8")]),
+  Object.keys(REVIEWED_PRODUCTION_MIGRATIONS).map(async (name) => [name, await readFile(resolve(drizzleRoot, name), "utf8")]),
 ));
 const expectedMigrationNames = validateProductionMigrationManifest({
   migrationNames: sqlEntries.map((entry) => entry.name).sort(),
   migrationSqlByName,
 });
-const reviewedNames = Object.keys(REVIEWED_KNOWLEDGE_MIGRATIONS);
-const knowledgeDefinitionsByMigration = Object.fromEntries(reviewedNames.map((name, index) => [
+const reviewedNames = Object.keys(REVIEWED_PRODUCTION_MIGRATIONS);
+const schemaDefinitionsByMigration = Object.fromEntries(reviewedNames.map((name, index) => [
   Number(name.slice(0, 4)),
-  productionKnowledgeDefinitions(migrationSqlByName, reviewedNames.slice(0, index + 1)),
+  productionSchemaDefinitions(migrationSqlByName, reviewedNames.slice(0, index + 1)),
 ]));
-const expectedKnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName);
+const expectedSchemaDefinitions = productionSchemaDefinitions(migrationSqlByName);
 const [ledgerPayload, freezePayload, schemaPayload] = await Promise.all([
   readFile(resolve(options.ledger), "utf8").then(JSON.parse),
   readFile(resolve(options.freeze), "utf8").then(JSON.parse),
@@ -57,12 +57,12 @@ const state = validateProductionMigrationState({
   schemaPayload,
   expectedMigrationNames,
   expectedSchemaObjects: [
-    ...Object.keys(expectedKnowledgeDefinitions),
+    ...Object.keys(expectedSchemaDefinitions),
     "index:notification_outbox_due",
     "table:notification_control",
     "table:notification_outbox",
   ].sort(),
-  expectedKnowledgeDefinitions,
-  knowledgeDefinitionsByMigration,
+  expectedSchemaDefinitions,
+  schemaDefinitionsByMigration,
 });
 process.stdout.write(`${state}\n`);

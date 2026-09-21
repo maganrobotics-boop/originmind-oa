@@ -44,7 +44,15 @@ A=\begin{bmatrix}1&2\\3&4\end{bmatrix},\quad x[999]=\sum_{i=1}^{n}x_i
 **完整结尾**。`;
 const ready = { authorized:true, modelReady:true, knowledgeReady:true, retrievalReady:true, budgetReady:true };
 const responseBody = { answer, mode:'ai', images:[], citations:[{ id:'1', itemId:'11111111-2222-4333-8444-555555555555', title:'浏览器测试资料' }] };
-const browser = await chromium.launch({ headless:true });
+const directoryPeople = { people:[
+  { id:'member-browser', fullName:'测试成员', email:'browser-test@example.test', role:'project_owner', permissions:['project_owner'], isAdmin:true, avatarDataUrl:'', profile:{ department:'Agent OS', position:'机器人系统', phone:'', bio:'', visibility:{ department:true, position:true, phone:false, bio:false } }, departmentId:'department:agent_os', lastSeenAt:new Date().toISOString(), online:true, ndaCompleted:true },
+  { id:'member-partner', fullName:'协作成员', email:'partner@example.test', role:'member', permissions:[], isAdmin:false, avatarDataUrl:'', profile:{ department:'Agent Hardware', position:'硬件验证', phone:'', bio:'', visibility:{ department:true, position:true, phone:false, bio:false } }, departmentId:'department:agent_hardware', lastSeenAt:new Date().toISOString(), online:false, ndaCompleted:true },
+] };
+const directoryDepartments = { canManage:true, departments:[
+  { id:'department:agent_hardware', code:'agent_hardware', name:'Agent Hardware', parentId:null, sortOrder:10, memberIds:['member-partner'] },
+  { id:'department:agent_os', code:'agent_os', name:'Agent OS', parentId:null, sortOrder:20, memberIds:['member-browser'] },
+] };
+const browser = await chromium.launch({ headless:true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}) });
 const results = [];
 try {
   for (const [name,width,height] of [['desktop',1280,900],['tablet-wide',900,1000],['tablet',820,960],['mobile',390,844],['mobile-landscape',844,390]]) {
@@ -59,7 +67,7 @@ try {
       if (!url.pathname.startsWith('/api/')) return route.continue();
       requests.push({ path:url.pathname, method:route.request().method(), body:route.request().postData() });
       if (url.pathname === '/api/lab-ai/ask' && holdAnswer) { held.push(route); return; }
-      const data = url.pathname === '/api/session' ? session : url.pathname === '/api/lab-ai/ask' ? responseBody : url.pathname === '/api/lab-ai/status' ? ready : url.pathname === '/api/approvals' ? { approvals:[] } : url.pathname === '/api/members' ? { members:[], pendingCount:0 } : url.pathname === '/api/knowledge' ? { items:[], pendingCount:0 } : url.pathname === '/api/people' ? { people:[] } : url.pathname === '/api/profile' ? { profile:{} } : { conversations:[], messages:[], unreadCount:0 };
+      const data = url.pathname === '/api/session' ? session : url.pathname === '/api/lab-ai/ask' ? responseBody : url.pathname === '/api/lab-ai/status' ? ready : url.pathname === '/api/approvals' ? { approvals:[] } : url.pathname === '/api/members' ? { members:[], pendingCount:0 } : url.pathname === '/api/knowledge' ? { items:[], pendingCount:0 } : url.pathname === '/api/people' ? directoryPeople : url.pathname === '/api/departments' ? directoryDepartments : url.pathname === '/api/profile' ? { profile:{} } : { conversations:[], messages:[], unreadCount:0 };
       return route.fulfill({ json:data });
     });
     const metrics = () => page.evaluate(() => {
@@ -68,6 +76,25 @@ try {
     });
     try {
       await page.goto(origin);
+      await page.locator('.collaboration-workspace').waitFor();
+      for (const label of ['聊天','通讯录','管理台','邮箱']) assert.equal(await page.locator('.sidebar-nav-item').filter({hasText:label}).count() >= 1,true);
+      if (name === 'desktop') {
+        await page.screenshot({ path:resolve(output,'desktop-collaboration-workspace.png'),fullPage:true });
+        const workspaceNav = page.locator('.oa-desktop-navigation').getByRole('navigation',{name:'核心工作区',exact:true});
+        await workspaceNav.getByRole('button',{name:'通讯录',exact:true}).click();
+        await page.locator('.people-view').waitFor();
+        assert.equal(await page.locator('.person-card').count(),2);
+        assert.equal(await page.getByRole('navigation',{name:'按部门筛选',exact:true}).getByRole('button',{name:/Agent OS/u}).count(),1);
+        assert.equal(await page.getByRole('button',{name:'部门管理',exact:true}).count(),1);
+        await page.screenshot({ path:resolve(output,'desktop-directory-workspace.png'),fullPage:true });
+        await workspaceNav.getByRole('button',{name:'邮箱',exact:true}).click();
+        await page.locator('.mail-workspace').waitFor();
+        await page.getByRole('heading',{name:'邮箱服务待配置',exact:true}).waitFor();
+        assert.equal(await page.locator('.mail-workspace iframe').count(),0,'webmail must never be embedded in an iframe');
+        await workspaceNav.getByRole('button',{name:'聊天',exact:true}).click();
+        await page.locator('.collaboration-workspace').waitFor();
+      }
+      await page.locator('.collaboration-ai-entry').click();
       await page.locator('.oa-shared-chat').waitFor();
       if (name === 'desktop') await page.getByRole('button', {name:'收起侧栏',exact:true}).click();
       const before = await metrics();

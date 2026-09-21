@@ -27,7 +27,7 @@ test('activation is opt-in on the existing protected manual main release, never 
   assert.match(shell, /find dist drizzle workbench -type f/u);
   assert.doesNotMatch(shell, /--file[^\n]*WEBSITE_DB|secret put OA_AI_TASKS_ENABLED|d1 time-travel restore/u);
 });
-test('release shell parses and refuses an unauthorised activation before running any command', () => {
+test('release shell parses and refuses an unauthorised activation before running any command', { skip: process.platform === 'win32' ? 'requires a POSIX shell' : false }, () => {
   const parsed = spawnSync('/bin/bash', ['-n', shellPath], { encoding: 'utf8' });
   assert.equal(parsed.status, 0, parsed.stderr);
   const blocked = spawnSync('/bin/bash', [shellPath, 'production'], { encoding: 'utf8', env: { PATH: '/nonexistent', OA_PRODUCTION_ENABLE_AI_WORKBENCH: 'true' } });

@@ -1,7 +1,7 @@
 import { access, readFile } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 
-import { REVIEWED_KNOWLEDGE_MIGRATIONS } from "../lib/production-release.mjs";
+import { REVIEWED_PRODUCTION_MIGRATIONS } from "../lib/production-release.mjs";
 import { deploymentTarget, productionTarget, requiredStandaloneSecrets, validateProductionChatServiceBindings } from "../lib/standalone-config.mjs";
 
 const target = process.argv[2] || "";
@@ -94,7 +94,7 @@ else assertProductionOutput();
 await access(resolve(dirname(outputPath), config.main));
 await access(resolve(dirname(outputPath), config.assets.directory));
 if (target === "production") {
-  for (const name of Object.keys(REVIEWED_KNOWLEDGE_MIGRATIONS)) {
+  for (const name of Object.keys(REVIEWED_PRODUCTION_MIGRATIONS)) {
     await access(resolve(dirname(outputPath), database.migrations_dir, name));
   }
 }
