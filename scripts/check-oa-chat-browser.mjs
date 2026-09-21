@@ -138,7 +138,7 @@ try {
       await nav.getByRole('button',{name:'审批工作台',exact:true}).click();
       assert.equal(await page.locator('.main-shell .dashboard-ai-entry').count(),0);
       assert.equal(await page.getByRole('button',{name:'进入 OA 内部实验室 AI',exact:true}).count(),0);
-      assert.equal(await page.getByRole('button',{name:'聊天选项',exact:true}).count(),0);
+      assert.equal(await page.getByRole('button',{name:'聊天选项',exact:true}).count(),1, 'every OA page keeps one unified right-side chat entry');
       assert.equal(await page.locator('.main-shell .stats-grid').isVisible(),true);
       if (!desktop) await page.getByRole('button',{name:'打开导航',exact:true}).click();
       await nav.getByRole('button',{name:'AI 助手',exact:true}).click();
