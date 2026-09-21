@@ -50,6 +50,19 @@ export class D1DatabaseAdapter {
     return new D1PreparedAdapter(this.sqlite, sql);
   }
 
+  async batch(statements) {
+    this.sqlite.exec("BEGIN IMMEDIATE");
+    try {
+      const results = [];
+      for (const statement of statements) results.push(await statement.run());
+      this.sqlite.exec("COMMIT");
+      return results;
+    } catch (error) {
+      this.sqlite.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
   close() {
     this.sqlite.close();
   }

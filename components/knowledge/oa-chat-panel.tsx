@@ -7,6 +7,7 @@ import { initialChatIndicators, probeChatIndicators, pendingChatIndicators, repl
 import { CHAT_DOCUMENT_HINTS, resolveChatCapability } from '@/lib/oa-chat-documents.mjs';
 import { resolveMeetingModeCommand } from '@/lib/oa-meeting-mode.mjs';
 import { parseKnowledgeUrlCommand } from '@/lib/knowledge-url-import.mjs';
+import { MAX_OA_CHAT_IMAGE_BYTES, validOaChatImage } from '@/lib/oa-chat-image.mjs';
 import type { KnowledgeCitation } from '@/lib/knowledge-types';
 import { PUBLIC_KNOWLEDGE_CONFIRMATION } from '@/lib/knowledge-policy';
 import { prepareKnowledgePackage, submitKnowledgePackage } from '@/lib/knowledge-package.mjs';
@@ -110,8 +111,42 @@ function RichAnswer({ answer }: { answer: string }) {
   }, [answer]);
   return <div ref={host} className="oa-rich-answer" />;
 }
-function validImage(image: Image): boolean {
-  return Boolean(image && typeof image.url === 'string' && /^\/api\/knowledge\/[0-9a-f-]{36}\/assets\/assets\/[A-Za-z0-9._/%-]+\?forChat=1&revision=[0-9a-f-]{36}$/iu.test(image.url) && typeof image.alt === 'string' && ['image/png', 'image/jpeg', 'image/webp'].includes(image.mimeType));
+function OaAnswerImage({ image }: { image: Image }) {
+  const [state, setState] = useState<'loading' | 'ready' | 'error'>('loading');
+  const [attempt, setAttempt] = useState(0);
+  const [objectUrl, setObjectUrl] = useState('');
+  useEffect(() => {
+    const controller = new AbortController();
+    let localUrl = '';
+    void (async () => {
+      try {
+        const response = await fetch(image.url, {
+          credentials: 'same-origin', cache: 'no-store', redirect: 'error',
+          headers: { accept: image.mimeType },
+          signal: AbortSignal.any([controller.signal, AbortSignal.timeout(15000)]),
+        });
+        const mediaType = response.headers.get('content-type')?.split(';', 1)[0].trim().toLowerCase();
+        const declared = Number(response.headers.get('content-length') || 0);
+        if (!response.ok || mediaType !== image.mimeType
+          || (Number.isFinite(declared) && declared > MAX_OA_CHAT_IMAGE_BYTES)) throw new Error('IMAGE_RESPONSE_INVALID');
+        const blob = await response.blob();
+        if (!blob.size || blob.size > MAX_OA_CHAT_IMAGE_BYTES || blob.type !== image.mimeType) throw new Error('IMAGE_BODY_INVALID');
+        localUrl = URL.createObjectURL(blob);
+        if (!controller.signal.aborted) { setObjectUrl(localUrl); setState('ready'); }
+      } catch {
+        if (!controller.signal.aborted) setState('error');
+      }
+    })();
+    return () => { controller.abort(); if (localUrl) URL.revokeObjectURL(localUrl); };
+  }, [attempt, image.mimeType, image.url]);
+  return <figure className={`oa-answer-image ${state}`}>
+    {state === 'ready' && objectUrl ? <>{/* blob URL is authenticated and cannot use the Next image optimizer. */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img src={objectUrl} alt={image.alt} /></> : state === 'loading'
+      ? <div className="oa-answer-image-status" role="status">正在加载图片…</div>
+      : <div className="oa-answer-image-status" role="alert"><span>图片加载失败</span><button type="button" onClick={() => { setState('loading'); setObjectUrl(''); setAttempt(value => value + 1); }}>重试</button></div>}
+    <figcaption>{image.alt}</figcaption>
+  </figure>;
 }
 
 export function OaChatStatus() {
@@ -267,7 +302,7 @@ function OaAiChatPanel({ isAdmin = false }: { isAdmin?: boolean }) {
       const data = await response.json() as Reply;
       if (sequence !== requestSequence.current) return;
       if (!response.ok || typeof data?.answer !== 'string' || !data.answer.trim()) throw new Error(data?.error || '暂未收到完整回答，请重试。');
-      const images = (Array.isArray(data.images) ? data.images : []).filter(validImage).slice(0, 4);
+      const images = (Array.isArray(data.images) ? data.images : []).filter(validOaChatImage).slice(0, 4);
       const fallback = data.mode === 'retrieval' && data.fallbackReason !== 'no_documents';
       setRequestStatus(replyChatIndicators(data));
       const fullAnswer = data.answer!;
@@ -316,7 +351,7 @@ function OaAiChatPanel({ isAdmin = false }: { isAdmin?: boolean }) {
           return <div className="oa-chat-turn" key={turn.id}>
           <article className="message user" title="右键复制问题" onContextMenu={event => { event.preventDefault(); void copyQuestion(turn); }}><div className="message-content"><p>{turn.question}</p></div></article>
           {turn.answer && <article className="message assistant"><div className="message-content"><RichAnswer answer={turn.answer} />
-            {!!turn.images.length && <div className="oa-answer-images">{turn.images.map(image => <figure key={image.url}><img src={image.url} alt={image.alt} loading="lazy" referrerPolicy="no-referrer" onError={event => { event.currentTarget.hidden = true; }} /><figcaption>{image.alt}</figcaption></figure>)}</div>}
+            {!!turn.images.length && <div className="oa-answer-images">{turn.images.map(image => <OaAnswerImage key={image.url} image={image} />)}</div>}
             <div className="oa-answer-actions"><button type="button" className="copy-answer" onClick={() => void copy(turn)} aria-label="复制回答"><Copy size={15} />{copied === turn.id ? '已复制' : '复制'}</button><button type="button" aria-label="转发回答给成员" onClick={() => forward({ body: userFacingAnswer(turn.answer), omittedImages: turn.images.length })}><Forward size={15} />转发</button>{isAdmin && !turn.failed && <button type="button" className="oa-admin-edit-answer" onClick={() => setEditingTurn(turn)} aria-label="管理员修改回答"><Pencil size={15} />修改回答</button>}{!!turn.citations.length && <details><summary>参考已审核资料</summary>{turn.citations.map(citation => <p key={`${citation.id}-${citation.itemId}`}>{citation.title}{citation.sectionTitle ? ` · ${citation.sectionTitle}` : ''}</p>)}</details>}</div>
           </div></article>}
           {turn.failed && <button type="button" className="oa-chat-retry" disabled={working} onClick={() => void ask(turn)}><RotateCcw size={16} />重新回答</button>}
