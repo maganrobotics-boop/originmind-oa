@@ -25,6 +25,8 @@ jobs:
             const accountId = process.env.CF_ACCOUNT_ID;
             const host = process.env.CHAT_HOST;
             const worker = process.env.CHAT_WORKER;
+            const expectedOrigin = '43.138.161.143';
+            const conflictingSitesTarget = 'custom-domains.chatgpt.site';
             const headers = { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' };
             const report = [];
             const call = async (label, url, options = {}) => {
@@ -42,6 +44,23 @@ jobs:
               if (!dns.response.ok || !dns.body.success) throw new Error('DNS lookup failed');
               for (const record of dns.body.result) {
                 report.push('DNS record: ' + JSON.stringify({ id: record.id, type: record.type, name: record.name, content: record.content, ttl: record.ttl, proxied: record.proxied }));
+              }
+              if (dns.body.result.length !== 1) throw new Error('Expected exactly one Chat DNS record');
+              const dnsRecord = dns.body.result[0];
+              const dnsIsReady = dnsRecord.type === 'A' && dnsRecord.content === expectedOrigin && dnsRecord.proxied === true;
+              const dnsIsKnownConflict = dnsRecord.type === 'CNAME' && dnsRecord.content === conflictingSitesTarget && dnsRecord.proxied === false;
+              if (!dnsIsReady && !dnsIsKnownConflict) throw new Error('Chat DNS record is neither the saved origin nor the known Sites conflict');
+              if (dnsIsKnownConflict) {
+                const restored = await call('DNS restore', 'https://api.cloudflare.com/client/v4/zones/' + zoneId + '/dns_records/' + dnsRecord.id, {
+                  method: 'PUT',
+                  body: JSON.stringify({ type: 'A', name: host, content: expectedOrigin, ttl: 1, proxied: true }),
+                });
+                if (!restored.response.ok || !restored.body.success) throw new Error('DNS restore failed');
+                const saved = restored.body.result;
+                if (saved.type !== 'A' || saved.name !== host || saved.content !== expectedOrigin || saved.proxied !== true) {
+                  throw new Error('DNS restore did not preserve the saved Chat origin');
+                }
+                report.push('DNS restored to the saved proxied Chat origin.');
               }
               const api = 'https://api.cloudflare.com/client/v4/zones/' + zoneId + '/workers/routes';
               const listed = await call('Route list', api);
