@@ -59,7 +59,7 @@ try {
    assert.equal(await alice.getByPlaceholder('发送消息给成员乙').inputValue(),'只属于成员乙的未发送草稿');
     await alice.getByRole('button',{name:'聊天选项'}).click();await alice.getByRole('button',{name:'AI 助手',exact:true}).click();
    await alice.getByPlaceholder('询问实验室大数据').fill('请给出完整测试结果');await alice.getByPlaceholder('询问实验室大数据').press('Enter');
-   await alice.locator('.message.assistant').waitFor();assert.ok((await alice.locator('.message.assistant').innerText()).includes('正文完整结束'));
+    await alice.waitForFunction(() => document.querySelector('.message.assistant')?.textContent?.includes('正文完整结束'));
    await alice.getByRole('button',{name:'转发回答给成员'}).click();await alice.getByRole('button',{name:'选择 成员乙'}).click();
    assert.equal(posts.length,0,'selecting a person must not send automatically');
    const preview=await alice.getByLabel('确认发送内容').inputValue();assert.ok(preview.includes('正文完整结束'));assert.ok(preview.length>1000);assert.ok(!preview.includes('http'));
