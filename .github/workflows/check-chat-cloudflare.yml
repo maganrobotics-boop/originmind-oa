@@ -6,6 +6,7 @@ on:
       - 'chat-cloudflare/**'
       - '.github/workflows/check-chat-cloudflare.yml'
       - '.github/workflows/deploy-chat-cloudflare.yml'
+      - '.github/workflows/deploy-chat-preview-cloudflare.yml'
       - '.github/workflows/initialize-chat-admin.yml'
       - '.github/workflows/repair-chat-admin-pbkdf2.yml'
   push:
@@ -15,6 +16,7 @@ on:
       - 'chat-cloudflare/**'
       - '.github/workflows/check-chat-cloudflare.yml'
       - '.github/workflows/deploy-chat-cloudflare.yml'
+      - '.github/workflows/deploy-chat-preview-cloudflare.yml'
       - '.github/workflows/initialize-chat-admin.yml'
       - '.github/workflows/repair-chat-admin-pbkdf2.yml'
 
@@ -40,6 +42,7 @@ jobs:
         run: |
           npm --prefix chat-cloudflare run check
           npm --prefix chat-cloudflare run check:wrangler
+          node --check chat-cloudflare/scripts/release-preview-cloudflare.mjs
       - name: Install isolated browser test tools
         run: |
           npm install --prefix "$RUNNER_TEMP/formula-browser" --no-save --ignore-scripts playwright@1.63.0
