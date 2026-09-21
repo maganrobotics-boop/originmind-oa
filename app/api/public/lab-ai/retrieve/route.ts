@@ -52,10 +52,17 @@ export async function POST(request: Request): Promise<Response> {
       return errorResponse("检索过于频繁，请稍后再试。", 429, { "retry-after": "60" });
     }
     const candidates = await getPublicActiveKnowledgeChunks(question);
-    const ranked = rankKnowledgeChunks(question, candidates, questionRequestsKnowledgeImages(question) ? 12 : 6);
+    let ranked = rankKnowledgeChunks(question, candidates, questionRequestsKnowledgeImages(question) ? 12 : 6);
     let assets = new Map();
     try {
-      assets = await collectPublicKnowledgeAssets(ranked, publicEnv.DB, publicEnv.PUBLIC_LAB_AI_SERVICE_TOKEN);
+      const imageRequest = questionRequestsKnowledgeImages(question);
+      assets = await collectPublicKnowledgeAssets(ranked, publicEnv.DB, publicEnv.PUBLIC_LAB_AI_SERVICE_TOKEN, { includeRevisionImages: imageRequest });
+      if (imageRequest && assets.size) {
+        ranked = [...ranked].sort((left, right) => {
+          const assetDelta = Number(assets.has(right.id)) - Number(assets.has(left.id));
+          return assetDelta || Date.parse(right.updatedAt || '') - Date.parse(left.updatedAt || '');
+        });
+      }
     } catch {
       // A missing image migration/binding must not make approved text unavailable.
     }
