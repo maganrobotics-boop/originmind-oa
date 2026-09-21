@@ -1029,6 +1029,9 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   const checkpointIndex = submitToOa.indexOf('submissionState: "unknown"');
   const oaPostIndex = submitToOa.indexOf("fetch(OA_CHAT_IMPORT_URL");
   assert.ok(checkpointIndex >= 0 && oaPostIndex > checkpointIndex);
+  const assetUploadIndex = submitToOa.indexOf("await uploadKnowledgeAssetsToOa");
+  const submittedPatchIndex = submitToOa.indexOf('submissionState: "submitted"');
+  assert.ok(assetUploadIndex >= 0 && submittedPatchIndex > assetUploadIndex);
   assert.match(script, /Promise\.allSettled\(unknown\.slice\(index, index \+ 5\)\.map\(lookupDocumentSubmissionState\)\)/u);
   assert.match(script, /if \(state\.oaStatusSyncing\)[\s\S]*?state\.oaStatusSyncQueued = true/u);
   assert.match(script, /if \(rerun && !state\.returnedKnowledgeItemId\) void reconcileUnknownDocumentStatuses\(\)/u);
@@ -1041,6 +1044,8 @@ test("vanilla frontend preserves every same-origin API and visibility contract",
   assert.deepEqual(externalApis, [
     "https://oa.omindos.ai/api/knowledge/import-chat",
     "https://oa.omindos.ai/api/knowledge/import-chat/status",
+    "https://oa.omindos.ai/api/knowledge/assets",
+    "https://oa.omindos.ai/api/knowledge/assets/finalize",
   ]);
 
   for (const forbidden of [
