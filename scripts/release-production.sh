@@ -40,6 +40,18 @@ meeting_bot_deploy_args=()
 if [[ "${meeting_bot_enabled}" == "true" ]]; then
   meeting_bot_deploy_args=(--var OA_MEETING_BOT_ENABLED:true)
 fi
+# The mailbox entry is also opt-in. The reviewed Feishu tenant URL is fixed in
+# this release path so a manual input cannot redirect authenticated members to
+# an arbitrary external origin. An unchecked input preserves the current value.
+feishu_webmail_enabled="${OA_PRODUCTION_ENABLE_FEISHU_WEBMAIL:-false}"
+if [[ "${feishu_webmail_enabled}" != "true" && "${feishu_webmail_enabled}" != "false" ]]; then
+  echo "OA_PRODUCTION_ENABLE_FEISHU_WEBMAIL must be true or false." >&2
+  exit 64
+fi
+feishu_webmail_deploy_args=()
+if [[ "${feishu_webmail_enabled}" == "true" ]]; then
+  feishu_webmail_deploy_args=(--var OA_WEBMAIL_URL:https://omindos.feishu.cn/mail)
+fi
 required_variables=(
   OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID
   OA_PRODUCTION_WORKER_NAME
@@ -235,9 +247,9 @@ node "${script_dir}/check-production-cloudflare-target.mjs" \
   --versions "${versions_path}" \
   --receipt "${release_root}/target-secret-configured.json"
 
-# Validate this exact immutable artifact and the explicitly recorded flag before
+# Validate this exact immutable artifact and the explicitly reviewed flags before
 # changing production schema. No arbitrary CLI vars or target overrides exist.
-run_wrangler deploy --dry-run --strict --keep-vars --config "${config_path}" "${workbench_deploy_args[@]}" "${meeting_bot_deploy_args[@]}"
+run_wrangler deploy --dry-run --strict --keep-vars --config "${config_path}" "${workbench_deploy_args[@]}" "${meeting_bot_deploy_args[@]}" "${feishu_webmail_deploy_args[@]}"
 (
   cd "${release_root}"
   sha256sum --check artifact-sha256.txt
@@ -287,7 +299,7 @@ fi
 # check leaves the captured rollback point and D1 bookmark for manual review.
 release_message="production ${GITHUB_SHA} run ${GITHUB_RUN_ID}.${GITHUB_RUN_ATTEMPT}"
 run_wrangler deploy --strict --keep-vars --config "${config_path}" \
-  --message "${release_message}" "${workbench_deploy_args[@]}" "${meeting_bot_deploy_args[@]}"
+  --message "${release_message}" "${workbench_deploy_args[@]}" "${meeting_bot_deploy_args[@]}" "${feishu_webmail_deploy_args[@]}"
 
 run_wrangler secret list --format json --config "${config_path}" > "${secrets_path}"
 run_wrangler deployments list --json --config "${config_path}" > "${deployments_path}"
@@ -316,6 +328,7 @@ if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
     echo "- Target and public smoke checks: passed"
     echo "- Workbench activation requested: \`${workbench_enabled}\`"
     echo "- Meeting bot activation requested: \`${meeting_bot_enabled}\`"
+    echo "- Feishu Webmail activation requested: \`${feishu_webmail_enabled}\`"
     echo "- Member-session task submission/download: still requires authenticated acceptance"
     echo "- Automatic rollback: disabled"
   } >> "${GITHUB_STEP_SUMMARY}"

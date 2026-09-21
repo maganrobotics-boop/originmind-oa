@@ -11,16 +11,21 @@ test('activation is opt-in on the existing protected manual main release, never 
   assert.doesNotMatch(shell, /\r/u);
   assert.match(workflow, /enable_ai_workbench:[\s\S]*?default: false[\s\S]*?type: boolean/u);
   assert.match(workflow, /enable_meeting_bot:[\s\S]*?default: false[\s\S]*?type: boolean/u);
+  assert.match(workflow, /enable_feishu_webmail:[\s\S]*?default: false[\s\S]*?type: boolean/u);
   assert.match(workflow, /name: production-oa/u);
   assert.match(workflow, /group: oa-production/u);
   assert.doesNotMatch(workflow.slice(workflow.indexOf('  test:'), workflow.indexOf('  deploy:')), /OA_PRODUCTION_ENABLE_AI_WORKBENCH:/u);
   assert.doesNotMatch(workflow.slice(workflow.indexOf('  test:'), workflow.indexOf('  deploy:')), /OA_PRODUCTION_ENABLE_MEETING_BOT:/u);
+  assert.doesNotMatch(workflow.slice(workflow.indexOf('  test:'), workflow.indexOf('  deploy:')), /OA_PRODUCTION_ENABLE_FEISHU_WEBMAIL:/u);
   assert.match(shell, /workbench_enabled="\$\{OA_PRODUCTION_ENABLE_AI_WORKBENCH:-false\}"/u);
   assert.equal((shell.match(/workbench_deploy_args=\(--var OA_AI_TASKS_ENABLED:true\)/gu) || []).length, 1);
   assert.equal((shell.match(/"\$\{workbench_deploy_args\[@\]\}"/gu) || []).length, 2);
   assert.match(shell, /meeting_bot_enabled="\$\{OA_PRODUCTION_ENABLE_MEETING_BOT:-false\}"/u);
   assert.equal((shell.match(/meeting_bot_deploy_args=\(--var OA_MEETING_BOT_ENABLED:true\)/gu) || []).length, 1);
   assert.equal((shell.match(/"\$\{meeting_bot_deploy_args\[@\]\}"/gu) || []).length, 2);
+  assert.match(shell, /feishu_webmail_enabled="\$\{OA_PRODUCTION_ENABLE_FEISHU_WEBMAIL:-false\}"/u);
+  assert.equal((shell.match(/feishu_webmail_deploy_args=\(--var OA_WEBMAIL_URL:https:\/\/omindos\.feishu\.cn\/mail\)/gu) || []).length, 1);
+  assert.equal((shell.match(/"\$\{feishu_webmail_deploy_args\[@\]\}"/gu) || []).length, 2);
   const positions = ['oa-workbench-release.mjs" before', 'oa-workbench-release.mjs" probe', 'd1 time-travel info DB', '--file "${release_root}/workbench/', 'oa-workbench-release.mjs" after', 'run_wrangler deploy --strict --keep-vars'].map(value => shell.indexOf(value));
   assert.ok(positions.every(value => value >= 0));
   assert.deepEqual(positions, [...positions].sort((a, b) => a - b));
@@ -34,5 +39,7 @@ test('release shell parses and refuses an unauthorised activation before running
   assert.equal(blocked.status, 64); assert.doesNotMatch(blocked.stderr, /command not found/u);
   const meetingBotBlocked = spawnSync('/bin/bash', [shellPath, 'production'], { encoding: 'utf8', env: { PATH: '/nonexistent', OA_PRODUCTION_ENABLE_MEETING_BOT: 'true' } });
   assert.equal(meetingBotBlocked.status, 64); assert.doesNotMatch(meetingBotBlocked.stderr, /command not found/u);
+  const webmailBlocked = spawnSync('/bin/bash', [shellPath, 'production'], { encoding: 'utf8', env: { PATH: '/nonexistent', OA_PRODUCTION_ENABLE_FEISHU_WEBMAIL: 'true' } });
+  assert.equal(webmailBlocked.status, 64); assert.doesNotMatch(webmailBlocked.stderr, /command not found/u);
 });
 
