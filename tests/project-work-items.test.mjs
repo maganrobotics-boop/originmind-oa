@@ -18,3 +18,12 @@ test('meeting actions are extracted only from the action section and deduplicate
 test('empty placeholders never become work items', () => {
   assert.deepEqual(extractMeetingActions('## 行动项\n- 暂无\n- 待补充\n## 结论\n完成'), []);
 });
+
+test('legacy meeting headings are supported', () => {
+  assert.deepEqual(extractMeetingActions(`**待办事项**
+* 完成机器人底盘联调
+* 整理项目甘特图
+**会议结论**
+* 本周继续推进`), ['完成机器人底盘联调', '整理项目甘特图']);
+  assert.deepEqual(extractMeetingActions('### 后续安排：\n1、确认传感器清单\n2. 更新周会材料'), ['确认传感器清单', '更新周会材料']);
+});

@@ -24,6 +24,8 @@ export const serializeWorkItem = (row: WorkItemRow): WorkItem => ({
 });
 
 const cleanLine = (value: string) => value.replace(/^\s*(?:[-*•]|\d+[.)、])\s*/u, '').replace(/\s+/gu, ' ').trim();
+const actionHeading = /^(?:#{1,6}\s*|\*\*\s*)?(?:行动项|待办(?:事项)?|行动计划|后续(?:安排|计划|工作)|责任分工|下一步)(?:\s*\*\*)?[：:]?\s*$/u;
+const anyHeading = /^(?:#{1,6}\s+|\*\*[^*]+\*\*\s*$)/u;
 
 export function extractMeetingActions(markdown: string) {
   const lines = markdown.split(/\r?\n/u);
@@ -31,9 +33,9 @@ export function extractMeetingActions(markdown: string) {
   const actions: string[] = [];
   for (const raw of lines) {
     const line = raw.trim();
-    if (/^#{1,4}\s*(?:行动项|待办|行动计划)/u.test(line)) { inActions = true; continue; }
-    if (inActions && /^#{1,4}\s+/u.test(line)) break;
-    if (!inActions || !/^\s*(?:[-*•]|\d+[.)、])\s+/u.test(raw)) continue;
+    if (actionHeading.test(line)) { inActions = true; continue; }
+    if (inActions && anyHeading.test(line)) break;
+    if (!inActions || !/^\s*(?:[-*•]\s+|\d+[.)、]\s*)/u.test(raw)) continue;
     const title = cleanLine(raw);
     if (title && !/^(?:暂无|无|待补充)[。.!！]?$/u.test(title) && title.length <= 240) actions.push(title);
   }
