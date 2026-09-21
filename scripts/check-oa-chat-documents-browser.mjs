@@ -114,7 +114,7 @@ try {
       assert.equal(await page.locator('.empty-hero p').isVisible(),true);
       assert.ok(await page.locator('.empty-hero').evaluate(element => [...element.querySelectorAll('h2,p')].every(child => child.scrollWidth <= child.clientWidth + 1)));
       const hints = page.locator('.oa-chat-examples button');
-      assert.deepEqual(await hints.allTextContents(),['知识问答','资料整理','会议纪要','项目总结']);
+      assert.deepEqual(await hints.allTextContents(),['会议模式','知识问答','资料整理','会议纪要','项目总结']);
       if (height > 520) {
         const prompts = [
           '实验室有哪些研究方向？',
@@ -123,7 +123,7 @@ try {
           '请把材料整理成项目总结文档，列出已完成工作、主要成果、存在问题和下一步计划，未明确的信息标注待补充。',
         ];
         for (let index = 0; index < prompts.length; index++) {
-          await hints.nth(index).click();
+          await hints.nth(index + 1).click();
           assert.equal(await input.inputValue(),prompts[index]);
         }
         assert.equal(createRequests().length,0,'choosing a capability must not submit a task');
