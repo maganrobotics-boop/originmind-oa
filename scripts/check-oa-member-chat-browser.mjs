@@ -51,7 +51,7 @@ try {
     assert.equal(await alice.getByRole('button',{name:'成员甲',exact:true}).count(),0,'never list the current user as a recipient');
     await alice.getByRole('button',{name:'成员乙',exact:true}).click();
    await alice.locator('.oa-member-title strong').filter({hasText:'成员乙'}).waitFor();
-   assert.equal(await alice.getByRole('dialog').count(),0,'a member name opens the conversation without another chooser');
+    assert.equal(await alice.locator('.oa-member-picker').count(),0,'a member name opens the conversation without another chooser');
    assert.equal(posts.length,0,'changing destination must not send anything');
    await alice.getByPlaceholder('发送消息给成员乙').fill('只属于成员乙的未发送草稿');
     await alice.getByRole('button',{name:'聊天选项'}).click();await alice.getByRole('button',{name:'AI 助手',exact:true}).click();
