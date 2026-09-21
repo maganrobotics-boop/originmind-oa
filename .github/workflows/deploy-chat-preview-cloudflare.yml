@@ -1,0 +1,74 @@
+name: Release Chat preview to Cloudflare manually
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type exactly: originmind-public-chat-preview:originmind-public-chat-preview:preview.omindos.ai'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  reject-invalid-ref:
+    if: github.ref != 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 1
+    steps:
+      - name: Reject a non-main preview dispatch
+        run: exit 64
+
+  release-preview:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment:
+      name: preview-chat
+      url: https://preview.omindos.ai
+    concurrency:
+      group: chat-cloudflare-preview
+      cancel-in-progress: false
+    env:
+      CLOUDFLARE_ACCOUNT_ID: ${{ vars.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID }}
+      OA_PRODUCTION_WORKER_NAME: ${{ vars.OA_PRODUCTION_WORKER_NAME }}
+      CHAT_ADMIN_EMAIL: ${{ vars.CHAT_ADMIN_EMAIL || 'maganrobotics@gmail.com' }}
+      CHAT_WORKERS_DEV_SUBDOMAIN: ${{ vars.CHAT_WORKERS_DEV_SUBDOMAIN }}
+      CHAT_RELEASE_CONFIRM: ${{ inputs.confirmation }}
+      CHAT_RELEASE_ID: ${{ github.sha }}-${{ github.run_attempt }}
+      WRANGLER_SEND_METRICS: 'false'
+      CI: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: chat-cloudflare/package-lock.json
+      - name: Install locked Chat dependencies
+        run: npm ci --prefix chat-cloudflare
+      - name: Check the Chat Worker and preview controls
+        run: |
+          npm --prefix chat-cloudflare run check
+          node --test chat-cloudflare/scripts/*.test.mjs
+          node --check chat-cloudflare/scripts/release-preview-cloudflare.mjs
+      - name: Stage, verify, and release Chat preview
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          PUBLIC_LAB_AI_SERVICE_TOKEN: ${{ secrets.PUBLIC_LAB_AI_SERVICE_TOKEN }}
+          CHAT_APP_ENCRYPTION_KEY: ${{ secrets.CHAT_APP_ENCRYPTION_KEY }}
+          CHAT_RATE_LIMIT_HMAC_KEY: ${{ secrets.CHAT_RATE_LIMIT_HMAC_KEY }}
+          CHAT_ADMIN_PASSWORD: ${{ secrets.CHAT_ADMIN_PASSWORD }}
+        run: node chat-cloudflare/scripts/release-preview-cloudflare.mjs
+      - name: Preserve non-secret preview release evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: chat-cloudflare-preview-${{ github.sha }}-${{ github.run_attempt }}
+          path: chat-cloudflare/.wrangler/preview-releases/*/evidence
+          if-no-files-found: warn
+          include-hidden-files: true
+          retention-days: 30
