@@ -41,6 +41,10 @@ async function instrument(page, requests) {
       const body = route.request().postDataJSON();requests.push(body);
       const noSource = body.messages.at(-1).content.includes('未引用资料');
       json = { answer, mode:'ai', provider:'test', oaPublicStatus:'connected', images:[], sources:noSource ? [] : [{ id:'approved',title:'approved public material' }], conversationToken:'signed-private-test-token' };
+    } else if (pathname === '/api/shares' && route.request().method() === 'POST') {
+      json = { id:'0123456789abcdef' };
+    } else if (pathname === '/api/shares/0123456789abcdef') {
+      json = { v:1, question:'请介绍机器人运动模型', answer };
     } else if (pathname === '/api/status') json = ready;
     else if (pathname === '/api/suggestions') json = { suggestions:[] };
     await route.fulfill({ json });
@@ -69,7 +73,8 @@ try {
     await shareDialog.getByRole('button',{name:'确认并复制链接',exact:true}).click();
     await page.waitForFunction(()=>window.__copied.at(-1)?.includes('#answer='));
     const link = await page.evaluate(()=>window.__copied.at(-1));
-    assert.equal(new URL(link).search,'');
+    assert.equal(new URL(link).search,'?share=0123456789abcdef');
+    assert.equal(new URL(link).hash,'');
     await shareDialog.getByRole('button',{name:'关闭',exact:true}).click();
     // A fresh browser opens the exact snapshot without sending or restoring anyone's chat.
     const fresh = await browser.newContext({ viewport,serviceWorkers:'block' });
@@ -78,6 +83,7 @@ try {
     await recipient.locator('.answer-share-preview .answer-content').waitFor();
     assert.ok((await recipient.locator('.answer-share-preview').innerText()).includes('最后一段完整保留'));
     assert.equal(incomingRequests.length,0);assert.equal(await recipient.locator('.message.user').count(),0);
+    assert.equal(new URL(recipient.url()).search,'');
     assert.equal(new URL(recipient.url()).hash,'');
     await recipient.screenshot({path:resolve(output,`message-share-${name}.png`),fullPage:true,animations:'disabled'});await fresh.close();
     await toolbar.locator('.share-answer').click();
@@ -173,3 +179,4 @@ try {
     } finally { await context.close(); }
   }
 } finally { await browser.close();await new Promise(resolve=>server.close(resolve)); }
+
