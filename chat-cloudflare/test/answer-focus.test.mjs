@@ -85,16 +85,15 @@ test("direct grounded answer names the responsible person and preserves hidden s
   assert.match(prompt, /每个有资料依据的具体事实后必须紧跟 \[1\]/u);
 });
 
-test("invalid grounded output is regenerated once and then shown safely", async (t) => {
-  const { result, calls, prompt } = await ask(t, {
+test("an image request without approved assets returns an explicit result without model generation", async (t) => {
+  const { result, calls } = await ask(t, {
     question: "实验室机器人图片",
     answers: ["这里有实验室机器人图片。", "已找到与实验室机器人相关的已审核图片，页面会在回答下方展示关联原图。[1]"],
   });
-  assert.equal(calls, 2);
-  assert.equal(result.mode, "ai");
-  assert.match(result.answer, /展示关联原图/u);
-  assert.doesNotMatch(result.answer, /\[1\]/u);
-  assert.match(prompt, /上一次生成结果未能通过完整性或资料引用校验/u);
+  assert.equal(calls, 0);
+  assert.equal(result.mode, "retrieval");
+  assert.equal(result.fallbackReason, "no_images");
+  assert.match(result.answer, /没有可展示的图片/u);
 });
 
 test("an explicit image request displays approved images without depending on model generation", async (t) => {
@@ -125,3 +124,4 @@ test("missing evidence neither invents a responsible person nor copies other sec
   assert.match(result.answer, /没有足够信息/u);
   assert.doesNotMatch(result.answer, /周示例|实验室培养特点/u);
 });
+
