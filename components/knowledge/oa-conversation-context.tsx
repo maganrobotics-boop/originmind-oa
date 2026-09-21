@@ -68,6 +68,7 @@ export function OaConversationMenu() {
 function ConversationMenu() {
   const chat = useOaConversation();
   const userEmail = chat.user.email;
+  const focusComposerAfterClose = useRef(false);
   const [open, setOpen] = useState(false);
   const [members, setMembers] = useState<ConversationPeer[]>([]);
   const [loadingMembers, setLoadingMembers] = useState(false);
@@ -91,8 +92,14 @@ function ConversationMenu() {
     return () => controller.abort();
   }, [open, userEmail, reload]);
   const navigate = (action: () => void) => { setOpen(false); window.requestAnimationFrame(action); };
-  const clear = () => { const focus = chat.clearCurrent(); setOpen(false); if (focus) window.requestAnimationFrame(() => document.querySelector<HTMLTextAreaElement>(chat.peer ? '.oa-member-chat textarea' : '.oa-conversation-ai:not([hidden]) textarea')?.focus()); };
-  return <Sheet open={open} onOpenChange={changeOpen}><SheetTrigger asChild><button type="button" className="oa-conversation-menu oa-chat-more-button" aria-label="聊天选项"><MoreHorizontal size={24} /></button></SheetTrigger><SheetContent side="right" className="oa-conversation-drawer">
+  const focusComposer = () => document.querySelector<HTMLTextAreaElement>(chat.peer ? '.oa-member-chat textarea' : '.oa-conversation-ai:not([hidden]) textarea')?.focus();
+  const clear = () => { focusComposerAfterClose.current = chat.clearCurrent(); setOpen(false); };
+  return <Sheet open={open} onOpenChange={changeOpen}><SheetTrigger asChild><button type="button" className="oa-conversation-menu oa-chat-more-button" aria-label="聊天选项"><MoreHorizontal size={24} /></button></SheetTrigger><SheetContent side="right" className="oa-conversation-drawer" onCloseAutoFocus={event => {
+    if (!focusComposerAfterClose.current) return;
+    event.preventDefault();
+    focusComposerAfterClose.current = false;
+    window.requestAnimationFrame(focusComposer);
+  }}>
     <SheetHeader><SheetTitle>聊天</SheetTitle><SheetDescription>选择 AI 助手或成员聊天</SheetDescription></SheetHeader>
     <nav className="oa-conversation-drawer-list" aria-label="聊天列表">
       <button type="button" aria-current={!chat.peer ? 'true' : undefined} onClick={() => navigate(chat.showAi)}><Bot /><span>AI 助手</span>{!chat.peer && <Check aria-hidden="true" />}</button>

@@ -47,9 +47,11 @@ test('accessible header controls use a right-side drawer and never use global cr
   assert.match(drawer,/\bonOpenChange=\{changeOpen\}/u);
   assert.match(context,/<SheetContent side="right"/u);
   assert.match(context,/aria-label="聊天选项"/u);
-  assert.match(context,/const focus = chat\.clearCurrent\(\)/u);
+  assert.match(context,/focusComposerAfterClose\.current = chat\.clearCurrent\(\)/u);
   assert.match(context,/disabled=\{!chat\.peer && !chat\.aiDirty\}/u);
-  assert.match(context,/requestAnimationFrame/u);
+  assert.match(context,/onCloseAutoFocus=\{event =>/u);
+  assert.match(context,/event\.preventDefault\(\)/u);
+  assert.match(context,/window\.requestAnimationFrame\(focusComposer\)/u);
   assert.doesNotMatch(panel+context,/dispatchEvent|addEventListener\(['"]clear/u);
 });
 
