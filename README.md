@@ -92,8 +92,9 @@ Runtime configuration:
 - `FEISHU_LOGIN_TENANT_KEY=<允许登录的企业 tenant key>`
 - `FEISHU_LOGIN_ENABLED=false|true`
 - `FEISHU_PDF_ARCHIVE_ENABLED=false|true`
+- `OA_WEBMAIL_URL=<optional exact HTTPS Roundcube/Webmail URL>`
 
-Register exact GitHub and Feishu callbacks for each origin; wildcard callback matching is not supported. Keep both flags `false` until the complete `0000`–`0030` chain and compatible application version are deployed. Disabling either flag rejects that provider's existing OAuth sessions. Feishu login validates the configured app, tenant key, OAuth state, browser nonce, PKCE transaction and explicit member binding; it does not request email and never merges members by name or email.
+Register exact GitHub and Feishu callbacks for each origin; wildcard callback matching is not supported. Keep both flags `false` until the complete `0000`–`0034` chain and compatible application version are deployed. Disabling either flag rejects that provider's existing OAuth sessions. Feishu login validates the configured app, tenant key, OAuth state, browser nonce, PKCE transaction and explicit member binding; it does not request email and never merges members by name or email. `OA_WEBMAIL_URL` is an ordinary runtime variable (not a password); leave it unset until the independently hosted Webmail endpoint is ready.
 
 Public address plan:
 

@@ -10,8 +10,8 @@ import { fileURLToPath } from "node:url";
 import {
   PRODUCTION_MIGRATION_NAME,
   PRODUCTION_MIGRATION_SHA256,
-  REVIEWED_KNOWLEDGE_MIGRATIONS,
-  productionKnowledgeDefinitions,
+  REVIEWED_PRODUCTION_MIGRATIONS,
+  productionSchemaDefinitions,
   validateD1Bookmark,
   validateProductionCloudflareSnapshot,
   validateProductionMigrationManifest,
@@ -25,7 +25,7 @@ const migrationNames = (await readdir(join(projectRoot, "drizzle")))
   .filter((name) => /^\d{4}_[A-Za-z0-9_]+\.sql$/u.test(name))
   .sort();
 const migrationSqlByName = Object.fromEntries(await Promise.all(
-  Object.keys(REVIEWED_KNOWLEDGE_MIGRATIONS).map(async (name) => [name, await readFile(join(projectRoot, "drizzle", name), "utf8")]),
+  Object.keys(REVIEWED_PRODUCTION_MIGRATIONS).map(async (name) => [name, await readFile(join(projectRoot, "drizzle", name), "utf8")]),
 ));
 const releaseScript = await readFile(join(projectRoot, "scripts", "release-production.sh"), "utf8");
 const smokeScript = await readFile(join(projectRoot, "scripts", "verify-production-live.mjs"), "utf8");
@@ -44,11 +44,11 @@ const validProductionEnvironment = Object.freeze({
   OA_PRODUCTION_CRON: "* * * * *",
 });
 const target = productionTarget(validProductionEnvironment);
-const expectedKnowledgeDefinitions = productionKnowledgeDefinitions(migrationSqlByName);
-const reviewedNames = Object.keys(REVIEWED_KNOWLEDGE_MIGRATIONS);
-const knowledgeDefinitionsByMigration = Object.fromEntries(reviewedNames.map((name, index) => [
+const expectedSchemaDefinitions = productionSchemaDefinitions(migrationSqlByName);
+const reviewedNames = Object.keys(REVIEWED_PRODUCTION_MIGRATIONS);
+const schemaDefinitionsByMigration = Object.fromEntries(reviewedNames.map((name, index) => [
   Number(name.slice(0, 4)),
-  productionKnowledgeDefinitions(migrationSqlByName, reviewedNames.slice(0, index + 1)),
+  productionSchemaDefinitions(migrationSqlByName, reviewedNames.slice(0, index + 1)),
 ]));
 const notificationObjects = [
   "index:notification_outbox_due",
@@ -56,9 +56,9 @@ const notificationObjects = [
   "table:notification_outbox",
 ];
 const schemaObjectsFor = (definitions) => [...notificationObjects, ...Object.keys(definitions)].sort();
-const expectedSchemaObjects = schemaObjectsFor(expectedKnowledgeDefinitions);
-const migration30KnowledgeDefinitions = knowledgeDefinitionsByMigration[30];
-const migration30SchemaObjects = schemaObjectsFor(migration30KnowledgeDefinitions);
+const expectedSchemaObjects = schemaObjectsFor(expectedSchemaDefinitions);
+const migration30SchemaDefinitions = schemaDefinitionsByMigration[30];
+const migration30SchemaObjects = schemaObjectsFor(migration30SchemaDefinitions);
 
 
 test("OA service token normalization matches the Chat release contract", () => {
@@ -78,7 +78,7 @@ test("OA service token normalization matches the Chat release contract", () => {
   assert.throws(() => normalizePublicLabAiServiceToken("A".repeat(4_097), "cloudflare-api-token-long-enough"), /missing or invalid/u);
 });
 
-test("OA shell captures a derived service token without writing any credential", async () => {
+test("OA shell captures a derived service token without writing any credential", { skip: process.platform === "win32" ? "requires a POSIX shell" : false }, async () => {
   const commandDirectory = await mkdtemp(join(tmpdir(), "originmind-oa-token-command-"));
   const rawToken = `${"A".repeat(42)}=`;
   const derivedToken = "1deoXJ_E6TPJy6PKS7aTztkKbUiXGr59FlLyiKRPFqE";
@@ -116,7 +116,7 @@ function queryResult(rows) {
   return [{ success: true, results: rows, meta: { served_by: "test" } }];
 }
 
-function schemaPayload(names, definitions = expectedKnowledgeDefinitions) {
+function schemaPayload(names, definitions = expectedSchemaDefinitions) {
   return queryResult(names.map((entry) => {
     const separator = entry.indexOf(":");
     return {
@@ -127,25 +127,25 @@ function schemaPayload(names, definitions = expectedKnowledgeDefinitions) {
   }));
 }
 
-function migrationSnapshot(appliedNames, schemaNames, activeFreezes = 0, definitions = expectedKnowledgeDefinitions) {
+function migrationSnapshot(appliedNames, schemaNames, activeFreezes = 0, definitions = expectedSchemaDefinitions) {
   return {
     ledgerPayload: queryResult(appliedNames.map((name, index) => ({ id: index + 1, name }))),
     freezePayload: queryResult([{ active_freezes: activeFreezes }]),
     schemaPayload: schemaPayload(schemaNames, definitions),
     expectedMigrationNames: migrationNames,
     expectedSchemaObjects,
-    expectedKnowledgeDefinitions,
-    knowledgeDefinitionsByMigration,
+    expectedSchemaDefinitions,
+    schemaDefinitionsByMigration,
   };
 }
 
 test("production migration gate supports every exact reviewed prefix through the release", () => {
   assert.equal(migrationNames.length, Number(PRODUCTION_MIGRATION_NAME.slice(0, 4)) + 1);
   assert.equal(migrationNames.at(-1), PRODUCTION_MIGRATION_NAME);
-  assert.equal(REVIEWED_KNOWLEDGE_MIGRATIONS[PRODUCTION_MIGRATION_NAME], PRODUCTION_MIGRATION_SHA256);
+  assert.equal(REVIEWED_PRODUCTION_MIGRATIONS[PRODUCTION_MIGRATION_NAME], PRODUCTION_MIGRATION_SHA256);
   assert.deepEqual(validateProductionMigrationManifest({ migrationNames, migrationSqlByName }), migrationNames);
   for (let lastMigration = 25; lastMigration < migrationNames.length; lastMigration += 1) {
-    const definitions = lastMigration === 25 ? {} : knowledgeDefinitionsByMigration[lastMigration];
+    const definitions = lastMigration === 25 ? {} : schemaDefinitionsByMigration[lastMigration];
     const snapshot = migrationSnapshot(migrationNames.slice(0, lastMigration + 1), schemaObjectsFor(definitions), 0, definitions);
     const pending = migrationNames.slice(lastMigration + 1).map((name) => name.slice(0, 4));
     assert.equal(validateProductionMigrationState({ phase: "before", ...snapshot }), pending.length ? `pending-${pending.join("-")}` : "applied");
@@ -158,13 +158,14 @@ test("production migration gate supports every exact reviewed prefix through the
 test("reviewed definitions match SQLite's forward migration result", async () => {
   const database = new DatabaseSync(":memory:");
   try {
-    for (const name of Object.keys(REVIEWED_KNOWLEDGE_MIGRATIONS)) {
+    database.exec("CREATE TABLE members (id TEXT PRIMARY KEY, department_code TEXT NOT NULL DEFAULT ''); CREATE TABLE migration_control (freeze_id TEXT PRIMARY KEY, deactivated_at TEXT)");
+    for (const name of Object.keys(REVIEWED_PRODUCTION_MIGRATIONS)) {
       for (const statement of migrationSqlByName[name].split(/--> statement-breakpoint\s*/u).map((value) => value.trim()).filter(Boolean)) {
         database.exec(statement);
       }
     }
-    const actualKnowledgeRows = database.prepare(
-      "SELECT type, name, sql FROM sqlite_master WHERE name GLOB 'knowledge_*' ORDER BY type, name",
+    const actualSchemaRows = database.prepare(
+      "SELECT type, name, sql FROM sqlite_master WHERE name GLOB 'knowledge_*' OR name GLOB 'conversation_events*' OR name GLOB 'conversation_members*' OR name GLOB 'conversation_messages*' OR name GLOB 'conversations*' OR name GLOB 'department_memberships*' OR name GLOB 'departments*' OR name GLOB 'project_links*' OR name GLOB 'project_members*' OR name GLOB 'projects*' ORDER BY type, name",
     ).all().map((row) => ({ ...row }));
     const notificationRows = notificationObjects.map((entry) => {
       const separator = entry.indexOf(":");
@@ -177,7 +178,7 @@ test("reviewed definitions match SQLite's forward migration result", async () =>
     assert.equal(validateProductionMigrationState({
       phase: "after",
       ...migrationSnapshot(migrationNames, expectedSchemaObjects),
-      schemaPayload: queryResult([...actualKnowledgeRows, ...notificationRows]),
+      schemaPayload: queryResult([...actualSchemaRows, ...notificationRows]),
     }), "applied");
   } finally {
     database.close();
@@ -189,7 +190,7 @@ test("production migration gate rejects drift, partial ledgers, and freezes", ()
     migrationNames.slice(0, 31),
     migration30SchemaObjects,
     0,
-    migration30KnowledgeDefinitions,
+    migration30SchemaDefinitions,
   );
   assert.throws(() => validateProductionMigrationState({
     phase: "before",
@@ -206,7 +207,7 @@ test("production migration gate rejects drift, partial ledgers, and freezes", ()
   }), /does not match/u);
   assert.throws(() => validateProductionMigrationState({
     phase: "before",
-    ...migrationSnapshot(migrationNames.slice(0, 31), migration30SchemaObjects.slice(1), 0, migration30KnowledgeDefinitions),
+    ...migrationSnapshot(migrationNames.slice(0, 31), migration30SchemaObjects.slice(1), 0, migration30SchemaDefinitions),
   }), /does not match|missing/u);
   assert.throws(() => validateProductionMigrationState({
     phase: "before",
@@ -219,12 +220,13 @@ test("production migration gate rejects drift, partial ledgers, and freezes", ()
 });
 
 test("asset migration gate rejects SQL drift and partial application at each checkpoint", () => {
-  assert.equal(Object.keys(knowledgeDefinitionsByMigration[30]).length, 51);
-  assert.equal(Object.keys(knowledgeDefinitionsByMigration[31]).length, 57);
-  assert.equal(Object.keys(knowledgeDefinitionsByMigration[32]).length, 58);
-  assert.equal(Object.keys(knowledgeDefinitionsByMigration[33]).length, 59);
+  assert.equal(Object.keys(schemaDefinitionsByMigration[30]).length, 51);
+  assert.equal(Object.keys(schemaDefinitionsByMigration[31]).length, 57);
+  assert.equal(Object.keys(schemaDefinitionsByMigration[32]).length, 58);
+  assert.equal(Object.keys(schemaDefinitionsByMigration[33]).length, 59);
+  assert.equal(Object.keys(schemaDefinitionsByMigration[34]).length, 113);
   for (const migration of [31, 32, 33]) {
-    const definitions = knowledgeDefinitionsByMigration[migration];
+    const definitions = schemaDefinitionsByMigration[migration];
     const snapshot = migrationSnapshot(migrationNames.slice(0, migration + 1), schemaObjectsFor(definitions), 0, definitions);
     const changed = structuredClone(snapshot);
     const table = changed.schemaPayload[0].results.find((row) => row.name === "knowledge_revision_assets");
@@ -244,9 +246,24 @@ test("asset migration gate rejects SQL drift and partial application at each che
     }), /reviewed SHA-256/u);
   }
   assert.throws(() => validateProductionMigrationManifest({
-    migrationNames: [...migrationNames, "0034_unreviewed.sql"], migrationSqlByName,
+    migrationNames: [...migrationNames, "0035_unreviewed.sql"], migrationSqlByName,
   }), /exact migrations/u);
-  assert.throws(() => productionKnowledgeDefinitions(migrationSqlByName, reviewedNames.slice(1)), /exact ordered prefix/u);
+  assert.throws(() => productionSchemaDefinitions(migrationSqlByName, reviewedNames.slice(1)), /exact ordered prefix/u);
+});
+
+test("lab OA V2 production schema is hash-pinned and checked object by object", () => {
+  const definitions = schemaDefinitionsByMigration[34];
+  const snapshot = migrationSnapshot(migrationNames, schemaObjectsFor(definitions), 0, definitions);
+  const changed = structuredClone(snapshot);
+  const table = changed.schemaPayload[0].results.find((row) => row.name === "conversation_messages");
+  table.sql = table.sql.replace("`body` text NOT NULL", "`body` text");
+  assert.throws(() => validateProductionMigrationState({ phase: "after", ...changed }), /schema SQL does not match/u);
+
+  const partial = structuredClone(snapshot);
+  partial.schemaPayload[0].results = partial.schemaPayload[0].results.filter(
+    (row) => row.name !== "projects_migration_freeze_delete",
+  );
+  assert.throws(() => validateProductionMigrationState({ phase: "after", ...partial }), /does not match/u);
 });
 
 test("migration CLI validates all reviewed immutable migration files", async () => {
@@ -258,7 +275,7 @@ test("migration CLI validates all reviewed immutable migration files", async () 
       migrationNames.slice(0, 31),
       migration30SchemaObjects,
       0,
-      migration30KnowledgeDefinitions,
+      migration30SchemaDefinitions,
     );
     const paths = {
       ledger: join(directory, "ledger.json"),
@@ -462,7 +479,7 @@ test("compiled production config preserves provider-managed state", async () => 
   }
 });
 
-test("workflow and shell expose the token only to a confirmed manual main release", () => {
+test("workflow and shell expose the token only to a confirmed manual main release", { skip: process.platform === "win32" ? "requires a POSIX shell" : false }, () => {
   const testJob = workflow.slice(workflow.indexOf("  test:"), workflow.indexOf("  reject-invalid-production-dispatch:"));
   const deployJob = workflow.slice(workflow.indexOf("  deploy:"));
   assert.doesNotMatch(workflow, /pull_request_target/u);

@@ -3,7 +3,7 @@
 /* This screen intentionally synchronizes remote OA state into local form/UI state. */
 /* eslint-disable react-hooks/set-state-in-effect */
 
-import { FormEvent, useEffect, useId, useMemo, useRef, useState } from "react";
+import { FormEvent, useCallback, useEffect, useId, useMemo, useRef, useState } from "react";
 import {
   Archive,
   AlertTriangle,
@@ -30,6 +30,7 @@ import {
   LayoutDashboard,
   ListTodo,
   LogOut,
+  Mail,
   Menu,
   MessageCircle,
   PackageCheck,
@@ -64,6 +65,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { NotificationStatus } from "@/components/notification-status";
 import { OemInbox } from "@/components/oem-inbox";
 import { ProjectWorkspace } from "@/components/project-workspace";
+import { CollaborationWorkspace, MailWorkspace } from "@/components/collaboration-workspace";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { Toaster } from "@/components/ui/sonner";
@@ -91,7 +93,7 @@ import { circulationPeople, circulationPendingForEmail } from "@/lib/circulation
 
 type ApprovalType = "技术审核" | "采购审核" | "保密协议" | "劳务报酬" | "流转审批";
 type ApprovalStatus = "草稿" | "待审核" | "审批中" | "已通过" | "已退回" | "已撤回" | "已作废" | "已归档";
-type ViewKey = "dashboard" | "todos" | "project" | "requests" | "people" | "knowledge" | "rules" | "members" | "oem" | "notifications" | "profile";
+type ViewKey = "chat" | "mail" | "dashboard" | "todos" | "project" | "requests" | "people" | "knowledge" | "rules" | "members" | "oem" | "notifications" | "profile";
 
 type Approval = {
   id: string;
@@ -135,7 +137,8 @@ type MemberAuditRow = { id: string; fullName: string; identityNumber: string; ch
 type ProfileVisibility = { department: boolean; position: boolean; phone: boolean; bio: boolean };
 type ProfileField = Exclude<keyof PersonProfile, "visibility">;
 type PersonProfile = { department: string; position: string; phone: string; bio: string; visibility: ProfileVisibility };
-type Person = { id: string; fullName: string; email: string; role: string; permissions: MemberPermission[]; isAdmin: boolean; avatarDataUrl: string; profile: PersonProfile; lastSeenAt: string; online: boolean; ndaCompleted: boolean };
+type Person = { id: string; fullName: string; email: string; role: string; permissions: MemberPermission[]; isAdmin: boolean; avatarDataUrl: string; profile: PersonProfile; lastSeenAt: string; online: boolean; ndaCompleted: boolean; departmentId?: string };
+type DirectoryDepartment = { id: string; code: string; name: string; parentId: string | null; sortOrder: number; memberIds: string[] };
 type DirectMessage = { id: string; senderEmail: string; senderName: string; recipientEmail: string; recipientName: string; body: string; createdAt: string };
 type ConversationSummary = { peer: { email: string; name?: string; fullName?: string; role?: string; permissions?: MemberPermission[]; isAdmin?: boolean }; latestMessageId?: string | null; latestCreatedAt?: string | null; latestIncomingId?: string | null };
 type MetricPanel = "approved" | "archive" | null;
@@ -341,17 +344,24 @@ function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马�
       window.location.href = authProvider === "chatgpt" ? "/signout-with-chatgpt?return_to=%2F" : "/";
     }
   };
+  const workspaceItems: { key: ViewKey; label: string; icon: typeof HomeIcon }[] = [
+    { key: "chat", label: "聊天", icon: MessageCircle },
+    { key: "people", label: "通讯录", icon: UsersRound },
+    { key: "project", label: "管理台", icon: BriefcaseBusiness },
+    { key: "mail", label: "邮箱", icon: Mail },
+  ];
   const items: { key: ViewKey; label: string; icon: typeof HomeIcon }[] = [
     { key: "dashboard", label: "审批工作台", icon: LayoutDashboard },
     { key: "todos", label: "统一待办", icon: ListTodo },
-    { key: "project", label: "项目工作台", icon: BriefcaseBusiness },
     { key: "requests", label: "全部申请", icon: FolderKanban },
-    { key: "people", label: "协作成员", icon: UsersRound },
     ...(isAdmin ? [{ key: "members" as ViewKey, label: "成员审核", icon: UsersRound }, { key: "notifications" as ViewKey, label: "飞书提醒", icon: MessageCircle }] : []),
   ];
   return <aside className="sidebar-shell">
-    <button type="button" className="brand-lockup" onClick={() => setActiveView("dashboard")} aria-label="返回首页" title="返回首页"><div className="brand-copy"><div className="brand-name">联合研发 OA</div><div className="brand-subtitle">{officialBrand}</div></div></button>
+    <button type="button" className="brand-lockup" onClick={() => setActiveView("chat")} aria-label="返回聊天" title="返回聊天"><div className="brand-copy"><div className="brand-name">联合研发 OA</div><div className="brand-subtitle">{officialBrand}</div></div></button>
     <div className="oa-sidebar-scroll">
+    <span className="sidebar-section-label">工作区</span>
+    <nav className="sidebar-nav" aria-label="核心工作区">{workspaceItems.map(({ key, label, icon: Icon }) => <button key={key} className={`sidebar-nav-item ${activeView === key ? "active" : ""}`} onClick={() => setActiveView(key)}><Icon className="size-[17px]" /><span>{label}</span></button>)}</nav>
+    <div className="sidebar-divider" />
     <button type="button" data-sidebar-section="office" className="sidebar-section-label sidebar-group-toggle" aria-expanded={officeOpen} aria-controls={officeId} onClick={() => setOfficeOpen(open => !open)}><span>审批办公</span><ChevronRight className="size-3.5" /></button>
     <div id={officeId} hidden={!officeOpen}>
     <nav className="sidebar-nav" aria-label="主导航">{items.map(({ key, label, icon: Icon }) => { const itemPendingCount = key === "dashboard" ? pendingApprovalCount : key === "members" ? pendingMemberCount : key === "knowledge" ? pendingKnowledgeCount : 0; const needsAttention = itemPendingCount > 0; const attentionClass = needsAttention ? `attention attention-${key}` : ""; return <button key={key} className={`sidebar-nav-item ${activeView === key ? "active" : ""} ${attentionClass}`} onClick={() => setActiveView(key)}><Icon className="size-[17px]" /><span>{label}</span>{needsAttention && <span className="nav-count nav-count-alert">{itemPendingCount > 99 ? "99+" : itemPendingCount}</span>}</button>; })}</nav>
@@ -657,19 +667,38 @@ function ChatHub({ currentUser, currentRole, isAdmin = false }: { currentUser?: 
   return <><div className="chat-hub"><button type="button" className={`icon-button chat-hub-button ${unread.size ? "has-unread" : ""}`} onClick={() => setOpen((value) => !value)} aria-expanded={open} aria-haspopup="dialog" aria-label="打开聊天" title="聊天"><MessageCircle className="size-[17px]" /><span className="chat-hub-label">聊天</span>{unread.size > 0 && <span className="chat-hub-badge">{unread.size > 9 ? "9+" : unread.size}</span>}</button>{open && <div className="chat-hub-popover" role="dialog" aria-label="会话列表"><div className="chat-hub-title"><strong>聊天</strong><span>{conversations.length} 个会话</span></div>{loading ? <div className="chat-hub-empty">正在加载会话…</div> : error ? <div className="chat-hub-empty chat-hub-error">{error}</div> : conversations.length ? conversations.map((conversation) => { const person = conversationPeer(conversation); const hasUnread = unread.has(person.email); return <button type="button" className={`chat-hub-person ${hasUnread ? "unread" : ""}`} key={person.email} onClick={() => openChat(person)}><span className="chat-person-copy"><strong>{person.fullName}</strong><small>{conversation.latestCreatedAt ? `最近消息 · ${formatChatTimestamp(conversation.latestCreatedAt)}` : "还没有消息"}</small></span>{hasUnread && <i aria-label="有新消息" />}</button>; }) : <div className="chat-hub-empty">暂无可聊天成员</div>}</div>}</div><ChatDialog key={chatPerson?.email || "chat-dialog"} person={chatPerson} currentRoleLabel={sessionRoleLabel(currentRole, isAdmin)} open={Boolean(chatPerson)} currentEmail={currentEmail} onOpenChange={(value) => { if (!value) setChatPerson(null); }} /></>;
 }
 
-function PeopleView({ currentUser }: { currentUser?: SessionInfo["user"] }) {
+function PeopleView({ currentUser, canManageDepartments = false }: { currentUser?: SessionInfo["user"]; canManageDepartments?: boolean }) {
   const [people, setPeople] = useState<Person[]>([]);
+  const [departments, setDepartments] = useState<DirectoryDepartment[]>([]);
+  const [selectedDepartment, setSelectedDepartment] = useState("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [selectedPerson, setSelectedPerson] = useState<Person | null>(null);
   const [profileOpen, setProfileOpen] = useState(false);
   const [chatPerson, setChatPerson] = useState<Person | null>(null);
+  const [managingDepartments, setManagingDepartments] = useState(false);
+  const [departmentName, setDepartmentName] = useState("");
+  const [departmentCode, setDepartmentCode] = useState("");
+  const [departmentParentId, setDepartmentParentId] = useState("");
+  const [departmentSaving, setDepartmentSaving] = useState(false);
+  const [assigningMemberId, setAssigningMemberId] = useState("");
   const currentEmail = currentUser?.email?.toLowerCase();
+
+  const loadDepartments = useCallback(async () => {
+    const response = await fetch("/api/departments", { headers: { accept: "application/json" }, credentials: "same-origin", cache: "no-store" });
+    const data = await response.json() as { departments?: DirectoryDepartment[]; error?: string };
+    if (!response.ok) throw new Error(data.error || "部门目录加载失败");
+    setDepartments(data.departments ?? []);
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
     const loadPeople = async () => {
       try {
-        const response = await fetch("/api/people?scope=directory", { headers: { accept: "application/json" }, credentials: "same-origin", cache: "no-store" });
+        const [response] = await Promise.all([
+          fetch("/api/people?scope=directory", { headers: { accept: "application/json" }, credentials: "same-origin", cache: "no-store" }),
+          loadDepartments(),
+        ]);
         const data = await response.json() as { people?: Person[]; error?: string };
         if (!response.ok) throw new Error(data.error || "成员目录加载失败");
         if (!cancelled) { setPeople(data.people ?? []); setError(""); }
@@ -679,13 +708,59 @@ function PeopleView({ currentUser }: { currentUser?: SessionInfo["user"] }) {
     loadPeople();
     const timer = setInterval(loadPeople, 30_000);
     return () => { cancelled = true; clearInterval(timer); };
-  }, [currentEmail]);
+  }, [currentEmail, loadDepartments]);
   const openProfile = (person: Person) => { setSelectedPerson(person); setProfileOpen(true); };
   const openChat = (person: Person) => { setChatPerson(person); };
   const updatePerson = (person: Person) => { setPeople((current) => current.map((item) => item.email === person.email ? person : item)); setSelectedPerson(person); };
+  const createDepartment = async (event: FormEvent) => {
+    event.preventDefault();
+    if (!departmentName.trim() || !departmentCode.trim() || departmentSaving) return;
+    setDepartmentSaving(true);
+    try {
+      const response = await fetch("/api/departments", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ name: departmentName, code: departmentCode, ...(departmentParentId ? { parentId: departmentParentId } : {}) }),
+      });
+      const data = await response.json() as { department?: DirectoryDepartment; error?: string };
+      if (!response.ok || !data.department) throw new Error(data.error || "部门创建失败");
+      setDepartmentName(""); setDepartmentCode(""); setDepartmentParentId("");
+      await loadDepartments();
+      toast.success("部门已创建");
+    } catch (cause) { toast.error(cause instanceof Error ? cause.message : "部门创建失败"); }
+    finally { setDepartmentSaving(false); }
+  };
+  const assignDepartment = async (person: Person, departmentId: string) => {
+    if (!departmentId || assigningMemberId) return;
+    setAssigningMemberId(person.id);
+    try {
+      const response = await fetch("/api/departments", {
+        method: "PATCH",
+        headers: { "content-type": "application/json" },
+        credentials: "same-origin",
+        body: JSON.stringify({ action: "assign_primary", memberId: person.id, departmentId }),
+      });
+      const data = await response.json() as { membership?: { departmentId: string }; error?: string };
+      if (!response.ok || !data.membership) throw new Error(data.error || "部门归属保存失败");
+      const department = departments.find((item) => item.id === departmentId);
+      setPeople((current) => current.map((item) => item.id === person.id ? { ...item, departmentId, profile: { ...item.profile, department: department?.name || item.profile.department } } : item));
+      await loadDepartments();
+      toast.success("成员部门已更新");
+    } catch (cause) { toast.error(cause instanceof Error ? cause.message : "部门归属保存失败"); }
+    finally { setAssigningMemberId(""); }
+  };
   const onlineCount = people.filter((person) => person.online).length;
   const self = people.find((person) => person.email === currentEmail);
-  return <div className="people-view"><div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-line" />团队通讯录</div><h1>协作成员</h1><p>已通过审核的成员会自动加入；完成保密协议后可使用私聊和内部协作功能。</p></div><Button variant="outline" onClick={() => self && openProfile(self)} disabled={!self}><Pencil className="size-4" />编辑我的资料</Button></div><div className="people-summary"><div><UsersRound className="size-5" /><strong>{people.length}</strong><span>位协作成员</span></div><div><span className="people-online-indicator" /><strong>{onlineCount}</strong><span>人在线</span></div><small>在线状态每 30 秒刷新一次</small></div>{loading ? <div className="people-loading"><Clock3 className="size-5" />正在加载成员目录…</div> : error ? <div className="empty-state"><UsersRound className="size-6" /><p>{error}</p></div> : people.length === 0 ? <div className="empty-state"><UsersRound className="size-6" /><p>暂无已通过审核的成员</p></div> : <div className="people-grid">{people.map((person) => <article className="person-card" key={person.email}><div className="person-card-head"><PersonAvatar person={person} onClick={() => openProfile(person)} /><div className="person-card-identity"><button type="button" className="person-name" onClick={() => openProfile(person)}>{person.fullName}</button><span className="person-role">{roleLabel(person)}</span><span className={`person-status ${person.online ? "online" : ""}`}><i />{formatLastSeen(person)}</span></div></div><div className="person-card-profile"><span>{profileValue(person, "department", currentEmail, "未填写部门")}</span><span>{profileValue(person, "position", currentEmail, "未填写负责方向")}</span></div><div className="person-card-actions"><button type="button" onClick={() => openProfile(person)}><UserRound className="size-3.5" />查看资料</button>{person.email !== currentEmail && person.ndaCompleted && <button type="button" onClick={() => openChat(person)}><MessageCircle className="size-3.5" />私聊</button>}</div></article>)}</div>}<ProfileDialog person={selectedPerson} open={profileOpen} currentEmail={currentEmail} onOpenChange={setProfileOpen} onSaved={updatePerson} onChat={openChat} /><ChatDialog key={chatPerson?.email || "people-chat-dialog"} person={chatPerson} currentPerson={self} open={Boolean(chatPerson)} currentEmail={currentEmail} onOpenChange={(open) => { if (!open) setChatPerson(null); }} /></div>;
+  const visiblePeople = selectedDepartment === "all" ? people : selectedDepartment === "unassigned" ? people.filter((person) => !person.departmentId) : people.filter((person) => person.departmentId === selectedDepartment);
+  return <div className="people-view">
+    <div className="page-heading"><div><div className="eyebrow"><span className="eyebrow-line" />团队通讯录</div><h1>协作成员</h1><p>按实验室部门查找成员，查看负责方向并发起一对一沟通。</p></div><div className="people-heading-actions">{canManageDepartments && <Button variant="outline" onClick={() => setManagingDepartments((current) => !current)}><Building2 className="size-4" />部门管理</Button>}<Button variant="outline" onClick={() => self && openProfile(self)} disabled={!self}><Pencil className="size-4" />编辑我的资料</Button></div></div>
+    <div className="people-summary"><div><UsersRound className="size-5" /><strong>{people.length}</strong><span>位协作成员</span></div><div><span className="people-online-indicator" /><strong>{onlineCount}</strong><span>人在线</span></div><small>在线状态每 30 秒刷新一次</small></div>
+    <nav className="department-filter" aria-label="按部门筛选"><button type="button" className={selectedDepartment === "all" ? "active" : ""} onClick={() => setSelectedDepartment("all")}>全部 <span>{people.length}</span></button>{departments.map((department) => <button type="button" key={department.id} className={selectedDepartment === department.id ? "active" : ""} onClick={() => setSelectedDepartment(department.id)}>{department.name} <span>{people.filter((person) => person.departmentId === department.id).length}</span></button>)}<button type="button" className={selectedDepartment === "unassigned" ? "active" : ""} onClick={() => setSelectedDepartment("unassigned")}>未公开 / 未分组 <span>{people.filter((person) => !person.departmentId).length}</span></button></nav>
+    {canManageDepartments && managingDepartments && <form className="department-admin-panel" onSubmit={createDepartment}><div><Building2 className="size-5" /><div><strong>新建部门</strong><span>部门编码创建后保持稳定，用于迁移和系统关联。</span></div></div><Input value={departmentName} onChange={(event) => setDepartmentName(event.target.value)} maxLength={120} placeholder="部门名称" aria-label="部门名称" /><Input value={departmentCode} onChange={(event) => setDepartmentCode(event.target.value.toLowerCase().replace(/[^a-z0-9_-]/gu, ""))} maxLength={64} placeholder="部门编码，例如 robotics" aria-label="部门编码" /><NativeSelect value={departmentParentId} onChange={(event) => setDepartmentParentId(event.target.value)} aria-label="上级部门"><NativeSelectOption value="">无上级部门</NativeSelectOption>{departments.map((department) => <NativeSelectOption key={department.id} value={department.id}>{department.name}</NativeSelectOption>)}</NativeSelect><Button type="submit" className="primary-button" disabled={departmentSaving || !departmentName.trim() || !departmentCode.trim()}>{departmentSaving ? "创建中…" : "创建部门"}</Button></form>}
+    {loading ? <div className="people-loading"><Clock3 className="size-5" />正在加载成员目录…</div> : error ? <div className="empty-state"><UsersRound className="size-6" /><p>{error}</p></div> : visiblePeople.length === 0 ? <div className="empty-state"><UsersRound className="size-6" /><p>当前部门暂无可见成员</p></div> : <div className="people-grid">{visiblePeople.map((person) => <article className="person-card" key={person.email}><div className="person-card-head"><PersonAvatar person={person} onClick={() => openProfile(person)} /><div className="person-card-identity"><button type="button" className="person-name" onClick={() => openProfile(person)}>{person.fullName}</button><span className="person-role">{roleLabel(person)}</span><span className={`person-status ${person.online ? "online" : ""}`}><i />{formatLastSeen(person)}</span></div></div><div className="person-card-profile"><span>{profileValue(person, "department", currentEmail, "未公开部门")}</span><span>{profileValue(person, "position", currentEmail, "未填写负责方向")}</span></div>{canManageDepartments && !person.id.startsWith("account:") && <NativeSelect value={person.departmentId || ""} onChange={(event) => void assignDepartment(person, event.target.value)} aria-label={`设置${person.fullName}的主部门`} disabled={assigningMemberId === person.id}><NativeSelectOption value="">选择主部门</NativeSelectOption>{departments.map((department) => <NativeSelectOption key={department.id} value={department.id}>{department.name}</NativeSelectOption>)}</NativeSelect>}<div className="person-card-actions"><button type="button" onClick={() => openProfile(person)}><UserRound className="size-3.5" />查看资料</button>{person.email !== currentEmail && person.ndaCompleted && <button type="button" onClick={() => openChat(person)}><MessageCircle className="size-3.5" />私聊</button>}</div></article>)}</div>}
+    <ProfileDialog person={selectedPerson} open={profileOpen} currentEmail={currentEmail} onOpenChange={setProfileOpen} onSaved={updatePerson} onChat={openChat} /><ChatDialog key={chatPerson?.email || "people-chat-dialog"} person={chatPerson} currentPerson={self} open={Boolean(chatPerson)} currentEmail={currentEmail} onOpenChange={(open) => { if (!open) setChatPerson(null); }} />
+  </div>;
 }
 
 function ProfileSettingsView({ currentUser, currentRole, isAdmin = false, migrationExportEnabled = false, migrationUnfreezeEnabled = false, onIdentityChanged }: { currentUser?: SessionInfo["user"]; currentRole?: string | null; isAdmin?: boolean; migrationExportEnabled?: boolean; migrationUnfreezeEnabled?: boolean; onIdentityChanged: (fullName: string, avatarDataUrl: string) => void }) {
@@ -2035,7 +2110,7 @@ function RulesView() {
 }
 
 export default function Home() {
-  const [activeView, setActiveView] = useState<ViewKey>("knowledge");
+  const [activeView, setActiveView] = useState<ViewKey>("chat");
   const [knowledgeTab, setKnowledgeTab] = useState<KnowledgeTab>("ask");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   useEffect(() => { try { setSidebarCollapsed(localStorage.getItem("oa.sidebar.collapsed") === "true"); } catch { /* optional preference */ } }, []);
@@ -2097,7 +2172,7 @@ export default function Home() {
       setActiveView("profile");
       toast.info("GitHub 已经绑定", { description: "无需重复操作。" });
     } else if (githubStatus === "signed-in") {
-      setActiveView("knowledge");
+      setActiveView("chat");
       setShowMineOnly(false);
       setMobileNavOpen(false);
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -2136,7 +2211,7 @@ export default function Home() {
       setActiveView("profile");
       toast.info("飞书已经绑定", { description: "无需重复操作。" });
     } else if (feishuStatus === "signed-in") {
-      setActiveView("knowledge");
+      setActiveView("chat");
       setShowMineOnly(false);
       setMobileNavOpen(false);
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -2454,7 +2529,7 @@ export default function Home() {
   const openMyPending = () => { setActiveView("todos"); setActiveFilter("全部"); setShowMineOnly(false); setMobileNavOpen(false); };
   const navigate = (view: ViewKey) => { setActiveView(view); setShowMineOnly(false); setMobileNavOpen(false); };
   const openMetricApproval = (id: string) => { setMetricPanel(null); openApproval(id); };
-  const secondaryTitle = activeView === "dashboard" ? "审批工作台" : activeView === "todos" ? "统一待办" : activeView === "project" ? "项目工作台" : activeView === "requests" ? showMineOnly ? "待我审批" : "全部申请" : activeView === "people" ? "协作成员" : activeView === "knowledge" ? knowledgeTab === "ask" ? "AI 助手" : knowledgeTab === "submit" ? "上传资料" : knowledgeTab === "mine" ? "我的资料" : knowledgeTab === "review" ? "资料审核" : "知识资料管理" : activeView === "members" ? "成员审核" : activeView === "oem" ? "官网 OEM 申请" : activeView === "notifications" ? "飞书提醒" : activeView === "profile" ? "个人设置" : "流程与规则";
+  const secondaryTitle = activeView === "chat" ? "聊天" : activeView === "mail" ? "邮箱" : activeView === "dashboard" ? "审批工作台" : activeView === "todos" ? "统一待办" : activeView === "project" ? "管理台" : activeView === "requests" ? showMineOnly ? "待我审批" : "全部申请" : activeView === "people" ? "通讯录" : activeView === "knowledge" ? knowledgeTab === "ask" ? "AI 助手" : knowledgeTab === "submit" ? "上传资料" : knowledgeTab === "mine" ? "我的资料" : knowledgeTab === "review" ? "资料审核" : "知识资料管理" : activeView === "members" ? "成员审核" : activeView === "oem" ? "官网 OEM 申请" : activeView === "notifications" ? "飞书提醒" : activeView === "profile" ? "个人设置" : "流程与规则";
   if (!session) return <div className="registration-shell"><div className="registration-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><h1>请登录账号</h1><p className="registration-intro">正在确认登录状态。实验室 AI 仅在登录并完成 OA 准入与保密签署后显示。</p></div></div>;
   if (!session.registered && (session.accountBindingRequired || session.accountBindingConflict || session.platformIdentityMissing || session.externalIdentityLinkRequired || session.githubIdentityLinkRequired || session.feishuIdentityLinkRequired)) return <><Toaster position="top-right" /><IdentityAccessGate session={session} onRefresh={refreshSession} /></>;
   if (session.status === "pending") return <><Toaster position="top-right" /><PendingGate session={session} onRefresh={refreshSession} /></>;
@@ -2479,7 +2554,7 @@ export default function Home() {
           </div>
         </header>
         <div className="oa-knowledge-pane" hidden={activeView !== "knowledge"}><KnowledgeView canReviewKnowledge={Boolean(session.canReviewKnowledge)} isAdmin={Boolean(session.isAdmin)} activeSection={knowledgeTab} onSectionChange={setKnowledgeTab} /></div>
-        {activeView === "notifications" ? <NotificationStatus /> : activeView === "oem" ? <OemInbox /> : activeView === "members" ? <MembersView currentEmail={session.user?.email} /> : activeView === "people" ? <PeopleView currentUser={session.user} /> : activeView === "knowledge" ? null : activeView === "todos" || activeView === "project" ? <ProjectWorkspace mode={activeView} approvals={approvals} currentUserEmail={session.user?.email} people={session.user ? [{ email: session.user.email, name: session.user.displayName }] : []} canReviewKnowledge={Boolean(session.canReviewKnowledge)} canManageProject={Boolean(session.isAdmin || session.role === "project_owner")} onOpenApproval={openApproval} onOpenKnowledgeReview={() => { setKnowledgeTab("review"); navigate("knowledge"); }} /> : activeView === "profile" ? <ProfileSettingsView currentUser={session.user} currentRole={session.role} isAdmin={Boolean(session.isAdmin)} migrationExportEnabled={session.migrationExportEnabled} migrationUnfreezeEnabled={session.migrationUnfreezeEnabled} onIdentityChanged={(fullName, avatarDataUrl) => { setMyAvatarDataUrl(avatarDataUrl); setSession((current) => current?.user ? { ...current, user: { ...current.user, displayName: fullName } } : current); }} /> : activeView === "rules" ? <RulesView /> : activeView === "requests" ? <RequestsView approvals={approvals} filteredApprovals={filteredApprovals} myPendingApprovals={myPendingApprovals} dataReady={dataReady} activeFilter={activeFilter} setActiveFilter={setActiveFilter} showMineOnly={showMineOnly} onClearMine={() => setShowMineOnly(false)} onOpen={openApproval} /> : <>
+        {activeView === "chat" ? <CollaborationWorkspace currentUserEmail={session.user?.email} /> : activeView === "mail" ? <MailWorkspace /> : activeView === "notifications" ? <NotificationStatus /> : activeView === "oem" ? <OemInbox /> : activeView === "members" ? <MembersView currentEmail={session.user?.email} /> : activeView === "people" ? <PeopleView currentUser={session.user} canManageDepartments={Boolean(session.isAdmin)} /> : activeView === "knowledge" ? null : activeView === "todos" || activeView === "project" ? <ProjectWorkspace mode={activeView} approvals={approvals} currentUserEmail={session.user?.email} people={session.user ? [{ email: session.user.email, name: session.user.displayName }] : []} canReviewKnowledge={Boolean(session.canReviewKnowledge)} canManageProject={Boolean(session.isAdmin || session.role === "project_owner")} onOpenApproval={openApproval} onOpenKnowledgeReview={() => { setKnowledgeTab("review"); navigate("knowledge"); }} /> : activeView === "profile" ? <ProfileSettingsView currentUser={session.user} currentRole={session.role} isAdmin={Boolean(session.isAdmin)} migrationExportEnabled={session.migrationExportEnabled} migrationUnfreezeEnabled={session.migrationUnfreezeEnabled} onIdentityChanged={(fullName, avatarDataUrl) => { setMyAvatarDataUrl(avatarDataUrl); setSession((current) => current?.user ? { ...current, user: { ...current.user, displayName: fullName } } : current); }} /> : activeView === "rules" ? <RulesView /> : activeView === "requests" ? <RequestsView approvals={approvals} filteredApprovals={filteredApprovals} myPendingApprovals={myPendingApprovals} dataReady={dataReady} activeFilter={activeFilter} setActiveFilter={setActiveFilter} showMineOnly={showMineOnly} onClearMine={() => setShowMineOnly(false)} onOpen={openApproval} /> : <>
           <section className="page-heading dashboard-heading">
             <div>
               <div className="eyebrow"><span className="eyebrow-line" />{officialName}</div>

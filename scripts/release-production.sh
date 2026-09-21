@@ -181,7 +181,7 @@ node "${script_dir}/check-production-cloudflare-target.mjs" \
 
 ledger_query="SELECT id, name FROM d1_migrations ORDER BY id"
 freeze_query="SELECT COUNT(*) AS active_freezes FROM migration_control WHERE deactivated_at IS NULL"
-schema_query="SELECT type, name, sql FROM sqlite_master WHERE name GLOB 'knowledge_*' OR name IN ('notification_control', 'notification_outbox', 'notification_outbox_due') ORDER BY type, name"
+schema_query="SELECT type, name, sql FROM sqlite_master WHERE name GLOB 'knowledge_*' OR name GLOB 'conversation_events*' OR name GLOB 'conversation_members*' OR name GLOB 'conversation_messages*' OR name GLOB 'conversations*' OR name GLOB 'department_memberships*' OR name GLOB 'departments*' OR name GLOB 'project_links*' OR name GLOB 'project_members*' OR name GLOB 'projects*' OR name IN ('notification_control', 'notification_outbox', 'notification_outbox_due') ORDER BY type, name"
 
 run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${ledger_query}" > "${release_root}/migration-ledger-before.json"
 run_wrangler d1 execute DB --remote --json --config "${config_path}" --command "${freeze_query}" > "${release_root}/migration-freeze-before.json"

@@ -30,7 +30,7 @@ async function htmlFiles(directory) {
   return found;
 }
 const files = await htmlFiles(output);
-const built = files.find(file => file.endsWith('/oa-chat-browser-fixture/index.html')) || files.find(file => file === path.join(output, 'index.html'));
+const built = files.find(file => file.endsWith(path.join('oa-chat-browser-fixture', 'index.html'))) || files.find(file => file === path.join(output, 'index.html'));
 if (!built) throw new Error('Browser fixture HTML was not emitted');
 await writeFile(path.join(output, 'index.html'), await readFile(built));
 console.log('Actual OA page browser fixture built without API access or production credentials.');

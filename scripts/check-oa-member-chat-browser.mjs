@@ -12,7 +12,7 @@ const server=createServer(async(req,res)=>{
   catch {res.writeHead(404);res.end('not found');}
 });
 await new Promise(r=>server.listen(0,'127.0.0.1',r));const origin=`http://127.0.0.1:${server.address().port}`;
-const browser=await chromium.launch({headless:true});const results=[];
+const browser=await chromium.launch({headless:true,...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE?{executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE}:{})});const results=[];
 const people=[{email:'a@example.test',name:'成员甲'},{email:'b@example.test',name:'成员乙'}];
 const directory=[...people,...Array.from({length:24},(_,i)=>({email:`synthetic-${i}@example.test`,name:`测试成员${String(i+1).padStart(2,'0')}`}))];
 const fullAnswer='# 机器人测试结果\n\n**可直接阅读的结论**\n\n|指标|结果|\n|---|---|\n|误差|$e^2$|\n\n'+'这段内容必须完整转发给成员。'.repeat(200)+'\n\n**正文完整结束**';
@@ -37,7 +37,7 @@ try {
     }else if(url.pathname==='/api/approvals')data={approvals:[]};else if(url.pathname==='/api/members')data={members:[],pendingCount:0};else if(url.pathname==='/api/knowledge')data={items:[],pendingCount:0};else if(url.pathname==='/api/people')data={people:[]};else if(url.pathname==='/api/profile')data={profile:{}};
     return route.fulfill({json:data});
    });
-   await page.goto(origin);await page.locator('.oa-shared-chat').waitFor();if(name==='desktop')await page.getByRole('button',{name:'收起侧栏',exact:true}).click();return page;
+   await page.goto(origin);await page.locator('.collaboration-workspace').waitFor();await page.locator('.collaboration-ai-entry').click();await page.locator('.oa-shared-chat').waitFor();if(name==='desktop')await page.getByRole('button',{name:'收起侧栏',exact:true}).click();return page;
   };
   const alice=await open(people[0]),bob=await open(people[1]);
   try {

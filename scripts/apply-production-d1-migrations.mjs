@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
-import { REVIEWED_KNOWLEDGE_MIGRATIONS } from "../lib/production-release.mjs";
+import { REVIEWED_PRODUCTION_MIGRATIONS } from "../lib/production-release.mjs";
 
 function parseArguments(values) {
   const options = {};
@@ -24,7 +24,7 @@ function parseArguments(values) {
 function pendingNames(state) {
   if (!/^pending-\d{4}(?:-\d{4})*$/u.test(state)) throw new Error("Production migration state is not pending");
   const requested = state.slice("pending-".length).split("-");
-  const reviewed = Object.keys(REVIEWED_KNOWLEDGE_MIGRATIONS);
+  const reviewed = Object.keys(REVIEWED_PRODUCTION_MIGRATIONS);
   const names = requested.map((prefix) => {
     const name = reviewed.find((candidate) => candidate.startsWith(`${prefix}_`));
     if (!name) throw new Error(`Pending migration ${prefix} is not reviewed for production`);
@@ -50,7 +50,8 @@ function sqlString(value) {
 }
 
 function runWrangler({ wrangler }, args) {
-  const result = spawnSync(wrangler, args, {
+  const invokeThroughNode = process.platform === "win32" && wrangler.toLowerCase().endsWith(".mjs");
+  const result = spawnSync(invokeThroughNode ? process.execPath : wrangler, invokeThroughNode ? [wrangler, ...args] : args, {
     encoding: "utf8",
     env: { ...process.env, CI: "1" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -92,7 +93,7 @@ try {
     if (!/^\d{4}_[A-Za-z0-9_]+\.sql$/u.test(name)) throw new Error("Unsafe migration name");
     const sql = await readFile(resolve(migrationsDir, name), "utf8");
     const digest = createHash("sha256").update(sql).digest("hex");
-    if (digest !== REVIEWED_KNOWLEDGE_MIGRATIONS[name]) throw new Error(`${name} does not match the reviewed SHA-256`);
+    if (digest !== REVIEWED_PRODUCTION_MIGRATIONS[name]) throw new Error(`${name} does not match the reviewed SHA-256`);
 
     for (const statement of splitStatements(sql)) {
       await runSql(context, statement);

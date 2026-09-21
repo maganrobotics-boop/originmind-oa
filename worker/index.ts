@@ -27,6 +27,7 @@ interface Env extends TaskEnv {
   FEISHU_LOGIN_TENANT_KEY?: string;
   FEISHU_NOTIFICATIONS_ENABLED?: string;
   OA_ADMIN_EMAILS?: string;
+  OA_WEBMAIL_URL?: string;
   PUBLIC_LAB_AI_SERVICE_TOKEN: string;
 }
 

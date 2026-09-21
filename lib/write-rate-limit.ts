@@ -6,7 +6,7 @@ type Database = Awaited<ReturnType<typeof getDb>>;
 
 export async function consumeWriteRateLimit(
   db: Database,
-  input: { actorSubject: string; scope: "approval_write" | "approval_create" | "direct_message" | "github_oauth_start" | "feishu_oauth_start" | "feishu_name_binding" | "feishu_auto_provision" | "knowledge_submit" | "knowledge_review" | "lab_ai_ask" | "lab_ai_status" | "lab_ai_extract" | "meeting_bot_control" | "meeting_bot_leave" | "meeting_bot_events"; limit: number; now?: Date },
+  input: { actorSubject: string; scope: "approval_write" | "approval_create" | "direct_message" | "conversation_create" | "conversation_message" | "department_admin" | "github_oauth_start" | "feishu_oauth_start" | "feishu_name_binding" | "feishu_auto_provision" | "knowledge_submit" | "knowledge_review" | "lab_ai_ask" | "lab_ai_status" | "lab_ai_extract" | "meeting_bot_control" | "meeting_bot_leave" | "meeting_bot_events"; limit: number; now?: Date },
 ) {
   const actorSubject = input.actorSubject.trim();
   if (!actorSubject || !Number.isInteger(input.limit) || input.limit < 1) return false;

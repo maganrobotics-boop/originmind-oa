@@ -7,7 +7,7 @@ const packageJson = JSON.parse(await readFile(new URL("../package.json", import.
 const releaseScript = await readFile(new URL("../scripts/release-standalone.sh", import.meta.url), "utf8");
 const secretListValidator = await readFile(new URL("../scripts/validate-staging-secret-list.mjs", import.meta.url), "utf8");
 
-test("the staging release requires an explicit isolated target before running commands", () => {
+test("the staging release requires an explicit isolated target before running any command", { skip: process.platform === "win32" ? "requires a POSIX shell" : false }, () => {
   const result = spawnSync("/bin/bash", [new URL("../scripts/release-standalone.sh", import.meta.url).pathname, "staging"], {
     encoding: "utf8",
     env: { PATH: "/nonexistent", OA_STAGING_RELEASE_CONFIRM: "originmind-oa-staging" },
