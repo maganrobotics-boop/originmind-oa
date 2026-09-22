@@ -60,6 +60,7 @@ try {
     await page.locator('.message.assistant [data-math-status="rendered"]').first().waitFor();
     await page.waitForFunction(() => document.querySelectorAll('.message.assistant [data-math-status="rendered"]').length >= 3);
     assert.ok(await page.locator(".message.assistant math").count() >= 3);
+    await page.waitForFunction(() => document.querySelector(".message.assistant")?.textContent?.includes("完整结尾"));
     assert.ok(await page.locator(".message.assistant strong").count() >= 5);
     assert.equal(await page.locator(".further-inquiry").count(),0);
     assert.equal(await page.locator(".copy-answer, .copy-action").count(),1);
