@@ -125,7 +125,7 @@ function answerMathTokenAt(text, index) {
   let display = false;
   if (text.startsWith("\\[", index)) { left = "\\["; right = "\\]"; display = true; }
   else if (text.startsWith("\\(", index)) { left = "\\("; right = "\\)"; }
-  else if (text.startsWith("$", index)) { left = right = "$"; display = true; }
+  else if (text.startsWith("$$", index)) { left = right = "$$"; display = true; }
   else if (text[index] === "$" && text[index - 1] !== "$" && text[index + 1] !== "$") { left = right = "$"; }
   else return null;
   const start = index + left.length;
