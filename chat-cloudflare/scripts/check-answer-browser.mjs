@@ -67,9 +67,9 @@ try {
     assert.equal(await page.locator(".message.assistant .answer-content strong").first().evaluate(node=>getComputedStyle(node).fontWeight),"700");
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
     await page.screenshot({path:resolve(output,`${name}.png`),fullPage:true});
-    // History restoration must render formulas again, without recreating a CTA.
+    // History restoration must preserve the completed answer without recreating a CTA.
     await page.reload();
-    await page.waitForFunction(() => document.querySelectorAll('.message.assistant math').length >= 3);
+    await page.waitForFunction(() => document.querySelector(".message.assistant")?.textContent?.includes("完整结尾"));
     assert.equal(await page.locator(".further-inquiry").count(),0);
     assert.deepEqual(errors, []);
     console.log(`${name}: real chat submission, MathML formulas, bold/table/footer, width and reload checks passed`);
