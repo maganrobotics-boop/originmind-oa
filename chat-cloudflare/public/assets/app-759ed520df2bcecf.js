@@ -277,7 +277,10 @@ async function openIncomingSharedAnswer() {
 "use strict";
 
 const KATEX_ASSET = "/assets/katex-cc567bec51ade0dc.mjs";
-void KATEX_ASSET;
+let answerMathEngine = null;
+if (KATEX_ASSET) {
+  import(KATEX_ASSET).then((module) => { answerMathEngine = module.default || module; }).catch(() => { answerMathEngine = null; });
+}
 
 const STORAGE_KEY = "originmind-public-preview-conversations-v1";
 const DEFAULT_PUBLIC_API_BASE = "";
@@ -352,6 +355,25 @@ function renderMarkdown(markdown) {
   for (let index = 0; index < lines.length; index += 1) {
     const line = lines[index];
     if (!line.trim()) { flushParagraph(); flushList(); continue; }
+    if (/^\s*(?:\$\$|\\\[)/u.test(line)) {
+      const isDollar = /^\s*\$\$/u.test(line);
+      const close = isDollar ? "$" : "\\]";
+      const start = isDollar ? line.indexOf("$") + 2 : line.indexOf("\\[") + 2;
+      let tex = line.slice(start);
+      let found = tex.includes(close);
+      while (!found && index + 1 < lines.length) {
+        index += 1;
+        tex += "\n" + lines[index];
+        found = lines[index].includes(close);
+      }
+      if (found) {
+        const end = tex.lastIndexOf(close);
+        const raw = `${isDollar ? "$" : "\\["}${tex.slice(0, end)}${close}`;
+        flushParagraph(); flushList();
+        output.push(renderAnswerMath(tex.slice(0, end), true, raw));
+        continue;
+      }
+    }
     const heading = line.match(/^(#{1,3})\s+(.+)$/u);
     if (heading) { flushParagraph(); flushList(); output.push(`<h3>${inline(heading[2])}</h3>`); continue; }
     const bullet = line.match(/^\s*(?:[-*]|\d+\.)\s+(.+)$/u);
@@ -371,10 +393,75 @@ function renderMarkdown(markdown) {
   return output.join("") || "<p>暂无内容。</p>";
 }
 
+function answerMathTokenAt(text, index) {
+  let left = "";
+  let right = "";
+  let display = false;
+  if (text.startsWith("\\[", index)) { left = "\\["; right = "\\]"; display = true; }
+  else if (text.startsWith("\\(", index)) { left = "\\("; right = "\\)"; }
+  else if (text.startsWith("$", index)) { left = right = "$"; display = true; }
+  else if (text[index] === "$" && text[index - 1] !== "$" && text[index + 1] !== "$") { left = right = "$"; }
+  else return null;
+  const start = index + left.length;
+  const end = text.indexOf(right, start);
+  if (end === -1) return null;
+  const content = text.slice(start, end);
+  const trimmed = content.trim();
+  if (left === "$") {
+    if (!trimmed || /\r|\n/u.test(content) || /\d/u.test(text[end + 1] || "")) return null;
+    const padded = content !== trimmed;
+    const looksMathematical = /\\[a-zA-Z]|[_^=+*/<>\-≤≥≠−]/u.test(trimmed) || /^[\p{L}\p{N}.]+$/u.test(trimmed);
+    if (padded && !looksMathematical) return null;
+  }
+  return { raw: text.slice(index, end + right.length), tex: content, display, end: end + right.length };
+}
+
+function renderAnswerMath(tex, display, raw) {
+  const fallback = `<span class="${display ? "math-display" : "math-inline"}" data-math-status="fallback">${escapeHtml(raw)}</span>`;
+  if (!answerMathEngine?.renderToString || String(tex).length > 8000) return fallback;
+  try {
+    const html = answerMathEngine.renderToString(tex.trim(), {
+      displayMode: display,
+      output: "mathml",
+      trust: false,
+      throwOnError: true,
+      strict: "ignore",
+      maxExpand: 1000,
+      maxSize: 10,
+    });
+    return `<span class="${display ? "math-display" : "math-inline"}" data-math-status="rendered">${html}</span>`;
+  } catch {
+    return fallback;
+  }
+}
+
 function inline(text) {
-  return escapeHtml(text)
+  const tokens = [];
+  let protectedText = "";
+  for (let index = 0; index < String(text).length;) {
+    if (text[index] === "`") {
+      const end = text.indexOf("`", index + 1);
+      if (end !== -1) {
+        const token = `\uE000C${tokens.length}\uE001`;
+        tokens.push(`<code>${escapeHtml(text.slice(index + 1, end))}</code>`);
+        protectedText += token;
+        index = end + 1;
+        continue;
+      }
+    }
+    const math = (text[index] === "$" || text[index] === "\\") ? answerMathTokenAt(text, index) : null;
+    if (math) {
+      const token = `\uE000C${tokens.length}\uE001`;
+      tokens.push(renderAnswerMath(math.tex, math.display, math.raw));
+      protectedText += token;
+      index = math.end;
+      continue;
+    }
+    protectedText += text[index++];
+  }
+  return escapeHtml(protectedText)
     .replace(/\*\*([^*]+)\*\*/gu, "<strong>$1</strong>")
-    .replace(/`([^`]+)`/gu, "<code>$1</code>");
+    .replace(/\uE000C(\d+)\uE001/gu, (_, index) => tokens[Number(index)] || "");
 }
 
 function knowledgeImageUrl(value) {
