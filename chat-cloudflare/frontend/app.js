@@ -1829,8 +1829,11 @@ function createPublicApp() {
     const shell = element("div", { className: "sidebar-shell" });
     const sidebarHeader = element("div", { className: "sidebar-header" });
     const sidebarBrand = element("div", { className: "sidebar-brand" }, [
-      element("strong", { className: "sidebar-brand-title", text: OA_PREVIEW_NAME }),
-      element("span", { className: "sidebar-brand-subtitle", text: OA_PREVIEW_BRAND }),
+      element("img", {
+        className: "sidebar-brand-logo",
+        attributes: { src: "/favicon.svg", alt: "", width: "32", height: "32", loading: "eager" },
+      }),
+      element("strong", { className: "sidebar-brand-title", text: "OriginMind" }),
     ]);
     const sidebarSearch = textButton("⌕", "sidebar-search");
     sidebarSearch.setAttribute("aria-label", "搜索最近聊天");
