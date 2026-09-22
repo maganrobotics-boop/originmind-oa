@@ -279,7 +279,9 @@ async function openIncomingSharedAnswer() {
 const KATEX_ASSET = "/assets/katex-cc567bec51ade0dc.mjs";
 let answerMathEngine = null;
 if (KATEX_ASSET) {
-  import(KATEX_ASSET).then((module) => { answerMathEngine = module.default || module; }).catch(() => { answerMathEngine = null; });
+  import(KATEX_ASSET)
+    .then((module) => { answerMathEngine = module.default || module; rerenderFallbackMath(); })
+    .catch(() => { answerMathEngine = null; });
 }
 
 const STORAGE_KEY = "originmind-public-preview-conversations-v1";
@@ -417,7 +419,7 @@ function answerMathTokenAt(text, index) {
 }
 
 function renderAnswerMath(tex, display, raw) {
-  const fallback = `<span class="${display ? "math-display" : "math-inline"}" data-math-status="fallback">${escapeHtml(raw)}</span>`;
+  const fallback = `<span class="${display ? "math-display" : "math-inline"}" data-math-status="fallback" data-tex="${escapeHtml(tex)}" data-display="${display ? "true" : "false"}" data-raw="${escapeHtml(raw)}">${escapeHtml(raw)}</span>`;
   if (!answerMathEngine?.renderToString || String(tex).length > 8000) return fallback;
   try {
     const html = answerMathEngine.renderToString(tex.trim(), {
@@ -462,6 +464,19 @@ function inline(text) {
   return escapeHtml(protectedText)
     .replace(/\*\*([^*]+)\*\*/gu, "<strong>$1</strong>")
     .replace(/\uE000C(\d+)\uE001/gu, (_, index) => tokens[Number(index)] || "");
+}
+
+function rerenderFallbackMath(root = document) {
+  if (!answerMathEngine?.renderToString) return;
+  root.querySelectorAll('[data-math-status="fallback"][data-tex]').forEach((node) => {
+    const tex = node.getAttribute("data-tex") || "";
+    const raw = node.getAttribute("data-raw") || node.textContent || "";
+    const display = node.getAttribute("data-display") === "true";
+    const wrapper = document.createElement("template");
+    wrapper.innerHTML = renderAnswerMath(tex, display, raw);
+    const rendered = wrapper.content.firstElementChild;
+    if (rendered && rendered.getAttribute("data-math-status") === "rendered") node.replaceWith(rendered);
+  });
 }
 
 function knowledgeImageUrl(value) {
