@@ -45,9 +45,9 @@ try {
       await page.goto(origin);
       await page.locator("textarea").first().fill("示例机器人公司简介");
       await page.locator("textarea").first().press("Enter");
-      await page.locator(".message.assistant .copy-answer").waitFor();
+      await page.locator(".message.assistant .copy-answer, .message.assistant .copy-action").waitFor();
       for(const restored of [false,true]) {
-        if(restored) { await page.reload(); await page.locator(".message.assistant .copy-answer").waitFor(); }
+        if(restored) { await page.reload(); await page.locator(".message.assistant .copy-answer, .message.assistant .copy-action").waitFor(); }
         const content=page.locator(".message.assistant .answer-content");
         const text=await content.innerText();
         assert.doesNotMatch(text,/##|\|---|\]\(https|INVESTOR BRIEF|仅供投资人/u);
