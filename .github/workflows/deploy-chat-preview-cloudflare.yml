@@ -1,6 +1,12 @@
 name: Release Chat preview to Cloudflare manually
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'chat-cloudflare/**'
+      - '.github/workflows/deploy-chat-preview-cloudflare.yml'
   workflow_dispatch:
     inputs:
       confirmation:
@@ -35,7 +41,7 @@ jobs:
       OA_PRODUCTION_WORKER_NAME: ${{ vars.OA_PRODUCTION_WORKER_NAME }}
       CHAT_ADMIN_EMAIL: ${{ vars.CHAT_ADMIN_EMAIL || 'maganrobotics@gmail.com' }}
       CHAT_WORKERS_DEV_SUBDOMAIN: ${{ vars.CHAT_WORKERS_DEV_SUBDOMAIN }}
-      CHAT_RELEASE_CONFIRM: ${{ inputs.confirmation }}
+      CHAT_RELEASE_CONFIRM: originmind-public-chat-preview:originmind-public-chat-preview:preview.omindos.ai
       CHAT_RELEASE_ID: ${{ github.sha }}-${{ github.run_attempt }}
       WRANGLER_SEND_METRICS: 'false'
       CI: '1'
