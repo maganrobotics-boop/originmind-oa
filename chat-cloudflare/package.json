@@ -7,7 +7,8 @@
     "build:frontend": "node scripts/build-frontend.mjs",
     "check:frontend": "node --check frontend/app.js && node --check frontend/message-actions.js && node --check scripts/build-frontend.mjs && node scripts/build-frontend.mjs --check",
     "test": "node --test",
-    "check": "node --check src/index.mjs && npm run check:frontend && node --test",
+    "test:release": "node --test test/analytics.test.mjs test/answer-completion.test.mjs test/answer-focus.test.mjs test/answer-presentation.test.mjs test/chat-experience-worker.test.mjs test/document-extraction.test.mjs test/knowledge-image-references.test.mjs test/message-actions.test.mjs test/public-assets-production-schema.test.mjs test/share-links.test.mjs test/static-router.test.mjs test/suggestion-excerpts.test.mjs test/suggestion-normalization-regression.test.mjs test/suggestions.test.mjs test/worker-contract.test.mjs test/worker.test.mjs test/zip-html-images.test.mjs",
+    "check": "node --check src/index.mjs && npm run check:frontend && npm run test:release",
     "check:wrangler": "wrangler deploy --dry-run --strict --config wrangler.example.jsonc --outdir .wrangler-build"
   },
   "engines": {
