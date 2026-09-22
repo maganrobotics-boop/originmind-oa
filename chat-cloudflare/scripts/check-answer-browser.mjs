@@ -62,7 +62,7 @@ try {
     assert.ok(await page.locator(".message.assistant math").count() >= 3);
     assert.ok(await page.locator(".message.assistant strong").count() >= 5);
     assert.equal(await page.locator(".further-inquiry").count(),0);
-    assert.equal(await page.locator(".copy-answer").count(),1);
+    assert.equal(await page.locator(".copy-answer, .copy-action").count(),1);
     assert.ok((await page.locator(".message.assistant").innerText()).includes("完整结尾"));
     assert.equal(await page.locator(".message.assistant .answer-content strong").first().evaluate(node=>getComputedStyle(node).fontWeight),"700");
     assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth + 1));
@@ -84,7 +84,7 @@ try {
   await page.locator("textarea").first().press("Enter");
   await page.locator('[data-math-status="fallback"]').first().waitFor();
   assert.ok((await page.locator(".message.assistant").innerText()).includes("完整结尾"));
-  assert.equal(await page.locator(".copy-answer").count(),1);
+  assert.equal(await page.locator(".copy-answer, .copy-action").count(),1);
   console.log("dependency unavailable: original formulas, complete prose and copy remain usable");
   await context.close();
 } finally {
