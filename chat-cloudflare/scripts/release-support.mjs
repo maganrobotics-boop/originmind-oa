@@ -284,7 +284,17 @@ function relativeFromConfig(configPath, targetPath) {
   return value.startsWith(".") ? value : `./${value}`;
 }
 
-export function buildWranglerConfig({ accountId, adminEmail, databaseId, configPath, oaWorkerName, origin, production, releaseId }) {
+export function buildWranglerConfig({
+  accountId,
+  adminEmail,
+  databaseId,
+  configPath,
+  oaWorkerName,
+  origin,
+  production,
+  releaseId,
+  publicAllowedOrigins = "",
+}) {
   if (
     !ACCOUNT_ID_PATTERN.test(accountId) ||
     !UUID_PATTERN.test(databaseId) ||
@@ -326,6 +336,7 @@ export function buildWranglerConfig({ accountId, adminEmail, databaseId, configP
       APP_ORIGIN: origin,
       ADMIN_EMAIL: adminEmail,
       RELEASE_ID: releaseId,
+      ...(publicAllowedOrigins ? { PUBLIC_ALLOWED_ORIGINS: publicAllowedOrigins } : {}),
     },
   };
   if (production) config.routes = [{ pattern: `${HOSTNAME}/*`, zone_name: ZONE_NAME }];

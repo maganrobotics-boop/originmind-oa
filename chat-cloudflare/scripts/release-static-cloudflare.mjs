@@ -95,6 +95,7 @@ const productionConfig = buildWranglerConfig({
   origin: PRODUCTION_ORIGIN,
   production: true,
   releaseId: environment.releaseId,
+  publicAllowedOrigins: process.env.PUBLIC_ALLOWED_ORIGINS || "https://maganrobotics-boop.github.io",
 });
 delete productionConfig.routes;
 productionConfig.workers_dev = false;

@@ -144,6 +144,7 @@ try {
     origin: stagingOrigin,
     production: false,
     releaseId: environment.releaseId,
+    publicAllowedOrigins: process.env.PUBLIC_ALLOWED_ORIGINS || "https://maganrobotics-boop.github.io",
   });
   const productionConfig = buildWranglerConfig({
     accountId: environment.accountId,
@@ -154,6 +155,7 @@ try {
     origin: PRODUCTION_ORIGIN,
     production: true,
     releaseId: environment.releaseId,
+    publicAllowedOrigins: process.env.PUBLIC_ALLOWED_ORIGINS || "https://maganrobotics-boop.github.io",
   });
   await writeJson(stagingConfigPath, stagingConfig);
   await writeJson(productionConfigPath, productionConfig);
