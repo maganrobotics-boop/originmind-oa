@@ -286,6 +286,13 @@ function messageActions() {
   return '<div class="message-actions"><button class="message-action copy-action" type="button" aria-label="复制"><svg viewBox="0 0 24 24" fill="none"><rect x="8" y="8" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2" stroke="currentColor" stroke-width="1.5"/></svg></button></div>';
 }
 
+function setAssistantContent(item, text, { html = false, images = [] } = {}) {
+  const content = item.querySelector(".answer-content");
+  if (!content) return;
+  content.innerHTML = `${html ? text : renderMarkdown(text)}${renderKnowledgeImages(images)}`;
+  rerenderFallbackMath(content);
+}
+
 function addMessage(role, text, { html = false, typing = false, images = [] } = {}) {
   const item = document.createElement("article");
   item.className = `message ${role}${typing ? " typing-message" : ""}`;
@@ -293,13 +300,39 @@ function addMessage(role, text, { html = false, typing = false, images = [] } = 
   else if (role === "assistant") item.innerHTML = `<div class="message-content"><div class="answer-content"></div>${messageActions()}</div>`;
   else item.innerHTML = '<div class="message-content"><p></p></div>';
   if (!typing) {
-    if (role === "assistant") item.querySelector(".answer-content").innerHTML = `${html ? text : renderMarkdown(text)}${renderKnowledgeImages(images)}`;
+    if (role === "assistant") setAssistantContent(item, text, { html, images });
     else item.querySelector("p").textContent = text;
   }
   messageList.appendChild(item);
   bindMessageActions(item);
   messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
   return item;
+}
+
+function answerRevealDelay(chunk) {
+  return Math.min(80, Math.max(18, Math.round(String(chunk || "").length * 1.1)));
+}
+
+function answerRevealChunks(text) {
+  const chunks = String(text || "").match(/[^。！？；\n]+[。！？；\n]+|[^。！？；\n]+$/gu) || [String(text || "")];
+  const merged = [];
+  for (const chunk of chunks) {
+    if (merged.length && (merged.at(-1).length < 28 || chunk.length < 10)) merged[merged.length - 1] += chunk;
+    else merged.push(chunk);
+  }
+  return merged.filter(Boolean);
+}
+
+async function revealAssistantAnswer(item, answer, { images = [] } = {}) {
+  const chunks = answerRevealChunks(answer);
+  let visible = "";
+  for (const chunk of chunks) {
+    visible += chunk;
+    setAssistantContent(item, visible, { images: [] });
+    messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
+    await new Promise((resolve) => setTimeout(resolve, answerRevealDelay(chunk)));
+  }
+  setAssistantContent(item, answer || "暂时没有生成回答。", { images });
 }
 
 function bindMessageActions(scope) {
@@ -337,7 +370,7 @@ async function submitMessage(rawText) {
   fileInput.value = "";
   attachmentChip.classList.remove("show");
   updateSendState();
-  const typing = addMessage("assistant", "", { typing: true });
+  const typing = addMessage("assistant", "正在检索公开资料，并组织回答…");
   try {
     const response = await fetch(apiUrl("/api/chat"), {
       method: "POST",
@@ -348,12 +381,10 @@ async function submitMessage(rawText) {
       }),
     });
     const data = await response.json().catch(() => ({}));
-    typing.remove();
     if (!response.ok) throw new Error(data.error || "服务暂不可用，请稍后重试。");
-    addMessage("assistant", data.answer || "暂时没有生成回答。", { images: data.images });
+    await revealAssistantAnswer(typing, data.answer || "暂时没有生成回答。", { images: data.images });
   } catch (error) {
-    typing.remove();
-    addMessage("assistant", error?.message || "服务暂不可用，请稍后重试。");
+    setAssistantContent(typing, error?.message || "服务暂不可用，请稍后重试。");
   }
   saveConversation();
 }
