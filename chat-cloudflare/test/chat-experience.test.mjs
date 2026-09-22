@@ -415,11 +415,11 @@ test("empty chats use the laboratory assistant brand, scoped guidance and data p
     const brandTitles = nodes(app.root, "strong")
       .filter((node) => node.className === "sidebar-brand-title")
       .map((node) => node.textContent);
-    const brandSubtitles = nodes(app.root, "span")
-      .filter((node) => node.className === "sidebar-brand-subtitle")
-      .map((node) => node.textContent);
-    assert.deepEqual(brandTitles, ["联合研发 OA", "联合研发 OA"]);
-    assert.deepEqual(brandSubtitles, ["ORIGINMIND × ARTS ROBOTICS", "ORIGINMIND × ARTS ROBOTICS"]);
+    const brandLogos = nodes(app.root, "img")
+      .filter((node) => node.className === "sidebar-brand-logo")
+      .map((node) => node.getAttribute("src"));
+    assert.deepEqual(brandTitles, ["OriginMind", "OriginMind"]);
+    assert.deepEqual(brandLogos, ["/favicon.svg", "/favicon.svg"]);
   }
 });
 
