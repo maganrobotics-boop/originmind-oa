@@ -1,6 +1,12 @@
 name: Release Chat to Cloudflare manually
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - 'chat-cloudflare/**'
+      - '.github/workflows/deploy-chat-cloudflare.yml'
   workflow_dispatch:
     inputs:
       confirmation:
@@ -36,7 +42,7 @@ jobs:
       CHAT_ADMIN_EMAIL: ${{ vars.CHAT_ADMIN_EMAIL || 'maganrobotics@gmail.com' }}
       CHAT_EXPECTED_ORIGIN_IPV4: ${{ vars.CHAT_EXPECTED_ORIGIN_IPV4 }}
       CHAT_WORKERS_DEV_SUBDOMAIN: ${{ vars.CHAT_WORKERS_DEV_SUBDOMAIN }}
-      CHAT_RELEASE_CONFIRM: ${{ inputs.confirmation }}
+      CHAT_RELEASE_CONFIRM: originmind-public-chat-production:originmind-public-chat-production:chat.omindos.ai
       CHAT_RELEASE_ID: ${{ github.sha }}-${{ github.run_attempt }}
       PUBLIC_ALLOWED_ORIGINS: https://maganrobotics-boop.github.io
       WRANGLER_SEND_METRICS: 'false'
