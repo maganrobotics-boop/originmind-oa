@@ -73,11 +73,11 @@ try {
     assert.equal(await page.locator(".answer-math-block").last().locator("mtd").count(),9);
     assert.ok(await page.locator(".message.assistant strong").count()>=5);
     assert.ok((await page.locator(".message.assistant").innerText()).includes("完整结尾"));
-    assert.equal(await page.locator(".copy-answer").count(),1);
+    assert.equal(await page.locator(".copy-answer, .copy-action").count(),1);
     await page.locator(".message.assistant").screenshot({path:resolve(output,`${name}-formulas.png`)});
     await page.reload();
     await expectRendered(page);
-    assert.equal(await page.locator(".copy-answer").count(),1);
+    assert.equal(await page.locator(".copy-answer, .copy-action").count(),1);
     assert.deepEqual(errors,[]);
     report.tests.push({name,passed:true,formulas:8,matrixRows:3,matrixCells:9,historyReload:true});
     await context.close();
@@ -114,7 +114,7 @@ try {
     await page.waitForFunction(()=>document.querySelectorAll('[data-math-status="fallback"]').length===8);
     assert.equal(requests,3);
     assert.ok((await page.locator(".message.assistant").innerText()).includes("完整结尾"));
-    assert.equal(await page.locator(".copy-answer").count(),1);
+  assert.equal(await page.locator(".copy-answer, .copy-action").count(),1);
     await page.unroute(pattern,fail);
     await submit(page,"网络恢复后重新解释公式");
     await expectRendered(page,16);
