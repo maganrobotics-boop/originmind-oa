@@ -1426,4 +1426,3 @@ test("math and code cannot masquerade as grounding citations or bypass contact r
     assert.doesNotMatch(result.answer, /unsafe|person@example|13912345678/u);
   }
 });
-
