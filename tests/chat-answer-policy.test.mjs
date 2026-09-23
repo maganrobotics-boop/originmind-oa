@@ -35,9 +35,9 @@ test('150 text questions preserve common, internal and deep routing boundaries',
 });
 
 test('applies default, short and deep answer length policies', () => {
-  assert.match(answerLengthInstruction('介绍研究成果'), /300–600/u);
+  assert.match(answerLengthInstruction('介绍研究成果'), /平均约 1000/u);
   assert.match(answerLengthInstruction('请简短回答'), /150–250/u);
-  assert.match(answerLengthInstruction('做一份项目总结'), /500–900/u);
+  assert.match(answerLengthInstruction('做一份项目总结'), /1000–1300/u);
   assert.match(answerStructureInstruction(), /说明 \/ 依据 \/ 下一步/u);
 });
 

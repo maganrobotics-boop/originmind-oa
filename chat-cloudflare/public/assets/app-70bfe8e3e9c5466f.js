@@ -329,6 +329,10 @@ const icons = {
   x: '<svg viewBox="0 0 24 24" fill="none"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
 };
 
+function cleanPublicChatText(value) {
+  return String(value || "").trim();
+}
+
 function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/gu, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 }
@@ -396,6 +400,48 @@ function renderMarkdown(markdown) {
   }
   flushParagraph(); flushList();
   return output.join("") || "<p>暂无内容。</p>";
+}
+
+function renderAnswerBody(answer) {
+  const container = document.createElement("div");
+  container.className = "answer-content";
+  const html = renderMarkdown(answer);
+  if ("innerHTML" in container) {
+    container.innerHTML = html;
+    return container;
+  }
+  appendControlledHtml(container, html);
+  return container;
+}
+
+function userFacingAnswer(value) {
+  return cleanPublicChatText(value);
+}
+
+function appendControlledHtml(root, html) {
+  const decode = (value) => value
+    .replace(/&lt;/gu, "<")
+    .replace(/&gt;/gu, ">")
+    .replace(/&quot;/gu, '"')
+    .replace(/&#39;/gu, "'")
+    .replace(/&amp;/gu, "&");
+  const stack = [root];
+  const pattern = /<\/?([a-z0-9]+)(?:\s[^>]*)?>|([^<]+)/giu;
+  let match;
+  while ((match = pattern.exec(html))) {
+    if (match[2]) {
+      stack.at(-1).append(document.createTextNode(decode(match[2])));
+      continue;
+    }
+    const tag = match[1].toLowerCase();
+    if (match[0][1] === "/") {
+      if (stack.length > 1) stack.pop();
+      continue;
+    }
+    const node = document.createElement(tag);
+    stack.at(-1).append(node);
+    stack.push(node);
+  }
 }
 
 function answerMathTokenAt(text, index) {
@@ -469,6 +515,12 @@ function inline(text) {
     .replace(/\uE000C(\d+)\uE001/gu, (_, index) => tokens[Number(index)] || "");
 }
 
+function knowledgeSuggestionsFromPayload(payload) {
+  return (Array.isArray(payload?.suggestions) ? payload.suggestions : [])
+    .map((item) => typeof item === "string" ? item : item?.question)
+    .filter(Boolean);
+}
+
 function rerenderFallbackMath(root = document) {
   if (!answerMathEngine?.renderToString) return;
   root.querySelectorAll('[data-math-status="fallback"][data-tex]').forEach((node) => {
@@ -520,7 +572,7 @@ function appShell() {
     <main class="workspace"><header class="topbar"><div class="topbar-title"><span class="desktop-lab-brand">OriginMind x ARTS Robotics</span><span class="lab-name">机器人自主移动与操作实验室</span></div><div class="topbar-actions"><span class="guest-badge">游客模式</span></div></header>
       <section class="chat-surface"><div class="empty-state"><div class="entry-card"><div class="entry-kicker">chat.omindos.ai · 对外公开入口</div><h1 class="hero-title">想了解实验室的什么？</h1><p class="hero-subtitle">从已审核的实验室公开知识中检索并回答。</p><div class="login-guide" role="note"><div class="login-guide-copy"><strong>深技大师生登录</strong><span>登录后可进入新手引导，完成保密协议和新手村任务。</span></div><button class="student-login-trigger login-guide-action" type="button">${icons.login}<span>去登录</span></button><button class="login-guide-dismiss" type="button" aria-label="关闭登录指引">${icons.x}</button></div><div class="entry-actions"><button class="guest-info-trigger secondary-entry" type="button">查看游客限制</button></div></div></div>
         <div class="conversation" aria-live="polite"><div class="message-list"></div></div>
-        <div class="composer-wrap"><div class="composer-glow"></div><form class="composer" aria-label="发送消息"><div class="composer-inner"><div class="input-panel"><textarea class="prompt-input" rows="2" maxlength="4000" placeholder="输入想了解的实验室问题"></textarea><div class="attachment-chip">${icons.paperclip}<span></span></div></div><div class="composer-footer"><div class="input-tools"><input class="file-input" type="file" hidden><button class="icon-button attach-button" type="button" aria-label="添加附件">${icons.paperclip}</button><button class="icon-button voice-button" type="button" aria-label="语音输入">${icons.voice}</button></div><div class="footer-actions"><button class="model-pill" type="button">${icons.cube}<span>文本模型</span></button><button class="send-button" type="submit" aria-label="发送" disabled>${icons.send}</button></div></div></div></form></div>
+        <div class="composer-wrap"><div class="composer-glow"></div><form class="composer" aria-label="发送消息"><div class="composer-inner"><div class="input-panel"><textarea class="prompt-input" rows="2" maxlength="4000" aria-label="你的问题" placeholder="输入想了解的实验室问题"></textarea><div class="attachment-chip">${icons.paperclip}<span></span></div></div><div class="composer-footer"><div class="input-tools"><input class="file-input" type="file" hidden><button class="icon-button attach-button" type="button" aria-label="添加附件">${icons.paperclip}</button><button class="icon-button voice-button" type="button" aria-label="语音输入">${icons.voice}</button></div><div class="footer-actions"><button class="model-pill" type="button">${icons.cube}<span>文本模型</span></button><button class="send-button" type="submit" aria-label="发送" disabled>${icons.send}</button></div></div></div></form></div>
         <div class="suggestions">${DEFAULT_SUGGESTIONS.map((question, index) => `<button class="suggestion" type="button" data-prompt="${escapeHtml(question)}">${[icons.file, icons.text, icons.chart, icons.pen][index] || icons.chat}<span>${escapeHtml(question.replace(/[？?]$/u, ""))}</span></button>`).join("")}</div>
       </section></main>
   </div>
@@ -783,13 +835,14 @@ async function submitMessage(rawText) {
   attachmentChip.classList.remove("show");
   updateSendState();
   const typing = addMessage("assistant", "正在检索公开资料，并组织回答…");
+  const payload = { answer: text || fileText };
   try {
     const response = await fetch(apiUrl("/api/chat"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         topic: "research",
-        messages: [{ role: "user", content: text || fileText }],
+        messages: [{ role: "user", content: userFacingAnswer(payload.answer) }],
       }),
     });
     const data = await response.json().catch(() => ({}));
