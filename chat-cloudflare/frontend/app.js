@@ -63,6 +63,27 @@ function escapeHtml(value) {
   return String(value ?? "").replace(/[&<>"']/gu, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char]);
 }
 
+function element(tag, options = {}, children = []) {
+  const node = document.createElement(tag);
+  if (options.className) node.className = options.className;
+  if (options.text !== undefined) node.textContent = options.text;
+  for (const [name, value] of Object.entries(options.attributes || {})) node.setAttribute(name, value);
+  node.append(...children);
+  return node;
+}
+
+function textButton(text, className) {
+  const button = element("button", { className, text });
+  button.type = "button";
+  return button;
+}
+
+function icon(name) {
+  const wrapper = document.createElement("span");
+  wrapper.innerHTML = icons[name] || "";
+  return wrapper.firstElementChild || document.createElement("span");
+}
+
 function renderMarkdown(markdown) {
   const lines = String(markdown || "").replace(/\r\n?/gu, "\n").split("\n");
   const output = [];
