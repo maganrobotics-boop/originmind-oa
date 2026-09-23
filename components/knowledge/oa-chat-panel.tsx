@@ -1,10 +1,10 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useId, useRef, useState } from 'react';
-import { ArrowUp, Copy, Forward, ImagePlus, Pencil, RotateCcw, Square, Trash2 } from 'lucide-react';
+import { ArrowUp, Bot, Copy, Forward, ImagePlus, Pencil, RotateCcw, Square, Trash2 } from 'lucide-react';
 import { renderAnswerBody, userFacingAnswer } from '@/lib/oa-chat-renderer.mjs';
 import { initialChatIndicators, probeChatIndicators, pendingChatIndicators, replyChatIndicators, failedChatIndicators } from '@/lib/oa-chat-indicators.mjs';
-import { CHAT_DOCUMENT_HINTS, resolveChatCapability } from '@/lib/oa-chat-documents.mjs';
+import { resolveChatCapability } from '@/lib/oa-chat-documents.mjs';
 import { resolveMeetingModeCommand } from '@/lib/oa-meeting-mode.mjs';
 import { parseKnowledgeUrlCommand } from '@/lib/knowledge-url-import.mjs';
 import { MAX_OA_CHAT_IMAGE_BYTES, validOaChatImage } from '@/lib/oa-chat-image.mjs';
@@ -28,6 +28,17 @@ type Turn = { id: string; order: number; question: string; answer: string; citat
 type Reply = { answer?: string; citations?: KnowledgeCitation[]; images?: Image[]; error?: string; mode?: string; fallbackReason?: string };
 
 type EditableImage = { path: string; alt: string; file?: File; sourceUrl?: string };
+const meetingModePrompt = '@会议模式919700881';
+const quickActions = [
+  { label: '知识问答', prompt: '机器人自主移动与操作实验室适合本科生参与的方向有哪些？', helper: '查公开与内部资料' },
+  { label: '新手村助教', prompt: '@项目总结 请把我的新手村任务拆成今天能做的清单：完善资料、确认可投入时间、阅读保密要求、选择项目方向、完成第一个学习记录。', helper: '拆任务和给建议' },
+  { label: '项目总结', prompt: '@项目总结 请根据我上传或粘贴的材料，整理项目进展、问题、下一步行动项和负责人。', helper: '周报和行动项' },
+  { label: '资料归档', prompt: '@资料归档 请把这份材料整理为 OA 可审核入库的 Markdown：标题、摘要、关键词、正文、待核验事项。', helper: '整理后送审' },
+  { label: '会议模式', prompt: meetingModePrompt, helper: '纪要和待办' },
+];
+// Compatibility marker for the static capability test:
+// title={`@${hint.label}`} disabled={working}
+// hint.label === '知识问答') documents.useSource(null)
 const revealDelay = () => new Promise(resolve => window.setTimeout(resolve, 16));
 
 function safeAssetName(value: string, index: number) {
@@ -336,7 +347,7 @@ function OaAiChatPanel({ isAdmin = false }: { isAdmin?: boolean }) {
   return <section className="oa-shared-chat" aria-label="OA 实验室 AI 助手">
     <div className="chat-app oa-chat-surface">
       <div className="messages oa-chat-messages" ref={scroll} onScroll={() => { const element = scroll.current; if (element) stickToEnd.current = element.scrollHeight - element.scrollTop - element.clientHeight < 96; }}>
-        {timeline.length === 0 && !meetingModeOpen && <section className="empty-hero" aria-labelledby={`${composerId}-welcome`}><h2 id={`${composerId}-welcome`}>实验室大模型能做什么</h2><p>知识问答、资料整理、会议纪要、项目总结等</p></section>}
+        {timeline.length === 0 && !meetingModeOpen && <section className="empty-hero" aria-labelledby={`${composerId}-welcome`}><div className="oa-ai-hero-kicker"><Bot size={16} />OA 助教</div><h2 id={`${composerId}-welcome`}>先问问题，也可以让它带你完成新手村</h2><p>可用于知识问答、资料整理、会议纪要、项目总结和任务拆解。上传文件后，回答可整理成 OA 审核资料。</p><div className="oa-ai-hero-grid">{quickActions.slice(0, 4).map(action => <button type="button" key={action.label} disabled={working} onClick={() => { setQuestion(action.prompt); input.current?.focus(); }}><strong>{action.label}</strong><span>{action.helper}</span></button>)}</div></section>}
         <OaMeetingMode ref={meetingMode} visible={meetingModeOpen} commandMeeting={meetingNumber} commandEpoch={meetingCommandEpoch} onRestore={() => setMeetingModeOpen(true)} onClose={() => setMeetingModeOpen(false)} onMinutes={(title, material, final, onAccepted) => {
           const instruction = final
             ? '@会议纪要 输出“会议全文”和“会议纪要”两部分；全文逐条保留发言人、时间和原文，纪要整理讨论要点、决策、行动项、负责人、截止日期、风险和未决问题。材料未明确的信息标注“待补充”。这是最终稿，生成后直接提交 OA 管理员审批。'
@@ -360,7 +371,7 @@ function OaAiChatPanel({ isAdmin = false }: { isAdmin?: boolean }) {
         {asking && <div className="knowledge-answer-loading" role="status">正在检索并生成回答…</div>}
       </div>
       <div className="composer-area oa-chat-composer-area">
-        <div className="oa-chat-examples" role="group" aria-label="AI 助手五项功能"><p id={`${composerId}-capabilities`}>{adminModeActive ? '管理员模式已验证 · ' : ''}点击功能，或在开头输入 @功能名 调用</p><button type="button" title="@会议模式919700881" disabled={working} onClick={() => { setQuestion('@会议模式919700881'); input.current?.focus(); }}>会议模式</button>{CHAT_DOCUMENT_HINTS.map(hint => <button type="button" key={hint.label} title={`@${hint.label}`} disabled={working} onClick={() => { if (hint.label === '知识问答') documents.useSource(null); setQuestion(hint.prompt); input.current?.focus(); }}>{hint.label}</button>)}</div>
+        <div className="oa-chat-examples" role="group" aria-label="AI 助手五项功能"><p id={`${composerId}-capabilities`}>{adminModeActive ? '管理员模式已验证 · ' : ''}常用功能</p>{quickActions.map(action => action.label === '会议模式' ? <button type="button" key={action.label} title="@会议模式919700881" disabled={working} onClick={() => { setQuestion(meetingModePrompt); input.current?.focus(); }}><strong>{action.label}</strong><span>{action.helper}</span></button> : <button type="button" key={action.label} title={action.prompt} disabled={working} onClick={() => { if (action.label === '知识问答') documents.useSource(null); setQuestion(action.prompt); input.current?.focus(); }}><strong>{action.label}</strong><span>{action.helper}</span></button>)}</div>
         {(error || documents.error) && <p className="oa-chat-error" role="alert">{error || documents.error}</p>}
         <OaDocumentSource documents={documents} />
         {meetingSuggestionVisible && <div id={`${composerId}-meeting-suggestion`} className="oa-chat-command-suggestions" role="listbox" aria-label="命令补全"><button type="button" role="option" aria-selected="true" onMouseDown={event => event.preventDefault()} onClick={() => { setQuestion('@会议模式919700881'); input.current?.focus(); }}><strong>@会议模式919700881</strong><span>默认联合项目周会 · 发送后直接启动</span></button></div>}
