@@ -210,22 +210,28 @@ test("campus email login accepts SZTU mailboxes without touching admin auth", as
   assert.equal(rejected.status, 400);
   assert.match(rejected.body.error, /sztu\.edu\.cn/u);
 
+  const legacyStudentDomain = await responseJson(await handleRequest(apiRequest("/api/visitor/request-code", {
+    method: "POST",
+    body: { email: "student@stu.sztu.edu.cn" },
+  }), env, {}, runtime()));
+  assert.equal(legacyStudentDomain.status, 400);
+
   const requested = await responseJson(await handleRequest(apiRequest("/api/visitor/request-code", {
     method: "POST",
-    body: { email: "Student@stu.sztu.edu.cn" },
+    body: { email: "Student@stumail.sztu.edu.cn" },
   }), env, {}, runtime()));
   assert.equal(requested.status, 200);
-  assert.equal(requested.body.email, "student@stu.sztu.edu.cn");
+  assert.equal(requested.body.email, "student@stumail.sztu.edu.cn");
   assert.match(requested.body.devCode, /^\d{6}$/u);
 
   const verifiedResponse = await handleRequest(apiRequest("/api/visitor/verify-code", {
     method: "POST",
-    body: { email: "student@stu.sztu.edu.cn", code: requested.body.devCode },
+    body: { email: "student@stumail.sztu.edu.cn", code: requested.body.devCode },
   }), env, {}, runtime());
   const verified = await responseJson(verifiedResponse);
   assert.equal(verified.status, 200);
   assert.deepEqual(verified.body.user, {
-    email: "student@stu.sztu.edu.cn",
+    email: "student@stumail.sztu.edu.cn",
     role: "student",
     roleLabel: "学生",
   });
@@ -235,7 +241,7 @@ test("campus email login accepts SZTU mailboxes without touching admin auth", as
   const status = await responseJson(await handleRequest(apiRequest("/api/visitor/status", { cookie }), env, {}, runtime()));
   assert.equal(status.status, 200);
   assert.equal(status.body.signedIn, true);
-  assert.equal(status.body.user.email, "student@stu.sztu.edu.cn");
+  assert.equal(status.body.user.email, "student@stumail.sztu.edu.cn");
 });
 
 test("campus email code webhook uses the configured SZTU sender", async (t) => {
@@ -1420,3 +1426,4 @@ test("math and code cannot masquerade as grounding citations or bypass contact r
     assert.doesNotMatch(result.answer, /unsafe|person@example|13912345678/u);
   }
 });
+
