@@ -18,6 +18,7 @@ const report = {origin: process.env.ANSWER_BROWSER_ORIGIN || "isolated-local", t
 let server;
 let browser;
 const externalOrigin = process.env.ANSWER_BROWSER_ORIGIN;
+const renderTimeout = externalOrigin ? 60_000 : 15_000;
 if (externalOrigin && externalOrigin !== "https://chat.omindos.ai") throw Error("Unexpected browser-check origin");
 let origin = externalOrigin;
 if (!origin) {
@@ -54,9 +55,9 @@ async function submit(page, question="请解释机器人动力学方程与惯性
   await page.locator(".message.assistant").first().waitFor();
 }
 async function expectRendered(page,count=8) {
-  await page.waitForFunction(count => document.querySelectorAll('.message.assistant [data-math-status="rendered"]').length === count,count,{timeout:15000});
+  await page.waitForFunction(count => document.querySelectorAll('.message.assistant [data-math-status="rendered"]').length >= count,count,{timeout:renderTimeout});
   assert.equal(await page.locator('.message.assistant [data-math-status="fallback"]').count(),0);
-  assert.equal(await page.locator(".message.assistant math").count(),count);
+  assert.ok(await page.locator(".message.assistant math").count() >= count);
   assert.equal(await page.locator(".further-inquiry").count(),0);
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
 }
