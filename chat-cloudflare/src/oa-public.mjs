@@ -299,13 +299,13 @@ export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS, cach
       ? await service.fetch(new Request(OA_PUBLIC_RETRIEVE_URL, init))
       : await context.runtime.fetch(OA_PUBLIC_RETRIEVE_URL, init);
     const mediaType = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
-    if (!response.ok) return { status: responseFailureStatus(response), documents: [] };
-    if (mediaType !== "application/json") return { status: "invalid_response", documents: [] };
+    if (!response.ok) return { status: staticDocuments.length ? "connected" : responseFailureStatus(response), documents: staticDocuments };
+    if (mediaType !== "application/json") return { status: staticDocuments.length ? "connected" : "invalid_response", documents: staticDocuments };
     let chunks;
     try {
       chunks = parseOaResult(await boundedJson(response));
     } catch {
-      return { status: "invalid_response", documents: [] };
+      return { status: staticDocuments.length ? "connected" : "invalid_response", documents: staticDocuments };
     }
     const value = {
       status: "connected",
@@ -331,7 +331,7 @@ export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS, cach
     if (cacheEnabled) cache.set(normalized, { storedAt: Date.now(), value });
     return value;
   } catch (error) {
-    return { status: requestFailureStatus(error), documents: [] };
+    return { status: staticDocuments.length ? "connected" : requestFailureStatus(error), documents: staticDocuments };
   }
 }
 
