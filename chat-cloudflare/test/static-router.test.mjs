@@ -28,6 +28,7 @@ function mockEnvironment() {
           });
           const known = new Set([
             "/index.html",
+            "/newbie-village.html",
             "/favicon.svg",
             "/LICENSES.md",
             "/manifest.webmanifest",
@@ -73,6 +74,7 @@ test("path classifier is exact and does not turn unknown paths into the SPA", ()
   assert.equal(classifyPath("/manage/extra"), RouteKind.NOT_FOUND);
   assert.equal(classifyPath("/%6Danage"), RouteKind.NOT_FOUND);
   assert.equal(classifyPath("/index.html"), RouteKind.REDIRECT_HOME);
+  assert.equal(classifyPath("/newbie-village.html"), RouteKind.ASSET);
   assert.equal(classifyPath("/_health"), RouteKind.DYNAMIC);
   assert.equal(classifyPath("/api/status"), RouteKind.DYNAMIC);
   assert.equal(classifyPath("/api"), RouteKind.NOT_FOUND);
@@ -83,6 +85,18 @@ test("path classifier is exact and does not turn unknown paths into the SPA", ()
   assert.equal(classifyPath("/service-worker.js"), RouteKind.ASSET);
   assert.equal(classifyPath("/zip-import-addon.js"), RouteKind.ASSET);
   assert.equal(classifyPath("/unknown"), RouteKind.NOT_FOUND);
+});
+
+test("newbie village page is served as a standalone non-cacheable document", async () => {
+  const { env, calls } = mockEnvironment();
+  const response = await routeStaticRequest(
+    new Request("https://chat.omindos.ai/newbie-village"),
+    env,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "asset:/newbie-village.html");
+  assertHardened(response);
+  assert.deepEqual(calls.map((call) => call.pathname), ["/newbie-village.html"]);
 });
 
 test("public topic links and exact /manage serve the same non-cacheable shell", async () => {
@@ -192,6 +206,7 @@ test("unsafe methods cannot retrieve the shell or static assets", async () => {
     "/technology/",
     "/manage",
     "/manage/",
+    "/newbie-village",
     "/favicon.svg",
     "/manifest.webmanifest",
     "/service-worker.js",

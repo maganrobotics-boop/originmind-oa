@@ -57,6 +57,7 @@
       cursor: pointer;
       text-align: left;
       color: #30343b;
+      text-decoration: none;
       transition: background .16s ease, color .16s ease;
     }
 

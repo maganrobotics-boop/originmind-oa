@@ -509,6 +509,7 @@ function appShell() {
         <button class="nav-item model-nav-item active" type="button" data-mode="text">${icons.text}<span>文本模型</span></button>
         <button class="nav-item model-nav-item" type="button" data-mode="voice">${icons.voice}<span>语音模型</span></button>
         <button class="nav-item model-nav-item" type="button" data-mode="vision">${icons.vision}<span>视觉模型</span></button>
+        <a class="nav-item village-nav-item" href="/newbie-village">${icons.chart}<span>新手村</span></a>
       </div>
       <div class="sidebar-label history-label">历史</div>
       <div class="history-list">${HISTORY_ITEMS.map(([key, label]) => `<button class="history-item" type="button" data-history="${key}">${icons.chat}<span>${label}</span></button>`).join("")}</div>

@@ -31,6 +31,7 @@ const TOPIC_TRAILING_REDIRECTS = new Map(
   TOPIC_PATHS.map((pathname) => [`${pathname}/`, pathname]),
 );
 const DIRECT_ASSET_PATHS = new Set([
+  "/newbie-village.html",
   "/favicon.svg",
   "/LICENSES.md",
   "/manifest.webmanifest",
@@ -128,6 +129,10 @@ export async function routeStaticRequest(request, env) {
   if (kind === RouteKind.REDIRECT_MANAGE) return redirect(request, "/manage");
   if (kind === RouteKind.REDIRECT_TOPIC) {
     return redirect(request, TOPIC_TRAILING_REDIRECTS.get(url.pathname));
+  }
+  if (url.pathname === "/newbie-village") {
+    if (!SAFE_METHODS.has(request.method)) return methodNotAllowed();
+    return fetchAsset(request, env, "/newbie-village.html", "no-store");
   }
 
   if (kind === RouteKind.SHELL) {
