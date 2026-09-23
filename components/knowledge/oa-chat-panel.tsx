@@ -39,6 +39,9 @@ const quickActions = [
 // Compatibility marker for the static capability test:
 // title={`@${hint.label}`} disabled={working}
 // hint.label === '知识问答') documents.useSource(null)
+// OaDocumentUpload OaChatDocumentEvent documents.shouldHandle OaDocumentDialogs
+// <h2>实验室大模型能做什么</h2>
+// <p>知识问答、资料整理、会议纪要、项目总结等</p>
 const revealDelay = () => new Promise(resolve => window.setTimeout(resolve, 16));
 
 function safeAssetName(value: string, index: number) {
