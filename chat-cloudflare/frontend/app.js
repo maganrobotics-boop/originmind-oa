@@ -543,11 +543,42 @@ function bindMessageActions(scope) {
     catch { showToast("复制失败，请手动选择文本"); }
   }));
   scope.querySelectorAll(".copy-answer-link").forEach((button) => button.addEventListener("click", () => {
-    openAnswerShare({ v: 1, question: questionText(button), answer: answerText(button) }, button, "copy");
+    openAnswerLinkDialog({ v: 1, question: questionText(button), answer: answerText(button) }, button, "copy");
   }));
   scope.querySelectorAll(".share-answer").forEach((button) => button.addEventListener("click", () => {
-    openAnswerShare({ v: 1, question: questionText(button), answer: answerText(button) }, button, "share");
+    openAnswerLinkDialog({ v: 1, question: questionText(button), answer: answerText(button) }, button, "share");
   }));
+}
+
+function openAnswerLinkDialog(snapshot, opener, intent) {
+  const dialog = messageActionDialog("分享这条问答", opener);
+  dialog.append(element("p", { className: "message-dialog-note", text: "仅分享预览中的这一问一答，不包含其他聊天或登录信息。任何获得链接的人都能查看；链接不能撤回，请先确认没有个人或非公开信息。" }));
+  answerSharePreview(dialog, snapshot);
+  const status = element("p", { className: "message-share-status", attributes: { role: "status", "aria-live": "polite" }, text: "确认后生成链接。" });
+  const actions = element("div", { className: "message-dialog-actions" });
+  const copy = textButton("确认并复制链接", "primary-button");
+  const share = textButton("确认并分享", "secondary-button");
+  const run = async (mode) => {
+    try {
+      status.textContent = "正在生成链接…";
+      const url = await createAnswerShareUrl(snapshot, window.location.origin);
+      if (mode === "share" && typeof navigator.share === "function") {
+        await navigator.share({ title: "ARTS Robotics 问答分享", url });
+        status.textContent = "已调用系统分享";
+      } else {
+        await writeMessageClipboard(url);
+        status.textContent = mode === "share" ? "当前浏览器未提供系统分享，链接已复制" : "分享链接已复制";
+      }
+    } catch (error) {
+      status.textContent = error?.name === "AbortError" ? "已取消分享" : error?.message || "分享未完成。";
+    }
+  };
+  copy.addEventListener("click", () => void run("copy"));
+  share.addEventListener("click", () => void run("share"));
+  actions.append(copy, share);
+  dialog.append(status, actions);
+  dialog.showModal();
+  (intent === "share" ? share : copy).focus({ preventScroll: true });
 }
 
 function saveConversation() {
