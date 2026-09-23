@@ -768,12 +768,12 @@ function StudentHomeView({ session, onNavigate, onOpenNewRequest }: { session: S
   const displayName = session.user?.displayName || "同学";
   const role = sessionRoleLabel(session.role, Boolean(session.isAdmin));
   const isStudent = !session.isAdmin && session.role !== "project_owner" && session.role !== "technical_advisor" && session.role !== "finance_owner";
-  const starterTasks = [
-    { title: "完善基本情况", description: "补充专业、年级、联系方式、兴趣方向和可投入时间。", action: "填写资料", icon: UserRound, done: false, onClick: () => onNavigate("profile") },
-    { title: "阅读项目章程", description: "先了解资料边界、提交规范、周报和成果归档方式。", action: "查看指南", icon: BookOpen, done: false, href: "/guide" },
-    { title: "使用 AI 助手提第一个问题", description: "从公开介绍、研究方向或当前项目切入，熟悉实验室大模型。", action: "打开 AI", icon: Bot, done: false, onClick: () => onNavigate("knowledge") },
-    { title: "选择一个试用方向", description: "可从机器人系统、感知、运动控制、导航、具身智能应用中选择。", action: "去管理台", icon: BriefcaseBusiness, done: false, onClick: () => onNavigate("project") },
-    { title: "提交第一次工作记录", description: "完成学习笔记、资料整理或小任务后，用 OA 留下正式记录。", action: "新建审核", icon: ClipboardCheck, done: false, onClick: onOpenNewRequest },
+  const starterTasks: Array<{ title: string; description: string; action: string; icon: typeof UserRound; done: boolean; href?: string; onClick?: () => void }> = [
+    { title: "完善基本情况", description: "补充专业、年级、联系方式、兴趣方向和每周可投入时间；这些信息会帮助助教推荐任务。", action: "填写资料", icon: UserRound, done: false, onClick: () => onNavigate("profile") },
+    { title: "签署并归档保密协议", description: "本人阅读、手写签名并提交；归档后才能使用内部知识库、上传资料和进入正式项目协作。", action: "查看保密待办", icon: FileSignature, done: false, onClick: () => onNavigate("dashboard") },
+    { title: "让 AI 助教生成新手清单", description: "进入 AI 助手，点击“新手村助教”，把你的时间、方向和基础转成今天可执行的学习任务。", action: "打开 AI 助教", icon: Bot, done: false, onClick: () => onNavigate("knowledge") },
+    { title: "选择一个试用方向", description: "从机器人系统、感知、运动控制、导航、具身智能应用中选一个试用方向，并形成一页计划。", action: "去管理台", icon: BriefcaseBusiness, done: false, onClick: () => onNavigate("project") },
+    { title: "提交第一次工作记录", description: "完成学习笔记、资料整理或小任务后，用 OA 留下正式记录，便于导师查看与后续分组。", action: "新建记录", icon: ClipboardCheck, done: false, onClick: onOpenNewRequest },
   ];
   return (
     <div className="student-home">
@@ -788,9 +788,9 @@ function StudentHomeView({ session, onNavigate, onOpenNewRequest }: { session: S
           <Button className="primary-button new-button" onClick={onOpenNewRequest}><Plus className="size-4" />新建记录</Button>
         </div>
       </section>
-      <div className="oa-guide-banner">
-        <div><strong>准入已完成，可以使用内部工作区。</strong><p>游客只能看公开问答；登录并签署保密协议后，才能看到个人主页、任务、上传和内部资料。</p></div>
-        <a href="/guide">查看项目章程 <ArrowUpRight className="size-4" /></a>
+      <div className="oa-guide-banner student-assistant-banner">
+        <div><strong>新手村不是单独页面，而是一条 AI 助教流程。</strong><p>先补资料和可投入时间，再让 AI 助教生成今日任务；完成后把成果整理成 OA 记录或知识库草稿。</p></div>
+        <button type="button" onClick={() => onNavigate("knowledge")}><Bot className="size-4" />打开新手村助教</button>
       </div>
       <section className="stats-grid">
         <button type="button" className="stat-card stat-card-action" onClick={() => onNavigate("profile")}><div className="stat-label">我的身份</div><div className="stat-value">{isStudent ? "实习" : "成员"}<span>{role}</span></div><div className="stat-foot"><span className="stat-icon"><UserRound className="size-4" /></span><span>完善基本情况和公开范围</span><ArrowUpRight className="stat-action-arrow size-4" /></div></button>
@@ -1766,8 +1766,8 @@ function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = tr
     <div className="registration-shell">
       <div className="registration-card login-entry-card">
         <div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div>
-        <div className="login-entry-heading"><h1>进入实验室大模型</h1><p>游客可以试看公开问答；实习学生请使用飞书登录，完成基本信息和保密协议后进入个人主页与新手任务。</p></div>
-        <div className="oa-intro"><strong>正式加入流程</strong><p>飞书登录后默认按实习学生进入，先签署保密协议，再开放内部知识库、资料上传、个人任务和 OA 工作记录。</p><a href="/guide"><BookOpen className="size-4" />第一次使用？先看使用指南</a></div>
+        <div className="login-entry-heading"><h1>进入实验室大模型</h1><p>游客可以试看公开问答；实习学生请使用飞书登录，完成基本信息和保密协议后进入个人主页与新手任务；扫码进入，不用等待邮箱验证码。</p></div>
+        <div className="oa-intro"><strong>正式加入流程</strong><p>扫码后按实习学生进入：先补基本资料和可投入时间，再签署保密协议，随后开放内部知识库、AI 助教、新手村任务和 OA 工作记录。</p><a href="/guide"><BookOpen className="size-4" />第一次使用？先看使用指南</a></div>
         {unboundFeishuLogin ? (
           <><div className="registration-notice login-notice login-confirmed">
             <Check className="size-4" />
@@ -1781,6 +1781,7 @@ function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = tr
         ) : (
           <div className="login-entry-panel">
             <FeishuQrLogin enabled={feishuLoginEnabled} />
+            <div className="registration-notice login-notice"><ShieldCheck className="size-4" /><div className="login-notice-copy"><strong>登录不依赖邮箱验证码</strong><span>如果邮箱收不到验证码，直接使用飞书扫码；邮箱仅作为身份记录和后续联系信息。</span></div></div>
             <a className="registration-login github-login" href="https://chat.omindos.ai" target="_blank" rel="noreferrer"><Bot className="size-4" />游客试看公开问答</a>
             <small className="account-switch-help">游客仅能访问公开资料：不能上传文件、查看内部知识库、进入个人主页、接收任务或提交项目成果。</small>
             {alternativeProviders.length > 0 && (
