@@ -10,7 +10,6 @@ if (KATEX_ASSET) {
 
 const STORAGE_KEY = "originmind-public-preview-conversations-v1";
 const DEFAULT_PUBLIC_API_BASE = "";
-const OA_ENTRY_URL = "https://oa.omindos.ai";
 const PUBLIC_API_BASE = typeof window.PUBLIC_API_BASE === "string" && window.PUBLIC_API_BASE.trim()
   ? window.PUBLIC_API_BASE.replace(/\/+$/u, "")
   : DEFAULT_PUBLIC_API_BASE;
@@ -240,8 +239,8 @@ function appShell() {
       <button class="collapse-handle" type="button" aria-label="收起侧边栏">${icons.chevron}</button>
       <div class="side-footer"><div class="bottom-actions"><button class="new-chat-bottom" type="button">${icons.plus}<span>聊天</span></button><button class="settings-trigger" type="button" aria-label="设置">${icons.gear}</button></div></div>
     </aside>
-    <main class="workspace"><header class="topbar"><div class="topbar-title">聊天</div><div class="topbar-actions"><span class="guest-badge">游客模式</span><button class="student-login-trigger" type="button">${icons.login}<span>飞书登录</span></button></div></header>
-      <section class="chat-surface"><div class="empty-state"><div class="entry-card"><div class="entry-kicker">chat.omindos.ai · 对外公开入口</div><h1 class="hero-title">想了解实验室的什么？</h1><p class="hero-subtitle">游客可检索经 OA 审核的公开知识；实习学生请用飞书进入内部 OA，完成保密协议后开启个人主页和新手任务。</p><div class="entry-actions"><button class="student-login-trigger primary-entry" type="button">${icons.login}<span>飞书登录进入 OA</span></button><button class="guest-info-trigger secondary-entry" type="button">查看游客限制</button></div></div></div>
+    <main class="workspace"><header class="topbar"><div class="topbar-title">聊天</div><div class="topbar-actions"><span class="guest-badge">游客模式</span><button class="student-login-trigger" type="button">${icons.login}<span>校内邮箱登录</span></button></div></header>
+      <section class="chat-surface"><div class="empty-state"><div class="entry-card"><div class="entry-kicker">chat.omindos.ai · 对外公开入口</div><h1 class="hero-title">想了解实验室的什么？</h1><p class="hero-subtitle">游客可检索已审核的公开知识；深技大师生可用 @sztu.edu.cn 或 @stu.sztu.edu.cn 邮箱验证码登录，后续获得更完整的新手引导。</p><div class="entry-actions"><button class="student-login-trigger primary-entry" type="button">${icons.login}<span>校内邮箱登录</span></button><button class="guest-info-trigger secondary-entry" type="button">查看游客限制</button></div></div></div>
         <div class="conversation" aria-live="polite"><div class="message-list"></div></div>
         <div class="composer-wrap"><div class="composer-glow"></div><form class="composer" aria-label="发送消息"><div class="composer-inner"><div class="input-panel"><textarea class="prompt-input" rows="2" maxlength="4000" placeholder="输入想了解的实验室问题"></textarea><div class="attachment-chip">${icons.paperclip}<span></span></div></div><div class="composer-footer"><div class="input-tools"><input class="file-input" type="file" hidden><button class="icon-button attach-button" type="button" aria-label="添加附件">${icons.paperclip}</button><button class="icon-button voice-button" type="button" aria-label="语音输入">${icons.voice}</button></div><div class="footer-actions"><button class="model-pill" type="button">${icons.cube}<span>文本模型</span></button><button class="send-button" type="submit" aria-label="发送" disabled>${icons.send}</button></div></div></div></form></div>
         <div class="suggestions">${DEFAULT_SUGGESTIONS.map((question, index) => `<button class="suggestion" type="button" data-prompt="${escapeHtml(question)}">${[icons.file, icons.text, icons.chart, icons.pen][index] || icons.chat}<span>${escapeHtml(question.replace(/[？?]$/u, ""))}</span></button>`).join("")}</div>
@@ -251,12 +250,18 @@ function appShell() {
     <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
       <button class="auth-close" type="button" aria-label="关闭">${icons.x}</button>
       <div class="auth-brand">${icons.login}</div>
-      <h2 id="auth-title">选择进入方式</h2>
-      <p>chat 是对外公开问答入口；OA 是对内工作台。实习学生使用飞书登录 OA，先签署保密协议，再进入个人主页和新手任务。</p>
-      <button class="feishu-login" type="button">${icons.login}<span>飞书登录 OA</span></button>
-      <div class="guest-limits"><strong>游客可用</strong><span>公开知识问答、公开研究方向、合作方式咨询。</span><strong>游客限制</strong><span>不能访问内部资料、任务、文件上传审核、个人主页和工作记录。</span></div>
+      <h2 id="auth-title">校内邮箱登录</h2>
+      <p>仅用于 chat 身份验证，不进入其他系统。支持 @sztu.edu.cn 和 @stu.sztu.edu.cn 邮箱验证码登录。</p>
+      <form class="campus-login-form">
+        <label class="auth-field"><span>邮箱</span><input class="campus-email-input" type="email" autocomplete="email" placeholder="name@stu.sztu.edu.cn"></label>
+        <button class="campus-code-button" type="button">发送验证码</button>
+        <label class="auth-field code-field"><span>验证码</span><input class="campus-code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位数字"></label>
+        <button class="campus-login-button" type="submit">验证并登录</button>
+        <div class="auth-status" aria-live="polite"></div>
+      </form>
+      <div class="guest-limits"><strong>游客可用</strong><span>公开知识问答、公开研究方向、合作方式咨询。</span><strong>登录后</strong><span>识别学生或校内教师身份，用于后续新手引导和个性化设置。</span></div>
       <button class="guest-continue" type="button">继续游客试看</button>
-      <p class="auth-caption">内部身份、保密协议和任务推进统一在 OA 完成。</p>
+      <p class="auth-caption">chat 登录只做身份验证，不关联内部审批流程。</p>
     </div>
   </div>
   <div class="toast" role="status" aria-live="polite"></div>`;
@@ -278,8 +283,15 @@ const heroTitle = document.querySelector(".hero-title");
 const heroSubtitle = document.querySelector(".hero-subtitle");
 const toast = document.querySelector(".toast");
 const authBackdrop = document.querySelector(".auth-backdrop");
+const guestBadge = document.querySelector(".guest-badge");
+const campusLoginForm = document.querySelector(".campus-login-form");
+const campusEmailInput = document.querySelector(".campus-email-input");
+const campusCodeInput = document.querySelector(".campus-code-input");
+const campusCodeButton = document.querySelector(".campus-code-button");
+const authStatus = document.querySelector(".auth-status");
 let toastTimer;
 let currentMode = "text";
+let visitorUser = null;
 
 function showToast(message) {
   toast.textContent = message;
@@ -291,7 +303,7 @@ function showToast(message) {
 function openAuthDialog() {
   authBackdrop.classList.add("open");
   authBackdrop.setAttribute("aria-hidden", "false");
-  authBackdrop.querySelector(".feishu-login").focus();
+  campusEmailInput.focus();
 }
 
 function closeAuthDialog() {
@@ -299,8 +311,79 @@ function closeAuthDialog() {
   authBackdrop.setAttribute("aria-hidden", "true");
 }
 
-function openOaEntry() {
-  window.location.assign(OA_ENTRY_URL);
+function setAuthStatus(message, tone = "") {
+  authStatus.textContent = message || "";
+  authStatus.className = `auth-status${tone ? ` ${tone}` : ""}`;
+}
+
+function updateVisitorUi(user) {
+  visitorUser = user || null;
+  if (visitorUser) {
+    guestBadge.textContent = visitorUser.roleLabel || "已登录";
+    guestBadge.classList.add("signed-in");
+    document.querySelectorAll(".student-login-trigger span").forEach((span) => { span.textContent = "已登录"; });
+  } else {
+    guestBadge.textContent = "游客模式";
+    guestBadge.classList.remove("signed-in");
+    document.querySelectorAll(".student-login-trigger span").forEach((span) => { span.textContent = "校内邮箱登录"; });
+  }
+}
+
+async function refreshVisitorStatus() {
+  try {
+    const response = await fetch(apiUrl("/api/visitor/status"), { headers: { accept: "application/json" }, credentials: "same-origin", cache: "no-store" });
+    const data = await response.json();
+    updateVisitorUi(response.ok && data.signedIn ? data.user : null);
+  } catch {
+    updateVisitorUi(null);
+  }
+}
+
+async function requestCampusCode() {
+  const email = campusEmailInput.value.trim();
+  campusCodeButton.disabled = true;
+  setAuthStatus("正在发送验证码…");
+  try {
+    const response = await fetch(apiUrl("/api/visitor/request-code"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ email }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(data.error || "验证码发送失败");
+    setAuthStatus(data.devCode ? `预览验证码：${data.devCode}` : "验证码已发送，请查看邮箱。", "success");
+    campusCodeInput.focus();
+  } catch (error) {
+    setAuthStatus(error?.message || "验证码发送失败", "error");
+  } finally {
+    campusCodeButton.disabled = false;
+  }
+}
+
+async function verifyCampusCode(event) {
+  event.preventDefault();
+  const button = campusLoginForm.querySelector(".campus-login-button");
+  button.disabled = true;
+  setAuthStatus("正在验证…");
+  try {
+    const response = await fetch(apiUrl("/api/visitor/verify-code"), {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      credentials: "same-origin",
+      body: JSON.stringify({ email: campusEmailInput.value.trim(), code: campusCodeInput.value.trim() }),
+    });
+    const data = await response.json().catch(() => ({}));
+    if (!response.ok || !data.signedIn) throw new Error(data.error || "登录失败");
+    updateVisitorUi(data.user);
+    setAuthStatus("登录成功。", "success");
+    closeAuthDialog();
+    showToast(`已登录：${data.user?.roleLabel || "校内身份"}`);
+  } catch (error) {
+    setAuthStatus(error?.message || "登录失败", "error");
+  } finally {
+    button.disabled = false;
+  }
 }
 
 function updateSendState() {
@@ -501,9 +584,10 @@ document.querySelectorAll(".history-item").forEach((item) => item.addEventListen
 document.querySelector(".collapse-handle").addEventListener("click", () => body.classList.toggle("sidebar-collapsed"));
 document.querySelector(".model-pill").addEventListener("click", () => showToast(`当前使用${MODE_COPY[currentMode][3]}`));
 document.querySelector(".settings-trigger").addEventListener("click", openAuthDialog);
-document.querySelectorAll(".student-login-trigger").forEach((button) => button.addEventListener("click", openOaEntry));
+document.querySelectorAll(".student-login-trigger").forEach((button) => button.addEventListener("click", openAuthDialog));
 document.querySelector(".guest-info-trigger").addEventListener("click", openAuthDialog);
-document.querySelector(".feishu-login").addEventListener("click", openOaEntry);
+campusCodeButton.addEventListener("click", () => void requestCampusCode());
+campusLoginForm.addEventListener("submit", (event) => void verifyCampusCode(event));
 document.querySelector(".guest-continue").addEventListener("click", closeAuthDialog);
 document.querySelector(".auth-close").addEventListener("click", closeAuthDialog);
 authBackdrop.addEventListener("click", (event) => { if (event.target === authBackdrop) closeAuthDialog(); });
@@ -513,4 +597,5 @@ bindSuggestions();
 restoreConversation();
 refreshSuggestions();
 refreshStatus();
+refreshVisitorStatus();
 updateSendState();

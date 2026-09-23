@@ -175,6 +175,12 @@
       white-space: nowrap;
     }
 
+    .guest-badge.signed-in {
+      border-color: #d6e3ff;
+      color: #245bdb;
+      background: #f3f7ff;
+    }
+
     .student-login-trigger {
       height: 32px;
       padding: 0 12px;
@@ -567,6 +573,51 @@
     .auth-brand svg { width: 31px; height: 31px; }
     .auth-dialog h2 { margin: 0; font-size: 21px; line-height: 1.45; font-weight: 650; }
     .auth-dialog p { margin: 9px 0 23px; color: #8a8e96; font-size: 13px; line-height: 1.7; }
+
+    .campus-login-form { display: grid; gap: 11px; margin: 0 0 16px; text-align: left; }
+    .auth-field { display: grid; gap: 6px; color: #475467; font-size: 12px; font-weight: 700; }
+    .auth-field input {
+      width: 100%;
+      height: 42px;
+      padding: 0 12px;
+      border: 1px solid #dfe3ea;
+      border-radius: 10px;
+      outline: 0;
+      background: #fff;
+      color: #20232a;
+      font-size: 14px;
+      font-weight: 500;
+    }
+
+    .auth-field input:focus { border-color: #3370ff; box-shadow: 0 0 0 3px rgba(51,112,255,.12); }
+    .code-field { margin-top: 3px; }
+
+    .campus-code-button, .campus-login-button {
+      width: 100%;
+      height: 42px;
+      border: 0;
+      border-radius: 11px;
+      background: #3370ff;
+      color: #fff;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 700;
+      transition: background .16s ease, transform .16s ease;
+    }
+
+    .campus-code-button:hover, .campus-login-button:hover { background: #245bdb; transform: translateY(-1px); }
+    .campus-code-button:disabled, .campus-login-button:disabled { opacity: .62; cursor: default; transform: none; }
+
+    .auth-status {
+      min-height: 19px;
+      color: #858991;
+      font-size: 12px;
+      line-height: 1.55;
+      text-align: center;
+    }
+
+    .auth-status.success { color: #1f7a4f; }
+    .auth-status.error { color: #d92d20; }
 
     .feishu-login {
       width: 100%;

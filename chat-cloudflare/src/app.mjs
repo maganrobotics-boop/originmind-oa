@@ -54,7 +54,10 @@ import {
 } from "./validation.mjs";
 
 const SESSION_COOKIE = "__Host-ma-session";
+const VISITOR_SESSION_COOKIE = "__Host-om-chat-session";
 const SESSION_SECONDS = 43_200;
+const VISITOR_SESSION_SECONDS = 30 * 24 * 60 * 60;
+const EMAIL_CODE_SECONDS = 10 * 60;
 const STATUS_PROBE_LEASE_MS = 15_000;
 const MODEL_STATUS_READY_TTL_MS = 5 * 60_000;
 const MODEL_STATUS_RETRY_MS = 30_000;
@@ -171,6 +174,124 @@ function sessionToken(request) {
       .find((item) => item.startsWith(prefix))
       ?.slice(prefix.length) || ""
   );
+}
+
+function visitorSessionToken(request) {
+  return String(request.headers.get("cookie") || "")
+    .split(";")
+    .map((part) => part.trim())
+    .find((part) => part.startsWith(`${VISITOR_SESSION_COOKIE}=`))
+    ?.slice(VISITOR_SESSION_COOKIE.length + 1) || "";
+}
+
+function normalizeCampusEmail(value) {
+  if (typeof value !== "string") return null;
+  const email = value.trim().toLowerCase();
+  if (email.length > 254 || !/^[a-z0-9._%+-]+@(stu\.)?sztu\.edu\.cn$/u.test(email)) return null;
+  return email;
+}
+
+function campusRole(email) {
+  return email.endsWith("@stu.sztu.edu.cn") ? "student" : "staff";
+}
+
+function roleLabel(role) {
+  return role === "staff" ? "校内教师/成员" : "学生";
+}
+
+function emailCode() {
+  const bytes = crypto.getRandomValues(new Uint8Array(4));
+  const number = ((bytes[0] << 24) >>> 0) + (bytes[1] << 16) + (bytes[2] << 8) + bytes[3];
+  return String(number % 1_000_000).padStart(6, "0");
+}
+
+async function sendCampusLoginCode(context, email, code) {
+  const endpoint = typeof context.env.EMAIL_CODE_WEBHOOK_URL === "string" ? context.env.EMAIL_CODE_WEBHOOK_URL.trim() : "";
+  const token = typeof context.env.EMAIL_CODE_WEBHOOK_TOKEN === "string" ? context.env.EMAIL_CODE_WEBHOOK_TOKEN.trim() : "";
+  if (!endpoint) return { sent: false, devCode: code };
+  const response = await context.runtime.fetch(endpoint, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      ...(token ? { authorization: `Bearer ${token}` } : {}),
+    },
+    body: JSON.stringify({
+      to: email,
+      subject: "OriginMind Chat 登录验证码",
+      text: `你的 OriginMind Chat 登录验证码是 ${code}，10 分钟内有效。`,
+    }),
+    redirect: "error",
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new PublicError("验证码暂时无法发送，请稍后重试。", 502);
+  return { sent: true };
+}
+
+async function currentVisitor(context) {
+  const token = visitorSessionToken(context.request);
+  if (!/^[a-f0-9]{64}$/u.test(token)) return null;
+  const row = await database(context).prepare("SELECT email,role,expires_at AS expiresAt FROM visitor_sessions WHERE hash=? AND expires_at>?")
+    .bind(await sha256Hex(token), Date.now()).first();
+  return row ? { email: row.email, role: row.role, roleLabel: roleLabel(row.role) } : null;
+}
+
+async function visitorAuth(context) {
+  const { request } = context;
+  const path = new URL(request.url).pathname;
+  if (path === "/api/visitor/status" && request.method === "GET") {
+    return json({ signedIn: Boolean(await currentVisitor(context)), user: await currentVisitor(context) });
+  }
+  if (request.method !== "POST") return json({ error: "没有找到此接口" }, 404);
+  sameOrigin(context);
+  const now = Date.now();
+  if (path === "/api/visitor/logout") {
+    const token = visitorSessionToken(request);
+    if (/^[a-f0-9]{64}$/u.test(token)) await database(context).prepare("DELETE FROM visitor_sessions WHERE hash=?").bind(await sha256Hex(token)).run();
+    return json({ signedIn: false }, 200, { "Set-Cookie": `${VISITOR_SESSION_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0` });
+  }
+  if (path === "/api/visitor/request-code") {
+    await limit(context, "visitor-code", 8, 900);
+    const payload = await readJson(request, 2_000);
+    const email = normalizeCampusEmail(payload?.email);
+    if (!email) throw new PublicError("请使用 @sztu.edu.cn 或 @stu.sztu.edu.cn 邮箱。", 400);
+    await consumeCounter(context, `visitor-code-email:${email}:${Math.floor(now / 900_000)}`, 3, Math.floor(now / 1000) + 1_800);
+    const code = emailCode();
+    const id = randomHex(16);
+    await database(context).batch([
+      database(context).prepare("DELETE FROM email_login_challenges WHERE expires_at<=? OR consumed_at IS NOT NULL").bind(now),
+      database(context).prepare("INSERT INTO email_login_challenges(id,email,code_hash,created_at,expires_at) VALUES(?,?,?,?,?)")
+        .bind(id, email, await sha256Hex(`${id}:${email}:${code}`), now, now + EMAIL_CODE_SECONDS * 1000),
+    ]);
+    const delivery = await sendCampusLoginCode(context, email, code);
+    return json({ sent: true, email, expiresIn: EMAIL_CODE_SECONDS, ...(!delivery.sent && delivery.devCode ? { devCode: delivery.devCode } : {}) });
+  }
+  if (path === "/api/visitor/verify-code") {
+    await limit(context, "visitor-verify", 20, 900);
+    const payload = await readJson(request, 2_000);
+    const email = normalizeCampusEmail(payload?.email);
+    const code = typeof payload?.code === "string" ? payload.code.trim() : "";
+    if (!email || !/^\d{6}$/u.test(code)) throw new PublicError("验证码格式不正确。", 400);
+    const row = await database(context).prepare("SELECT id,code_hash AS codeHash,attempts FROM email_login_challenges WHERE email=? AND expires_at>? AND consumed_at IS NULL ORDER BY created_at DESC LIMIT 1")
+      .bind(email, now).first();
+    if (!row || row.attempts >= 5) throw new PublicError("验证码已失效，请重新获取。", 401);
+    const matches = row.codeHash === await sha256Hex(`${row.id}:${email}:${code}`);
+    if (!matches) {
+      await database(context).prepare("UPDATE email_login_challenges SET attempts=attempts+1 WHERE id=?").bind(row.id).run();
+      throw new PublicError("验证码不正确。", 401);
+    }
+    const token = randomHex(32);
+    const role = campusRole(email);
+    await database(context).batch([
+      database(context).prepare("UPDATE email_login_challenges SET consumed_at=? WHERE id=?").bind(now, row.id),
+      database(context).prepare("DELETE FROM visitor_sessions WHERE expires_at<=?").bind(now),
+      database(context).prepare("INSERT INTO visitor_sessions(hash,email,role,created_at,expires_at) VALUES(?,?,?,?,?)")
+        .bind(await sha256Hex(token), email, role, now, now + VISITOR_SESSION_SECONDS * 1000),
+    ]);
+    return json({ signedIn: true, user: { email, role, roleLabel: roleLabel(role) } }, 200, {
+      "Set-Cookie": `${VISITOR_SESSION_COOKIE}=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${VISITOR_SESSION_SECONDS}`,
+    });
+  }
+  return json({ error: "没有找到此接口" }, 404);
 }
 
 function database(context) {
@@ -1578,6 +1699,7 @@ export async function handleRequest(request, env, executionContext, runtime = ru
       const row = await env.DB.prepare("SELECT 1 AS ok").first();
       return json({ app: APP_NAME, ready: Number(row?.ok) === 1, releaseId: releaseId(context) });
     }
+    if (url.pathname.startsWith("/api/visitor/")) return await visitorAuth(context);
     if (url.pathname.startsWith("/api/auth/")) return await auth(context);
     if (url.pathname.startsWith("/api/")) return await api(context);
     return json({ error: "Page not found" }, 404);
@@ -1591,4 +1713,3 @@ export async function handleRequest(request, env, executionContext, runtime = ru
     return json({ error: "服务暂时不可用，请稍后重试。" }, 503);
   }
 }
-

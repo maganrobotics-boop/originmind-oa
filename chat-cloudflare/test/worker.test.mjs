@@ -199,6 +199,45 @@ test("auth preserves public error status without exposing unknown failures", asy
   assert.match(unavailable.body.error, /尚未设置/u);
 });
 
+test("campus email login accepts SZTU mailboxes without touching admin auth", async (t) => {
+  const env = makeEnvironment();
+  t.after(() => env.DB.close());
+
+  const rejected = await responseJson(await handleRequest(apiRequest("/api/visitor/request-code", {
+    method: "POST",
+    body: { email: "outsider@example.com" },
+  }), env, {}, runtime()));
+  assert.equal(rejected.status, 400);
+  assert.match(rejected.body.error, /sztu\.edu\.cn/u);
+
+  const requested = await responseJson(await handleRequest(apiRequest("/api/visitor/request-code", {
+    method: "POST",
+    body: { email: "Student@stu.sztu.edu.cn" },
+  }), env, {}, runtime()));
+  assert.equal(requested.status, 200);
+  assert.equal(requested.body.email, "student@stu.sztu.edu.cn");
+  assert.match(requested.body.devCode, /^\d{6}$/u);
+
+  const verifiedResponse = await handleRequest(apiRequest("/api/visitor/verify-code", {
+    method: "POST",
+    body: { email: "student@stu.sztu.edu.cn", code: requested.body.devCode },
+  }), env, {}, runtime());
+  const verified = await responseJson(verifiedResponse);
+  assert.equal(verified.status, 200);
+  assert.deepEqual(verified.body.user, {
+    email: "student@stu.sztu.edu.cn",
+    role: "student",
+    roleLabel: "学生",
+  });
+  const cookie = verifiedResponse.headers.get("set-cookie");
+  assert.match(cookie, /__Host-om-chat-session=[a-f0-9]{64}/u);
+
+  const status = await responseJson(await handleRequest(apiRequest("/api/visitor/status", { cookie }), env, {}, runtime()));
+  assert.equal(status.status, 200);
+  assert.equal(status.body.signedIn, true);
+  assert.equal(status.body.user.email, "student@stu.sztu.edu.cn");
+});
+
 test("zero retrieved documents returns retrieval fallback and never invokes a model", async (t) => {
   let calls = 0;
   const env = makeEnvironment({ AI: { run: async () => { calls += 1; throw new Error("must not run"); } } });
