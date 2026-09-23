@@ -120,7 +120,27 @@
     }
 
     .new-chat-bottom:hover { background: #245bdb; }
-    .new-chat-bottom svg, .settings-trigger svg { width: 17px; height: 17px; }
+    .new-chat-bottom svg, .settings-trigger svg, .recent-chat-trigger svg { width: 17px; height: 17px; }
+
+    .recent-chat-trigger { display: none; }
+
+    .recent-drawer {
+      width: min(420px, calc(100vw - 24px));
+      max-height: min(72dvh, 620px);
+      margin: auto;
+      padding: 16px;
+      border: 1px solid #e4e6e9;
+      border-radius: 18px;
+      background: #fff;
+      color: #24272b;
+    }
+    .recent-drawer::backdrop { background: rgb(0 0 0 / .3); }
+    .recent-drawer header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .recent-drawer-close { width: 38px; height: 38px; border: 0; border-radius: 10px; display: grid; place-items: center; background: #f2f3f5; color: #4b5058; cursor: pointer; }
+    .recent-drawer-close svg { width: 18px; height: 18px; }
+    .recent-list { display: grid; gap: 5px; }
+    .recent-drawer-item { height: 44px; border-radius: 12px; }
+    .recent-empty { margin: 18px 4px; color: #858b95; font-size: 13px; text-align: center; }
 
     .settings-trigger {
       flex: none;
@@ -273,6 +293,7 @@
     .login-guide:hover { background: linear-gradient(135deg,#f2f7ff,#fff); transform: translateY(-1px); box-shadow: 0 16px 38px rgba(51,112,255,.17); }
     .login-guide:focus-visible { outline: 3px solid rgba(51,112,255,.22); outline-offset: 2px; }
     .login-guide[hidden] { display: none !important; }
+    body.chat-active .login-guide { display: none; }
 
     .login-guide-icon { display: grid; place-items: center; width: 34px; height: 34px; flex: 0 0 34px; border-radius: 11px; background: #3370ff; color: #fff; }
     .login-guide-icon svg { width: 18px; height: 18px; }
@@ -772,7 +793,8 @@
       .sidebar-label, .nav-list, .history-label, .history-list, .collapse-handle { display: none !important; }
       .side-footer { position: static; display: block !important; margin-left: auto; }
       .side-footer .bottom-actions { flex-direction: row; }
-      .side-footer .new-chat-bottom, .side-footer .settings-trigger { width: 36px; height: 36px; border-radius: 50%; padding: 0; }
+      .side-footer .new-chat-bottom, .side-footer .settings-trigger, .side-footer .recent-chat-trigger { width: 36px; height: 36px; border-radius: 50%; padding: 0; }
+      .recent-chat-trigger { display: grid; place-items: center; border: 1px solid #e3e5e8; background: #fff; color: #555b64; box-shadow: 0 2px 7px rgba(28,32,40,.05); cursor: pointer; }
       .mobile-settings-trigger { display: grid; }
       .side-footer .new-chat-bottom span { display: none; }
       .workspace {
