@@ -548,11 +548,17 @@ async function visitorAuth(context) {
     return json({ signedIn: false }, 200, { "Set-Cookie": `${VISITOR_SESSION_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0` });
   }
   if (path === "/api/visitor/request-code") {
-    await limit(context, "visitor-code", 8, 900);
+    await limit(context, "visitor-code", 60, 900);
     const payload = await readJson(request, 2_000);
     const email = normalizeCampusEmail(payload?.email);
     if (!email) throw new PublicError("学生请使用学号@stumail.sztu.edu.cn，教师请使用 @sztu.edu.cn 邮箱。", 400);
-    await consumeCounter(context, `visitor-code-email:${email}:${Math.floor(now / 900_000)}`, 3, Math.floor(now / 1000) + 1_800);
+    await consumeCounter(
+      context,
+      `visitor-code-email:${email}:${Math.floor(now / 900_000)}`,
+      8,
+      Math.floor(now / 1000) + 1_800,
+      "验证码发送次数较多，请 15 分钟后再试，或直接使用最新一封邮件里的验证码。",
+    );
     const code = emailCode();
     const id = randomHex(16);
     await database(context).batch([

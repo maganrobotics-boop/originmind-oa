@@ -306,6 +306,21 @@ test("production email login fails closed instead of displaying a verification c
   assert.match(result.body.error, /邮件服务尚未配置/u);
 });
 
+test("campus login code rate limit tolerates classroom retries from the same network", async (t) => {
+  const env = makeEnvironment();
+  t.after(() => env.DB.close());
+
+  for (let index = 1; index <= 12; index += 1) {
+    const email = `${String(index).padStart(8, "0")}@stumail.sztu.edu.cn`;
+    const result = await responseJson(await handleRequest(apiRequest("/api/visitor/request-code", {
+      method: "POST",
+      body: { email },
+    }), env, {}, runtime()));
+    assert.equal(result.status, 200);
+    assert.match(result.body.devCode, /^\d{6}$/u);
+  }
+});
+
 test("newbie village keeps an authenticated task path and personal homepage independent from OA", async (t) => {
   const env = makeEnvironment();
   t.after(() => env.DB.close());
