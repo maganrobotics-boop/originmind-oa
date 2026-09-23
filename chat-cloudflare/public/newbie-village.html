@@ -3,6 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="description" content="机器人学习新手村：使用校内邮箱登录，按关卡完成任务、保存学习进度，并了解方向任务、真机训练和项目组申请所需的通行证。">
     <meta name="robots" content="noindex,nofollow">
     <meta name="theme-color" content="#f5f7fb">
     <title>新手村 · 个人学习主页</title>
@@ -18,6 +19,7 @@
       button, input, textarea, select { font: inherit; }
       button, a { -webkit-tap-highlight-color: transparent; }
       [hidden] { display: none !important; }
+      :focus-visible { outline: 3px solid rgba(51,112,255,.42); outline-offset: 3px; }
       .app { min-height: 100vh; display: grid; grid-template-columns: 244px minmax(0,1fr); }
       .sidebar {
         position: sticky; top: 0; height: 100vh; padding: 26px 18px 20px;
@@ -175,6 +177,20 @@
         box-shadow: 0 12px 28px rgba(20,24,34,.2); font-size: 13px;
       }
       .toast.show { opacity: 1; transform: translate(-50%,0); }
+      .passes-section { margin-top: 54px; padding-top: 34px; border-top: 1px solid #e3e7ee; scroll-margin-top: 92px; }
+      .passes-head { display: grid; grid-template-columns: minmax(0,1fr) minmax(260px,.55fr); gap: 24px; align-items: end; margin-bottom: 22px; }
+      .passes-head h2 { margin: 8px 0 0; font-size: clamp(30px,4vw,46px); }
+      .passes-head p { margin: 8px 0 0; max-width: 760px; color: #6e7581; line-height: 1.75; }
+      .passes-note { padding: 16px 18px; border: 1px solid #d9e3f8; border-radius: 14px; background: #f1f6ff; color: #31568f; font-size: 13px; line-height: 1.65; }
+      .pass-grid { display: grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 14px; }
+      .pass-card { padding: 20px; border: 1px solid #e3e7ee; border-radius: 17px; background: #fff; box-shadow: 0 12px 28px rgba(34,42,58,.045); }
+      .pass-title { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+      .pass-title span { padding: 5px 8px; border-radius: 999px; background: #edf3ff; color: #245bdb; font-size: 11px; font-weight: 850; }
+      .pass-title h3 { margin: 0; font-size: 19px; }
+      .pass-card dl { display: grid; gap: 10px; margin: 0; }
+      .pass-card dl > div { display: grid; grid-template-columns: 5.5em minmax(0,1fr); gap: 10px; padding-top: 10px; border-top: 1px solid #edf0f4; }
+      .pass-card dt { color: #858c97; font-size: 12px; font-weight: 800; }
+      .pass-card dd { margin: 0; color: #5f6773; font-size: 13px; line-height: 1.65; }
       @media (max-width: 860px) {
         .app { grid-template-columns: 1fr; }
         .sidebar { position: sticky; z-index: 10; height: auto; padding: 10px 14px; border-right: 0; border-bottom: 1px solid #e6e9ef; flex-direction: row; align-items: center; }
@@ -203,6 +219,7 @@
         .progress-summary { width: 100%; text-align: left; }
         .progress-track { width: 100%; }
         .form-row { grid-template-columns: 1fr; }
+        .passes-head, .pass-grid { grid-template-columns: 1fr; }
         .nav-button span:last-child { display: none; }
         .nav-button { width: 40px; padding: 0; justify-content: center; }
         h1 { font-size: 42px; }
@@ -218,6 +235,7 @@
         <nav class="side-nav" aria-label="新手村导航">
           <button class="nav-button active" type="button" data-view="tasks" disabled><span class="nav-icon">⌁</span><span>任务地图</span></button>
           <button class="nav-button" type="button" data-view="profile" disabled><span class="nav-icon">◎</span><span>个人主页</span></button>
+          <a class="nav-button" href="#passes"><span class="nav-icon">◇</span><span>通行证</span></a>
         </nav>
         <div class="side-foot">
           <p class="side-note">新手村与 OA 独立运行，学习进度只保存在 Chat 系统。</p>
@@ -235,7 +253,7 @@
               <div class="eyebrow">START HERE</div>
               <h1>从第一项任务，走到能交付。</h1>
               <p class="lead">新手村把环境配置、协作基础、ROS2 仿真和小型项目拆成清晰关卡。登录后会生成你的个人主页，并在这个独立系统里持续保存学习进度。</p>
-              <div class="welcome-actions"><button class="primary login-trigger" type="button">使用深技大邮箱进入</button><a class="secondary" href="/" style="display:inline-flex;align-items:center;text-decoration:none">先去问实验室大模型</a></div>
+              <div class="welcome-actions"><button class="primary login-trigger" type="button">使用深技大邮箱进入</button><a class="secondary" href="#passes" style="display:inline-flex;align-items:center;text-decoration:none">先了解通行证</a><a class="ghost" href="/" style="display:inline-flex;align-items:center;text-decoration:none">去问实验室大模型</a></div>
             </div>
             <aside class="welcome-card">
               <h2>第一版已可用</h2>
@@ -304,6 +322,23 @@
                   <div class="form-actions"><span class="form-status" role="status"></span><button class="primary" type="submit">保存个人主页</button></div>
                 </form>
               </div>
+            </div>
+          </section>
+
+          <section class="passes-section" id="passes" aria-labelledby="passes-title">
+            <div class="passes-head">
+              <div><div class="eyebrow">ACCESS &amp; PROGRESS</div><h2 id="passes-title">通行证与解锁规则</h2><p>通行证代表已经验证的能力和对应权限。每项资格都有明确的获得条件、审核责任和使用范围；涉及真机、项目或助教的权限，必须经负责人审核后生效。</p></div>
+              <div class="passes-note">当前版本先保存个人资料、任务进度和证据。高级通行证将在人工审核流程接入后逐步开放，页面中的“完成任务”不等于自动获得真机或项目权限。</div>
+            </div>
+            <div class="pass-grid">
+              <article class="pass-card"><div class="pass-title"><span>入门</span><h3>入村资格</h3></div><dl><div><dt>获得条件</dt><dd>完成校内邮箱验证、基础登记和保密协议。</dd></div><div><dt>审核方式</dt><dd>系统校验，必要时由管理员复核。</dd></div><div><dt>解锁范围</dt><dd>基础课程、正式任务和证据提交。</dd></div></dl></article>
+              <article class="pass-card"><div class="pass-title"><span>基础</span><h3>新手村毕业通行证</h3></div><dl><div><dt>获得条件</dt><dd>完成规定基础关卡，并提交合格的出村证据包。</dd></div><div><dt>审核方式</dt><dd>AI 初评，助教或老师终审；退回后可按意见重交。</dd></div><div><dt>解锁范围</dt><dd>方向任务、进阶教程和项目组申请。</dd></div></dl></article>
+              <article class="pass-card"><div class="pass-title"><span>开发</span><h3>工具通行证</h3></div><dl><div><dt>获得条件</dt><dd>完成 Linux、Git、VS Code 和基础开发任务。</dd></div><div><dt>审核方式</dt><dd>自动检查与人工抽查结合。</dd></div><div><dt>解锁范围</dt><dd>基础开发任务和协作仓库练习。</dd></div></dl></article>
+              <article class="pass-card"><div class="pass-title"><span>仿真</span><h3>ROS2 通行证</h3></div><dl><div><dt>获得条件</dt><dd>完成节点、话题、服务和基础仿真任务。</dd></div><div><dt>审核方式</dt><dd>检查运行结果、日志和代码说明。</dd></div><div><dt>解锁范围</dt><dd>ROS2 仿真任务和进阶教程。</dd></div></dl></article>
+              <article class="pass-card"><div class="pass-title"><span>导航</span><h3>仿真导航通行证</h3></div><dl><div><dt>获得条件</dt><dd>完成地图、定位、规划和导航证据包。</dd></div><div><dt>审核方式</dt><dd>方向助教或老师按任务场景审核。</dd></div><div><dt>解锁范围</dt><dd>SLAM、Nav2 及导航方向任务。</dd></div></dl></article>
+              <article class="pass-card"><div class="pass-title"><span>安全</span><h3>真机安全通行证</h3></div><dl><div><dt>获得条件</dt><dd>完成安全培训、设备操作练习和现场考核。</dd></div><div><dt>审核方式</dt><dd>设备负责人现场确认，并定期复核。</dd></div><div><dt>解锁范围</dt><dd>仅在获批设备和场地范围内预约、操作真机。</dd></div></dl></article>
+              <article class="pass-card"><div class="pass-title"><span>项目</span><h3>项目成员通行证</h3></div><dl><div><dt>获得条件</dt><dd>达到方向要求，并通过项目面谈或任务考核。</dd></div><div><dt>审核方式</dt><dd>项目负责人按职责和保密要求审批。</dd></div><div><dt>解锁范围</dt><dd>加入对应项目组并访问获批项目任务。</dd></div></dl></article>
+              <article class="pass-card"><div class="pass-title"><span>协作</span><h3>助教通行证</h3></div><dl><div><dt>获得条件</dt><dd>完成指定方向并通过评分一致性与规范培训。</dd></div><div><dt>审核方式</dt><dd>老师授权、限定审核范围，并定期抽查质量。</dd></div><div><dt>解锁范围</dt><dd>审核被授权级别的任务，不替代老师终审。</dd></div></dl></article>
             </div>
           </section>
         </div>
