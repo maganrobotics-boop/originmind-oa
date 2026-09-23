@@ -199,6 +199,72 @@ function roleLabel(role) {
   return role === "staff" ? "校内教师/成员" : "学生";
 }
 
+const NEWBIE_TASKS = Object.freeze([
+  {
+    id: "registration",
+    index: 1,
+    title: "入村登记",
+    stage: "身份与方向",
+    summary: "完善个人主页，确认学习方向和当前基础。",
+    goal: "让导师和后续任务知道你是谁、想学什么，以及目前可以从哪里开始。",
+    deliverables: ["完成个人主页", "选择兴趣方向", "写下本阶段学习目标"],
+  },
+  {
+    id: "toolkit",
+    index: 2,
+    title: "装备铺",
+    stage: "开发环境",
+    summary: "准备 Git、VS Code、Python 与 Linux/WSL 环境。",
+    goal: "建立一套能复现、能提交、能排查问题的个人开发环境。",
+    deliverables: ["Git 版本截图", "Python 版本截图", "工作目录说明"],
+  },
+  {
+    id: "git-basics",
+    index: 3,
+    title: "Git 训练场",
+    stage: "协作基础",
+    summary: "完成分支、提交、合并与 README 练习。",
+    goal: "能独立维护一个小型仓库，并用清晰提交记录说明自己的工作。",
+    deliverables: ["仓库链接", "至少 3 次有效提交", "README 复盘"],
+  },
+  {
+    id: "python-basics",
+    index: 4,
+    title: "Python 训练场",
+    stage: "编程基础",
+    summary: "完成数据处理、函数拆分和基础测试任务。",
+    goal: "用可读、可运行、可验证的代码解决一个小问题。",
+    deliverables: ["源代码链接", "运行结果", "测试说明"],
+  },
+  {
+    id: "ros2-simulation",
+    index: 5,
+    title: "ROS2 仿真场",
+    stage: "机器人基础",
+    summary: "运行 turtlesim，并完成 publisher/subscriber 练习。",
+    goal: "理解节点、话题和消息如何组成一个最小机器人软件系统。",
+    deliverables: ["节点图截图", "终端日志", "关键代码链接"],
+  },
+  {
+    id: "mini-project",
+    index: 6,
+    title: "任务大厅",
+    stage: "小型项目",
+    summary: "从感知、导航、控制、机械或 AI 中完成一个小任务。",
+    goal: "把工具和基础知识组合成一项可演示、可复盘的小成果。",
+    deliverables: ["演示截图或视频链接", "代码链接", "问题与改进"],
+  },
+  {
+    id: "graduation",
+    index: 7,
+    title: "出村考核",
+    stage: "成果复盘",
+    summary: "整理证据包和个人主页，形成可审核的阶段成果。",
+    goal: "证明自己能完成任务、记录过程并清楚说明下一步方向。",
+    deliverables: ["完整证据包", "个人复盘", "下一阶段计划"],
+  },
+]);
+
 function emailCode() {
   const bytes = crypto.getRandomValues(new Uint8Array(4));
   const number = ((bytes[0] << 24) >>> 0) + (bytes[1] << 16) + (bytes[2] << 8) + bytes[3];
@@ -237,6 +303,133 @@ async function currentVisitor(context) {
   const row = await database(context).prepare("SELECT email,role,expires_at AS expiresAt FROM visitor_sessions WHERE hash=? AND expires_at>?")
     .bind(await sha256Hex(token), Date.now()).first();
   return row ? { email: row.email, role: row.role, roleLabel: roleLabel(row.role) } : null;
+}
+
+function profileText(value, maximum, label) {
+  if (typeof value !== "string") throw new PublicError(`${label}格式不正确。`, 400);
+  const text = value.trim();
+  if (text.length > maximum) throw new PublicError(`${label}不能超过 ${maximum} 个字符。`, 400);
+  return text;
+}
+
+async function newbieDashboard(context, visitor) {
+  const now = Date.now();
+  await database(context)
+    .prepare("INSERT OR IGNORE INTO newbie_profiles(email,created_at,updated_at) VALUES(?,?,?)")
+    .bind(visitor.email, now, now)
+    .run();
+  const [profile, progressRows] = await Promise.all([
+    database(context)
+      .prepare("SELECT display_name AS displayName,grade,major,direction,bio,updated_at AS updatedAt FROM newbie_profiles WHERE email=?")
+      .bind(visitor.email)
+      .first(),
+    database(context)
+      .prepare("SELECT task_id AS taskId,status,evidence,updated_at AS updatedAt FROM newbie_task_progress WHERE email=?")
+      .bind(visitor.email)
+      .all(),
+  ]);
+  const progressByTask = new Map((progressRows.results || []).map((row) => [row.taskId, row]));
+  let previousCompleted = true;
+  const tasks = NEWBIE_TASKS.map((task) => {
+    const progress = progressByTask.get(task.id);
+    const status = progress?.status || "not_started";
+    const result = {
+      ...task,
+      status,
+      evidence: progress?.evidence || "",
+      updatedAt: progress?.updatedAt || null,
+      unlocked: previousCompleted,
+    };
+    previousCompleted = status === "completed";
+    return result;
+  });
+  return {
+    user: visitor,
+    profile: {
+      displayName: profile?.displayName || visitor.email.split("@", 1)[0],
+      grade: profile?.grade || "",
+      major: profile?.major || "",
+      direction: profile?.direction || "undecided",
+      bio: profile?.bio || "",
+      updatedAt: profile?.updatedAt || now,
+    },
+    tasks,
+    progress: {
+      completed: tasks.filter((task) => task.status === "completed").length,
+      total: tasks.length,
+    },
+  };
+}
+
+async function newbieApi(context) {
+  const { request } = context;
+  const pathname = new URL(request.url).pathname;
+  const visitor = await currentVisitor(context);
+  if (!visitor) throw new PublicError("请先使用深圳技术大学邮箱登录。", 401);
+
+  if (pathname === "/api/newbie/dashboard" && request.method === "GET") {
+    return json(await newbieDashboard(context, visitor));
+  }
+
+  if (pathname === "/api/newbie/profile" && request.method === "PATCH") {
+    sameOrigin(context);
+    await limit(context, "newbie-profile", 40, 900);
+    const input = await readJson(request, 4_000);
+    const allowed = new Set(["displayName", "grade", "major", "direction", "bio"]);
+    if (!input || typeof input !== "object" || Array.isArray(input) ||
+        !Object.keys(input).length || Object.keys(input).some((key) => !allowed.has(key))) {
+      throw new PublicError("个人主页内容不正确。", 400);
+    }
+    const direction = profileText(input.direction ?? "undecided", 24, "方向");
+    if (!["undecided", "perception", "navigation", "control", "mechanics", "ai"].includes(direction)) {
+      throw new PublicError("请选择有效的学习方向。", 400);
+    }
+    const now = Date.now();
+    await database(context)
+      .prepare(
+        "INSERT INTO newbie_profiles(email,display_name,grade,major,direction,bio,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?) " +
+        "ON CONFLICT(email) DO UPDATE SET display_name=excluded.display_name,grade=excluded.grade,major=excluded.major,direction=excluded.direction,bio=excluded.bio,updated_at=excluded.updated_at",
+      )
+      .bind(
+        visitor.email,
+        profileText(input.displayName ?? "", 40, "姓名或昵称"),
+        profileText(input.grade ?? "", 40, "年级"),
+        profileText(input.major ?? "", 80, "专业"),
+        direction,
+        profileText(input.bio ?? "", 300, "个人介绍"),
+        now,
+        now,
+      )
+      .run();
+    return json({ saved: true, ...(await newbieDashboard(context, visitor)) });
+  }
+
+  const taskMatch = pathname.match(/^\/api\/newbie\/tasks\/([a-z0-9-]+)$/u);
+  if (taskMatch && request.method === "POST") {
+    sameOrigin(context);
+    await limit(context, "newbie-progress", 80, 900);
+    const task = NEWBIE_TASKS.find((candidate) => candidate.id === taskMatch[1]);
+    if (!task) throw new PublicError("任务不存在。", 404);
+    const input = await readJson(request, 4_000);
+    const status = typeof input?.status === "string" ? input.status : "";
+    if (!["in_progress", "completed"].includes(status)) throw new PublicError("任务状态不正确。", 400);
+    const evidence = profileText(input?.evidence ?? "", 1_000, "任务证据");
+    if (status === "completed" && !evidence) throw new PublicError("完成任务前请填写证据或复盘。", 400);
+    const dashboard = await newbieDashboard(context, visitor);
+    const taskIndex = dashboard.tasks.findIndex((candidate) => candidate.id === task.id);
+    if (taskIndex < 0 || !dashboard.tasks[taskIndex].unlocked) throw new PublicError("请先完成前一项任务。", 409);
+    const now = Date.now();
+    await database(context)
+      .prepare(
+        "INSERT INTO newbie_task_progress(email,task_id,status,evidence,updated_at) VALUES(?,?,?,?,?) " +
+        "ON CONFLICT(email,task_id) DO UPDATE SET status=excluded.status,evidence=excluded.evidence,updated_at=excluded.updated_at",
+      )
+      .bind(visitor.email, task.id, status, evidence, now)
+      .run();
+    return json({ saved: true, ...(await newbieDashboard(context, visitor)) });
+  }
+
+  return json({ error: "没有找到此接口" }, 404);
 }
 
 async function visitorAuth(context) {
@@ -1704,6 +1897,7 @@ export async function handleRequest(request, env, executionContext, runtime = ru
       return json({ app: APP_NAME, ready: Number(row?.ok) === 1, releaseId: releaseId(context) });
     }
     if (url.pathname.startsWith("/api/visitor/")) return await visitorAuth(context);
+    if (url.pathname.startsWith("/api/newbie/")) return await newbieApi(context);
     if (url.pathname.startsWith("/api/auth/")) return await auth(context);
     if (url.pathname.startsWith("/api/")) return await api(context);
     return json({ error: "Page not found" }, 404);
@@ -1717,3 +1911,4 @@ export async function handleRequest(request, env, executionContext, runtime = ru
     return json({ error: "服务暂时不可用，请稍后重试。" }, 503);
   }
 }
+
