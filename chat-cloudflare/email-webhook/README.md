@@ -22,6 +22,21 @@ Keep `SMTP_PASS` and `EMAIL_CODE_WEBHOOK_TOKEN` only on the server. Do not commi
 node server.mjs
 ```
 
+## Install on a Linux server
+
+Copy this directory to the server, then run:
+
+```bash
+sudo ./install-systemd.sh
+```
+
+Fill the two empty secrets in `/etc/originmind-chat-email-webhook.env`:
+
+```bash
+sudo editor /etc/originmind-chat-email-webhook.env
+sudo systemctl restart originmind-chat-email-webhook
+```
+
 The service listens on `127.0.0.1` only. Put Nginx or another HTTPS reverse proxy in front of it and expose only:
 
 ```text
@@ -44,7 +59,15 @@ Expected JSON body:
 Configure the Cloudflare Worker with:
 
 ```bash
+npx wrangler secret put EMAIL_CODE_WEBHOOK_TOKEN --config <production-wrangler-config>
+npx wrangler deploy --config <production-wrangler-config>
+```
+
+Set these Worker vars in the production Wrangler config or dashboard:
+
+```bash
 EMAIL_CODE_FROM=magan@sztu.edu.cn
 EMAIL_CODE_WEBHOOK_URL=https://<your-mail-webhook-domain>/send
-EMAIL_CODE_WEBHOOK_TOKEN=<same-long-random-token>
 ```
+
+`EMAIL_CODE_WEBHOOK_TOKEN` must be the same token used by the webhook service.
