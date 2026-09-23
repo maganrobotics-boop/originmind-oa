@@ -1,0 +1,372 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>机器人项目新手村 | OriginMind</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #172033;
+        --muted: #667085;
+        --line: #d9e2f1;
+        --soft: #f6f9fd;
+        --brand: #2563eb;
+        --brand-strong: #1d4ed8;
+        --green: #0f8a65;
+        --yellow: #fef3c7;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          "Microsoft YaHei", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: #ffffff;
+        color: var(--ink);
+        line-height: 1.65;
+      }
+
+      .hero {
+        background:
+          linear-gradient(135deg, rgba(37, 99, 235, 0.14), rgba(15, 138, 101, 0.08)),
+          #f8fbff;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .wrap {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 0 22px;
+      }
+
+      .hero-inner {
+        display: grid;
+        grid-template-columns: minmax(0, 1.1fr) minmax(280px, 0.9fr);
+        gap: 30px;
+        align-items: center;
+        min-height: 500px;
+        padding: 58px 22px;
+      }
+
+      .eyebrow {
+        color: var(--brand-strong);
+        font-size: 14px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        margin: 0 0 10px;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        font-size: clamp(36px, 6vw, 64px);
+        line-height: 1.08;
+        letter-spacing: 0;
+        margin: 0;
+      }
+
+      .lead {
+        color: #344054;
+        font-size: 20px;
+        margin: 20px 0 0;
+        max-width: 720px;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 28px;
+      }
+
+      .button {
+        align-items: center;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        display: inline-flex;
+        font-weight: 800;
+        justify-content: center;
+        min-height: 44px;
+        padding: 10px 16px;
+        text-decoration: none;
+      }
+
+      .button.primary {
+        background: var(--brand);
+        border-color: var(--brand);
+        color: #ffffff;
+      }
+
+      .assistant {
+        background: #ffffff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 22px;
+        box-shadow: 0 20px 48px rgba(23, 32, 51, 0.08);
+      }
+
+      .assistant h2,
+      section h2 {
+        font-size: 26px;
+        line-height: 1.2;
+        margin: 0 0 16px;
+      }
+
+      .assistant p {
+        color: var(--muted);
+        margin: 0 0 14px;
+      }
+
+      .prompt {
+        background: #eef4ff;
+        border: 1px solid #c7d7fe;
+        border-radius: 8px;
+        color: #1e3a8a;
+        font-weight: 700;
+        padding: 13px 14px;
+      }
+
+      main {
+        padding: 44px 0 70px;
+      }
+
+      section {
+        margin-top: 46px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(4, minmax(0, 1fr));
+        gap: 14px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .card {
+        background: #ffffff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 18px;
+      }
+
+      .card h3 {
+        font-size: 18px;
+        line-height: 1.35;
+        margin: 0 0 8px;
+      }
+
+      .card p,
+      .card li {
+        color: var(--muted);
+      }
+
+      .number {
+        align-items: center;
+        background: #ecfdf3;
+        border: 1px solid #abefc6;
+        border-radius: 999px;
+        color: var(--green);
+        display: inline-flex;
+        font-size: 13px;
+        font-weight: 900;
+        height: 28px;
+        justify-content: center;
+        margin-bottom: 12px;
+        width: 28px;
+      }
+
+      ul {
+        margin: 10px 0 0;
+        padding-left: 20px;
+      }
+
+      .week {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .day {
+        background: var(--soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+      }
+
+      .day strong {
+        color: var(--brand-strong);
+        display: block;
+        margin-bottom: 6px;
+      }
+
+      .fields {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .field {
+        background: #fff7ed;
+        border: 1px solid #fed7aa;
+        border-radius: 8px;
+        padding: 13px;
+      }
+
+      .level-strip {
+        background: var(--yellow);
+        border: 1px solid #fde68a;
+        border-radius: 8px;
+        padding: 18px;
+      }
+
+      @media (max-width: 900px) {
+        .hero-inner,
+        .grid,
+        .grid.two,
+        .week,
+        .fields {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-inner {
+          min-height: 0;
+          padding-top: 42px;
+          padding-bottom: 42px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <div class="wrap hero-inner">
+        <div>
+          <p class="eyebrow">Orientation</p>
+          <h1>机器人项目新手村</h1>
+          <p class="lead">
+            完成准入、能力自评和第一个项目任务。你不需要一开始就会很多，但需要留下清楚的记录和证据。
+          </p>
+          <div class="actions">
+            <a class="button primary" href="/">呼叫实验室 AI 助教</a>
+            <a class="button" href="/robotics-course">查看课程简介</a>
+          </div>
+        </div>
+        <aside class="assistant" aria-label="AI 助教提示">
+          <h2>随时可以喊助教</h2>
+          <p>遇到不懂的概念、不会拆任务、不知道下一步做什么时，直接把当前任务和卡住的位置告诉 AI 助教。</p>
+          <div class="prompt">
+            推荐提问：我正在做机器人新手村，请根据我的基础，帮我生成今天的任务清单，并告诉我需要提交什么证据。
+          </div>
+        </aside>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section>
+        <h2>新手村 8 个任务</h2>
+        <div class="grid">
+          <article class="card">
+            <span class="number">1</span>
+            <h3>加入实验室微信群</h3>
+            <p>确认通知渠道，知道在哪里提问、交付和查看公告。</p>
+          </article>
+          <article class="card">
+            <span class="number">2</span>
+            <h3>完成系统注册</h3>
+            <p>注册课程与实验室系统，后续任务、记录和评审都从这里进入。</p>
+          </article>
+          <article class="card">
+            <span class="number">3</span>
+            <h3>阅读并签署保密协议</h3>
+            <p>理解项目资料、企业案例和实验数据的使用边界。</p>
+          </article>
+          <article class="card">
+            <span class="number">4</span>
+            <h3>填写项目意向</h3>
+            <p>选择更感兴趣的方向：运动控制、视觉感知、SLAM、机械臂或 AI 任务规划。</p>
+          </article>
+          <article class="card">
+            <span class="number">5</span>
+            <h3>完成基础能力自评</h3>
+            <p>说明编程、数学、硬件、仿真、表达和团队协作基础。</p>
+          </article>
+          <article class="card">
+            <span class="number">6</span>
+            <h3>生成个人新手清单</h3>
+            <p>由 AI 助教根据你的基础生成第一周任务和补课路径。</p>
+          </article>
+          <article class="card">
+            <span class="number">7</span>
+            <h3>选择第一个试用项目</h3>
+            <p>先选一个小项目跑通最小版本，再逐步扩大难度。</p>
+          </article>
+          <article class="card">
+            <span class="number">8</span>
+            <h3>提交第一次工作记录</h3>
+            <p>提交目标、步骤、截图或数据、遇到的问题，以及下一步计划。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="level-strip">
+        <h2>L0 到 L1 的目标</h2>
+        <p>
+          L0 是完成准入与安全，L1 是能读懂任务。新手村结束时，你应该能用自己的话说明：
+          我要解决什么问题、机器人输入输出是什么、验收标准是什么、我下一步要做什么。
+        </p>
+      </section>
+
+      <section>
+        <h2>第一周任务节奏</h2>
+        <div class="week">
+          <div class="day"><strong>Day 1</strong>注册、保密协议、方向意向。</div>
+          <div class="day"><strong>Day 2</strong>读课程简介，理解感知、决策、执行。</div>
+          <div class="day"><strong>Day 3</strong>选择试用项目，写一页项目卡。</div>
+          <div class="day"><strong>Day 4</strong>跑通最小 demo 或仿真，记录失败。</div>
+          <div class="day"><strong>Day 5</strong>提交工作记录，请 AI 助教点评。</div>
+        </div>
+      </section>
+
+      <section>
+        <h2>第一张项目卡</h2>
+        <div class="fields">
+          <div class="field">选择方向：我想先做哪类机器人任务？</div>
+          <div class="field">问题描述：这个任务要解决什么真实问题？</div>
+          <div class="field">已有基础：我已经会什么、有什么资料？</div>
+          <div class="field">知识缺口：我最不懂的 3 个概念是什么？</div>
+          <div class="field">下一步：今天能完成的最小动作是什么？</div>
+          <div class="field">证据：我要提交截图、数据、视频还是文字记录？</div>
+        </div>
+      </section>
+
+      <section>
+        <h2>AI 助教怎么参与</h2>
+        <div class="grid two">
+          <div class="card">
+            <h3>学生主动呼叫</h3>
+            <ul>
+              <li>讲不懂的理论</li>
+              <li>把大任务拆成今天能做的步骤</li>
+              <li>检查项目卡是否具体</li>
+              <li>帮你整理失败原因和下一步</li>
+            </ul>
+          </div>
+          <div class="card">
+            <h3>系统自动提醒</h3>
+            <ul>
+              <li>注册、保密协议、能力自评未完成时提醒</li>
+              <li>任务记录太空泛时追问证据</li>
+              <li>项目卡缺少验收标准时要求补充</li>
+              <li>阶段复盘前生成检查清单</li>
+            </ul>
+          </div>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
