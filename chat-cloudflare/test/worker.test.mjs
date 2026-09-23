@@ -115,6 +115,21 @@ async function storeVerifiedBailianConfig(env, credential = "test-key-not-a-real
   await env.DB.prepare("INSERT INTO settings(id,value) VALUES (?,?)").bind("model", JSON.stringify(value)).run();
 }
 
+async function signInCampusVisitor(env, email = "student@stumail.sztu.edu.cn") {
+  const requested = await responseJson(await handleRequest(apiRequest("/api/visitor/request-code", {
+    method: "POST",
+    body: { email },
+  }), env, {}, runtime()));
+  assert.equal(requested.status, 200);
+  assert.match(requested.body.devCode, /^\d{6}$/u);
+  const response = await handleRequest(apiRequest("/api/visitor/verify-code", {
+    method: "POST",
+    body: { email, code: requested.body.devCode },
+  }), env, {}, runtime());
+  assert.equal(response.status, 200);
+  return response.headers.get("set-cookie");
+}
+
 test("Worker source contains no Tencent/Node runtime shell", () => {
   const sources = readdirSync(new URL("../src/", import.meta.url))
     .filter((name) => name.endsWith(".mjs"))
@@ -268,6 +283,108 @@ test("campus email code webhook uses the configured SZTU sender", async (t) => {
   assert.equal(delivered.body.from, "magan@sztu.edu.cn");
   assert.equal(delivered.body.to, "teacher@sztu.edu.cn");
   assert.match(delivered.body.text, /\d{6}/u);
+});
+
+test("newbie village keeps an authenticated task path and personal homepage independent from OA", async (t) => {
+  const env = makeEnvironment();
+  t.after(() => env.DB.close());
+
+  const anonymous = await responseJson(await handleRequest(
+    apiRequest("/api/newbie/dashboard"), env, {}, runtime(),
+  ));
+  assert.equal(anonymous.status, 401);
+
+  const cookie = await signInCampusVisitor(env);
+  const initial = await responseJson(await handleRequest(
+    apiRequest("/api/newbie/dashboard", { cookie }), env, {}, runtime(),
+  ));
+  assert.equal(initial.status, 200);
+  assert.equal(initial.body.user.email, "student@stumail.sztu.edu.cn");
+  assert.equal(initial.body.profile.displayName, "student");
+  assert.deepEqual(initial.body.progress, { completed: 0, total: 7 });
+  assert.equal(initial.body.tasks[0].id, "registration");
+  assert.equal(initial.body.tasks[0].unlocked, true);
+  assert.equal(initial.body.tasks[1].unlocked, false);
+
+  const profile = await responseJson(await handleRequest(apiRequest("/api/newbie/profile", {
+    method: "PATCH",
+    cookie,
+    body: {
+      displayName: "小深",
+      grade: "2024",
+      major: "机器人工程",
+      direction: "navigation",
+      bio: "希望先掌握 ROS2，再完成一个导航小项目。",
+    },
+  }), env, {}, runtime()));
+  assert.equal(profile.status, 200);
+  assert.equal(profile.body.saved, true);
+  assert.deepEqual(
+    {
+      displayName: profile.body.profile.displayName,
+      grade: profile.body.profile.grade,
+      major: profile.body.profile.major,
+      direction: profile.body.profile.direction,
+      bio: profile.body.profile.bio,
+    },
+    {
+      displayName: "小深",
+      grade: "2024",
+      major: "机器人工程",
+      direction: "navigation",
+      bio: "希望先掌握 ROS2，再完成一个导航小项目。",
+    },
+  );
+  assert.equal(Object.hasOwn(profile.body, "oa"), false);
+
+  const locked = await responseJson(await handleRequest(apiRequest("/api/newbie/tasks/toolkit", {
+    method: "POST",
+    cookie,
+    body: { status: "in_progress", evidence: "" },
+  }), env, {}, runtime()));
+  assert.equal(locked.status, 409);
+
+  const started = await responseJson(await handleRequest(apiRequest("/api/newbie/tasks/registration", {
+    method: "POST",
+    cookie,
+    body: { status: "in_progress", evidence: "已填写个人主页" },
+  }), env, {}, runtime()));
+  assert.equal(started.status, 200);
+  assert.equal(started.body.tasks[0].status, "in_progress");
+
+  const missingEvidence = await responseJson(await handleRequest(apiRequest("/api/newbie/tasks/registration", {
+    method: "POST",
+    cookie,
+    body: { status: "completed", evidence: "" },
+  }), env, {}, runtime()));
+  assert.equal(missingEvidence.status, 400);
+
+  const completed = await responseJson(await handleRequest(apiRequest("/api/newbie/tasks/registration", {
+    method: "POST",
+    cookie,
+    body: { status: "completed", evidence: "个人主页已完成，下一步学习 Git。" },
+  }), env, {}, runtime()));
+  assert.equal(completed.status, 200);
+  assert.deepEqual(completed.body.progress, { completed: 1, total: 7 });
+  assert.equal(completed.body.tasks[1].unlocked, true);
+
+  const persisted = await responseJson(await handleRequest(
+    apiRequest("/api/newbie/dashboard", { cookie }), env, {}, runtime(),
+  ));
+  assert.equal(persisted.body.profile.displayName, "小深");
+  assert.equal(persisted.body.tasks[0].evidence, "个人主页已完成，下一步学习 Git。");
+
+  for (const path of ["/api/newbie/profile", "/api/newbie/tasks/toolkit"]) {
+    const crossOrigin = await responseJson(await handleRequest(apiRequest(path, {
+      method: path.endsWith("profile") ? "PATCH" : "POST",
+      cookie,
+      origin: "https://attacker.example",
+      body: path.endsWith("profile")
+        ? { displayName: "x", grade: "", major: "", direction: "ai", bio: "" }
+        : { status: "in_progress", evidence: "" },
+    }), env, {}, runtime()));
+    assert.equal(crossOrigin.status, 403);
+  }
 });
 
 test("zero retrieved documents returns retrieval fallback and never invokes a model", async (t) => {
@@ -1426,3 +1543,4 @@ test("math and code cannot masquerade as grounding citations or bypass contact r
     assert.doesNotMatch(result.answer, /unsafe|person@example|13912345678/u);
   }
 });
+

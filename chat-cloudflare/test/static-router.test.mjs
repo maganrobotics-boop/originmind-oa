@@ -29,6 +29,7 @@ function mockEnvironment() {
           const known = new Set([
             "/index.html",
             "/newbie-village.html",
+            "/newbie-village.js",
             "/favicon.svg",
             "/LICENSES.md",
             "/manifest.webmanifest",
@@ -75,6 +76,7 @@ test("path classifier is exact and does not turn unknown paths into the SPA", ()
   assert.equal(classifyPath("/%6Danage"), RouteKind.NOT_FOUND);
   assert.equal(classifyPath("/index.html"), RouteKind.REDIRECT_HOME);
   assert.equal(classifyPath("/newbie-village.html"), RouteKind.ASSET);
+  assert.equal(classifyPath("/newbie-village.js"), RouteKind.ASSET);
   assert.equal(classifyPath("/_health"), RouteKind.DYNAMIC);
   assert.equal(classifyPath("/api/status"), RouteKind.DYNAMIC);
   assert.equal(classifyPath("/api"), RouteKind.NOT_FOUND);
@@ -207,6 +209,7 @@ test("unsafe methods cannot retrieve the shell or static assets", async () => {
     "/manage",
     "/manage/",
     "/newbie-village",
+    "/newbie-village.js",
     "/favicon.svg",
     "/manifest.webmanifest",
     "/service-worker.js",
@@ -243,7 +246,13 @@ test("hashed assets are immutable while auxiliary assets use a short TTL", async
   assert.equal(icon.status, 200);
   assertHardened(icon, "public, max-age=31536000, immutable");
 
-  for (const path of ["/favicon.svg", "/LICENSES.md", "/manifest.webmanifest", "/zip-import-addon.js"]) {
+  for (const path of [
+    "/newbie-village.js",
+    "/favicon.svg",
+    "/LICENSES.md",
+    "/manifest.webmanifest",
+    "/zip-import-addon.js",
+  ]) {
     const response = await routeStaticRequest(
       new Request(`https://chat.omindos.ai${path}`),
       env,
@@ -292,3 +301,4 @@ test("the helper fails closed when the ASSETS binding is absent", async () => {
     /ASSETS binding is required/,
   );
 });
+

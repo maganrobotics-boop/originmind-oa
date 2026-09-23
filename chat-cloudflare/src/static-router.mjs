@@ -32,6 +32,7 @@ const TOPIC_TRAILING_REDIRECTS = new Map(
 );
 const DIRECT_ASSET_PATHS = new Set([
   "/newbie-village.html",
+  "/newbie-village.js",
   "/favicon.svg",
   "/LICENSES.md",
   "/manifest.webmanifest",
@@ -152,3 +153,4 @@ export async function routeStaticRequest(request, env) {
     }),
   );
 }
+
