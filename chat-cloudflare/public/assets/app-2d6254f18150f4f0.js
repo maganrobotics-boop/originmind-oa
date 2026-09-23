@@ -286,6 +286,7 @@ if (KATEX_ASSET) {
 
 const STORAGE_KEY = "originmind-public-preview-conversations-v1";
 const DEFAULT_PUBLIC_API_BASE = "";
+const OA_ENTRY_URL = "https://oa.omindos.ai";
 const PUBLIC_API_BASE = typeof window.PUBLIC_API_BASE === "string" && window.PUBLIC_API_BASE.trim()
   ? window.PUBLIC_API_BASE.replace(/\/+$/u, "")
   : DEFAULT_PUBLIC_API_BASE;
@@ -324,6 +325,8 @@ const icons = {
   cube: '<svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7 4v10l-7 4-7-4V7l7-4z" stroke="currentColor" stroke-width="1.5"/><path d="m9 12 2 2 4-5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   gear: '<svg viewBox="0 0 24 24" fill="none"><path d="M12 3l7.5 4.5v9L12 21l-7.5-4.5v-9L12 3z" stroke="currentColor" stroke-width="1.5"/><circle cx="12" cy="12" r="3" stroke="currentColor" stroke-width="1.5"/></svg>',
   chevron: '<svg viewBox="0 0 24 24" fill="none"><path d="m14 8-4 4 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  login: '<svg viewBox="0 0 24 24" fill="none"><path d="M10 7V5a2 2 0 012-2h6v18h-6a2 2 0 01-2-2v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 12h11m0 0-3-3m3 3-3 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  x: '<svg viewBox="0 0 24 24" fill="none"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
 };
 
 function escapeHtml(value) {
@@ -513,13 +516,26 @@ function appShell() {
       <button class="collapse-handle" type="button" aria-label="收起侧边栏">${icons.chevron}</button>
       <div class="side-footer"><div class="bottom-actions"><button class="new-chat-bottom" type="button">${icons.plus}<span>聊天</span></button><button class="settings-trigger" type="button" aria-label="设置">${icons.gear}</button></div></div>
     </aside>
-    <main class="workspace"><header class="topbar"><div class="topbar-title">聊天</div></header>
-      <section class="chat-surface"><div class="empty-state"><h1 class="hero-title">想了解实验室的什么？</h1><p class="hero-subtitle">从已审核的实验室公开知识中检索并回答</p></div>
+    <main class="workspace"><header class="topbar"><div class="topbar-title">聊天</div><div class="topbar-actions"><span class="guest-badge">游客模式</span><button class="student-login-trigger" type="button">${icons.login}<span>飞书登录</span></button></div></header>
+      <section class="chat-surface"><div class="empty-state"><div class="entry-card"><div class="entry-kicker">chat.omindos.ai · 对外公开入口</div><h1 class="hero-title">想了解实验室的什么？</h1><p class="hero-subtitle">游客可检索经 OA 审核的公开知识；实习学生请用飞书进入内部 OA，完成保密协议后开启个人主页和新手任务。</p><div class="entry-actions"><button class="student-login-trigger primary-entry" type="button">${icons.login}<span>飞书登录进入 OA</span></button><button class="guest-info-trigger secondary-entry" type="button">查看游客限制</button></div></div></div>
         <div class="conversation" aria-live="polite"><div class="message-list"></div></div>
         <div class="composer-wrap"><div class="composer-glow"></div><form class="composer" aria-label="发送消息"><div class="composer-inner"><div class="input-panel"><textarea class="prompt-input" rows="2" maxlength="4000" placeholder="输入想了解的实验室问题"></textarea><div class="attachment-chip">${icons.paperclip}<span></span></div></div><div class="composer-footer"><div class="input-tools"><input class="file-input" type="file" hidden><button class="icon-button attach-button" type="button" aria-label="添加附件">${icons.paperclip}</button><button class="icon-button voice-button" type="button" aria-label="语音输入">${icons.voice}</button></div><div class="footer-actions"><button class="model-pill" type="button">${icons.cube}<span>文本模型</span></button><button class="send-button" type="submit" aria-label="发送" disabled>${icons.send}</button></div></div></div></form></div>
         <div class="suggestions">${DEFAULT_SUGGESTIONS.map((question, index) => `<button class="suggestion" type="button" data-prompt="${escapeHtml(question)}">${[icons.file, icons.text, icons.chart, icons.pen][index] || icons.chat}<span>${escapeHtml(question.replace(/[？?]$/u, ""))}</span></button>`).join("")}</div>
       </section></main>
-  </div><div class="toast" role="status" aria-live="polite"></div>`;
+  </div>
+  <div class="auth-backdrop" aria-hidden="true">
+    <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
+      <button class="auth-close" type="button" aria-label="关闭">${icons.x}</button>
+      <div class="auth-brand">${icons.login}</div>
+      <h2 id="auth-title">选择进入方式</h2>
+      <p>chat 是对外公开问答入口；OA 是对内工作台。实习学生使用飞书登录 OA，先签署保密协议，再进入个人主页和新手任务。</p>
+      <button class="feishu-login" type="button">${icons.login}<span>飞书登录 OA</span></button>
+      <div class="guest-limits"><strong>游客可用</strong><span>公开知识问答、公开研究方向、合作方式咨询。</span><strong>游客限制</strong><span>不能访问内部资料、任务、文件上传审核、个人主页和工作记录。</span></div>
+      <button class="guest-continue" type="button">继续游客试看</button>
+      <p class="auth-caption">内部身份、保密协议和任务推进统一在 OA 完成。</p>
+    </div>
+  </div>
+  <div class="toast" role="status" aria-live="polite"></div>`;
 }
 
 document.getElementById("app").innerHTML = appShell();
@@ -537,6 +553,7 @@ const modelPillLabel = document.querySelector(".model-pill span");
 const heroTitle = document.querySelector(".hero-title");
 const heroSubtitle = document.querySelector(".hero-subtitle");
 const toast = document.querySelector(".toast");
+const authBackdrop = document.querySelector(".auth-backdrop");
 let toastTimer;
 let currentMode = "text";
 
@@ -545,6 +562,21 @@ function showToast(message) {
   toast.classList.add("show");
   clearTimeout(toastTimer);
   toastTimer = setTimeout(() => toast.classList.remove("show"), 1800);
+}
+
+function openAuthDialog() {
+  authBackdrop.classList.add("open");
+  authBackdrop.setAttribute("aria-hidden", "false");
+  authBackdrop.querySelector(".feishu-login").focus();
+}
+
+function closeAuthDialog() {
+  authBackdrop.classList.remove("open");
+  authBackdrop.setAttribute("aria-hidden", "true");
+}
+
+function openOaEntry() {
+  window.location.assign(OA_ENTRY_URL);
 }
 
 function updateSendState() {
@@ -744,7 +776,14 @@ document.querySelector(".new-chat-bottom").addEventListener("click", resetChat);
 document.querySelectorAll(".history-item").forEach((item) => item.addEventListener("click", () => loadHistory(item.dataset.history)));
 document.querySelector(".collapse-handle").addEventListener("click", () => body.classList.toggle("sidebar-collapsed"));
 document.querySelector(".model-pill").addEventListener("click", () => showToast(`当前使用${MODE_COPY[currentMode][3]}`));
-document.querySelector(".settings-trigger").addEventListener("click", () => showToast("设置与账号同步将在正式服务中启用"));
+document.querySelector(".settings-trigger").addEventListener("click", openAuthDialog);
+document.querySelectorAll(".student-login-trigger").forEach((button) => button.addEventListener("click", openOaEntry));
+document.querySelector(".guest-info-trigger").addEventListener("click", openAuthDialog);
+document.querySelector(".feishu-login").addEventListener("click", openOaEntry);
+document.querySelector(".guest-continue").addEventListener("click", closeAuthDialog);
+document.querySelector(".auth-close").addEventListener("click", closeAuthDialog);
+authBackdrop.addEventListener("click", (event) => { if (event.target === authBackdrop) closeAuthDialog(); });
+document.addEventListener("keydown", (event) => { if (event.key === "Escape" && authBackdrop.classList.contains("open")) closeAuthDialog(); });
 
 bindSuggestions();
 restoreConversation();

@@ -153,6 +153,48 @@
     }
 
     .topbar-title { font-size: 15px; font-weight: 700; color: #25282e; }
+    .topbar-actions {
+      position: absolute;
+      right: 18px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .guest-badge {
+      height: 28px;
+      padding: 0 10px;
+      border: 1px solid #e4e7ec;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      color: #667085;
+      background: #fafafa;
+      font-size: 12px;
+      font-weight: 650;
+      white-space: nowrap;
+    }
+
+    .student-login-trigger {
+      height: 32px;
+      padding: 0 12px;
+      border: 0;
+      border-radius: 999px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      background: #3370ff;
+      color: #fff;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      box-shadow: 0 5px 13px rgba(51,112,255,.16);
+      transition: background .16s ease, transform .16s ease;
+    }
+
+    .student-login-trigger:hover { background: #245bdb; transform: translateY(-1px); }
+    .student-login-trigger svg { width: 15px; height: 15px; }
 
     .chat-surface { position: relative; height: calc(100% - 58px); overflow: hidden; }
 
@@ -166,21 +208,58 @@
       transition: opacity .22s ease, visibility .22s ease, transform .28s ease;
     }
 
+    .entry-card {
+      width: min(920px,calc(100% - 72px));
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .entry-kicker {
+      margin-bottom: 14px;
+      color: #667085;
+      font-size: 13px;
+      font-weight: 700;
+    }
+
     .hero-title {
-      margin: 0 auto 26px;
+      margin: 0 auto 22px;
       padding: 0 24px;
       text-align: center;
       font-size: clamp(27px,2.3vw,33px);
       line-height: 1.35;
       font-weight: 400;
-      letter-spacing: -.02em;
+      letter-spacing: 0;
     }
 
-    .hero-subtitle { margin: -12px 0 25px; text-align: center; color: #a1a4ab; font-size: 14px; }
+    .hero-subtitle { max-width: 650px; margin: -8px auto 18px; text-align: center; color: #8b9099; font-size: 14px; line-height: 1.7; }
+
+    .entry-actions {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      margin-bottom: 20px;
+    }
+
+    .primary-entry { height: 38px; padding: 0 16px; font-size: 14px; }
+
+    .secondary-entry {
+      height: 38px;
+      padding: 0 15px;
+      border: 1px solid #e3e6eb;
+      border-radius: 999px;
+      background: #fff;
+      color: #555b64;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 650;
+    }
+
+    .secondary-entry:hover { background: #f7f8fa; color: #22262d; }
 
     .composer-wrap {
       position: absolute;
-      top: 285px;
+      top: 344px;
       left: 50%;
       width: min(900px,calc(100% - 88px));
       transform: translateX(-50%);
@@ -295,7 +374,7 @@
 
     .suggestions {
       position: absolute;
-      top: 472px;
+      top: 531px;
       left: 50%;
       width: min(900px,calc(100% - 88px));
       transform: translateX(-50%);
@@ -509,6 +588,36 @@
     .feishu-login:hover { background: #245bdb; transform: translateY(-1px); }
     .feishu-login:focus-visible { outline: 3px solid rgba(51,112,255,.25); outline-offset: 2px; }
     .feishu-login svg { width: 19px; height: 19px; }
+    .guest-limits {
+      margin: 18px 0 14px;
+      padding: 14px 15px;
+      border: 1px solid #edf0f4;
+      border-radius: 13px;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 8px 11px;
+      background: #fafbfc;
+      text-align: left;
+      font-size: 12px;
+      line-height: 1.6;
+      color: #717680;
+    }
+
+    .guest-limits strong { color: #30343b; white-space: nowrap; }
+
+    .guest-continue {
+      width: 100%;
+      height: 40px;
+      border: 1px solid #e4e7ec;
+      border-radius: 11px;
+      background: #fff;
+      color: #424750;
+      cursor: pointer;
+      font-size: 14px;
+      font-weight: 650;
+    }
+
+    .guest-continue:hover { background: #f7f8fa; }
     .auth-caption { margin-top: 14px !important; margin-bottom: 0 !important; color: #b1b3b8 !important; font-size: 12px !important; }
 
     body.sidebar-collapsed .sidebar { flex-basis: 68px; width: 68px; padding-left: 8px; padding-right: 8px; }
@@ -539,6 +648,10 @@
       .collapse-handle { right: -10px; width: 20px; height: 54px; }
       .workspace { margin: 12px 8px 12px 0; border-radius: 13px; }
       .topbar { height: 48px; }
+      .topbar-actions { right: 12px; gap: 6px; }
+      .guest-badge { display: none; }
+      .student-login-trigger { width: 34px; height: 34px; padding: 0; border-radius: 50%; }
+      .student-login-trigger span { display: none; }
       .chat-surface { height: calc(100% - 48px); }
       body.chat-active .topbar { height: 0; padding: 0; border-bottom: 0; overflow: hidden; }
       body.chat-active .chat-surface { height: 100%; }
@@ -568,8 +681,10 @@
       .new-chat-bottom span { display: none; }
       .workspace { margin-right: 8px; }
       .empty-state { padding-top: 128px; }
-      .composer-wrap { top: 215px; width: calc(100% - 32px); }
-      .suggestions { top: 402px; width: calc(100% - 32px); }
+      .entry-card { width: calc(100% - 32px); }
+      .entry-actions { margin-bottom: 14px; }
+      .composer-wrap { top: 300px; width: calc(100% - 32px); }
+      .suggestions { top: 487px; width: calc(100% - 32px); }
       body.chat-active .composer-wrap, .message-list { width: calc(100% - 24px); }
       .toast { left: calc(50% + 34px); }
     }
@@ -599,10 +714,14 @@
       .empty-state { padding-top: 55px; }
       .hero-title { max-width: 360px; font-size: 25px; }
       .hero-subtitle { font-size: 13px; }
-      .composer-wrap { top: 160px; width: calc(100% - 20px); }
+      .entry-card { width: calc(100% - 20px); }
+      .entry-kicker { margin-bottom: 10px; font-size: 12px; }
+      .entry-actions { gap: 8px; }
+      .primary-entry, .secondary-entry { height: 34px; padding: 0 12px; font-size: 12px; }
+      .composer-wrap { top: 265px; width: calc(100% - 20px); }
       .composer { border-radius: 20px; }
       .composer-inner { border-radius: 19px; }
-      .suggestions { top: 345px; width: calc(100% - 20px); grid-template-columns: 1fr; }
+      .suggestions { top: 445px; width: calc(100% - 20px); grid-template-columns: 1fr; }
       .suggestion:nth-child(n+3) { display: none; }
       .model-pill span { display: none; }
       .message-list {
