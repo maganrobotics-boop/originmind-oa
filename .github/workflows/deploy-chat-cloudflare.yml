@@ -44,7 +44,6 @@ jobs:
       CHAT_WORKERS_DEV_SUBDOMAIN: ${{ vars.CHAT_WORKERS_DEV_SUBDOMAIN }}
       CHAT_RELEASE_CONFIRM: originmind-public-chat-production:originmind-public-chat-production:chat.omindos.ai
       CHAT_RELEASE_ID: ${{ github.sha }}-${{ github.run_attempt }}
-      EMAIL_CODE_WEBHOOK_URL: ${{ vars.EMAIL_CODE_WEBHOOK_URL }}
       PUBLIC_ALLOWED_ORIGINS: https://maganrobotics-boop.github.io
       WRANGLER_SEND_METRICS: 'false'
       CI: '1'
@@ -70,7 +69,6 @@ jobs:
           CHAT_APP_ENCRYPTION_KEY: ${{ secrets.CHAT_APP_ENCRYPTION_KEY }}
           CHAT_RATE_LIMIT_HMAC_KEY: ${{ secrets.CHAT_RATE_LIMIT_HMAC_KEY }}
           CHAT_ADMIN_PASSWORD: ${{ secrets.CHAT_ADMIN_PASSWORD }}
-          EMAIL_CODE_WEBHOOK_TOKEN: ${{ secrets.EMAIL_CODE_WEBHOOK_TOKEN }}
         run: node chat-cloudflare/scripts/release-cloudflare.mjs
       - name: Preserve non-secret release evidence
         if: always()
