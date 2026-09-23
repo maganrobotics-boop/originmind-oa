@@ -525,6 +525,29 @@ test("zero retrieved documents returns retrieval fallback and never invokes a mo
   assert.equal(timings.model, 0);
 });
 
+test("public chat grounds newbie village questions in bundled site knowledge when OA returns no chunks", async (t) => {
+  let captured;
+  const env = makeEnvironment({
+    AI: { run: async (model, input) => {
+      captured = { model, input };
+      return { choices: [{ message: { role: "assistant", content: "今天可以先完善个人信息、签署保密协议、选择项目方向，并提交学习笔记或运行截图作为证据。[1]" } }] };
+    } },
+  });
+  t.after(() => env.DB.close());
+  const result = await responseJson(await handleRequest(apiRequest("/api/chat", {
+    method: "POST",
+    body: { messages: [{ role: "user", content: "我正在做机器人新手村，今天任务清单和证据是什么？" }], topic: "research" },
+  }), env, {}, runtime(async () => emptyOaResponse())));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.mode, "ai");
+  assert.equal(result.body.sources[0].id, "site:orientation");
+  assert.match(result.body.sources[0].title, /机器人项目新手村/u);
+  assert.match(result.body.answer, /个人信息|保密协议|项目方向/u);
+  assert.equal(captured.model, WORKERS_AI_MODEL);
+  assert.match(captured.input.messages[0].content, /机器人项目新手村/u);
+  assert.match(captured.input.messages[0].content, /任务-证据-反馈/u);
+});
+
 test("Workers AI gets only two bounded user turns and never client assistant text", async (t) => {
   let captured;
   const env = makeEnvironment({

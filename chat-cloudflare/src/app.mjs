@@ -33,6 +33,7 @@ import {
 } from "./knowledge.mjs";
 import { generateValidatedAnswer } from "./answer-retry.mjs";
 import { answerMode } from "./answer-mode.mjs";
+import { siteKnowledgeDocuments } from "./site-knowledge.mjs";
 import {
   inspectOaPublicKnowledge,
   probeOaPublicKnowledge,
@@ -1680,7 +1681,14 @@ async function api(context) {
         }, 200, chatTimingHeaders(chatTiming));
       };
       const suggestionReference = suggestionKnowledgeReference(sourceQuestion || last.content);
-      const sourceDocuments = oa.documents.filter((document) => (
+      const localSiteDocuments = sourceQuestion ? [] : siteKnowledgeDocuments(last.content);
+      const retrievedDocuments = [
+        ...oa.documents,
+        ...localSiteDocuments.filter((siteDocument) => (
+          !oa.documents.some((document) => document.id === siteDocument.id)
+        )),
+      ];
+      const sourceDocuments = retrievedDocuments.filter((document) => (
         !suggestionReference || suggestionMatchesKnowledge(sourceQuestion || last.content, document)
       ));
       const applicableDocuments = sourceQuestion && !naturalQuestions(sourceDocuments).includes(last.content)
@@ -1724,8 +1732,9 @@ async function api(context) {
       const config = await getModelConfig(context);
       const active = modelProvider(context, config);
       const questionScope = [...retrievalHistory.map(message => message.content), last.content].join(' ');
+      const hasSiteKnowledge = documents.some((document) => document.origin === "site_public");
       const generalKnowledge = !sourceQuestion && (documents.length
-        ? questionPrefersGeneralKnowledge(last.content)
+        ? !hasSiteKnowledge && questionPrefersGeneralKnowledge(last.content)
         : questionAllowsGeneralKnowledge(questionScope));
       if ((!documents.length && !generalKnowledge) || !active.provider) {
         return chatResult({
