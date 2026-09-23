@@ -44,7 +44,7 @@ export default function GuidePage() {
       <section className="guide-section" id="getting-started" aria-labelledby="start-title">
         <div className="guide-section-heading"><span>01</span><div><h2 id="start-title">第一次使用：完成这四步</h2><p>使用本人账户，按页面提示完成身份确认和保密签署。</p></div></div>
         <ol className="guide-start-steps">
-          <li><strong>登录并确认身份</strong><p>按登录页提供的方式确认企业身份。如系统提示绑定原 OA 账户，只确认属于自己的账户；出现“人工审核中”时，等待管理员核验并刷新状态。</p></li>
+          <li><strong>登录并确认身份</strong><p>按登录页提供的方式确认飞书身份。如系统提示绑定原 OA 账户，只确认属于自己的账户；出现“人工审核中”时，等待管理员核验并刷新状态。</p></li>
           <li><strong>签署对应保密文件</strong><p>完整阅读文件，用本人手写签名，预览确认后提交。普通成员签署后自动归档，项目负责人可查阅，无需另行审核；项目负责人承诺书由 OA 管理员确认归档，管理员本人签署时自动归档。</p></li>
           <li><strong>检查个人资料</strong><p>进入“个人设置”核对姓名和资料，按需要设置联系方式的公开范围。部门和顾问、负责人等权限由管理员设置；显示不正确时联系管理员处理。</p></li>
           <li><strong>查看“待我处理”</strong><p>这里集中显示需要你确认贡献、审核或补充材料的事项。需要提出新申请时，点击“新建审核”，选择对应类型。</p></li>

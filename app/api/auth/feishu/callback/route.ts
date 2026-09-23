@@ -82,9 +82,8 @@ export async function GET(request: Request) {
   try {
     const flow = feishuOAuthFlowForTransactionVerifier(transaction.pkceVerifier);
     feishuIdentity = await exchangeFeishuCode(config, code, transaction.pkceVerifier, flow);
-  } catch (error) {
-    const status = /configured organization/i.test(error instanceof Error ? error.message : "") ? "wrong-tenant" : "failed";
-    return redirectWithStatus(config.origin, transaction.returnPath, status);
+  } catch {
+    return redirectWithStatus(config.origin, transaction.returnPath, "failed");
   }
   const loginSnapshot = feishuIdentity.openId;
 
@@ -125,7 +124,7 @@ export async function GET(request: Request) {
     }
     if (!subjectIdentity) {
       try {
-        const auditNote = "成员本人通过已准入 OA 会话显式绑定飞书登录身份；已验证灵感智能应用、企业租户与稳定 open_id。未请求飞书邮箱，未保存飞书访问令牌。";
+        const auditNote = "成员本人通过已准入 OA 会话显式绑定飞书登录身份；已验证飞书应用、来源租户与稳定 open_id。未请求飞书邮箱，未保存飞书访问令牌。";
         const [identityRows, eventRows] = await db.batch([
           db.insert(authIdentities).select(db.select({
             id: sql<string>`${crypto.randomUUID()}`.as("id"),

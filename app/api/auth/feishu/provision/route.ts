@@ -52,7 +52,7 @@ export async function POST(request: Request) {
     return noStoreJson({ provisioned: true, alreadyProvisioned: true });
   }
   if (user?.authProvider !== FEISHU_PROVIDER || !user.externalSubject) {
-    return noStoreJson({ error: "请先使用源灵智能飞书扫码登录。" }, 401);
+    return noStoreJson({ error: "请先使用飞书扫码登录。" }, 401);
   }
   const name = feishuMemberName(user.displayName);
   let accountUserId: string;
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
       accountEmailForFeishu(user.externalSubject),
     ]);
   } catch {
-    return noStoreJson({ error: "当前飞书企业身份无效，请重新扫码。" }, 400);
+    return noStoreJson({ error: "当前飞书身份无效，请重新扫码。" }, 400);
   }
 
   const cookieStore = await cookies();
@@ -142,8 +142,8 @@ export async function POST(request: Request) {
       isNull(authIdentities.unlinkedAt),
     )));
     const auditNote = explicitlyDeclinedMatches
-      ? "源灵智能企业成员扫码验证后，明确确认同名候选均非本人账户，系统以飞书姓名直接开通新内部成员；未提交姓名、学号/工号或额外认证资料。"
-      : "源灵智能企业成员扫码验证后未发现同名旧账户，系统以飞书姓名直接开通内部成员；未提交姓名、学号/工号或额外认证资料。";
+      ? "飞书认证用户扫码验证后，明确确认同名候选均非本人账户，系统以飞书姓名直接开通实习学生入口；未提交姓名、学号/工号或额外认证资料。"
+      : "飞书认证用户扫码验证后未发现同名旧账户，系统以飞书姓名直接开通实习学生入口；未提交姓名、学号/工号或额外认证资料。";
     const [memberRows, identityRows, eventRows, sessionRows] = await db.batch([
       db.insert(members).select(db.select({
         id: sql<string>`${memberId}`.as("id"),

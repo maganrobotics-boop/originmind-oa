@@ -171,7 +171,7 @@ export async function POST(request: Request) {
         actorName: sql<string>`${user.displayName}`.as("actor_name"),
         actorEmail: sql<string>`${user.email}`.as("actor_email"),
         action: sql<string>`'feishu_identity_name_confirmed'`.as("action"),
-        note: sql<string>`'飞书组织成员扫码登录后，系统按飞书姓名展示同名旧账户；本人在页面明确确认后绑定。未按姓名静默合并。'`.as("note"),
+        note: sql<string>`'飞书认证用户扫码登录后，系统按飞书姓名展示同名旧账户；本人在页面明确确认后绑定。未按姓名静默合并。'`.as("note"),
         createdAt: sql<string>`${now}`.as("created_at"),
       }).from(members).where(and(eq(members.id, candidate.id), eq(members.mutationRevision, candidate.mutationRevision), boundIdentityExists))).returning({ id: memberEvents.id }),
       db.update(oauthSessions).set({ memberId: candidate.id, emailSnapshot: candidate.chatgptAccount, displayNameSnapshot: candidate.fullName, lastSeenAt: now }).where(and(activeOAuthSession, boundIdentityExists)).returning({ tokenHash: oauthSessions.tokenHash }),

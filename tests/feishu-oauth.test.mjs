@@ -182,15 +182,22 @@ test("Feishu embedded QR code exchange uses the matching legacy token and user-i
   assert.doesNotMatch(JSON.stringify(identity), /legacy-opaque-value|on_ignored/u);
 });
 
-test("Feishu code exchange rejects another tenant and malformed upstream responses", async () => {
+test("Feishu code exchange accepts another Feishu tenant as a distinct account subject and rejects malformed upstream responses", async () => {
   let calls = 0;
   const accessTokenKey = ["access", "token"].join("_");
   globalThis.fetch = async () => {
     calls += 1;
     if (calls === 1) return json({ code: 0, [accessTokenKey]: "opaque-test-value" });
-    return json({ code: 0, data: { tenant_key: "tenant_attacker", open_id: "ou_member_1234", enterprise_email: "attacker@example.com" } });
+    return json({ code: 0, data: { tenant_key: "tenant_external", open_id: "ou_member_1234", enterprise_email: "external@example.com", name: "外部学生" } });
   };
-  await assert.rejects(() => oauth.exchangeFeishuCode(oauth.getFeishuOAuthConfig(), "code", "verifier"), /configured organization/u);
+  const identity = await oauth.exchangeFeishuCode(oauth.getFeishuOAuthConfig(), "code", "verifier");
+  assert.deepEqual(identity, {
+    providerSubject: "cli_originmind_app:tenant_external:ou_member_1234",
+    openId: "ou_member_1234",
+    tenantKey: "tenant_external",
+    displayName: "外部学生",
+  });
+  assert.match(await accountSubject.accountSubjectForFeishu(identity.providerSubject), /^feishu_[0-9a-f]{64}$/u);
 
   globalThis.fetch = async () => new Response("not-json", { status: 200, headers: { "content-type": "text/plain" } });
   await assert.rejects(() => oauth.exchangeFeishuCode(oauth.getFeishuOAuthConfig(), "code", "verifier"), /unexpected response/u);

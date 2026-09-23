@@ -943,7 +943,7 @@ function ProfileSettingsView({ currentUser, currentRole, isAdmin = false, migrat
             <div className="profile-settings-account-row"><span>当前登录</span><strong>{authProviderLabel(currentUser?.authProvider)}</strong></div>
             {(feishuLoginEnabled || feishuLinked) && (
               <div className={`feishu-link-panel ${feishuLinked ? "linked" : ""}`}>
-                <div className="github-link-heading"><Building2 className="size-4" /><div><strong>飞书扫码登录</strong><span>{feishuLinked ? "已绑定，扫码后继续进入当前成员账号" : "绑定灵感智能飞书身份，保留当前成员的全部原数据"}</span></div></div>
+                <div className="github-link-heading"><Building2 className="size-4" /><div><strong>飞书扫码登录</strong><span>{feishuLinked ? "已绑定，扫码后继续进入当前成员账号" : "绑定飞书身份，保留当前成员的全部原数据"}</span></div></div>
                 {feishuLinked
                   ? <Badge variant="outline" className="feishu-linked-badge"><Check className="size-3.5" />已绑定</Badge>
                   : <form method="post" action="/api/auth/feishu/start?return_to=%2F" target="_top" aria-busy={linkingFeishu} onSubmit={beginFeishuLink}><button type="submit" className="feishu-link-button" disabled={linkingFeishu}><Building2 className="size-4" />{linkingFeishu ? "正在打开飞书…" : "绑定飞书"}</button></form>}
@@ -1642,8 +1642,8 @@ function FeishuQrLogin({ enabled }: { enabled: boolean }) {
         {status === "loading" && <div className="feishu-qr-state"><Clock3 className="size-4" />正在生成二维码…</div>}
         {status === "error" && <div className="feishu-qr-state error"><AlertTriangle className="size-4" />二维码加载失败<button type="button" onClick={() => setRetryKey((value) => value + 1)}>重新加载</button></div>}
       </div>
-      <strong>源灵智能飞书</strong>
-      <span>打开手机飞书，扫描并确认企业身份</span>
+      <strong>飞书登录</strong>
+      <span>打开手机飞书，扫描并确认身份</span>
       <a className="feishu-current-device-login" href="/api/auth/feishu/start" target="_top">本机已登录飞书，直接继续 <ArrowUpRight className="size-3.5" /></a>
     </div>
   );
@@ -1699,7 +1699,7 @@ function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = tr
         const nextSession = await provisionCurrentFeishuMember();
         if (cancelled) return;
         onRegistered(nextSession);
-        toast.success("飞书登录成功", { description: "源灵智能企业成员身份已确认，无需填写注册资料。" });
+        toast.success("飞书登录成功", { description: "飞书身份已确认，先按实习学生入口进入。" });
       })
       .catch((lookupError: unknown) => {
         if (!cancelled) {
@@ -1715,9 +1715,9 @@ function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = tr
       const response = await fetch("/api/session", { headers: { accept: "application/json" }, credentials: "same-origin", cache: "no-store" });
       const data = await response.json() as SessionInfo;
       onRegistered(data);
-      if (data.registered) toast.success("企业成员身份已确认");
-      else if (data.user?.email) toast.info(`已识别 ${authProviderLabel(data.user.authProvider)} 登录`, { description: "请使用源灵智能飞书扫码进入。" });
-      else toast.info("尚未识别到登录状态", { description: "请使用源灵智能飞书扫码。" });
+      if (data.registered) toast.success("飞书身份已确认");
+      else if (data.user?.email) toast.info(`已识别 ${authProviderLabel(data.user.authProvider)} 登录`, { description: "请使用飞书扫码进入。" });
+      else toast.info("尚未识别到登录状态", { description: "请使用飞书扫码。" });
     } catch { toast.error("登录状态刷新失败", { description: "请稍后重试。" }); }
     finally { setRefreshing(false); }
   };
@@ -1754,7 +1754,7 @@ function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = tr
     try {
       const nextSession = await provisionCurrentFeishuMember("none-of-these-accounts-is-mine");
       onRegistered(nextSession);
-      toast.success("飞书登录成功", { description: "已按当前飞书企业身份进入 OA。" });
+      toast.success("飞书登录成功", { description: "已按当前飞书身份进入 OA。" });
     } catch (error) {
       toast.error("飞书登录未完成", { description: error instanceof Error ? error.message : "请稍后重试" });
       setBindingLookupKey((value) => value + 1);
@@ -1771,7 +1771,7 @@ function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = tr
         {unboundFeishuLogin ? (
           <><div className="registration-notice login-notice login-confirmed">
             <Check className="size-4" />
-            <div className="login-notice-copy"><strong>已通过源灵智能飞书验证</strong><span>{initialUser?.displayName || "飞书成员"}</span></div>
+            <div className="login-notice-copy"><strong>已通过飞书验证</strong><span>{initialUser?.displayName || "飞书成员"}</span></div>
             <button type="button" className="registration-login" onClick={switchLogin} disabled={switchingAccount}>{switchingAccount ? "正在退出…" : "更换登录账户"} <ArrowUpRight className="size-3.5" /></button>
           </div>
           {(bindingLookupState === "loading" || bindingLookupState === "provisioning") && <div className="feishu-name-match-state"><Clock3 className="size-4" />{bindingLookupState === "loading" ? "正在查找是否有同名原 OA 账户…" : "正在进入内部 OA…"}</div>}
@@ -1790,10 +1790,10 @@ function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = tr
                   {chatgptLoginEnabled && <a className="registration-login" href="/signin-with-chatgpt?return_to=%2F" target="_top">使用 ChatGPT 登录 <ArrowUpRight className="size-3.5" /></a>}
                   {githubLoginEnabled && <a className="registration-login github-login" href="/api/auth/github/start" target="_top"><GitBranch className="size-4" />使用 GitHub 登录</a>}
                 </div>
-                <small>其他方式仅用于进入已绑定的原 OA 账户；新成员请使用源灵智能飞书扫码。</small>
+                <small>其他方式仅用于进入已绑定的原 OA 账户；新成员请使用飞书扫码。</small>
               </details>
             )}
-            {initialUser?.email && <div className="feishu-name-match-state"><AlertTriangle className="size-4" />当前 {providerLabel} 账户尚未绑定企业成员，请改用飞书扫码。</div>}
+            {initialUser?.email && <div className="feishu-name-match-state"><AlertTriangle className="size-4" />当前 {providerLabel} 账户尚未绑定 OA 成员，请改用飞书扫码。</div>}
             <button type="button" className="login-refresh" onClick={refreshLoginState} disabled={refreshing}>{refreshing ? "正在检查…" : "已扫码但未跳转？刷新状态"}</button>
           </div>
         )}
@@ -2268,11 +2268,11 @@ export default function Home() {
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
       toast.success("飞书登录成功");
     } else if (feishuStatus === "register") {
-      toast.success("飞书企业身份已验证", { description: "系统会先查询同名旧账户；没有匹配时直接进入，有匹配时由本人确认是否绑定。" });
+      toast.success("飞书身份已验证", { description: "系统会先查询同名旧账户；没有匹配时直接进入，有匹配时由本人确认是否绑定。" });
     } else if (feishuStatus === "denied") {
       toast.info("已取消飞书授权");
     } else if (feishuStatus === "wrong-tenant") {
-      toast.error("飞书组织不匹配", { description: "请使用灵感智能组织内的飞书账号扫码。" });
+      toast.error("飞书登录未完成", { description: "请重新扫码，或联系 OA 管理员核验飞书应用配置。" });
     } else if (feishuStatus === "member-disabled") {
       toast.error("成员账号当前不可用", { description: "请联系 OA 管理员核验成员状态。" });
     } else if (feishuStatus === "link-session-expired") {

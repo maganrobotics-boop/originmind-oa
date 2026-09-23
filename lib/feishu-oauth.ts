@@ -168,7 +168,7 @@ export async function exchangeFeishuCode(
   }
 
   const tenantKey = cleanIdentifier(data.tenant_key, 128);
-  if (tenantKey !== config.tenantKey) throw new Error("Feishu account does not belong to the configured organization");
+  if (!/^[A-Za-z0-9_-]{4,128}$/u.test(tenantKey)) throw new Error("Feishu returned an invalid tenant identifier");
   const openId = cleanIdentifier(data.open_id, 128);
   const providerSubject = feishuProviderSubject(config.clientId, tenantKey, openId);
   const displayName = cleanText(data.name, 80) || "飞书成员";
