@@ -23,6 +23,10 @@ const state = {
 
 const elements = {
   loggedOut: document.querySelector(".logged-out"),
+  agreementGate: document.querySelector(".agreement-gate"),
+  agreementForm: document.querySelector(".agreement-form"),
+  agreementStatus: document.querySelector(".agreement-status"),
+  agreementReview: document.querySelector(".agreement-review"),
   dashboard: document.querySelector(".dashboard"),
   tasksView: document.querySelector(".tasks-view"),
   profileView: document.querySelector(".profile-view"),
@@ -131,14 +135,75 @@ function fillProfile(profile) {
   }
 }
 
+function formatTime(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("zh-CN", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Asia/Shanghai",
+  }).format(new Date(value));
+}
+
+function renderAgreement() {
+  const data = state.dashboard;
+  const agreement = data?.agreement;
+  if (!agreement) return;
+  elements.loggedOut.hidden = true;
+  elements.dashboard.hidden = true;
+  elements.agreementGate.hidden = false;
+  elements.userChip.hidden = false;
+  elements.logout.hidden = false;
+  document.querySelectorAll(".login-trigger").forEach((button) => { button.hidden = true; });
+  document.querySelectorAll(".nav-button").forEach((button) => { button.disabled = true; });
+  elements.userChip.textContent = `${data.user.roleLabel} · ${data.user.email}`;
+  document.querySelector(".agreement-version").textContent = `版本 ${agreement.version}`;
+  document.querySelector(".agreement-effective").textContent = `生效日期 ${agreement.effectiveDate}`;
+  document.querySelector(".agreement-email").textContent = `签署账号 ${data.user.email}`;
+  document.querySelector(".agreement-introduction").textContent = agreement.introduction;
+  document.querySelector(".privacy-notice").textContent = agreement.privacyNotice;
+  document.querySelector(".agreement-clauses").replaceChildren(...agreement.clauses.map((clause) => {
+    const section = document.createElement("section");
+    section.className = "agreement-clause";
+    const title = document.createElement("h2");
+    title.textContent = clause.title;
+    const text = document.createElement("p");
+    text.textContent = clause.text;
+    section.append(title, text);
+    return section;
+  }));
+  const pending = agreement.reviewStatus === "pending";
+  const rejected = agreement.reviewStatus === "rejected";
+  elements.agreementForm.hidden = pending;
+  elements.agreementReview.hidden = !pending && !rejected;
+  elements.agreementReview.className = `agreement-review${pending ? " pending" : rejected ? " rejected" : ""}`;
+  if (pending || rejected) {
+    elements.agreementReview.querySelector("h2").textContent = pending ? "签署记录已归档，等待管理员审核" : "本次签署未通过审核";
+    elements.agreementReview.querySelector(".review-summary").textContent =
+      `签署人：${agreement.signerName} · 签署时间：${formatTime(agreement.acceptedAt)}`;
+    elements.agreementReview.querySelector(".review-note").textContent = rejected
+      ? `审核说明：${agreement.reviewNote || "请核对签署信息后重新提交。"}`
+      : "审核通过后，任务地图和个人主页会自动开放。";
+  }
+  if (rejected) {
+    const signer = elements.agreementForm.elements.namedItem("signerName");
+    if (signer && !signer.value) signer.value = agreement.signerName;
+  }
+}
+
 function renderDashboard() {
   const data = state.dashboard;
   if (!data) return;
+  if (!data.agreement?.approved) {
+    renderAgreement();
+    return;
+  }
   elements.loggedOut.hidden = true;
+  elements.agreementGate.hidden = true;
   elements.dashboard.hidden = false;
   elements.userChip.hidden = false;
   elements.logout.hidden = false;
   document.querySelectorAll(".login-trigger").forEach((button) => { button.hidden = true; });
+  document.querySelectorAll(".nav-button").forEach((button) => { button.disabled = false; });
   elements.userChip.textContent = `${data.user.roleLabel} · ${data.user.email}`;
 
   document.querySelector(".progress-number").textContent = String(data.progress.completed);
@@ -163,10 +228,12 @@ function renderDashboard() {
 function renderLoggedOut() {
   state.dashboard = null;
   elements.loggedOut.hidden = false;
+  elements.agreementGate.hidden = true;
   elements.dashboard.hidden = true;
   elements.userChip.hidden = true;
   elements.logout.hidden = true;
   document.querySelectorAll(".login-trigger").forEach((button) => { button.hidden = false; });
+  document.querySelectorAll(".nav-button").forEach((button) => { button.disabled = true; });
 }
 
 async function loadDashboard() {
@@ -258,6 +325,30 @@ async function saveProfile(event) {
   }
 }
 
+async function signAgreement(event) {
+  event.preventDefault();
+  const submit = elements.agreementForm.querySelector('button[type="submit"]');
+  const signerName = String(new FormData(elements.agreementForm).get("signerName") || "").trim();
+  submit.disabled = true;
+  elements.agreementStatus.textContent = "正在归档签署记录…";
+  try {
+    state.dashboard = await requestJson("/api/newbie/agreement", {
+      method: "POST",
+      body: JSON.stringify({
+        agreementVersion: state.dashboard.agreement.version,
+        signerName,
+        accepted: true,
+      }),
+    });
+    renderDashboard();
+    showToast("已签署并归档，等待管理员审核");
+  } catch (error) {
+    elements.agreementStatus.textContent = error.message;
+  } finally {
+    submit.disabled = false;
+  }
+}
+
 function openTask(id) {
   const task = state.dashboard?.tasks.find((candidate) => candidate.id === id);
   if (!task || !task.unlocked) return;
@@ -315,6 +406,7 @@ document.querySelector(".login-close").addEventListener("click", () => elements.
 elements.codeButton.addEventListener("click", () => void requestCode());
 elements.loginForm.addEventListener("submit", (event) => void verifyCode(event));
 elements.profileForm.addEventListener("submit", (event) => void saveProfile(event));
+elements.agreementForm.addEventListener("submit", (event) => void signAgreement(event));
 elements.logout.addEventListener("click", () => void logout());
 document.querySelectorAll(".nav-button").forEach((button) => button.addEventListener("click", () => switchView(button.dataset.view)));
 document.querySelector(".task-close").addEventListener("click", () => elements.taskDialog.close());
@@ -323,5 +415,4 @@ document.querySelector(".task-complete").addEventListener("click", () => void up
 window.addEventListener("hashchange", () => switchView(location.hash === "#profile" ? "profile" : "tasks"));
 
 void loadDashboard();
-
 
