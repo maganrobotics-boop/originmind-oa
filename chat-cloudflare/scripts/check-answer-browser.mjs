@@ -80,6 +80,7 @@ try {
   await page.locator("textarea").first().fill("公式组件故障测试");
   await page.locator("textarea").first().press("Enter");
   await page.locator('[data-math-status="fallback"]').first().waitFor();
+  await page.waitForFunction(() => document.querySelector(".message.assistant")?.textContent?.includes("完整结尾"));
   assert.ok((await page.locator(".message.assistant").innerText()).includes("完整结尾"));
   assert.equal(await page.locator(".copy-answer, .copy-action").count(),1);
   console.log("dependency unavailable: original formulas, complete prose and copy remain usable");
