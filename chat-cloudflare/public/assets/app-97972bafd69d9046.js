@@ -327,6 +327,8 @@ const icons = {
   chevron: '<svg viewBox="0 0 24 24" fill="none"><path d="m14 8-4 4 4 4" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   login: '<svg viewBox="0 0 24 24" fill="none"><path d="M10 7V5a2 2 0 012-2h6v18h-6a2 2 0 01-2-2v-2" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M3 12h11m0 0-3-3m3 3-3 3" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
   x: '<svg viewBox="0 0 24 24" fill="none"><path d="m7 7 10 10M17 7 7 17" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  link: '<svg viewBox="0 0 24 24" fill="none"><path d="M10 13a5 5 0 0 0 7 0l2-2a5 5 0 0 0-7-7l-1 1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/><path d="M14 11a5 5 0 0 0-7 0l-2 2a5 5 0 0 0 7 7l1-1" stroke="currentColor" stroke-width="1.7" stroke-linecap="round"/></svg>',
+  share: '<svg viewBox="0 0 24 24" fill="none"><path d="M12 16V4m0 0-4 4m4-4 4 4M5 14v5h14v-5" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
 
 function cleanPublicChatText(value) {
@@ -747,7 +749,11 @@ function autoResize() {
 }
 
 function messageActions() {
-  return '<div class="message-actions"><button class="message-action copy-action" type="button" aria-label="复制"><svg viewBox="0 0 24 24" fill="none"><rect x="8" y="8" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.5"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2" stroke="currentColor" stroke-width="1.5"/></svg></button></div>';
+  return `<div class="message-actions">
+    <button class="message-action-button copy-answer" type="button" aria-label="复制回答" title="复制回答">${icons.file}</button>
+    <button class="message-action-button copy-answer-link" type="button" aria-label="复制链接" title="复制链接">${icons.link || icons.chat}</button>
+    <button class="message-action-button share-answer" type="button" aria-label="分享链接" title="分享链接">${icons.share || icons.chat}</button>
+  </div>`;
 }
 
 function setAssistantContent(item, text, { html = false, images = [] } = {}) {
@@ -800,10 +806,22 @@ async function revealAssistantAnswer(item, answer, { images = [] } = {}) {
 }
 
 function bindMessageActions(scope) {
-  scope.querySelectorAll(".copy-action").forEach((button) => button.addEventListener("click", async () => {
-    const text = button.closest(".message-content").innerText.replace(/复制$/u, "").trim();
-    try { await navigator.clipboard.writeText(text); showToast("已复制"); }
+  const answerText = (button) => button.closest(".message-content")?.querySelector(".answer-content")?.innerText.trim() || "";
+  const questionText = (button) => {
+    const article = button.closest(".message");
+    let previous = article?.previousElementSibling;
+    while (previous && !previous.classList.contains("user")) previous = previous.previousElementSibling;
+    return previous?.querySelector(".message-body, p")?.innerText.trim() || "";
+  };
+  scope.querySelectorAll(".copy-answer").forEach((button) => button.addEventListener("click", async () => {
+    try { await writeMessageClipboard(answerText(button)); showToast("已复制"); }
     catch { showToast("复制失败，请手动选择文本"); }
+  }));
+  scope.querySelectorAll(".copy-answer-link").forEach((button) => button.addEventListener("click", () => {
+    openAnswerShare({ v: 1, question: questionText(button), answer: answerText(button) }, button, "copy");
+  }));
+  scope.querySelectorAll(".share-answer").forEach((button) => button.addEventListener("click", () => {
+    openAnswerShare({ v: 1, question: questionText(button), answer: answerText(button) }, button, "share");
   }));
 }
 
