@@ -80,8 +80,8 @@ test("explains the internal OA and public ARTS Robotics assistant split", async 
   assert.match(guideSource, /对外公开必须再次输入指定确认文字/u);
   assert.match(guideSource, /公众无需 OA 登录/u);
   assert.match(guideSource, /OA 管理员可以批准本人提交的知识；项目负责人仍需回避自己的投稿/u);
-  assert.match(pageSource, /<h1>请登录账号<\/h1>/u);
-  assert.match(pageSource, /实验室 AI 仅在登录并完成 OA 准入与保密签署后显示/u);
+  assert.match(pageSource, /<h1>进入实验室大模型<\/h1>/u);
+  assert.match(pageSource, /游客可以试看公开问答；实习学生请使用飞书登录/u);
 });
 
 test("lets authorized reviewers reclassify active knowledge with the same public confirmation guard", async () => {
