@@ -115,17 +115,17 @@ try {
     // point rather than weakening the assertion by including hidden elements.
     async function restoreRecentQuestion(question) {
       if (name === 'mobile') {
-        await page.getByRole('button',{name:'打开主题菜单',exact:true}).click();
-        await page.locator('#topic-drawer[open]').waitFor();
+        await page.getByRole('button',{name:'打开最近聊天',exact:true}).click();
+        await page.locator('#recent-drawer[open]').waitFor();
       }
-      const sidebar = page.locator(name === 'mobile' ? '#topic-drawer' : '.chat-sidebar');
+      const sidebar = page.locator(name === 'mobile' ? '#recent-drawer' : '.history-list');
       const entry = sidebar.getByRole('button',{name:new RegExp(`^${question}，`)});
       await entry.waitFor({state:'visible'});
       assert.equal(await entry.count(),1);
       await entry.click();
       await page.waitForFunction(expected => document.querySelector('.message.user .message-body')?.textContent === expected, question);
       await page.locator('.message.assistant math').first().waitFor();
-      if (name === 'mobile') assert.equal(await page.locator('#topic-drawer[open]').count(),0);
+      if (name === 'mobile') assert.equal(await page.locator('#recent-drawer[open]').count(),0);
     }
     await restoreRecentQuestion('请介绍机器人运动模型');
     assert.equal(await page.locator('.message.user').count(),1);
