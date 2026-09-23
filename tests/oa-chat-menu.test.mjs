@@ -14,7 +14,7 @@ test('every workspace header opens chat on the right and centers the current sec
   assert.match(page, /aria-label="打开个人账户菜单"/u);
   assert.match(page, /className="oa-sidebar-account"/u);
   assert.match(page, /<OaConversationProvider/u);
-  assert.match(page, /const secondaryTitle = activeView === "chat" \? "聊天"[\s\S]*?activeView === "dashboard" \? "审批工作台"/u);
+  assert.match(page, /const secondaryTitle = activeView === "home" \? "主页"[\s\S]*?activeView === "chat" \? "聊天"[\s\S]*?activeView === "dashboard" \? "审批工作台"/u);
 });
 
 test('approval dashboard has no AI shortcut while the knowledge sidebar and admission gates remain', async () => {
