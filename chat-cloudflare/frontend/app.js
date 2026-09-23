@@ -728,4 +728,3 @@ refreshSuggestions();
 refreshStatus();
 refreshVisitorStatus();
 updateSendState();
-
