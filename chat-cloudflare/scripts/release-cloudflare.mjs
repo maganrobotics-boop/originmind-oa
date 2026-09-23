@@ -179,6 +179,10 @@ try {
 
   progress("Inspecting existing Worker secret names without reading their values.");
   const existingSecretNames = await existingWorkerSecretNames(stagingConfigPath, secretValues);
+  if (environment.emailCodeWebhookUrl && !environment.emailCodeWebhookToken &&
+      !existingSecretNames.has("EMAIL_CODE_WEBHOOK_TOKEN")) {
+    throw new Error("EMAIL_CODE_WEBHOOK_TOKEN must already exist on the Worker or be supplied for email login");
+  }
   await writeJson(join(evidenceRoot, "worker-secret-names-before.json"), {
     format: "originmind-chat-worker-secret-names-v1",
     names: [...existingSecretNames].sort(),
@@ -311,3 +315,4 @@ try {
   }
   process.exitCode = 1;
 }
+

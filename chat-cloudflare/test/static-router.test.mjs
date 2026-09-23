@@ -30,6 +30,8 @@ function mockEnvironment() {
             "/index.html",
             "/newbie-village.html",
             "/newbie-village.js",
+            "/newbie-village-admin.html",
+            "/newbie-village-admin.js",
             "/favicon.svg",
             "/LICENSES.md",
             "/manifest.webmanifest",
@@ -77,6 +79,8 @@ test("path classifier is exact and does not turn unknown paths into the SPA", ()
   assert.equal(classifyPath("/index.html"), RouteKind.REDIRECT_HOME);
   assert.equal(classifyPath("/newbie-village.html"), RouteKind.ASSET);
   assert.equal(classifyPath("/newbie-village.js"), RouteKind.ASSET);
+  assert.equal(classifyPath("/newbie-village-admin.html"), RouteKind.ASSET);
+  assert.equal(classifyPath("/newbie-village-admin.js"), RouteKind.ASSET);
   assert.equal(classifyPath("/_health"), RouteKind.DYNAMIC);
   assert.equal(classifyPath("/api/status"), RouteKind.DYNAMIC);
   assert.equal(classifyPath("/api"), RouteKind.NOT_FOUND);
@@ -99,6 +103,18 @@ test("newbie village page is served as a standalone non-cacheable document", asy
   assert.equal(await response.text(), "asset:/newbie-village.html");
   assertHardened(response);
   assert.deepEqual(calls.map((call) => call.pathname), ["/newbie-village.html"]);
+});
+
+test("newbie agreement review page is a standalone non-cacheable admin document", async () => {
+  const { env, calls } = mockEnvironment();
+  const response = await routeStaticRequest(
+    new Request("https://chat.omindos.ai/newbie-village/admin"),
+    env,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "asset:/newbie-village-admin.html");
+  assertHardened(response);
+  assert.deepEqual(calls.map((call) => call.pathname), ["/newbie-village-admin.html"]);
 });
 
 test("public topic links and exact /manage serve the same non-cacheable shell", async () => {
@@ -209,7 +225,9 @@ test("unsafe methods cannot retrieve the shell or static assets", async () => {
     "/manage",
     "/manage/",
     "/newbie-village",
+    "/newbie-village/admin",
     "/newbie-village.js",
+    "/newbie-village-admin.js",
     "/favicon.svg",
     "/manifest.webmanifest",
     "/service-worker.js",
@@ -248,6 +266,7 @@ test("hashed assets are immutable while auxiliary assets use a short TTL", async
 
   for (const path of [
     "/newbie-village.js",
+    "/newbie-village-admin.js",
     "/favicon.svg",
     "/LICENSES.md",
     "/manifest.webmanifest",

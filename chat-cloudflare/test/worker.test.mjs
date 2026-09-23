@@ -41,6 +41,7 @@ function makeEnvironment(overrides = {}) {
     RATE_LIMIT_HMAC_KEY: "rate-limit-key-".padEnd(48, "r"),
     PUBLIC_LAB_AI_SERVICE_TOKEN: SERVICE_TOKEN,
     RELEASE_ID,
+    EMAIL_CODE_DEV_MODE: "1",
     ...overrides,
   };
 }
@@ -128,6 +129,14 @@ async function signInCampusVisitor(env, email = "student@stumail.sztu.edu.cn") {
   }), env, {}, runtime());
   assert.equal(response.status, 200);
   return response.headers.get("set-cookie");
+}
+
+async function ownerCookie(database) {
+  const token = "9".repeat(64);
+  await database.prepare("INSERT INTO sessions(hash,expires) VALUES (?,?)")
+    .bind(await sha256Hex(token), Date.now() + 60_000)
+    .run();
+  return `__Host-ma-session=${token}`;
 }
 
 test("Worker source contains no Tencent/Node runtime shell", () => {
@@ -285,6 +294,18 @@ test("campus email code webhook uses the configured SZTU sender", async (t) => {
   assert.match(delivered.body.text, /\d{6}/u);
 });
 
+test("production email login fails closed instead of displaying a verification code", async (t) => {
+  const env = makeEnvironment({ EMAIL_CODE_DEV_MODE: "" });
+  t.after(() => env.DB.close());
+  const result = await responseJson(await handleRequest(apiRequest("/api/visitor/request-code", {
+    method: "POST",
+    body: { email: "student@stumail.sztu.edu.cn" },
+  }), env, {}, runtime()));
+  assert.equal(result.status, 503);
+  assert.equal(Object.hasOwn(result.body, "devCode"), false);
+  assert.match(result.body.error, /邮件服务尚未配置/u);
+});
+
 test("newbie village keeps an authenticated task path and personal homepage independent from OA", async (t) => {
   const env = makeEnvironment();
   t.after(() => env.DB.close());
@@ -300,11 +321,95 @@ test("newbie village keeps an authenticated task path and personal homepage inde
   ));
   assert.equal(initial.status, 200);
   assert.equal(initial.body.user.email, "student@stumail.sztu.edu.cn");
-  assert.equal(initial.body.profile.displayName, "student");
+  assert.equal(initial.body.agreement.accepted, false);
+  assert.equal(initial.body.agreement.approved, false);
+  assert.equal(initial.body.agreement.reviewStatus, "unsigned");
+  assert.equal(initial.body.profile, null);
+  assert.deepEqual(initial.body.tasks, []);
   assert.deepEqual(initial.body.progress, { completed: 0, total: 7 });
-  assert.equal(initial.body.tasks[0].id, "registration");
-  assert.equal(initial.body.tasks[0].unlocked, true);
-  assert.equal(initial.body.tasks[1].unlocked, false);
+
+  const blockedBeforeSigning = await responseJson(await handleRequest(apiRequest("/api/newbie/profile", {
+    method: "PATCH",
+    cookie,
+    body: { displayName: "小深", grade: "2024", major: "机器人工程", direction: "navigation", bio: "" },
+  }), env, {}, runtime()));
+  assert.equal(blockedBeforeSigning.status, 428);
+
+  const unsignedCrossOrigin = await responseJson(await handleRequest(apiRequest("/api/newbie/agreement", {
+    method: "POST",
+    cookie,
+    origin: "https://attacker.example",
+    body: { agreementVersion: initial.body.agreement.version, signerName: "小深", accepted: true },
+  }), env, {}, runtime()));
+  assert.equal(unsignedCrossOrigin.status, 403);
+
+  const signed = await responseJson(await handleRequest(apiRequest("/api/newbie/agreement", {
+    method: "POST",
+    cookie,
+    body: { agreementVersion: initial.body.agreement.version, signerName: "小深同学", accepted: true },
+  }), env, {}, runtime()));
+  assert.equal(signed.status, 200);
+  assert.equal(signed.body.signed, true);
+  assert.equal(signed.body.archived, true);
+  assert.equal(signed.body.agreement.accepted, true);
+  assert.equal(signed.body.agreement.approved, false);
+  assert.equal(signed.body.agreement.reviewStatus, "pending");
+  assert.equal(signed.body.profile, null);
+  assert.deepEqual(signed.body.tasks, []);
+
+  const archive = await env.DB.prepare(
+    "SELECT * FROM newbie_agreement_acceptances WHERE email=? AND agreement_version=?",
+  ).bind("student@stumail.sztu.edu.cn", initial.body.agreement.version).first();
+  assert.equal(archive.signer_name, "小深同学");
+  assert.match(archive.content_sha256, /^[a-f0-9]{64}$/u);
+  assert.equal(archive.review_status, "pending");
+  assert.equal(Object.hasOwn(archive, "ip"), false);
+  assert.equal(Object.hasOwn(archive, "user_agent"), false);
+
+  const blockedPending = await responseJson(await handleRequest(apiRequest("/api/newbie/profile", {
+    method: "PATCH",
+    cookie,
+    body: { displayName: "小深", grade: "2024", major: "机器人工程", direction: "navigation", bio: "" },
+  }), env, {}, runtime()));
+  assert.equal(blockedPending.status, 423);
+
+  const visitorCannotReadArchive = await responseJson(await handleRequest(
+    apiRequest("/api/admin/newbie-agreements?status=pending", { cookie }), env, {}, runtime(),
+  ));
+  assert.equal(visitorCannotReadArchive.status, 403);
+
+  const adminCookie = await ownerCookie(env.DB);
+  const queue = await responseJson(await handleRequest(
+    apiRequest("/api/admin/newbie-agreements?status=pending", { cookie: adminCookie }), env, {}, runtime(),
+  ));
+  assert.equal(queue.status, 200);
+  assert.equal(queue.body.records.length, 1);
+  assert.equal(queue.body.records[0].email, "student@stumail.sztu.edu.cn");
+  assert.equal(queue.body.records[0].reviewStatus, "pending");
+  assert.match(queue.body.agreement.title, /保密协议/u);
+
+  const reviewed = await responseJson(await handleRequest(apiRequest("/api/admin/newbie-agreements/review", {
+    method: "POST",
+    cookie: adminCookie,
+    body: {
+      email: "student@stumail.sztu.edu.cn",
+      agreementVersion: initial.body.agreement.version,
+      reviewStatus: "approved",
+      reviewNote: "身份与签署信息一致。",
+    },
+  }), env, {}, runtime()));
+  assert.deepEqual(reviewed, { status: 200, body: { saved: true, reviewStatus: "approved" } });
+
+  const admitted = await responseJson(await handleRequest(
+    apiRequest("/api/newbie/dashboard", { cookie }), env, {}, runtime(),
+  ));
+  assert.equal(admitted.status, 200);
+  assert.equal(admitted.body.agreement.approved, true);
+  assert.equal(admitted.body.agreement.reviewStatus, "approved");
+  assert.equal(admitted.body.profile.displayName, "student");
+  assert.equal(admitted.body.tasks[0].id, "registration");
+  assert.equal(admitted.body.tasks[0].unlocked, true);
+  assert.equal(admitted.body.tasks[1].unlocked, false);
 
   const profile = await responseJson(await handleRequest(apiRequest("/api/newbie/profile", {
     method: "PATCH",

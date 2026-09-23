@@ -33,6 +33,8 @@ const TOPIC_TRAILING_REDIRECTS = new Map(
 const DIRECT_ASSET_PATHS = new Set([
   "/newbie-village.html",
   "/newbie-village.js",
+  "/newbie-village-admin.html",
+  "/newbie-village-admin.js",
   "/favicon.svg",
   "/LICENSES.md",
   "/manifest.webmanifest",
@@ -134,6 +136,10 @@ export async function routeStaticRequest(request, env) {
   if (url.pathname === "/newbie-village") {
     if (!SAFE_METHODS.has(request.method)) return methodNotAllowed();
     return fetchAsset(request, env, "/newbie-village.html", "no-store");
+  }
+  if (url.pathname === "/newbie-village/admin") {
+    if (!SAFE_METHODS.has(request.method)) return methodNotAllowed();
+    return fetchAsset(request, env, "/newbie-village-admin.html", "no-store");
   }
 
   if (kind === RouteKind.SHELL) {

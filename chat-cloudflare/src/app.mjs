@@ -265,6 +265,36 @@ const NEWBIE_TASKS = Object.freeze([
   },
 ]);
 
+const NEWBIE_AGREEMENT = Object.freeze({
+  version: "2026-09-23-v1",
+  title: "OriginMind × ARTS Robotics 新手村保密协议",
+  effectiveDate: "2026-09-23",
+  introduction: "为保护实验室成员、合作方和项目资料，在进入新手村并接触学习任务前，请阅读并同意以下保密约定。",
+  clauses: Object.freeze([
+    Object.freeze({
+      title: "一、保密信息范围",
+      text: "保密信息包括通过新手村、实验室成员或项目协作接触到的未公开代码、数据、模型、设计、文档、实验记录、账号信息、会议内容，以及其他已标注或依其性质应当保密的信息。",
+    }),
+    Object.freeze({
+      title: "二、使用与保护义务",
+      text: "保密信息仅可用于获准的新手村学习和实验室任务；未经书面许可，不得向无关人员披露、复制到非授权平台、公开发布或用于其他目的。应妥善保管账号和资料，发现误传、泄露或异常访问时应立即报告。",
+    }),
+    Object.freeze({
+      title: "三、不属于保密信息的情形",
+      text: "能够证明在接收前已合法知悉、并非因违反本协议而公开、从有权披露的第三方合法取得、独立开发形成，或已取得实验室书面公开许可的信息，不受本协议限制。",
+    }),
+    Object.freeze({
+      title: "四、保密期限与资料处理",
+      text: "保密义务自签署时起生效，持续至相关信息依法公开或实验室书面解除保密要求。任务结束、退出项目或收到要求时，应停止使用并按要求归还或删除相关资料。",
+    }),
+    Object.freeze({
+      title: "五、违规处理",
+      text: "违反本协议可能导致新手村或项目权限暂停、任务资格取消，并应按适用规则和法律承担相应责任。涉及第三方权益或安全事件时，应配合采取补救措施。",
+    }),
+  ]),
+  privacyNotice: "签署时系统仅记录校内邮箱、签署姓名、协议版本、协议内容摘要和签署时间，用于身份确认、访问控制和签署记录。记录保存在 Chat 系统，不写入 OA，也不收集 IP 或浏览器指纹。不同意时仍可使用公开 Chat，但不能进入新手村。",
+});
+
 function emailCode() {
   const bytes = crypto.getRandomValues(new Uint8Array(4));
   const number = ((bytes[0] << 24) >>> 0) + (bytes[1] << 16) + (bytes[2] << 8) + bytes[3];
@@ -277,7 +307,10 @@ async function sendCampusLoginCode(context, email, code) {
   const from = typeof context.env.EMAIL_CODE_FROM === "string" && context.env.EMAIL_CODE_FROM.trim()
     ? context.env.EMAIL_CODE_FROM.trim()
     : "magan@sztu.edu.cn";
-  if (!endpoint) return { sent: false, devCode: code };
+  if (!endpoint) {
+    if (context.env.EMAIL_CODE_DEV_MODE === "1") return { sent: false, devCode: code };
+    throw new PublicError("验证码邮件服务尚未配置，请联系管理员。", 503);
+  }
   const response = await context.runtime.fetch(endpoint, {
     method: "POST",
     headers: {
@@ -312,7 +345,47 @@ function profileText(value, maximum, label) {
   return text;
 }
 
+async function newbieAgreement(context, visitor) {
+  const contentSha256 = await sha256Hex(JSON.stringify(NEWBIE_AGREEMENT));
+  const acceptance = await database(context)
+    .prepare(
+      "SELECT signer_name AS signerName,accepted_at AS acceptedAt,review_status AS reviewStatus,reviewed_at AS reviewedAt,review_note AS reviewNote " +
+      "FROM newbie_agreement_acceptances " +
+      "WHERE email=? AND agreement_version=? AND content_sha256=?",
+    )
+    .bind(visitor.email, NEWBIE_AGREEMENT.version, contentSha256)
+    .first();
+  return {
+    ...NEWBIE_AGREEMENT,
+    accepted: Boolean(acceptance),
+    approved: acceptance?.reviewStatus === "approved",
+    signerName: acceptance?.signerName || "",
+    acceptedAt: acceptance?.acceptedAt || null,
+    reviewStatus: acceptance?.reviewStatus || "unsigned",
+    reviewedAt: acceptance?.reviewedAt || null,
+    reviewNote: acceptance?.reviewStatus === "rejected" ? acceptance.reviewNote || "" : "",
+  };
+}
+
+async function requireNewbieAgreement(context, visitor) {
+  const agreement = await newbieAgreement(context, visitor);
+  if (!agreement.accepted) throw new PublicError("请先签署新手村保密协议。", 428);
+  if (agreement.reviewStatus === "pending") throw new PublicError("保密协议正在等待管理员审核。", 423);
+  if (!agreement.approved) throw new PublicError("保密协议尚未通过审核。", 403);
+  return agreement;
+}
+
 async function newbieDashboard(context, visitor) {
+  const agreement = await newbieAgreement(context, visitor);
+  if (!agreement.approved) {
+    return {
+      user: visitor,
+      agreement,
+      profile: null,
+      tasks: [],
+      progress: { completed: 0, total: NEWBIE_TASKS.length },
+    };
+  }
   const now = Date.now();
   await database(context)
     .prepare("INSERT OR IGNORE INTO newbie_profiles(email,created_at,updated_at) VALUES(?,?,?)")
@@ -345,6 +418,7 @@ async function newbieDashboard(context, visitor) {
   });
   return {
     user: visitor,
+    agreement,
     profile: {
       displayName: profile?.displayName || visitor.email.split("@", 1)[0],
       grade: profile?.grade || "",
@@ -371,8 +445,34 @@ async function newbieApi(context) {
     return json(await newbieDashboard(context, visitor));
   }
 
+  if (pathname === "/api/newbie/agreement" && request.method === "POST") {
+    sameOrigin(context);
+    await limit(context, "newbie-agreement", 12, 900);
+    const input = await readJson(request, 4_000);
+    const allowed = new Set(["agreementVersion", "signerName", "accepted"]);
+    if (!input || typeof input !== "object" || Array.isArray(input) ||
+        Object.keys(input).some((key) => !allowed.has(key)) || input.accepted !== true ||
+        input.agreementVersion !== NEWBIE_AGREEMENT.version) {
+      throw new PublicError("请完整阅读并同意当前版本的保密协议。", 400);
+    }
+    const signerName = profileText(input.signerName ?? "", 80, "签署姓名");
+    if (signerName.length < 2) throw new PublicError("请填写真实签署姓名。", 400);
+    const contentSha256 = await sha256Hex(JSON.stringify(NEWBIE_AGREEMENT));
+    await database(context)
+      .prepare(
+        "INSERT INTO newbie_agreement_acceptances(email,agreement_version,signer_name,content_sha256,accepted_at) VALUES(?,?,?,?,?) " +
+        "ON CONFLICT(email,agreement_version) DO UPDATE SET signer_name=excluded.signer_name,content_sha256=excluded.content_sha256," +
+        "accepted_at=excluded.accepted_at,review_status='pending',reviewed_by='',reviewed_at=NULL,review_note='' " +
+        "WHERE newbie_agreement_acceptances.review_status='rejected'",
+      )
+      .bind(visitor.email, NEWBIE_AGREEMENT.version, signerName, contentSha256, Date.now())
+      .run();
+    return json({ signed: true, archived: true, ...(await newbieDashboard(context, visitor)) });
+  }
+
   if (pathname === "/api/newbie/profile" && request.method === "PATCH") {
     sameOrigin(context);
+    await requireNewbieAgreement(context, visitor);
     await limit(context, "newbie-profile", 40, 900);
     const input = await readJson(request, 4_000);
     const allowed = new Set(["displayName", "grade", "major", "direction", "bio"]);
@@ -407,6 +507,7 @@ async function newbieApi(context) {
   const taskMatch = pathname.match(/^\/api\/newbie\/tasks\/([a-z0-9-]+)$/u);
   if (taskMatch && request.method === "POST") {
     sameOrigin(context);
+    await requireNewbieAgreement(context, visitor);
     await limit(context, "newbie-progress", 80, 900);
     const task = NEWBIE_TASKS.find((candidate) => candidate.id === taskMatch[1]);
     if (!task) throw new PublicError("任务不存在。", 404);
@@ -1467,7 +1568,54 @@ async function api(context) {
       await recordAnalyticsBestEffort(context, payload.events);
       return json({ accepted: true }, 202);
     }
-    if (path.startsWith("admin/")) await requireOwner(context);
+    const owner = path.startsWith("admin/") ? await requireOwner(context) : null;
+    if (path === "admin/newbie-agreements" && method === "GET") {
+      const status = new URL(request.url).searchParams.get("status") || "pending";
+      if (!["pending", "approved", "rejected", "all"].includes(status)) {
+        throw new PublicError("审核状态不正确。", 400);
+      }
+      const columns =
+        "email,agreement_version AS agreementVersion,signer_name AS signerName,content_sha256 AS contentSha256," +
+        "accepted_at AS acceptedAt,review_status AS reviewStatus,reviewed_by AS reviewedBy," +
+        "reviewed_at AS reviewedAt,review_note AS reviewNote";
+      const result = status === "all"
+        ? await database(context)
+          .prepare(`SELECT ${columns} FROM newbie_agreement_acceptances ORDER BY accepted_at DESC LIMIT 200`)
+          .all()
+        : await database(context)
+          .prepare(`SELECT ${columns} FROM newbie_agreement_acceptances WHERE review_status=? ORDER BY accepted_at ASC LIMIT 200`)
+          .bind(status)
+          .all();
+      return json({ agreement: NEWBIE_AGREEMENT, records: result.results || [] });
+    }
+    if (path === "admin/newbie-agreements/review" && method === "POST") {
+      await limit(context, "newbie-agreement-review", 120, 900);
+      const input = await readJson(request, 4_000);
+      const allowed = new Set(["email", "agreementVersion", "reviewStatus", "reviewNote"]);
+      if (!input || typeof input !== "object" || Array.isArray(input) ||
+          Object.keys(input).some((key) => !allowed.has(key))) {
+        throw new PublicError("审核内容不正确。", 400);
+      }
+      const email = normalizeCampusEmail(input.email);
+      const reviewStatus = typeof input.reviewStatus === "string" ? input.reviewStatus : "";
+      const reviewNote = profileText(input.reviewNote ?? "", 500, "审核备注");
+      if (!email || input.agreementVersion !== NEWBIE_AGREEMENT.version ||
+          !["approved", "rejected"].includes(reviewStatus)) {
+        throw new PublicError("审核内容不正确。", 400);
+      }
+      if (reviewStatus === "rejected" && !reviewNote) {
+        throw new PublicError("驳回时请填写原因。", 400);
+      }
+      const result = await database(context)
+        .prepare(
+          "UPDATE newbie_agreement_acceptances SET review_status=?,reviewed_by=?,reviewed_at=?,review_note=? " +
+          "WHERE email=? AND agreement_version=? AND review_status='pending'",
+        )
+        .bind(reviewStatus, owner.email, Date.now(), reviewNote, email, NEWBIE_AGREEMENT.version)
+        .run();
+      if (!result.meta.changes) throw new PublicError("记录不存在或已经审核，请刷新后重试。", 409);
+      return json({ saved: true, reviewStatus });
+    }
     if (path === "chat" && method === "POST") {
       const payload = parseChatPayload(await readJson(request, 80_000));
       const last = payload.messages.at(-1);
