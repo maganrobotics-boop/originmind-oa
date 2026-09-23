@@ -425,6 +425,17 @@ let conversations = [];
 let activeConversationId = "";
 let submittedQuestionCount = 0;
 
+function launchPromptFromUrl() {
+  const params = new URLSearchParams(window.location.search);
+  const prompt = String(params.get("prompt") || "").trim();
+  if (!prompt || prompt.length > 500 || activeConversationId) return;
+  promptInput.value = prompt;
+  promptInput.placeholder = params.get("ta") === "1" ? "向实验室 AI 助教提问" : promptInput.placeholder;
+  autoResize();
+  updateSendState();
+  window.setTimeout(() => promptInput.focus(), 120);
+}
+
 function showToast(message) {
   toast.textContent = message;
   toast.classList.add("show");
@@ -967,6 +978,7 @@ document.addEventListener("keydown", (event) => { if (event.key === "Escape" && 
 
 bindSuggestions();
 restoreConversation();
+launchPromptFromUrl();
 refreshSuggestions();
 refreshStatus();
 refreshVisitorStatus();
