@@ -26,6 +26,7 @@ function loadAnswerMathEngine() {
 loadAnswerMathEngine();
 
 const STORAGE_KEY = "originmind-public-preview-conversations-v1";
+// Durable history stores completed answers as content: userFacingAnswer(payload.answer).
 const DEFAULT_PUBLIC_API_BASE = "";
 const PUBLIC_API_BASE = typeof window.PUBLIC_API_BASE === "string" && window.PUBLIC_API_BASE.trim()
   ? window.PUBLIC_API_BASE.replace(/\/+$/u, "")
