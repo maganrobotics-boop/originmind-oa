@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>机器人技术与应用课程 | OriginMind</title>
+    <style>
+      :root {
+        color-scheme: light;
+        --ink: #172033;
+        --muted: #667085;
+        --line: #d9e2f1;
+        --soft: #f5f8fc;
+        --brand: #2563eb;
+        --brand-strong: #1d4ed8;
+        --green: #0f8a65;
+        --orange: #b45309;
+        font-family:
+          Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+          "Microsoft YaHei", sans-serif;
+      }
+
+      * {
+        box-sizing: border-box;
+      }
+
+      body {
+        margin: 0;
+        background: #ffffff;
+        color: var(--ink);
+        line-height: 1.65;
+      }
+
+      a {
+        color: inherit;
+      }
+
+      .hero {
+        background:
+          linear-gradient(135deg, rgba(37, 99, 235, 0.12), rgba(15, 138, 101, 0.08)),
+          #f8fbff;
+        border-bottom: 1px solid var(--line);
+      }
+
+      .wrap {
+        max-width: 1120px;
+        margin: 0 auto;
+        padding: 0 22px;
+      }
+
+      .hero-inner {
+        display: grid;
+        grid-template-columns: minmax(0, 1.3fr) minmax(280px, 0.7fr);
+        gap: 34px;
+        align-items: center;
+        min-height: 520px;
+        padding: 62px 22px;
+      }
+
+      .eyebrow {
+        color: var(--brand-strong);
+        font-size: 14px;
+        font-weight: 800;
+        letter-spacing: 0.08em;
+        margin: 0 0 10px;
+        text-transform: uppercase;
+      }
+
+      h1 {
+        font-size: clamp(34px, 6vw, 64px);
+        line-height: 1.08;
+        letter-spacing: 0;
+        margin: 0;
+      }
+
+      .lead {
+        color: #344054;
+        font-size: 20px;
+        max-width: 760px;
+        margin: 22px 0 0;
+      }
+
+      .actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        margin-top: 30px;
+      }
+
+      .button {
+        align-items: center;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        display: inline-flex;
+        font-weight: 800;
+        justify-content: center;
+        min-height: 44px;
+        padding: 10px 16px;
+        text-decoration: none;
+      }
+
+      .button.primary {
+        background: var(--brand);
+        border-color: var(--brand);
+        color: #ffffff;
+      }
+
+      .hero-panel {
+        background: #ffffff;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 22px;
+        box-shadow: 0 20px 48px rgba(23, 32, 51, 0.08);
+      }
+
+      .hero-panel h2,
+      section h2 {
+        font-size: 26px;
+        line-height: 1.2;
+        margin: 0 0 16px;
+      }
+
+      .ai-flow {
+        display: grid;
+        gap: 12px;
+        margin-top: 18px;
+      }
+
+      .ai-step {
+        border-left: 4px solid var(--brand);
+        background: var(--soft);
+        border-radius: 8px;
+        padding: 12px 14px;
+      }
+
+      .ai-step strong {
+        display: block;
+      }
+
+      main {
+        padding: 44px 0 70px;
+      }
+
+      section {
+        margin-top: 46px;
+      }
+
+      .grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 16px;
+      }
+
+      .grid.two {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .card {
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 20px;
+        background: #ffffff;
+      }
+
+      .card h3 {
+        font-size: 19px;
+        line-height: 1.35;
+        margin: 0 0 10px;
+      }
+
+      .card p,
+      .card li {
+        color: var(--muted);
+      }
+
+      ul {
+        margin: 10px 0 0;
+        padding-left: 20px;
+      }
+
+      .pill-row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 14px;
+      }
+
+      .pill {
+        background: #eef4ff;
+        border: 1px solid #c7d7fe;
+        border-radius: 999px;
+        color: #1e40af;
+        font-size: 13px;
+        font-weight: 700;
+        padding: 5px 10px;
+      }
+
+      .level {
+        display: grid;
+        grid-template-columns: 78px minmax(0, 1fr);
+        gap: 12px;
+        align-items: start;
+        border-top: 1px solid var(--line);
+        padding: 16px 0;
+      }
+
+      .level:first-child {
+        border-top: 0;
+      }
+
+      .badge {
+        background: #ecfdf3;
+        border: 1px solid #abefc6;
+        border-radius: 8px;
+        color: var(--green);
+        display: inline-flex;
+        font-weight: 900;
+        justify-content: center;
+        padding: 7px 9px;
+      }
+
+      .rubric {
+        display: grid;
+        grid-template-columns: repeat(5, minmax(0, 1fr));
+        gap: 10px;
+      }
+
+      .score {
+        background: var(--soft);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 14px;
+      }
+
+      .score strong {
+        color: var(--orange);
+        display: block;
+        font-size: 22px;
+      }
+
+      .callout {
+        background: #fff7ed;
+        border: 1px solid #fed7aa;
+        border-radius: 8px;
+        padding: 18px;
+      }
+
+      @media (max-width: 860px) {
+        .hero-inner,
+        .grid,
+        .grid.two,
+        .rubric {
+          grid-template-columns: 1fr;
+        }
+
+        .hero-inner {
+          min-height: 0;
+          padding-top: 42px;
+          padding-bottom: 42px;
+        }
+      }
+    </style>
+  </head>
+  <body>
+    <header class="hero">
+      <div class="wrap hero-inner">
+        <div>
+          <p class="eyebrow">OriginMind Robotics Course</p>
+          <h1>真实任务驱动的机器人技术与应用</h1>
+          <p class="lead">
+            AI 教师讲理论，AI 助教带项目，学生从第一个可运行任务开始，逐步建立机器人系统工程能力。
+          </p>
+          <div class="actions">
+            <a class="button primary" href="/orientation">进入新手村</a>
+            <a class="button" href="/">打开实验室大模型</a>
+          </div>
+        </div>
+        <aside class="hero-panel" aria-label="AI 教学闭环">
+          <h2>全程 AI 陪跑</h2>
+          <div class="ai-flow">
+            <div class="ai-step">
+              <strong>AI 教师</strong>
+              把理论讲成任务前置知识：概念、公式、工程边界和常见误区。
+            </div>
+            <div class="ai-step">
+              <strong>AI 项目助教</strong>
+              帮学生拆任务、补知识、追问方案，随时可以被叫出来。
+            </div>
+            <div class="ai-step">
+              <strong>AI 评审老师</strong>
+              按项目证据评价：能否运行、是否解释失败、是否形成复盘。
+            </div>
+          </div>
+        </aside>
+      </div>
+    </header>
+
+    <main class="wrap">
+      <section>
+        <h2>课程定位</h2>
+        <div class="grid two">
+          <div class="card">
+            <h3>不是只讲知识点</h3>
+            <p>
+              每个理论都挂到真实项目：运动学服务于路径跟踪，视觉服务于识别，SLAM 服务于巡检，机械臂知识服务于抓取任务。
+            </p>
+          </div>
+          <div class="card">
+            <h3>不是只做演示</h3>
+            <p>
+              学生需要提交项目卡、参数记录、失败分析、阶段展示和可复现证据。AI 可以帮忙，但不能替代学生判断。
+            </p>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>五个真实项目</h2>
+        <div class="grid">
+          <article class="card">
+            <h3>校园 / 实验室巡检小车</h3>
+            <p>从“能走”到“走得准”，训练差速运动学、编码器、PID、里程计误差。</p>
+            <ul>
+              <li>项目卡与任务边界</li>
+              <li>路径跟踪与 PID 调参</li>
+              <li>误差来源分析</li>
+            </ul>
+            <div class="pill-row">
+              <span class="pill">运动控制</span><span class="pill">PID</span><span class="pill">里程计</span>
+            </div>
+          </article>
+          <article class="card">
+            <h3>机器人看懂工作台</h3>
+            <p>围绕工位识别任务，理解相机、RGB-D、点云、目标检测和传感器选型。</p>
+            <ul>
+              <li>传感器选择表</li>
+              <li>识别结果展示</li>
+              <li>失败样例归因</li>
+            </ul>
+            <div class="pill-row">
+              <span class="pill">视觉感知</span><span class="pill">RGB-D</span><span class="pill">点云</span>
+            </div>
+          </article>
+          <article class="card">
+            <h3>矿井 / 楼道自主巡检机器人</h3>
+            <p>在结构化但不稳定的环境里，学习 LiDAR、IMU、SLAM、路径规划和定位恢复。</p>
+            <ul>
+              <li>地图与巡检路线</li>
+              <li>定位退化处理</li>
+              <li>安全巡检报告</li>
+            </ul>
+            <div class="pill-row">
+              <span class="pill">SLAM</span><span class="pill">规划</span><span class="pill">安全</span>
+            </div>
+          </article>
+          <article class="card">
+            <h3>机械臂识别与抓取</h3>
+            <p>从自由度、工作空间、运动学、轨迹到夹爪，完成一次可解释的抓取流程。</p>
+            <ul>
+              <li>工作空间分析</li>
+              <li>抓取流程图</li>
+              <li>仿真或实机 demo</li>
+            </ul>
+            <div class="pill-row">
+              <span class="pill">机械臂</span><span class="pill">运动学</span><span class="pill">抓取</span>
+            </div>
+          </article>
+          <article class="card">
+            <h3>AI 机器人任务规划</h3>
+            <p>把大模型、具身智能、VLA、任务分解、人机交互和安全边界放进同一个项目。</p>
+            <ul>
+              <li>任务规划链路</li>
+              <li>人机协作流程</li>
+              <li>安全边界说明</li>
+            </ul>
+            <div class="pill-row">
+              <span class="pill">Embodied AI</span><span class="pill">VLA</span><span class="pill">HRI</span>
+            </div>
+          </article>
+          <article class="card">
+            <h3>个人项目延展</h3>
+            <p>学生可以把实验室方向、竞赛题目或企业真实问题转成课程项目，由助教协助拆解。</p>
+            <ul>
+              <li>需求澄清</li>
+              <li>里程碑设计</li>
+              <li>成果归档</li>
+            </ul>
+            <div class="pill-row">
+              <span class="pill">选题</span><span class="pill">复盘</span><span class="pill">展示</span>
+            </div>
+          </article>
+        </div>
+      </section>
+
+      <section>
+        <h2>等级系统</h2>
+        <div class="card">
+          <div class="level">
+            <span class="badge">L0</span>
+            <div><strong>准入与安全</strong><br />完成注册、保密协议、方向选择和基础能力自评。</div>
+          </div>
+          <div class="level">
+            <span class="badge">L1</span>
+            <div><strong>能读懂任务</strong><br />能说清项目目标、输入输出、约束和验收标准。</div>
+          </div>
+          <div class="level">
+            <span class="badge">L2</span>
+            <div><strong>能跑通最小版本</strong><br />完成仿真或实机最小 demo，留下参数和证据。</div>
+          </div>
+          <div class="level">
+            <span class="badge">L3</span>
+            <div><strong>能解释失败</strong><br />识别误差、延迟、环境变化、模型不稳等问题，并提出改进。</div>
+          </div>
+          <div class="level">
+            <span class="badge">L4</span>
+            <div><strong>能独立迭代</strong><br />按计划推进实验，形成稳定记录和阶段性展示。</div>
+          </div>
+          <div class="level">
+            <span class="badge">L5</span>
+            <div><strong>能带别人做项目</strong><br />能把经验整理成教程、模板、检查清单或助教知识库。</div>
+          </div>
+        </div>
+      </section>
+
+      <section>
+        <h2>评价方式</h2>
+        <div class="rubric">
+          <div class="score"><strong>25%</strong>理论理解</div>
+          <div class="score"><strong>20%</strong>方案设计</div>
+          <div class="score"><strong>25%</strong>实验证据</div>
+          <div class="score"><strong>20%</strong>失败分析</div>
+          <div class="score"><strong>10%</strong>展示表达</div>
+        </div>
+      </section>
+
+      <section class="callout">
+        <h2>AI 使用边界</h2>
+        <p>
+          AI 可以解释理论、拆任务、生成清单、检查报告和追问方案；学生需要自己确认事实、运行实验、记录数据、判断风险。
+          课程看重的不是“答案像不像”，而是项目是否能被复现、失败是否能被解释、下一步是否能被推进。
+        </p>
+      </section>
+    </main>
+  </body>
+</html>
