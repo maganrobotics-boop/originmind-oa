@@ -98,9 +98,6 @@ export function validateReleaseEnvironment(environment = process.env) {
   if (emailCodeWebhookToken && (emailCodeWebhookToken.length < 32 || emailCodeWebhookToken.length > 1_024)) {
     throw new Error("EMAIL_CODE_WEBHOOK_TOKEN is invalid when supplied");
   }
-  if (emailCodeWebhookUrl && !emailCodeWebhookToken) {
-    throw new Error("EMAIL_CODE_WEBHOOK_TOKEN is required when EMAIL_CODE_WEBHOOK_URL is supplied");
-  }
   if (!emailCodeWebhookUrl && emailCodeWebhookToken) {
     throw new Error("EMAIL_CODE_WEBHOOK_URL is required when EMAIL_CODE_WEBHOOK_TOKEN is supplied");
   }
@@ -501,3 +498,4 @@ export async function seedAdmin(configPath, password, secrets) {
     await rm(directory, { recursive: true, force: true });
   }
 }
+
