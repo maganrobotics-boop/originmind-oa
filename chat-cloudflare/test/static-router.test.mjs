@@ -28,6 +28,8 @@ function mockEnvironment() {
           });
           const known = new Set([
             "/index.html",
+            "/orientation.html",
+            "/robotics-course.html",
             "/newbie-village.html",
             "/newbie-village.js",
             "/newbie-village-admin.html",
@@ -77,6 +79,8 @@ test("path classifier is exact and does not turn unknown paths into the SPA", ()
   assert.equal(classifyPath("/manage/extra"), RouteKind.NOT_FOUND);
   assert.equal(classifyPath("/%6Danage"), RouteKind.NOT_FOUND);
   assert.equal(classifyPath("/index.html"), RouteKind.REDIRECT_HOME);
+  assert.equal(classifyPath("/orientation.html"), RouteKind.ASSET);
+  assert.equal(classifyPath("/robotics-course.html"), RouteKind.ASSET);
   assert.equal(classifyPath("/newbie-village.html"), RouteKind.ASSET);
   assert.equal(classifyPath("/newbie-village.js"), RouteKind.ASSET);
   assert.equal(classifyPath("/newbie-village-admin.html"), RouteKind.ASSET);
@@ -91,6 +95,30 @@ test("path classifier is exact and does not turn unknown paths into the SPA", ()
   assert.equal(classifyPath("/service-worker.js"), RouteKind.ASSET);
   assert.equal(classifyPath("/zip-import-addon.js"), RouteKind.ASSET);
   assert.equal(classifyPath("/unknown"), RouteKind.NOT_FOUND);
+});
+
+test("orientation page is served as a standalone non-cacheable document", async () => {
+  const { env, calls } = mockEnvironment();
+  const response = await routeStaticRequest(
+    new Request("https://chat.omindos.ai/orientation"),
+    env,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "asset:/orientation.html");
+  assertHardened(response);
+  assert.deepEqual(calls.map((call) => call.pathname), ["/orientation.html"]);
+});
+
+test("robotics course page is served as a standalone non-cacheable document", async () => {
+  const { env, calls } = mockEnvironment();
+  const response = await routeStaticRequest(
+    new Request("https://chat.omindos.ai/robotics-course"),
+    env,
+  );
+  assert.equal(response.status, 200);
+  assert.equal(await response.text(), "asset:/robotics-course.html");
+  assertHardened(response);
+  assert.deepEqual(calls.map((call) => call.pathname), ["/robotics-course.html"]);
 });
 
 test("newbie village page is served as a standalone non-cacheable document", async () => {
@@ -224,6 +252,10 @@ test("unsafe methods cannot retrieve the shell or static assets", async () => {
     "/technology/",
     "/manage",
     "/manage/",
+    "/orientation",
+    "/robotics-course",
+    "/orientation.html",
+    "/robotics-course.html",
     "/newbie-village",
     "/newbie-village/admin",
     "/newbie-village.js",
