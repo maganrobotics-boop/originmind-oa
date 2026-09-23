@@ -36,6 +36,7 @@ jobs:
       CHAT_ADMIN_EMAIL: ${{ vars.CHAT_ADMIN_EMAIL || 'maganrobotics@gmail.com' }}
       CHAT_STATIC_RELEASE_CONFIRM: ${{ inputs.confirmation }}
       CHAT_RELEASE_ID: ${{ github.sha }}-${{ github.run_attempt }}
+      EMAIL_CODE_WEBHOOK_URL: ${{ vars.EMAIL_CODE_WEBHOOK_URL }}
       PUBLIC_ALLOWED_ORIGINS: https://maganrobotics-boop.github.io
       WRANGLER_SEND_METRICS: 'false'
       CI: '1'

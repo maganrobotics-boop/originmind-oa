@@ -35,6 +35,7 @@ delete process.env.PUBLIC_LAB_AI_SERVICE_TOKEN;
 delete process.env.CHAT_ADMIN_PASSWORD;
 delete process.env.CHAT_APP_ENCRYPTION_KEY;
 delete process.env.CHAT_RATE_LIMIT_HMAC_KEY;
+delete process.env.EMAIL_CODE_WEBHOOK_TOKEN;
 const secretValues = [
   rawPublicToken,
   rawPublicToken.trim(),
@@ -43,6 +44,7 @@ const secretValues = [
   environment.encryptionKey,
   environment.rateLimitKey,
   environment.adminPassword,
+  environment.emailCodeWebhookToken,
 ].filter(Boolean);
 const releaseRoot = join(CHAT_ROOT, ".wrangler", "releases", environment.releaseId);
 const evidenceRoot = join(releaseRoot, "evidence");
@@ -144,6 +146,7 @@ try {
     origin: stagingOrigin,
     production: false,
     releaseId: environment.releaseId,
+    emailCodeWebhookUrl: environment.emailCodeWebhookUrl,
     publicAllowedOrigins: process.env.PUBLIC_ALLOWED_ORIGINS || "https://maganrobotics-boop.github.io",
   });
   const productionConfig = buildWranglerConfig({
@@ -155,6 +158,7 @@ try {
     origin: PRODUCTION_ORIGIN,
     production: true,
     releaseId: environment.releaseId,
+    emailCodeWebhookUrl: environment.emailCodeWebhookUrl,
     publicAllowedOrigins: process.env.PUBLIC_ALLOWED_ORIGINS || "https://maganrobotics-boop.github.io",
   });
   await writeJson(stagingConfigPath, stagingConfig);
@@ -189,6 +193,7 @@ try {
   if (rateLimitKey) secretValues.push(rateLimitKey);
   const workerSecrets = {
     PUBLIC_LAB_AI_SERVICE_TOKEN: environment.publicToken,
+    ...(environment.emailCodeWebhookToken ? { EMAIL_CODE_WEBHOOK_TOKEN: environment.emailCodeWebhookToken } : {}),
     ...(appEncryptionKey ? { APP_ENCRYPTION_KEY: appEncryptionKey } : {}),
     ...(rateLimitKey ? { RATE_LIMIT_HMAC_KEY: rateLimitKey } : {}),
   };

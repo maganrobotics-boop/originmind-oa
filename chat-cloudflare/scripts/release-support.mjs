@@ -77,6 +77,8 @@ export function validateReleaseEnvironment(environment = process.env) {
   const publicToken = normalizePublicServiceToken(environment.PUBLIC_LAB_AI_SERVICE_TOKEN, apiToken);
   const encryptionKey = (environment.CHAT_APP_ENCRYPTION_KEY || "").trim();
   const rateLimitKey = (environment.CHAT_RATE_LIMIT_HMAC_KEY || "").trim();
+  const emailCodeWebhookUrl = (environment.EMAIL_CODE_WEBHOOK_URL || "").trim();
+  const emailCodeWebhookToken = (environment.EMAIL_CODE_WEBHOOK_TOKEN || "").trim();
   const adminPassword = environment.CHAT_ADMIN_PASSWORD || "";
   if (encryptionKey && (encryptionKey.length < 40 || encryptionKey.length > 1_024)) {
     throw new Error("CHAT_APP_ENCRYPTION_KEY is invalid when supplied");
@@ -87,7 +89,22 @@ export function validateReleaseEnvironment(environment = process.env) {
   if (adminPassword && (adminPassword.length < 12 || adminPassword.length > 256)) {
     throw new Error("CHAT_ADMIN_PASSWORD is invalid when supplied");
   }
-  const suppliedCredentials = [publicToken, encryptionKey, rateLimitKey, adminPassword].filter(Boolean);
+  if (emailCodeWebhookUrl) {
+    const webhookUrl = new URL(emailCodeWebhookUrl);
+    if (webhookUrl.protocol !== "https:" || webhookUrl.href !== emailCodeWebhookUrl) {
+      throw new Error("EMAIL_CODE_WEBHOOK_URL must be an exact HTTPS URL when supplied");
+    }
+  }
+  if (emailCodeWebhookToken && (emailCodeWebhookToken.length < 32 || emailCodeWebhookToken.length > 1_024)) {
+    throw new Error("EMAIL_CODE_WEBHOOK_TOKEN is invalid when supplied");
+  }
+  if (emailCodeWebhookUrl && !emailCodeWebhookToken) {
+    throw new Error("EMAIL_CODE_WEBHOOK_TOKEN is required when EMAIL_CODE_WEBHOOK_URL is supplied");
+  }
+  if (!emailCodeWebhookUrl && emailCodeWebhookToken) {
+    throw new Error("EMAIL_CODE_WEBHOOK_URL is required when EMAIL_CODE_WEBHOOK_TOKEN is supplied");
+  }
+  const suppliedCredentials = [publicToken, encryptionKey, rateLimitKey, adminPassword, emailCodeWebhookToken].filter(Boolean);
   if (new Set(suppliedCredentials).size !== suppliedCredentials.length) {
     throw new Error("Chat credentials must be independent values");
   }
@@ -105,6 +122,8 @@ export function validateReleaseEnvironment(environment = process.env) {
     publicToken,
     encryptionKey,
     rateLimitKey,
+    emailCodeWebhookUrl,
+    emailCodeWebhookToken,
     adminPassword,
     expectedOriginIpv4,
     releaseId,
@@ -293,6 +312,7 @@ export function buildWranglerConfig({
   origin,
   production,
   releaseId,
+  emailCodeWebhookUrl = "",
   publicAllowedOrigins = "",
 }) {
   if (
@@ -335,6 +355,8 @@ export function buildWranglerConfig({
     vars: {
       APP_ORIGIN: origin,
       ADMIN_EMAIL: adminEmail,
+      EMAIL_CODE_FROM: "magan@sztu.edu.cn",
+      ...(emailCodeWebhookUrl ? { EMAIL_CODE_WEBHOOK_URL: emailCodeWebhookUrl } : {}),
       RELEASE_ID: releaseId,
       ...(publicAllowedOrigins ? { PUBLIC_ALLOWED_ORIGINS: publicAllowedOrigins } : {}),
     },

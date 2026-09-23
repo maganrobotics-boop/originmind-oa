@@ -47,7 +47,14 @@ function validateEnvironment() {
   if (!EMAIL_PATTERN.test(adminEmail)) throw new Error("CHAT_ADMIN_EMAIL is invalid");
   const oaWorkerName = requiredText("OA_PRODUCTION_WORKER_NAME", 1, 63).trim().toLowerCase();
   if (oaWorkerName !== OA_WORKER_NAME) throw new Error(`OA_PRODUCTION_WORKER_NAME must equal ${OA_WORKER_NAME}`);
-  return { accountId, adminEmail, apiToken, oaWorkerName, releaseId };
+  const emailCodeWebhookUrl = (process.env.EMAIL_CODE_WEBHOOK_URL || "").trim();
+  if (emailCodeWebhookUrl) {
+    const webhookUrl = new URL(emailCodeWebhookUrl);
+    if (webhookUrl.protocol !== "https:" || webhookUrl.href !== emailCodeWebhookUrl) {
+      throw new Error("EMAIL_CODE_WEBHOOK_URL must be an exact HTTPS URL when supplied");
+    }
+  }
+  return { accountId, adminEmail, apiToken, oaWorkerName, releaseId, emailCodeWebhookUrl };
 }
 
 function progress(message) {
@@ -95,6 +102,7 @@ const productionConfig = buildWranglerConfig({
   origin: PRODUCTION_ORIGIN,
   production: true,
   releaseId: environment.releaseId,
+  emailCodeWebhookUrl: environment.emailCodeWebhookUrl,
   publicAllowedOrigins: process.env.PUBLIC_ALLOWED_ORIGINS || "https://maganrobotics-boop.github.io",
 });
 delete productionConfig.routes;
