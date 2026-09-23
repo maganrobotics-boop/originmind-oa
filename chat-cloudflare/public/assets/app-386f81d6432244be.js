@@ -753,6 +753,7 @@ function messageActions() {
     <button class="message-action-button copy-answer" type="button" aria-label="复制回答" title="复制回答">${icons.file}</button>
     <button class="message-action-button copy-answer-link" type="button" aria-label="复制链接" title="复制链接">${icons.link || icons.chat}</button>
     <button class="message-action-button share-answer" type="button" aria-label="分享链接" title="分享链接">${icons.share || icons.chat}</button>
+    <span class="message-source-note">参考内部公开资料</span>
   </div>`;
 }
 
