@@ -93,7 +93,7 @@ import { circulationPeople, circulationPendingForEmail } from "@/lib/circulation
 
 type ApprovalType = "技术审核" | "采购审核" | "保密协议" | "劳务报酬" | "流转审批";
 type ApprovalStatus = "草稿" | "待审核" | "审批中" | "已通过" | "已退回" | "已撤回" | "已作废" | "已归档";
-type ViewKey = "chat" | "mail" | "dashboard" | "todos" | "project" | "requests" | "people" | "knowledge" | "rules" | "members" | "oem" | "notifications" | "profile";
+type ViewKey = "home" | "chat" | "mail" | "dashboard" | "todos" | "project" | "requests" | "people" | "knowledge" | "rules" | "members" | "oem" | "notifications" | "profile";
 
 type Approval = {
   id: string;
@@ -345,6 +345,7 @@ function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马�
     }
   };
   const workspaceItems: { key: ViewKey; label: string; icon: typeof HomeIcon }[] = [
+    { key: "home", label: "主页", icon: HomeIcon },
     { key: "chat", label: "聊天", icon: MessageCircle },
     { key: "people", label: "通讯录", icon: UsersRound },
     { key: "project", label: "管理台", icon: BriefcaseBusiness },
@@ -357,7 +358,7 @@ function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马�
     ...(isAdmin ? [{ key: "members" as ViewKey, label: "成员审核", icon: UsersRound }, { key: "notifications" as ViewKey, label: "飞书提醒", icon: MessageCircle }] : []),
   ];
   return <aside className="sidebar-shell">
-    <button type="button" className="brand-lockup" onClick={() => setActiveView("chat")} aria-label="返回聊天" title="返回聊天"><div className="brand-copy"><div className="brand-name">联合研发 OA</div><div className="brand-subtitle">{officialBrand}</div></div></button>
+    <button type="button" className="brand-lockup" onClick={() => setActiveView("home")} aria-label="返回主页" title="返回主页"><div className="brand-copy"><div className="brand-name">联合研发 OA</div><div className="brand-subtitle">{officialBrand}</div></div></button>
     <div className="oa-sidebar-scroll">
     <span className="sidebar-section-label">工作区</span>
     <nav className="sidebar-nav" aria-label="核心工作区">{workspaceItems.map(({ key, label, icon: Icon }) => <button key={key} className={`sidebar-nav-item ${activeView === key ? "active" : ""}`} onClick={() => setActiveView(key)}><Icon className="size-[17px]" /><span>{label}</span></button>)}</nav>
@@ -761,6 +762,54 @@ function PeopleView({ currentUser, canManageDepartments = false }: { currentUser
     {loading ? <div className="people-loading"><Clock3 className="size-5" />正在加载成员目录…</div> : error ? <div className="empty-state"><UsersRound className="size-6" /><p>{error}</p></div> : visiblePeople.length === 0 ? <div className="empty-state"><UsersRound className="size-6" /><p>当前部门暂无可见成员</p></div> : <div className="people-grid">{visiblePeople.map((person) => <article className="person-card" key={person.email}><div className="person-card-head"><PersonAvatar person={person} onClick={() => openProfile(person)} /><div className="person-card-identity"><button type="button" className="person-name" onClick={() => openProfile(person)}>{person.fullName}</button><span className="person-role">{roleLabel(person)}</span><span className={`person-status ${person.online ? "online" : ""}`}><i />{formatLastSeen(person)}</span></div></div><div className="person-card-profile"><span>{profileValue(person, "department", currentEmail, "未公开部门")}</span><span>{profileValue(person, "position", currentEmail, "未填写负责方向")}</span></div>{canManageDepartments && !person.id.startsWith("account:") && <NativeSelect value={person.departmentId || ""} onChange={(event) => void assignDepartment(person, event.target.value)} aria-label={`设置${person.fullName}的主部门`} disabled={assigningMemberId === person.id}><NativeSelectOption value="">选择主部门</NativeSelectOption>{departments.map((department) => <NativeSelectOption key={department.id} value={department.id}>{department.name}</NativeSelectOption>)}</NativeSelect>}<div className="person-card-actions"><button type="button" onClick={() => openProfile(person)}><UserRound className="size-3.5" />查看资料</button>{person.email !== currentEmail && person.ndaCompleted && <button type="button" onClick={() => openChat(person)}><MessageCircle className="size-3.5" />私聊</button>}</div></article>)}</div>}
     <ProfileDialog person={selectedPerson} open={profileOpen} currentEmail={currentEmail} onOpenChange={setProfileOpen} onSaved={updatePerson} onChat={openChat} /><ChatDialog key={chatPerson?.email || "people-chat-dialog"} person={chatPerson} currentPerson={self} open={Boolean(chatPerson)} currentEmail={currentEmail} onOpenChange={(open) => { if (!open) setChatPerson(null); }} />
   </div>;
+}
+
+function StudentHomeView({ session, onNavigate, onOpenNewRequest }: { session: SessionInfo; onNavigate: (view: ViewKey) => void; onOpenNewRequest: () => void }) {
+  const displayName = session.user?.displayName || "同学";
+  const role = sessionRoleLabel(session.role, Boolean(session.isAdmin));
+  const isStudent = !session.isAdmin && session.role !== "project_owner" && session.role !== "technical_advisor" && session.role !== "finance_owner";
+  const starterTasks = [
+    { title: "完善基本情况", description: "补充专业、年级、联系方式、兴趣方向和可投入时间。", action: "填写资料", icon: UserRound, done: false, onClick: () => onNavigate("profile") },
+    { title: "阅读项目章程", description: "先了解资料边界、提交规范、周报和成果归档方式。", action: "查看指南", icon: BookOpen, done: false, href: "/guide" },
+    { title: "使用 AI 助手提第一个问题", description: "从公开介绍、研究方向或当前项目切入，熟悉实验室大模型。", action: "打开 AI", icon: Bot, done: false, onClick: () => onNavigate("knowledge") },
+    { title: "选择一个试用方向", description: "可从机器人系统、感知、运动控制、导航、具身智能应用中选择。", action: "去管理台", icon: BriefcaseBusiness, done: false, onClick: () => onNavigate("project") },
+    { title: "提交第一次工作记录", description: "完成学习笔记、资料整理或小任务后，用 OA 留下正式记录。", action: "新建审核", icon: ClipboardCheck, done: false, onClick: onOpenNewRequest },
+  ];
+  return (
+    <div className="student-home">
+      <section className="page-heading dashboard-heading">
+        <div>
+          <div className="eyebrow"><span className="eyebrow-line" />实习学生工作台</div>
+          <h1>{displayName}，先从这几件事开始</h1>
+          <p>{isStudent ? "你现在按实习学生身份进入。系统会先带你完成资料、规范、AI 助手和试用任务，再逐步进入正式项目。" : `当前身份：${role}。这里保留学生入口视角，便于你查看新成员 onboarding。`}</p>
+        </div>
+        <div className="heading-actions">
+          <button className="secondary-action" onClick={() => onNavigate("knowledge")}><Bot className="size-4" />进入 AI 助手</button>
+          <Button className="primary-button new-button" onClick={onOpenNewRequest}><Plus className="size-4" />新建记录</Button>
+        </div>
+      </section>
+      <div className="oa-guide-banner">
+        <div><strong>准入已完成，可以使用内部工作区。</strong><p>游客只能看公开问答；登录并签署保密协议后，才能看到个人主页、任务、上传和内部资料。</p></div>
+        <a href="/guide">查看项目章程 <ArrowUpRight className="size-4" /></a>
+      </div>
+      <section className="stats-grid">
+        <button type="button" className="stat-card stat-card-action" onClick={() => onNavigate("profile")}><div className="stat-label">我的身份</div><div className="stat-value">{isStudent ? "实习" : "成员"}<span>{role}</span></div><div className="stat-foot"><span className="stat-icon"><UserRound className="size-4" /></span><span>完善基本情况和公开范围</span><ArrowUpRight className="stat-action-arrow size-4" /></div></button>
+        <button type="button" className="stat-card stat-card-action stat-card-approved" onClick={() => onNavigate("knowledge")}><div className="stat-label">AI 助手</div><div className="stat-value">公开+内部<span>问答</span></div><div className="stat-foot positive"><span className="stat-icon"><Bot className="size-4" /></span><span>提问、整理资料、生成草稿</span><ArrowUpRight className="stat-action-arrow size-4" /></div></button>
+        <button type="button" className="stat-card stat-card-action stat-card-people" onClick={() => onNavigate("people")}><div className="stat-label">协作网络</div><div className="stat-value">导师<span>成员</span></div><div className="stat-foot"><span className="stat-icon"><UsersRound className="size-4" /></span><span>查看团队成员与联系方式</span><ArrowUpRight className="stat-action-arrow size-4" /></div></button>
+        <button type="button" className="stat-card stat-card-highlight stat-card-action" onClick={() => onNavigate("project")}><div className="stat-label">项目推进</div><div className="stat-value">任务<span>记录</span></div><div className="stat-foot"><span className="stat-icon"><ListTodo className="size-4" /></span><span>从试用任务进入正式项目</span><ArrowUpRight className="stat-action-arrow size-4" /></div></button>
+      </section>
+      <section className="flow-card">
+        <div className="flow-card-head"><div><div className="eyebrow"><span className="eyebrow-line" />新手任务</div><h2>先把入口、规范和第一个任务跑通</h2></div><Badge variant="outline" className="rule-badge"><ShieldCheck className="size-3.5" />保密准入已完成</Badge></div>
+        <div className="approval-flow-grid">
+          {starterTasks.map((task, index) => {
+            const Icon = task.icon;
+            const content = <><div className="approval-flow-card-head"><strong>{task.title}</strong><span>{String(index + 1).padStart(2, "0")}</span></div><p>{task.description}</p><div className="stat-foot"><span className="stat-icon"><Icon className="size-4" /></span><span>{task.action}</span><ArrowUpRight className="stat-action-arrow size-4" /></div></>;
+            return task.href ? <a className="approval-flow-card" href={task.href} key={task.title}>{content}</a> : <button type="button" className="approval-flow-card stat-card-action" onClick={task.onClick} key={task.title}>{content}</button>;
+          })}
+        </div>
+      </section>
+    </div>
+  );
 }
 
 function ProfileSettingsView({ currentUser, currentRole, isAdmin = false, migrationExportEnabled = false, migrationUnfreezeEnabled = false, onIdentityChanged }: { currentUser?: SessionInfo["user"]; currentRole?: string | null; isAdmin?: boolean; migrationExportEnabled?: boolean; migrationUnfreezeEnabled?: boolean; onIdentityChanged: (fullName: string, avatarDataUrl: string) => void }) {
@@ -1481,7 +1530,7 @@ function NdaAdmissionGate({ session, onRefresh }: { session: SessionInfo; onRefr
   if (loading) return <div className="registration-shell"><div className="registration-card nda-gate-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><p className="registration-intro">正在核对{agreementTitle}状态…</p></div></div>;
   if (currentMemberNdaInLegacyReview) return <div className="registration-shell"><div className="registration-card nda-gate-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><div className="eyebrow"><span className="eyebrow-line" />流程状态需修复</div><h1>这份保密协议不应等待审核</h1><p className="registration-intro">当前版本应在本人签署后由系统直接归档。为避免把新协议误送入旧审批流程，请先撤回该记录，再按当前正文重新手写签署。</p><div className="registration-notice"><AlertTriangle className="size-4" /><span>项目负责人不能代为确认这份异常记录。</span></div><div className="nda-withdraw-box"><strong>撤回后重新签署</strong><Textarea value={withdrawReason} onChange={(event) => setWithdrawReason(event.target.value)} rows={2} placeholder="填写至少 2 个字的撤回原因" disabled={withdrawing} /><Button type="button" variant="outline" className="return-button" disabled={withdrawing || withdrawReason.trim().length < 2} onClick={() => void withdrawPendingNda()}><RotateCcw className="size-4" />{withdrawing ? "撤回中…" : "撤回异常记录"}</Button><small>原记录和操作轨迹会保留；撤回后可重新签署并直接归档。</small></div></div></div>;
   if (awaitingReview) return <div className="registration-shell"><div className="registration-card nda-gate-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><div className="eyebrow"><span className="eyebrow-line" />等待{reviewerLabel}确认</div><h1>{agreementTitle}已提交</h1><p className="registration-intro">{reviewerLabel}确认并归档后，你才能进入内部工作区；等待期间系统不会加载审批、成员或聊天数据。</p><div className="registration-notice"><Clock3 className="size-4" /><span>当前账户：{accountIdentityLabel(session.user) || "已登录账户"}</span></div><Button type="button" className="primary-button registration-button" onClick={onRefresh}>刷新审核状态</Button><div className="nda-withdraw-box"><strong>提交后发现需要修改？</strong><Textarea value={withdrawReason} onChange={(event) => setWithdrawReason(event.target.value)} rows={2} placeholder="填写至少 2 个字的撤回原因" disabled={withdrawing} /><Button type="button" variant="outline" className="return-button" disabled={withdrawing || withdrawReason.trim().length < 2} onClick={() => void withdrawPendingNda()}><RotateCcw className="size-4" />{withdrawing ? "撤回中…" : "撤回并重新签署"}</Button><small>撤回会保留原记录和操作轨迹，不会进入内部工作区。</small></div></div></div>;
-  if (showNdaTaskEntry) return <div className="registration-shell"><div className="registration-card nda-gate-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><div className="eyebrow"><span className="eyebrow-line" />{session.isAdmin ? "系统管理员待办" : isOwnerPledge ? "项目负责人待办" : "新成员待办"}</div><h1>完成{agreementTitle}后进入 OA</h1><p className="registration-intro">{session.isAdmin ? "你已具备系统管理员角色，必须先完成负责人专用承诺书。" : isOwnerPledge ? "你已具备项目负责人角色，必须先完成负责人专用承诺书。" : "成员注册已经审核通过。"} 请点击下面的高亮任务进入本人实名签署；归档前系统不会加载内部工作区数据。</p><div className="nda-taskbar" aria-label="待办任务"><div className="nda-taskbar-label"><span>待办任务</span><strong>1</strong></div><button type="button" className="nda-taskbar-item attention" onClick={() => setEnteredNdaForm(true)}><span className="nda-taskbar-icon"><ShieldCheck className="size-5" /></span><span className="nda-taskbar-copy"><strong>{isOwnerPledge ? "签署项目负责人保密承诺书" : "签署并归档保密协议"}</strong><small>点击进入本人实名签署</small></span><span className="nav-count nav-count-alert">1</span><ChevronRight className="size-4" /></button></div></div></div>;
+  if (showNdaTaskEntry) return <div className="registration-shell"><div className="registration-card nda-gate-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><div className="eyebrow"><span className="eyebrow-line" />{session.isAdmin ? "系统管理员待办" : isOwnerPledge ? "项目负责人待办" : "实习学生待办"}</div><h1>完成{agreementTitle}后进入个人主页</h1><p className="registration-intro">{session.isAdmin ? "你已具备系统管理员角色，必须先完成负责人专用承诺书。" : isOwnerPledge ? "你已具备项目负责人角色，必须先完成负责人专用承诺书。" : "飞书身份已确认，系统将按实习学生身份为你开通入口。"} 请点击下面的高亮任务进入本人实名签署；归档前系统不会加载内部工作区、内部知识库和项目任务。</p><div className="nda-taskbar" aria-label="待办任务"><div className="nda-taskbar-label"><span>待办任务</span><strong>1</strong></div><button type="button" className="nda-taskbar-item attention" onClick={() => setEnteredNdaForm(true)}><span className="nda-taskbar-icon"><ShieldCheck className="size-5" /></span><span className="nda-taskbar-copy"><strong>{isOwnerPledge ? "签署项目负责人保密承诺书" : "签署实习学生保密协议"}</strong><small>点击进入本人实名签署</small></span><span className="nav-count nav-count-alert">1</span><ChevronRight className="size-4" /></button></div></div></div>;
   const isNdaRevision = existingApproval?.status === "已退回" || existingApproval?.status === "已撤回";
   return <div className="registration-shell nda-admission-shell"><div className="registration-card nda-admission-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><div className="eyebrow"><span className="eyebrow-line" />内部资料准入</div><h1>{isNdaRevision ? `修改并重新签署${agreementTitle}` : upgradingLegacyNda ? "角色要求已更新，请重新签署" : `先完成${agreementTitle}`}</h1><p className="registration-intro">在接触代码、图纸、BOM、测试数据、样机和客户资料前，须由本人实名手写签署。{ndaDirectArchive ? agreementKind === "member" ? "签署后立即生效并由系统自动归档，项目负责人可查阅。" : "签署后由系统自动归档。" : `签署后提交${reviewerLabel}确认。`} 归档前不会加载 OA 主工作区数据。</p>{upgradingLegacyNda && <div className="nda-returned-note"><RotateCcw className="size-4" /><span>{session.isAdmin ? "原成员保密协议仍保留；由于你已成为系统管理员，需另行签署《项目负责人保密承诺书》。" : isOwnerPledge ? "原成员保密协议仍保留；由于你已成为项目负责人，需另行签署《项目负责人保密承诺书》。" : "之前签署的协议仍保留在归档记录中；请阅读当前正文并重新手写签署。"}</span></div>}{isNdaRevision && <div className="nda-returned-note"><RotateCcw className="size-4" /><span>{existingApproval?.status === "已撤回" ? "文件已由你撤回，原记录已保留；请修改内容并重新手写签名。" : "上次文件已退回，请核对范围、重新手写签名并提交。"}</span></div>}{loadError && <div className="nda-gate-error" role="alert"><AlertTriangle className="size-4" /><span>{loadError}。为避免重复申请，暂时不能提交。</span></div>}<form className="nda-admission-form" onSubmit={submit} aria-busy={submitting}><Field label="签署人" required><Input value={signer} readOnly /></Field><Field label="当前认证身份" required><Input value={accountIdentityLabel(session.user)} readOnly /></Field><Field label="接触的未公开信息范围" required><Textarea value={confidentialScope} onChange={(event) => setConfidentialScope(event.target.value)} rows={3} disabled={submitting} /></Field><NdaAgreement kind={agreementKind} signer={signer} confidentialScope={confidentialScope} /><div className="signature-heading"><div><strong>本人手写电子签</strong><span>请由本人使用手指、触控笔或鼠标签名</span></div><FileSignature className="size-5" /></div><SignaturePad key={signatureResetKey} onChange={(signature) => setSignatureDataUrl(signature)} /><div className="nda-preview-actions"><Button type="button" variant="outline" disabled={!signatureDataUrl || submitting} onClick={() => setPreviewed(true)}><FileCheck2 className="size-4" />{previewed ? "已预览文件" : "预览已签文件"}</Button>{previewed && <button type="button" className="clear-signature" onClick={() => { setSignatureDataUrl(""); setSignatureResetKey((key) => key + 1); }}>重新签名</button>}</div>{previewed && <div className="nda-signed-preview"><div className="nda-signed-preview-label"><FileCheck2 className="size-4" />签署后预览</div><NdaAgreement kind={agreementKind} signer={signer} confidentialScope={confidentialScope} signatureDataUrl={signatureDataUrl} /></div>}<label className="nda-consent"><input type="checkbox" checked={agreed} onChange={(event) => setAgreed(event.target.checked)} disabled={!previewed || submitting} /><span>我已阅读{agreementTitle}正文，确认签名为本人手写，并同意按对应流程归档。</span></label>{!ndaDirectArchive && <Field label={`选择${reviewerLabel}`} required><NativeSelect value={reviewerEmail} onChange={(event) => setReviewerEmail(event.target.value)} disabled={submitting || eligibleReviewers.length === 0 || Boolean(loadError)}><NativeSelectOption value="">{eligibleReviewers.length ? `请选择${reviewerLabel}` : `暂无可选${reviewerLabel}`}</NativeSelectOption>{eligibleReviewers.map((reviewer) => <NativeSelectOption key={reviewer.email} value={reviewer.email}>{reviewer.displayName} · {reviewer.email}</NativeSelectOption>)}</NativeSelect></Field>}<Button type="submit" className="primary-button registration-button" disabled={submitting || Boolean(loadError) || !signatureDataUrl || !previewed || !agreed || (!ndaDirectArchive && !reviewerEmail)}>{submitting ? "正在提交…" : ndaDirectArchive ? `签署并归档${agreementTitle}` : isNdaRevision ? `重新提交${agreementTitle}` : `提交${agreementTitle}`}</Button>{existingApproval?.status === "已退回" && <div className="nda-withdraw-box"><strong>想终止这份退回记录？</strong><Textarea value={withdrawReason} onChange={(event) => setWithdrawReason(event.target.value)} rows={2} placeholder="先填写至少 2 个字的撤回原因" disabled={withdrawing} /><Button type="button" variant="outline" className="return-button" disabled={withdrawing || withdrawReason.trim().length < 2} onClick={() => void withdrawPendingNda()}><RotateCcw className="size-4" />{withdrawing ? "撤回中…" : "先撤回这份申请"}</Button><small>退回记录需先撤回，之后才可选择作废。</small></div>}{existingApproval?.status === "已撤回" && <div className="nda-withdraw-box nda-void-box"><strong>不再继续这份申请？</strong><Textarea value={withdrawReason} onChange={(event) => setWithdrawReason(event.target.value)} rows={2} placeholder="填写至少 2 个字的作废原因" disabled={voidingNda} /><label className="void-confirm"><input type="checkbox" checked={ndaVoidConfirmed} onChange={(event) => setNdaVoidConfirmed(event.target.checked)} /><span>我确认终止这份撤回记录；记录保留但不再流转。</span></label><Button type="button" className="danger-button" disabled={voidingNda || !ndaVoidConfirmed || withdrawReason.trim().length < 2} onClick={() => void voidWithdrawnNda()}><Trash2 className="size-4" />{voidingNda ? "作废中…" : "确认作废"}</Button></div>}</form></div></div>;
 }
@@ -1717,8 +1766,8 @@ function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = tr
     <div className="registration-shell">
       <div className="registration-card login-entry-card">
         <div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div>
-        <div className="login-entry-heading"><h1>请登录账号</h1><p>使用源灵智能飞书扫码确认企业身份后即可进入 OA；登录并完成准入与保密签署后，才会显示实验室 AI 等内部功能。</p></div>
-        <div className="oa-intro"><strong>OA 是做什么的？</strong><p>记录研发贡献、提交采购和劳务申请、签署保密协议，并查看审批进度。</p><a href="/guide"><BookOpen className="size-4" />第一次使用？先看使用指南</a></div>
+        <div className="login-entry-heading"><h1>进入实验室大模型</h1><p>游客可以试看公开问答；实习学生请使用飞书登录，完成基本信息和保密协议后进入个人主页与新手任务。</p></div>
+        <div className="oa-intro"><strong>正式加入流程</strong><p>飞书登录后默认按实习学生进入，先签署保密协议，再开放内部知识库、资料上传、个人任务和 OA 工作记录。</p><a href="/guide"><BookOpen className="size-4" />第一次使用？先看使用指南</a></div>
         {unboundFeishuLogin ? (
           <><div className="registration-notice login-notice login-confirmed">
             <Check className="size-4" />
@@ -1732,6 +1781,8 @@ function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = tr
         ) : (
           <div className="login-entry-panel">
             <FeishuQrLogin enabled={feishuLoginEnabled} />
+            <a className="registration-login github-login" href="https://chat.omindos.ai" target="_blank" rel="noreferrer"><Bot className="size-4" />游客试看公开问答</a>
+            <small className="account-switch-help">游客仅能访问公开资料：不能上传文件、查看内部知识库、进入个人主页、接收任务或提交项目成果。</small>
             {alternativeProviders.length > 0 && (
               <details className="other-login-options">
                 <summary>采用其他方式登录</summary>
@@ -2110,7 +2161,7 @@ function RulesView() {
 }
 
 export default function Home() {
-  const [activeView, setActiveView] = useState<ViewKey>("chat");
+  const [activeView, setActiveView] = useState<ViewKey>("home");
   const [knowledgeTab, setKnowledgeTab] = useState<KnowledgeTab>("ask");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   useEffect(() => { try { setSidebarCollapsed(localStorage.getItem("oa.sidebar.collapsed") === "true"); } catch { /* optional preference */ } }, []);
@@ -2172,7 +2223,7 @@ export default function Home() {
       setActiveView("profile");
       toast.info("GitHub 已经绑定", { description: "无需重复操作。" });
     } else if (githubStatus === "signed-in") {
-      setActiveView("chat");
+      setActiveView("home");
       setShowMineOnly(false);
       setMobileNavOpen(false);
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -2211,7 +2262,7 @@ export default function Home() {
       setActiveView("profile");
       toast.info("飞书已经绑定", { description: "无需重复操作。" });
     } else if (feishuStatus === "signed-in") {
-      setActiveView("chat");
+      setActiveView("home");
       setShowMineOnly(false);
       setMobileNavOpen(false);
       window.scrollTo({ top: 0, left: 0, behavior: "auto" });
@@ -2529,7 +2580,7 @@ export default function Home() {
   const openMyPending = () => { setActiveView("todos"); setActiveFilter("全部"); setShowMineOnly(false); setMobileNavOpen(false); };
   const navigate = (view: ViewKey) => { setActiveView(view); setShowMineOnly(false); setMobileNavOpen(false); };
   const openMetricApproval = (id: string) => { setMetricPanel(null); openApproval(id); };
-  const secondaryTitle = activeView === "chat" ? "聊天" : activeView === "mail" ? "邮箱" : activeView === "dashboard" ? "审批工作台" : activeView === "todos" ? "统一待办" : activeView === "project" ? "管理台" : activeView === "requests" ? showMineOnly ? "待我审批" : "全部申请" : activeView === "people" ? "通讯录" : activeView === "knowledge" ? knowledgeTab === "ask" ? "AI 助手" : knowledgeTab === "submit" ? "上传资料" : knowledgeTab === "mine" ? "我的资料" : knowledgeTab === "review" ? "资料审核" : "知识资料管理" : activeView === "members" ? "成员审核" : activeView === "oem" ? "官网 OEM 申请" : activeView === "notifications" ? "飞书提醒" : activeView === "profile" ? "个人设置" : "流程与规则";
+  const secondaryTitle = activeView === "home" ? "主页" : activeView === "chat" ? "聊天" : activeView === "mail" ? "邮箱" : activeView === "dashboard" ? "审批工作台" : activeView === "todos" ? "统一待办" : activeView === "project" ? "管理台" : activeView === "requests" ? showMineOnly ? "待我审批" : "全部申请" : activeView === "people" ? "通讯录" : activeView === "knowledge" ? knowledgeTab === "ask" ? "AI 助手" : knowledgeTab === "submit" ? "上传资料" : knowledgeTab === "mine" ? "我的资料" : knowledgeTab === "review" ? "资料审核" : "知识资料管理" : activeView === "members" ? "成员审核" : activeView === "oem" ? "官网 OEM 申请" : activeView === "notifications" ? "飞书提醒" : activeView === "profile" ? "个人设置" : "流程与规则";
   if (!session) return <div className="registration-shell"><div className="registration-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><h1>请登录账号</h1><p className="registration-intro">正在确认登录状态。实验室 AI 仅在登录并完成 OA 准入与保密签署后显示。</p></div></div>;
   if (!session.registered && (session.accountBindingRequired || session.accountBindingConflict || session.platformIdentityMissing || session.externalIdentityLinkRequired || session.githubIdentityLinkRequired || session.feishuIdentityLinkRequired)) return <><Toaster position="top-right" /><IdentityAccessGate session={session} onRefresh={refreshSession} /></>;
   if (session.status === "pending") return <><Toaster position="top-right" /><PendingGate session={session} onRefresh={refreshSession} /></>;
@@ -2554,7 +2605,7 @@ export default function Home() {
           </div>
         </header>
         <div className="oa-knowledge-pane" hidden={activeView !== "knowledge"}><KnowledgeView canReviewKnowledge={Boolean(session.canReviewKnowledge)} isAdmin={Boolean(session.isAdmin)} activeSection={knowledgeTab} onSectionChange={setKnowledgeTab} /></div>
-        {activeView === "chat" ? <CollaborationWorkspace currentUserEmail={session.user?.email} /> : activeView === "mail" ? <MailWorkspace /> : activeView === "notifications" ? <NotificationStatus /> : activeView === "oem" ? <OemInbox /> : activeView === "members" ? <MembersView currentEmail={session.user?.email} /> : activeView === "people" ? <PeopleView currentUser={session.user} canManageDepartments={Boolean(session.isAdmin)} /> : activeView === "knowledge" ? null : activeView === "todos" || activeView === "project" ? <ProjectWorkspace mode={activeView} approvals={approvals} currentUserEmail={session.user?.email} people={session.user ? [{ email: session.user.email, name: session.user.displayName }] : []} canReviewKnowledge={Boolean(session.canReviewKnowledge)} canManageProject={Boolean(session.isAdmin || session.role === "project_owner")} onOpenApproval={openApproval} onOpenKnowledgeReview={() => { setKnowledgeTab("review"); navigate("knowledge"); }} /> : activeView === "profile" ? <ProfileSettingsView currentUser={session.user} currentRole={session.role} isAdmin={Boolean(session.isAdmin)} migrationExportEnabled={session.migrationExportEnabled} migrationUnfreezeEnabled={session.migrationUnfreezeEnabled} onIdentityChanged={(fullName, avatarDataUrl) => { setMyAvatarDataUrl(avatarDataUrl); setSession((current) => current?.user ? { ...current, user: { ...current.user, displayName: fullName } } : current); }} /> : activeView === "rules" ? <RulesView /> : activeView === "requests" ? <RequestsView approvals={approvals} filteredApprovals={filteredApprovals} myPendingApprovals={myPendingApprovals} dataReady={dataReady} activeFilter={activeFilter} setActiveFilter={setActiveFilter} showMineOnly={showMineOnly} onClearMine={() => setShowMineOnly(false)} onOpen={openApproval} /> : <>
+        {activeView === "home" ? <StudentHomeView session={session} onNavigate={navigate} onOpenNewRequest={openNewRequest} /> : activeView === "chat" ? <CollaborationWorkspace currentUserEmail={session.user?.email} /> : activeView === "mail" ? <MailWorkspace /> : activeView === "notifications" ? <NotificationStatus /> : activeView === "oem" ? <OemInbox /> : activeView === "members" ? <MembersView currentEmail={session.user?.email} /> : activeView === "people" ? <PeopleView currentUser={session.user} canManageDepartments={Boolean(session.isAdmin)} /> : activeView === "knowledge" ? null : activeView === "todos" || activeView === "project" ? <ProjectWorkspace mode={activeView} approvals={approvals} currentUserEmail={session.user?.email} people={session.user ? [{ email: session.user.email, name: session.user.displayName }] : []} canReviewKnowledge={Boolean(session.canReviewKnowledge)} canManageProject={Boolean(session.isAdmin || session.role === "project_owner")} onOpenApproval={openApproval} onOpenKnowledgeReview={() => { setKnowledgeTab("review"); navigate("knowledge"); }} /> : activeView === "profile" ? <ProfileSettingsView currentUser={session.user} currentRole={session.role} isAdmin={Boolean(session.isAdmin)} migrationExportEnabled={session.migrationExportEnabled} migrationUnfreezeEnabled={session.migrationUnfreezeEnabled} onIdentityChanged={(fullName, avatarDataUrl) => { setMyAvatarDataUrl(avatarDataUrl); setSession((current) => current?.user ? { ...current, user: { ...current.user, displayName: fullName } } : current); }} /> : activeView === "rules" ? <RulesView /> : activeView === "requests" ? <RequestsView approvals={approvals} filteredApprovals={filteredApprovals} myPendingApprovals={myPendingApprovals} dataReady={dataReady} activeFilter={activeFilter} setActiveFilter={setActiveFilter} showMineOnly={showMineOnly} onClearMine={() => setShowMineOnly(false)} onOpen={openApproval} /> : <>
           <section className="page-heading dashboard-heading">
             <div>
               <div className="eyebrow"><span className="eyebrow-line" />{officialName}</div>
