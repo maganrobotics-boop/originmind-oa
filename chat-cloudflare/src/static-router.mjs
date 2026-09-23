@@ -37,6 +37,7 @@ const DIRECT_ASSET_PATHS = new Set([
   "/newbie-village.js",
   "/newbie-village-admin.html",
   "/newbie-village-admin.js",
+  "/TA/index.html",
   "/favicon.svg",
   "/LICENSES.md",
   "/manifest.webmanifest",
@@ -151,6 +152,10 @@ export async function routeStaticRequest(request, env) {
     if (!SAFE_METHODS.has(request.method)) return methodNotAllowed();
     return fetchAsset(request, env, "/robotics-course.html", "no-store");
   }
+  if (url.pathname === "/TA" || url.pathname === "/TA/" || url.pathname === "/ta" || url.pathname === "/ta/") {
+    if (!SAFE_METHODS.has(request.method)) return methodNotAllowed();
+    return fetchAsset(request, env, "/TA/index.html", "no-store");
+  }
 
   if (kind === RouteKind.SHELL) {
     if (!SAFE_METHODS.has(request.method)) return methodNotAllowed();
@@ -169,4 +174,3 @@ export async function routeStaticRequest(request, env) {
     }),
   );
 }
-
