@@ -866,4 +866,3 @@
 .message-copy-probe{position:fixed;top:0;left:0;width:1px;height:1px;opacity:0;pointer-events:none;}
 @media (pointer:coarse){.message-action-button{width:44px;height:44px;min-width:44px;min-height:44px;flex-basis:44px;}}
 @media (max-width:480px){.message-action-dialog{padding:16px;}.message-source-note{margin-left:4px;font-size:11px;}.message-dialog-actions button{flex:1 1 120px;}}
-
