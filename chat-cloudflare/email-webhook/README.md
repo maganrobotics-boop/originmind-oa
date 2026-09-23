@@ -50,7 +50,7 @@ Expected JSON body:
 ```json
 {
   "from": "magan@sztu.edu.cn",
-  "to": "student@stu.sztu.edu.cn",
+  "to": "student@stumail.sztu.edu.cn",
   "subject": "OriginMind Chat 登录验证码",
   "text": "你的 OriginMind Chat 登录验证码是 123456，10 分钟内有效。"
 }

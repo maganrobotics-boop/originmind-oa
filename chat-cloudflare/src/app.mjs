@@ -187,12 +187,12 @@ function visitorSessionToken(request) {
 function normalizeCampusEmail(value) {
   if (typeof value !== "string") return null;
   const email = value.trim().toLowerCase();
-  if (email.length > 254 || !/^[a-z0-9._%+-]+@(stu\.)?sztu\.edu\.cn$/u.test(email)) return null;
+  if (email.length > 254 || !/^[a-z0-9._%+-]+@(?:stumail\.)?sztu\.edu\.cn$/u.test(email)) return null;
   return email;
 }
 
 function campusRole(email) {
-  return email.endsWith("@stu.sztu.edu.cn") ? "student" : "staff";
+  return email.endsWith("@stumail.sztu.edu.cn") ? "student" : "staff";
 }
 
 function roleLabel(role) {
@@ -257,7 +257,7 @@ async function visitorAuth(context) {
     await limit(context, "visitor-code", 8, 900);
     const payload = await readJson(request, 2_000);
     const email = normalizeCampusEmail(payload?.email);
-    if (!email) throw new PublicError("请使用 @sztu.edu.cn 或 @stu.sztu.edu.cn 邮箱。", 400);
+    if (!email) throw new PublicError("学生请使用学号@stumail.sztu.edu.cn，教师请使用 @sztu.edu.cn 邮箱。", 400);
     await consumeCounter(context, `visitor-code-email:${email}:${Math.floor(now / 900_000)}`, 3, Math.floor(now / 1000) + 1_800);
     const code = emailCode();
     const id = randomHex(16);

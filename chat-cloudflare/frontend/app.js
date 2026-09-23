@@ -2,14 +2,30 @@
 
 const KATEX_ASSET = "__KATEX_ASSET__";
 let answerMathEngine = null;
-if (KATEX_ASSET) {
-  import(KATEX_ASSET)
-    .then((module) => { answerMathEngine = module.default || module; rerenderFallbackMath(); })
-    .catch(() => { answerMathEngine = null; });
+let answerMathLoading = null;
+let answerMathAttempts = 0;
+let answerMathImportVersion = 0;
+const MAX_ANSWER_MATH_ATTEMPTS = 3;
+
+function loadAnswerMathEngine() {
+  if (!KATEX_ASSET || answerMathEngine || answerMathLoading || answerMathAttempts >= MAX_ANSWER_MATH_ATTEMPTS) return;
+  answerMathAttempts += 1;
+  const separator = KATEX_ASSET.includes("?") ? "&" : "?";
+  answerMathLoading = import(`${KATEX_ASSET}${separator}math-load=${answerMathImportVersion++}`)
+    .then((module) => {
+      answerMathEngine = module.default || module;
+      answerMathLoading = null;
+      rerenderFallbackMath();
+    })
+    .catch(() => {
+      answerMathEngine = null;
+      answerMathLoading = null;
+      if (answerMathAttempts < MAX_ANSWER_MATH_ATTEMPTS) window.setTimeout(loadAnswerMathEngine, 0);
+    });
 }
+loadAnswerMathEngine();
 
 const STORAGE_KEY = "originmind-public-preview-conversations-v1";
-const LOGIN_GUIDE_DISMISSED_KEY = "originmind-login-guide-dismissed-v1";
 const DEFAULT_PUBLIC_API_BASE = "";
 const PUBLIC_API_BASE = typeof window.PUBLIC_API_BASE === "string" && window.PUBLIC_API_BASE.trim()
   ? window.PUBLIC_API_BASE.replace(/\/+$/u, "")
@@ -85,7 +101,12 @@ function icon(name) {
 }
 
 function renderMarkdown(markdown) {
-  const lines = String(markdown || "").replace(/\r\n?/gu, "\n").split("\n");
+  const normalized = String(markdown || "")
+    .replace(/\r\n?/gu, "\n")
+    .replace(/([。！？；])\s+(?=#{1,6}\s)/gu, "$1\n\n")
+    .replace(/\|[ \t]+\|/gu, "|\n|")
+    .replace(/\[([^\]\n]{1,200})\]\(https?:\/\/[^)\s]+\)/giu, "$1");
+  const lines = normalized.split("\n");
   const output = [];
   let paragraph = [];
   let list = [];
@@ -113,7 +134,7 @@ function renderMarkdown(markdown) {
     if (!line.trim()) { flushParagraph(); flushList(); continue; }
     if (/^\s*(?:\$\$|\\\[)/u.test(line)) {
       const isDollar = /^\s*\$\$/u.test(line);
-      const close = isDollar ? "$" : "\\]";
+      const close = isDollar ? "$$" : "\\]";
       const start = isDollar ? line.indexOf("$") + 2 : line.indexOf("\\[") + 2;
       let tex = line.slice(start);
       let found = tex.includes(close);
@@ -124,7 +145,7 @@ function renderMarkdown(markdown) {
       }
       if (found) {
         const end = tex.lastIndexOf(close);
-        const raw = `${isDollar ? "$" : "\\["}${tex.slice(0, end)}${close}`;
+        const raw = `${isDollar ? "$$" : "\\["}${tex.slice(0, end)}${close}`;
         flushParagraph(); flushList();
         output.push(renderAnswerMath(tex.slice(0, end), true, raw));
         continue;
@@ -214,11 +235,33 @@ function answerMathTokenAt(text, index) {
   return { raw: text.slice(index, end + right.length), tex: content, display, end: end + right.length };
 }
 
+function normalizeAnswerMathTex(value) {
+  return String(value).replace(
+    /\\begin\{(matrix|pmatrix|bmatrix|Bmatrix|vmatrix|Vmatrix)\}([\s\S]*?)\\end\{\1\}/gu,
+    (original, environment, body) => {
+      if (/\\(?:begin|end|text|verb|multicolumn|hline)\b/u.test(body)) return original;
+      const lines = body.split("\n");
+      const rows = lines.map((line, index) => ({ line, index })).filter(({ line }) => line.trim());
+      if (rows.length < 2 || rows.length > 50) return original;
+      const columns = rows.map(({ line }) => (line.match(/(?<!\\)&/gu) || []).length);
+      if (columns[0] < 1 || columns.some((count) => count !== columns[0])) return original;
+      const preceding = rows.slice(0, -1);
+      if (preceding.some(({ line }) => !/(?<!\\)\\{1,2}[ \t\r]*$/u.test(line))) return original;
+      for (const { line, index } of preceding) {
+        lines[index] = line.replace(/(?<!\\)\\([ \t\r]*)$/u, (_, spaces) => "\\\\" + spaces);
+      }
+      return `\\begin{${environment}}${lines.join("\n")}\\end{${environment}}`;
+    },
+  );
+}
+
 function renderAnswerMath(tex, display, raw) {
-  const fallback = `<span class="${display ? "math-display" : "math-inline"}" data-math-status="fallback" data-tex="${escapeHtml(tex)}" data-display="${display ? "true" : "false"}" data-raw="${escapeHtml(raw)}">${escapeHtml(raw)}</span>`;
-  if (!answerMathEngine?.renderToString || String(tex).length > 8000) return fallback;
+  const normalizedTex = normalizeAnswerMathTex(tex);
+  const mathClass = display ? "math-display answer-math-block" : "math-inline";
+  const fallback = `<span class="${mathClass}" data-math-status="fallback" data-tex="${escapeHtml(normalizedTex)}" data-display="${display ? "true" : "false"}" data-raw="${escapeHtml(raw)}">${escapeHtml(raw)}</span>`;
+  if (!answerMathEngine?.renderToString || normalizedTex.length > 8000) return fallback;
   try {
-    const html = answerMathEngine.renderToString(tex.trim(), {
+    const html = answerMathEngine.renderToString(normalizedTex.trim(), {
       displayMode: display,
       output: "mathml",
       trust: false,
@@ -227,7 +270,7 @@ function renderAnswerMath(tex, display, raw) {
       maxExpand: 1000,
       maxSize: 10,
     });
-    return `<span class="${display ? "math-display" : "math-inline"}" data-math-status="rendered">${html}</span>`;
+    return `<span class="${mathClass}" data-math-status="rendered">${html}</span>`;
   } catch {
     return fallback;
   }
@@ -303,34 +346,38 @@ function appShell() {
   return `
   <div class="app-shell">
     <aside class="sidebar">
-      <div class="brand"><div class="brand-copy"><strong class="brand-title">OriginMind x ARTS Robotics</strong><span class="brand-subtitle">机器人自主移动与操作实验室</span></div></div>
-      <div class="sidebar-label">置顶</div>
+      <div class="brand"><span class="brand-mark" aria-hidden="true"></span><div class="brand-copy"><strong class="brand-title">机器人自主移动与操作实验室</strong><span class="brand-subtitle">OriginMind x ARTS Robotics</span></div></div>
+      <div class="sidebar-label">功能</div>
       <div class="nav-list">
+        <a class="nav-item village-nav-item" href="/newbie-village">${icons.chart}<span>新手村</span></a>
         <button class="nav-item model-nav-item active" type="button" data-mode="text">${icons.text}<span>文本模型</span></button>
         <button class="nav-item model-nav-item" type="button" data-mode="voice">${icons.voice}<span>语音模型</span></button>
         <button class="nav-item model-nav-item" type="button" data-mode="vision">${icons.vision}<span>视觉模型</span></button>
-        <a class="nav-item village-nav-item" href="/newbie-village">${icons.chart}<span>新手村</span></a>
       </div>
       <div class="sidebar-label history-label">历史</div>
-      <div class="history-list">${HISTORY_ITEMS.map(([key, label]) => `<button class="history-item" type="button" data-history="${key}">${icons.chat}<span>${label}</span></button>`).join("")}</div>
+      <div class="history-list"></div>
       <button class="collapse-handle" type="button" aria-label="收起侧边栏">${icons.chevron}</button>
-      <div class="side-footer"><div class="bottom-actions"><button class="new-chat-bottom" type="button">${icons.plus}<span>聊天</span></button><button class="settings-trigger" type="button" aria-label="设置">${icons.gear}</button></div></div>
+      <div class="side-footer"><div class="bottom-actions"><button class="new-chat-bottom" type="button">${icons.plus}<span>聊天</span></button><button class="recent-chat-trigger" type="button" aria-label="打开最近聊天">${icons.chat}</button><button class="settings-trigger mobile-settings-trigger" type="button" aria-label="登录与设置">${icons.gear}</button></div></div>
     </aside>
-    <main class="workspace"><header class="topbar"><div class="topbar-title"><span class="desktop-lab-brand">OriginMind x ARTS Robotics</span><span class="lab-name">机器人自主移动与操作实验室</span></div><div class="topbar-actions"><span class="guest-badge">游客模式</span></div></header>
-      <section class="chat-surface"><div class="empty-state"><div class="entry-card"><div class="entry-kicker">chat.omindos.ai · 对外公开入口</div><h1 class="hero-title">想了解实验室的什么？</h1><p class="hero-subtitle">从已审核的实验室公开知识中检索并回答。</p><div class="login-guide" role="note"><div class="login-guide-copy"><strong>深技大师生登录</strong><span>登录后可进入新手引导，完成保密协议和新手村任务。</span></div><button class="student-login-trigger login-guide-action" type="button">${icons.login}<span>去登录</span></button><button class="login-guide-dismiss" type="button" aria-label="关闭登录指引">${icons.x}</button></div><div class="entry-actions"><button class="guest-info-trigger secondary-entry" type="button">查看游客限制</button></div></div></div>
+    <main class="workspace"><header class="topbar"><div class="topbar-title"><span class="lab-name">机器人自主移动与操作实验室</span><span class="desktop-lab-brand">OriginMind x ARTS Robotics</span></div><div class="topbar-actions"><span class="guest-badge">游客模式</span><button class="settings-trigger desktop-settings-trigger" type="button" aria-label="登录与设置">${icons.gear}</button></div></header>
+      <section class="chat-surface"><button class="student-login-trigger login-guide" type="button" hidden><span class="login-guide-icon">${icons.login}</span><span class="login-guide-copy"><strong>深技大师生登录</strong></span></button><div class="empty-state"><div class="entry-card"><h1 class="hero-title">想了解实验室的什么？</h1><p class="hero-subtitle">从已审核的实验室公开知识中检索并回答。</p></div></div>
         <div class="conversation" aria-live="polite"><div class="message-list"></div></div>
-        <div class="composer-wrap"><div class="composer-glow"></div><form class="composer" aria-label="发送消息"><div class="composer-inner"><div class="input-panel"><textarea class="prompt-input" rows="2" maxlength="4000" aria-label="你的问题" placeholder="输入想了解的实验室问题"></textarea><div class="attachment-chip">${icons.paperclip}<span></span></div></div><div class="composer-footer"><div class="input-tools"><input class="file-input" type="file" hidden><button class="icon-button attach-button" type="button" aria-label="添加附件">${icons.paperclip}</button><button class="icon-button voice-button" type="button" aria-label="语音输入">${icons.voice}</button></div><div class="footer-actions"><button class="model-pill" type="button">${icons.cube}<span>文本模型</span></button><button class="send-button" type="submit" aria-label="发送" disabled>${icons.send}</button></div></div></div></form></div>
+        <div class="composer-wrap"><div class="composer-glow"></div><form class="composer" aria-label="发送消息"><div class="composer-inner"><div class="input-panel"><textarea id="question" class="prompt-input" rows="2" maxlength="4000" aria-label="你的问题" placeholder="输入想了解的实验室问题"></textarea><div class="attachment-chip">${icons.paperclip}<span></span></div></div><div class="composer-footer"><div class="input-tools"><input class="file-input" type="file" hidden><button class="icon-button attach-button" type="button" aria-label="添加附件">${icons.paperclip}</button><button class="icon-button voice-button" type="button" aria-label="语音输入">${icons.voice}</button></div><div class="footer-actions"><button class="model-pill" type="button">${icons.cube}<span>文本模型</span></button><button class="send-button" type="submit" aria-label="发送" disabled>${icons.send}</button></div></div></div></form></div>
         <div class="suggestions">${DEFAULT_SUGGESTIONS.map((question, index) => `<button class="suggestion" type="button" data-prompt="${escapeHtml(question)}">${[icons.file, icons.text, icons.chart, icons.pen][index] || icons.chat}<span>${escapeHtml(question.replace(/[？?]$/u, ""))}</span></button>`).join("")}</div>
       </section></main>
   </div>
+  <dialog id="recent-drawer" class="recent-drawer" aria-label="最近聊天">
+    <header><strong>最近聊天</strong><button class="recent-drawer-close" type="button" aria-label="关闭最近聊天">${icons.x}</button></header>
+    <div class="recent-list"></div>
+  </dialog>
   <div class="auth-backdrop" aria-hidden="true">
     <div class="auth-dialog" role="dialog" aria-modal="true" aria-labelledby="auth-title">
       <button class="auth-close" type="button" aria-label="关闭">${icons.x}</button>
       <div class="auth-brand">${icons.login}</div>
       <h2 id="auth-title">校内邮箱登录</h2>
-      <p>仅用于 chat 身份验证，不进入其他系统。支持 @sztu.edu.cn 和 @stu.sztu.edu.cn 邮箱验证码登录。</p>
+      <p>仅用于 chat 身份验证，不进入其他系统。学生请使用学号@stumail.sztu.edu.cn，教师请使用 @sztu.edu.cn 邮箱。</p>
       <form class="campus-login-form">
-        <label class="auth-field"><span>邮箱</span><input class="campus-email-input" type="email" autocomplete="email" placeholder="name@stu.sztu.edu.cn"></label>
+        <label class="auth-field"><span>邮箱</span><input class="campus-email-input" type="email" autocomplete="email" placeholder="学号@stumail.sztu.edu.cn"></label>
         <button class="campus-code-button" type="button">发送验证码</button>
         <label class="auth-field code-field"><span>验证码</span><input class="campus-code-input" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="6 位数字"></label>
         <button class="campus-login-button" type="submit">验证并登录</button>
@@ -362,15 +409,20 @@ const toast = document.querySelector(".toast");
 const authBackdrop = document.querySelector(".auth-backdrop");
 const guestBadge = document.querySelector(".guest-badge");
 const loginGuide = document.querySelector(".login-guide");
-const loginGuideDismiss = document.querySelector(".login-guide-dismiss");
 const campusLoginForm = document.querySelector(".campus-login-form");
 const campusEmailInput = document.querySelector(".campus-email-input");
 const campusCodeInput = document.querySelector(".campus-code-input");
 const campusCodeButton = document.querySelector(".campus-code-button");
 const authStatus = document.querySelector(".auth-status");
+const historyList = document.querySelector(".history-list");
+const recentDrawer = document.querySelector("#recent-drawer");
+const recentList = document.querySelector(".recent-list");
 let toastTimer;
 let currentMode = "text";
 let visitorUser = null;
+let conversations = [];
+let activeConversationId = "";
+let submittedQuestionCount = 0;
 
 function showToast(message) {
   toast.textContent = message;
@@ -400,28 +452,16 @@ function updateVisitorUi(user) {
   if (visitorUser) {
     guestBadge.textContent = visitorUser.roleLabel || "已登录";
     guestBadge.classList.add("signed-in");
-    document.querySelectorAll(".student-login-trigger span").forEach((span) => { span.textContent = "已登录"; });
   } else {
     guestBadge.textContent = "游客模式";
     guestBadge.classList.remove("signed-in");
-    document.querySelectorAll(".student-login-trigger span").forEach((span) => { span.textContent = "校内邮箱登录"; });
   }
-  updateLoginGuide();
-}
-
-function isLoginGuideDismissed() {
-  try { return localStorage.getItem(LOGIN_GUIDE_DISMISSED_KEY) === "1"; }
-  catch { return false; }
-}
-
-function dismissLoginGuide() {
-  try { localStorage.setItem(LOGIN_GUIDE_DISMISSED_KEY, "1"); } catch { /* ignore */ }
   updateLoginGuide();
 }
 
 function updateLoginGuide() {
   if (!loginGuide) return;
-  loginGuide.hidden = Boolean(visitorUser) || isLoginGuideDismissed();
+  loginGuide.hidden = Boolean(visitorUser);
 }
 
 async function refreshVisitorStatus() {
@@ -471,7 +511,6 @@ async function verifyCampusCode(event) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.signedIn) throw new Error(data.error || "登录失败");
     updateVisitorUi(data.user);
-    dismissLoginGuide();
     setAuthStatus("登录成功。", "success");
     closeAuthDialog();
     showToast(`已登录：${data.user?.roleLabel || "校内身份"}`);
@@ -493,31 +532,49 @@ function autoResize() {
   promptInput.style.height = `${Math.min(promptInput.scrollHeight, 126)}px`;
 }
 
-function messageActions() {
+function messageActions(publicSources = false) {
   return `<div class="message-actions">
     <button class="message-action-button copy-answer" type="button" aria-label="复制回答" title="复制回答">${icons.file}</button>
     <button class="message-action-button copy-answer-link" type="button" aria-label="复制链接" title="复制链接">${icons.link || icons.chat}</button>
     <button class="message-action-button share-answer" type="button" aria-label="分享链接" title="分享链接">${icons.share || icons.chat}</button>
-    <span class="message-source-note">参考内部公开资料</span>
+    ${publicSources ? '<span class="message-source-note">参考内部公开资料</span>' : ""}
   </div>`;
 }
 
-function setAssistantContent(item, text, { html = false, images = [] } = {}) {
+function setAssistantContent(item, text, { html = false, images = [], publicSources = false } = {}) {
   const content = item.querySelector(".answer-content");
   if (!content) return;
   content.innerHTML = `${html ? text : renderMarkdown(text)}${renderKnowledgeImages(images)}`;
+  item.__chatTurn = { role: "assistant", text: String(text || ""), images, publicSources };
+  const actions = item.querySelector(".message-actions");
+  actions?.querySelector(".message-source-note")?.remove();
+  if (publicSources && actions) {
+    actions.append(element("span", { className: "message-source-note", text: "参考内部公开资料" }));
+  }
   rerenderFallbackMath(content);
 }
 
-function addMessage(role, text, { html = false, typing = false, images = [] } = {}) {
+function addMessage(role, text, { html = false, typing = false, images = [], publicSources = false } = {}) {
   const item = document.createElement("article");
   item.className = `message ${role}${typing ? " typing-message" : ""}`;
   if (typing) item.innerHTML = '<div class="message-content"><div class="typing"><i></i><i></i><i></i></div></div>';
-  else if (role === "assistant") item.innerHTML = `<div class="message-content"><div class="answer-content"></div>${messageActions()}</div>`;
-  else item.innerHTML = '<div class="message-content"><p></p></div>';
+  else if (role === "assistant") item.innerHTML = `<div class="message-content"><div class="answer-content"></div>${messageActions(publicSources)}</div>`;
+  else item.innerHTML = '<div class="message-content"><p class="message-body"></p></div>';
   if (!typing) {
-    if (role === "assistant") setAssistantContent(item, text, { html, images });
-    else item.querySelector("p").textContent = text;
+    if (role === "assistant") setAssistantContent(item, text, { html, images, publicSources });
+    else {
+      item.querySelector("p").textContent = text;
+      item.__chatTurn = { role: "user", text: String(text || "") };
+      installQuestionActions(
+        item,
+        String(text || ""),
+        (opener) => editQuestion(item, opener),
+        async () => {
+          await writeMessageClipboard(String(text || ""));
+          showToast("已复制提问");
+        },
+      );
+    }
   }
   messageList.appendChild(item);
   bindMessageActions(item);
@@ -539,16 +596,16 @@ function answerRevealChunks(text) {
   return merged.filter(Boolean);
 }
 
-async function revealAssistantAnswer(item, answer, { images = [] } = {}) {
+async function revealAssistantAnswer(item, answer, { images = [], publicSources = false } = {}) {
   const chunks = answerRevealChunks(answer);
   let visible = "";
   for (const chunk of chunks) {
     visible += chunk;
-    setAssistantContent(item, visible, { images: [] });
+    setAssistantContent(item, visible, { images: [], publicSources: false });
     messageList.scrollTo({ top: messageList.scrollHeight, behavior: "smooth" });
     await new Promise((resolve) => setTimeout(resolve, answerRevealDelay(chunk)));
   }
-  setAssistantContent(item, answer || "暂时没有生成回答。", { images });
+  setAssistantContent(item, answer || "暂时没有生成回答。", { images, publicSources });
 }
 
 function bindMessageActions(scope) {
@@ -602,51 +659,209 @@ function openAnswerLinkDialog(snapshot, opener, intent) {
   (intent === "share" ? share : copy).focus({ preventScroll: true });
 }
 
+function conversationId() {
+  return typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function conversationTitle(turns) {
+  const question = turns.find((turn) => turn.role === "user")?.text || "新聊天";
+  return question.length > 28 ? `${question.slice(0, 28)}…` : question;
+}
+
+function turnsFromDom() {
+  return [...messageList.querySelectorAll(".message:not(.typing-message)")]
+    .map((node) => node.__chatTurn)
+    .filter((turn) => turn?.role === "user" || turn?.role === "assistant")
+    .slice(-20);
+}
+
+function persistConversations() {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({
+      version: 2,
+      activeConversationId,
+      conversations: conversations.slice(0, 12),
+    }));
+  } catch { /* Browser storage is optional. */ }
+}
+
+function recentButton(conversation, compact = false) {
+  const button = textButton("", `history-item${conversation.id === activeConversationId ? " current" : ""}`);
+  button.setAttribute("aria-label", `${conversation.title}，最近聊天`);
+  button.dataset.conversationId = conversation.id;
+  button.append(icon("chat"), element("span", { text: conversation.title }));
+  if (compact) button.classList.add("recent-drawer-item");
+  button.addEventListener("click", () => {
+    renderConversation(conversation.id);
+    if (recentDrawer.open) recentDrawer.close();
+  });
+  return button;
+}
+
+function renderRecentConversations() {
+  historyList.replaceChildren();
+  recentList.replaceChildren();
+  if (!conversations.length) {
+    for (const [key, label] of HISTORY_ITEMS) {
+      const button = textButton("", "history-item");
+      button.dataset.history = key;
+      button.append(icon("chat"), element("span", { text: label }));
+      button.addEventListener("click", () => loadHistory(key));
+      historyList.append(button);
+    }
+    recentList.append(element("p", { className: "recent-empty", text: "提问后，最近聊天会显示在这里。" }));
+    return;
+  }
+  for (const conversation of conversations.slice(0, 8)) {
+    historyList.append(recentButton(conversation));
+    recentList.append(recentButton(conversation, true));
+  }
+}
+
 function saveConversation() {
-  const turns = [...messageList.querySelectorAll(".message:not(.typing-message)")].map((node) => ({
-    role: node.classList.contains("user") ? "user" : "assistant",
-    text: node.innerText.trim(),
-  })).slice(-20);
-  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(turns)); } catch { /* ignore */ }
+  if (!activeConversationId) return;
+  const turns = turnsFromDom();
+  if (!turns.length) return;
+  const now = Date.now();
+  const existing = conversations.find((conversation) => conversation.id === activeConversationId);
+  if (existing) {
+    existing.turns = turns;
+    existing.title = conversationTitle(turns);
+    existing.updatedAt = now;
+  } else {
+    conversations.push({ id: activeConversationId, title: conversationTitle(turns), turns, updatedAt: now });
+  }
+  conversations.sort((left, right) => right.updatedAt - left.updatedAt);
+  persistConversations();
+  renderRecentConversations();
+}
+
+function rememberAssistantTurn(id, turn) {
+  const conversation = conversations.find((candidate) => candidate.id === id);
+  if (!conversation) return;
+  conversation.turns = [...conversation.turns, turn].slice(-20);
+  conversation.title = conversationTitle(conversation.turns);
+  conversation.updatedAt = Date.now();
+  conversations.sort((left, right) => right.updatedAt - left.updatedAt);
+  persistConversations();
+  renderRecentConversations();
+}
+
+function createConversation(turns = []) {
+  const conversation = {
+    id: conversationId(),
+    title: conversationTitle(turns),
+    turns: turns.map((turn) => ({ ...turn })),
+    updatedAt: Date.now(),
+  };
+  conversations.unshift(conversation);
+  activeConversationId = conversation.id;
+  persistConversations();
+  return conversation;
+}
+
+function renderConversation(id) {
+  const conversation = conversations.find((candidate) => candidate.id === id);
+  if (!conversation) return;
+  activeConversationId = id;
+  messageList.replaceChildren();
+  body.classList.toggle("chat-active", conversation.turns.length > 0);
+  for (const turn of conversation.turns) {
+    addMessage(turn.role, turn.text || "", {
+      images: turn.images || [],
+      publicSources: turn.publicSources === true,
+    });
+  }
+  persistConversations();
+  renderRecentConversations();
 }
 
 function restoreConversation() {
-  let turns = [];
-  try { turns = JSON.parse(localStorage.getItem(STORAGE_KEY) || "[]"); } catch { turns = []; }
-  if (!Array.isArray(turns) || !turns.length) return;
-  body.classList.add("chat-active");
-  for (const turn of turns) addMessage(turn.role === "user" ? "user" : "assistant", turn.text || "");
+  let stored = null;
+  try { stored = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null"); } catch { stored = null; }
+  if (Array.isArray(stored)) {
+    const turns = stored
+      .filter((turn) => turn?.role === "user" || turn?.role === "assistant")
+      .map((turn) => ({ role: turn.role, text: String(turn.text || "") }));
+    if (turns.length) createConversation(turns);
+  } else if (stored?.version === 2 && Array.isArray(stored.conversations)) {
+    conversations = stored.conversations
+      .filter((conversation) => typeof conversation?.id === "string" && Array.isArray(conversation.turns))
+      .slice(0, 12);
+    activeConversationId = conversations.some((conversation) => conversation.id === stored.activeConversationId)
+      ? stored.activeConversationId
+      : conversations[0]?.id || "";
+  }
+  if (activeConversationId) renderConversation(activeConversationId);
+  else renderRecentConversations();
+}
+
+function editQuestion(item, opener) {
+  const originalText = String(item.__chatTurn?.text || "");
+  openQuestionEditor(originalText, opener, (question) => {
+    saveConversation();
+    const original = conversations.find((conversation) => conversation.id === activeConversationId);
+    const messageIndex = [...messageList.querySelectorAll(".message")].indexOf(item);
+    if (!original || messageIndex < 0) throw new Error("当前聊天已变化，请重试。");
+    const branch = createConversation(original.turns.slice(0, messageIndex));
+    renderConversation(branch.id);
+    void submitMessage(question);
+  });
 }
 
 async function submitMessage(rawText) {
   const text = String(rawText || "").trim();
   const fileText = attachmentChip.classList.contains("show") ? `附件：${attachmentName.textContent}` : "";
   if (!text && !fileText) return;
+  if (submittedQuestionCount > 0 && !answerMathEngine && !answerMathLoading &&
+      answerMathAttempts >= MAX_ANSWER_MATH_ATTEMPTS) {
+    answerMathAttempts = 0;
+    loadAnswerMathEngine();
+  }
+  submittedQuestionCount += 1;
+  if (!activeConversationId) createConversation();
+  const requestConversationId = activeConversationId;
   body.classList.add("chat-active");
   addMessage("user", [text, fileText].filter(Boolean).join("\n"));
+  saveConversation();
   promptInput.value = "";
   promptInput.style.height = "auto";
   fileInput.value = "";
   attachmentChip.classList.remove("show");
   updateSendState();
-  const typing = addMessage("assistant", "正在检索公开资料，并组织回答…");
   const payload = { answer: text || fileText };
+  const requestMessages = turnsFromDom().map((turn) => ({ role: turn.role, content: userFacingAnswer(turn.text) }));
+  const typing = addMessage("assistant", "正在检索公开资料，并组织回答…");
   try {
     const response = await fetch(apiUrl("/api/chat"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         topic: "research",
-        messages: [{ role: "user", content: userFacingAnswer(payload.answer) }],
+        messages: requestMessages,
       }),
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "服务暂不可用，请稍后重试。");
-    await revealAssistantAnswer(typing, data.answer || "暂时没有生成回答。", { images: data.images });
+    const assistantTurn = {
+      role: "assistant",
+      text: data.answer || "暂时没有生成回答。",
+      images: data.images || [],
+      publicSources: data.oaPublicStatus === "connected" && Array.isArray(data.sources) && data.sources.length > 0,
+    };
+    rememberAssistantTurn(requestConversationId, assistantTurn);
+    await revealAssistantAnswer(typing, data.answer || "暂时没有生成回答。", {
+      images: data.images,
+      publicSources: assistantTurn.publicSources,
+    });
   } catch (error) {
-    setAssistantContent(typing, error?.message || "服务暂不可用，请稍后重试。");
+    const message = error?.message || "服务暂不可用，请稍后重试。";
+    rememberAssistantTurn(requestConversationId, { role: "assistant", text: message, images: [], publicSources: false });
+    setAssistantContent(typing, message);
   }
-  saveConversation();
+  if (activeConversationId === requestConversationId) saveConversation();
 }
 
 function resetChat() {
@@ -656,8 +871,9 @@ function resetChat() {
   fileInput.value = "";
   attachmentChip.classList.remove("show");
   body.classList.remove("chat-active");
-  document.querySelectorAll(".history-item").forEach((item) => item.classList.remove("current"));
-  try { localStorage.removeItem(STORAGE_KEY); } catch { /* ignore */ }
+  activeConversationId = "";
+  persistConversations();
+  renderRecentConversations();
   updateSendState();
   setTimeout(() => promptInput.focus(), 220);
 }
@@ -668,10 +884,16 @@ function loadHistory(key) {
     robots: [["user", "实验室现有的机器人平台包括哪些？"], ["assistant", "接入公开知识库后，我会按机器人平台、核心能力、应用场景和资料来源整理回答。"]],
     cooperation: [["user", "如何与实验室开展科研合作？"], ["assistant", "我会根据实验室公开信息说明合作方向、联系渠道和申请要求。"]],
   };
+  const existing = conversations.find((conversation) => conversation.id === key);
+  if (existing) {
+    renderConversation(existing.id);
+    return;
+  }
   messageList.innerHTML = "";
   body.classList.add("chat-active");
   for (const [role, text] of examples[key] || examples.overview) addMessage(role, text);
-  document.querySelectorAll(".history-item").forEach((item) => item.classList.toggle("current", item.dataset.history === key));
+  const preview = createConversation(turnsFromDom());
+  renderConversation(preview.id);
 }
 
 async function refreshSuggestions() {
@@ -726,12 +948,15 @@ document.querySelectorAll(".model-nav-item").forEach((item) => item.addEventList
 
 document.querySelector(".new-chat-bottom").addEventListener("click", resetChat);
 document.querySelectorAll(".history-item").forEach((item) => item.addEventListener("click", () => loadHistory(item.dataset.history)));
+document.querySelector(".recent-chat-trigger").addEventListener("click", () => {
+  renderRecentConversations();
+  recentDrawer.showModal();
+});
+document.querySelector(".recent-drawer-close").addEventListener("click", () => recentDrawer.close());
 document.querySelector(".collapse-handle").addEventListener("click", () => body.classList.toggle("sidebar-collapsed"));
 document.querySelector(".model-pill").addEventListener("click", () => showToast(`当前使用${MODE_COPY[currentMode][3]}`));
-document.querySelector(".settings-trigger").addEventListener("click", openAuthDialog);
+document.querySelectorAll(".settings-trigger").forEach((button) => button.addEventListener("click", openAuthDialog));
 document.querySelectorAll(".student-login-trigger").forEach((button) => button.addEventListener("click", openAuthDialog));
-loginGuideDismiss?.addEventListener("click", dismissLoginGuide);
-document.querySelector(".guest-info-trigger").addEventListener("click", openAuthDialog);
 campusCodeButton.addEventListener("click", () => void requestCampusCode());
 campusLoginForm.addEventListener("submit", (event) => void verifyCampusCode(event));
 document.querySelector(".guest-continue").addEventListener("click", closeAuthDialog);
