@@ -264,6 +264,43 @@
 
     .secondary-entry:hover { background: #f7f8fa; color: #22262d; }
 
+    .login-guide {
+      width: min(560px,100%);
+      margin: 4px auto 18px;
+      padding: 11px 12px 11px 16px;
+      border: 1px solid #dce6ff;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      text-align: left;
+      background: linear-gradient(135deg,#f7faff,#fff);
+      box-shadow: 0 12px 30px rgba(51,112,255,.08);
+    }
+
+    .login-guide[hidden] { display: none !important; }
+
+    .login-guide-copy { flex: 1; min-width: 0; }
+    .login-guide-copy strong { display: block; color: #245bdb; font-size: 13px; font-weight: 800; }
+    .login-guide-copy span { display: block; margin-top: 3px; color: #667085; font-size: 12px; line-height: 1.55; }
+    .login-guide-action { flex: 0 0 auto; height: 32px; }
+
+    .login-guide-dismiss {
+      width: 28px;
+      height: 28px;
+      border: 0;
+      border-radius: 50%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      background: transparent;
+      color: #98a2b3;
+      cursor: pointer;
+    }
+
+    .login-guide-dismiss:hover { background: #f1f4f9; color: #475467; }
+    .login-guide-dismiss svg { width: 15px; height: 15px; }
+
     .composer-wrap {
       position: absolute;
       top: 344px;
@@ -760,17 +797,21 @@
         border-radius: 12px;
       }
       .topbar { height: 54px; padding: 0 18px; }
-      .chat-surface { height: calc(100% - 54px); }
+      .topbar { display: none; }
+      .chat-surface { height: 100%; }
       body.chat-active .topbar { height: 0; padding: 0; border-bottom: 0; overflow: hidden; }
       body.chat-active .chat-surface { height: 100%; }
-      .empty-state { padding-top: 55px; }
+      .empty-state { padding-top: 42px; }
       .hero-title { max-width: 360px; font-size: 25px; }
       .hero-subtitle { font-size: 13px; }
       .entry-card { width: calc(100% - 20px); }
       .entry-kicker { margin-bottom: 10px; font-size: 12px; }
       .entry-actions { gap: 8px; }
       .primary-entry, .secondary-entry { height: 34px; padding: 0 12px; font-size: 12px; }
-      .composer-wrap { top: 265px; width: calc(100% - 20px); }
+      .login-guide { align-items: flex-start; margin-bottom: 12px; padding: 10px 10px 10px 12px; gap: 8px; }
+      .login-guide-action { width: auto; min-width: 34px; }
+      .login-guide-action span { display: none; }
+      .composer-wrap { top: 280px; width: calc(100% - 20px); }
       .composer { border-radius: 20px; }
       .composer-inner { border-radius: 19px; }
       .suggestions { top: 445px; width: calc(100% - 20px); grid-template-columns: 1fr; }

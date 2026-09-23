@@ -285,6 +285,7 @@ if (KATEX_ASSET) {
 }
 
 const STORAGE_KEY = "originmind-public-preview-conversations-v1";
+const LOGIN_GUIDE_DISMISSED_KEY = "originmind-login-guide-dismissed-v1";
 const DEFAULT_PUBLIC_API_BASE = "";
 const PUBLIC_API_BASE = typeof window.PUBLIC_API_BASE === "string" && window.PUBLIC_API_BASE.trim()
   ? window.PUBLIC_API_BASE.replace(/\/+$/u, "")
@@ -517,7 +518,7 @@ function appShell() {
       <div class="side-footer"><div class="bottom-actions"><button class="new-chat-bottom" type="button">${icons.plus}<span>聊天</span></button><button class="settings-trigger" type="button" aria-label="设置">${icons.gear}</button></div></div>
     </aside>
     <main class="workspace"><header class="topbar"><div class="topbar-title">聊天</div><div class="topbar-actions"><span class="guest-badge">游客模式</span><button class="student-login-trigger" type="button">${icons.login}<span>校内邮箱登录</span></button></div></header>
-      <section class="chat-surface"><div class="empty-state"><div class="entry-card"><div class="entry-kicker">chat.omindos.ai · 对外公开入口</div><h1 class="hero-title">想了解实验室的什么？</h1><p class="hero-subtitle">游客可检索已审核的公开知识；深技大师生可用 @sztu.edu.cn 或 @stu.sztu.edu.cn 邮箱验证码登录，后续获得更完整的新手引导。</p><div class="entry-actions"><button class="student-login-trigger primary-entry" type="button">${icons.login}<span>校内邮箱登录</span></button><button class="guest-info-trigger secondary-entry" type="button">查看游客限制</button></div></div></div>
+      <section class="chat-surface"><div class="empty-state"><div class="entry-card"><div class="entry-kicker">chat.omindos.ai · 对外公开入口</div><h1 class="hero-title">想了解实验室的什么？</h1><p class="hero-subtitle">从已审核的实验室公开知识中检索并回答。</p><div class="entry-actions"><button class="student-login-trigger primary-entry" type="button">${icons.login}<span>校内邮箱登录</span></button><button class="guest-info-trigger secondary-entry" type="button">查看游客限制</button></div><div class="login-guide" role="note"><div class="login-guide-copy"><strong>深技大师生登录</strong><span>登录后可进入新手引导，后续完成保密协议和任务提交。</span></div><button class="student-login-trigger login-guide-action" type="button">${icons.login}<span>去登录</span></button><button class="login-guide-dismiss" type="button" aria-label="关闭登录指引">${icons.x}</button></div></div></div>
         <div class="conversation" aria-live="polite"><div class="message-list"></div></div>
         <div class="composer-wrap"><div class="composer-glow"></div><form class="composer" aria-label="发送消息"><div class="composer-inner"><div class="input-panel"><textarea class="prompt-input" rows="2" maxlength="4000" placeholder="输入想了解的实验室问题"></textarea><div class="attachment-chip">${icons.paperclip}<span></span></div></div><div class="composer-footer"><div class="input-tools"><input class="file-input" type="file" hidden><button class="icon-button attach-button" type="button" aria-label="添加附件">${icons.paperclip}</button><button class="icon-button voice-button" type="button" aria-label="语音输入">${icons.voice}</button></div><div class="footer-actions"><button class="model-pill" type="button">${icons.cube}<span>文本模型</span></button><button class="send-button" type="submit" aria-label="发送" disabled>${icons.send}</button></div></div></div></form></div>
         <div class="suggestions">${DEFAULT_SUGGESTIONS.map((question, index) => `<button class="suggestion" type="button" data-prompt="${escapeHtml(question)}">${[icons.file, icons.text, icons.chart, icons.pen][index] || icons.chat}<span>${escapeHtml(question.replace(/[？?]$/u, ""))}</span></button>`).join("")}</div>
@@ -561,6 +562,8 @@ const heroSubtitle = document.querySelector(".hero-subtitle");
 const toast = document.querySelector(".toast");
 const authBackdrop = document.querySelector(".auth-backdrop");
 const guestBadge = document.querySelector(".guest-badge");
+const loginGuide = document.querySelector(".login-guide");
+const loginGuideDismiss = document.querySelector(".login-guide-dismiss");
 const campusLoginForm = document.querySelector(".campus-login-form");
 const campusEmailInput = document.querySelector(".campus-email-input");
 const campusCodeInput = document.querySelector(".campus-code-input");
@@ -604,6 +607,22 @@ function updateVisitorUi(user) {
     guestBadge.classList.remove("signed-in");
     document.querySelectorAll(".student-login-trigger span").forEach((span) => { span.textContent = "校内邮箱登录"; });
   }
+  updateLoginGuide();
+}
+
+function isLoginGuideDismissed() {
+  try { return localStorage.getItem(LOGIN_GUIDE_DISMISSED_KEY) === "1"; }
+  catch { return false; }
+}
+
+function dismissLoginGuide() {
+  try { localStorage.setItem(LOGIN_GUIDE_DISMISSED_KEY, "1"); } catch { /* ignore */ }
+  updateLoginGuide();
+}
+
+function updateLoginGuide() {
+  if (!loginGuide) return;
+  loginGuide.hidden = Boolean(visitorUser) || isLoginGuideDismissed();
 }
 
 async function refreshVisitorStatus() {
@@ -653,6 +672,7 @@ async function verifyCampusCode(event) {
     const data = await response.json().catch(() => ({}));
     if (!response.ok || !data.signedIn) throw new Error(data.error || "登录失败");
     updateVisitorUi(data.user);
+    dismissLoginGuide();
     setAuthStatus("登录成功。", "success");
     closeAuthDialog();
     showToast(`已登录：${data.user?.roleLabel || "校内身份"}`);
@@ -862,6 +882,7 @@ document.querySelector(".collapse-handle").addEventListener("click", () => body.
 document.querySelector(".model-pill").addEventListener("click", () => showToast(`当前使用${MODE_COPY[currentMode][3]}`));
 document.querySelector(".settings-trigger").addEventListener("click", openAuthDialog);
 document.querySelectorAll(".student-login-trigger").forEach((button) => button.addEventListener("click", openAuthDialog));
+loginGuideDismiss?.addEventListener("click", dismissLoginGuide);
 document.querySelector(".guest-info-trigger").addEventListener("click", openAuthDialog);
 campusCodeButton.addEventListener("click", () => void requestCampusCode());
 campusLoginForm.addEventListener("submit", (event) => void verifyCampusCode(event));
