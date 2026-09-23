@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="robots" content="noindex,nofollow">
+    <title>新手村 · 保密协议内部审核</title>
+    <style>
+      :root { color:#20242b; background:#f4f6fa; font-family:"Microsoft YaHei","PingFang SC",system-ui,sans-serif; }
+      * { box-sizing:border-box; }
+      body { margin:0; min-width:320px; min-height:100vh; }
+      button,input,textarea,select { font:inherit; }
+      [hidden] { display:none !important; }
+      .topbar { min-height:68px; padding:14px clamp(18px,4vw,44px); display:flex; align-items:center; justify-content:space-between; gap:16px; border-bottom:1px solid #e3e7ee; background:#fff; }
+      .brand small { display:block; color:#3370ff; font-size:11px; font-weight:850; letter-spacing:.09em; }
+      .brand strong { display:block; margin-top:4px; font-size:17px; }
+      .actions { display:flex; gap:9px; align-items:center; }
+      button,.button { min-height:40px; padding:0 15px; border-radius:11px; cursor:pointer; font-weight:750; }
+      .primary { border:0; background:#3370ff; color:#fff; }
+      .secondary { border:1px solid #dce1e8; background:#fff; color:#343a44; }
+      .danger { border:0; background:#b42318; color:#fff; }
+      main { width:min(1120px,100%); margin:0 auto; padding:36px clamp(18px,4vw,44px) 70px; }
+      .login-panel { width:min(440px,100%); margin:10vh auto 0; }
+      .panel,.record { border:1px solid #e1e5ec; border-radius:17px; background:#fff; box-shadow:0 14px 34px rgba(34,42,58,.055); }
+      .panel { padding:25px; }
+      h1 { margin:0 0 10px; font-size:clamp(30px,4vw,46px); }
+      p { color:#68707c; line-height:1.7; }
+      form { display:grid; gap:14px; }
+      label { display:grid; gap:7px; color:#5f6773; font-size:12px; font-weight:750; }
+      input,textarea,select { width:100%; border:1px solid #dbe0e8; border-radius:11px; background:#fff; color:#20242b; outline:0; }
+      input,select { height:44px; padding:0 12px; }
+      textarea { min-height:112px; padding:12px; resize:vertical; line-height:1.6; }
+      input:focus,textarea:focus,select:focus { border-color:#7ca3ff; box-shadow:0 0 0 3px rgba(51,112,255,.12); }
+      .toolbar { display:flex; justify-content:space-between; gap:14px; align-items:end; margin:26px 0 18px; }
+      .toolbar label { min-width:180px; }
+      .records { display:grid; gap:13px; }
+      .record { padding:20px; }
+      .record-head { display:flex; justify-content:space-between; gap:16px; align-items:start; }
+      .record h2 { margin:0; font-size:18px; }
+      .record-email { margin-top:5px; color:#68707c; overflow-wrap:anywhere; }
+      .tag { padding:5px 9px; border-radius:999px; background:#fff5dd; color:#946000; font-size:11px; font-weight:800; }
+      .tag.approved { background:#e8f8ef; color:#147a43; }
+      .tag.rejected { background:#fff0ee; color:#b42318; }
+      .record-meta { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:10px; margin:17px 0; }
+      .record-meta div { padding:12px; border-radius:12px; background:#f7f8fa; }
+      .record-meta span { display:block; color:#8a919c; font-size:11px; }
+      .record-meta strong { display:block; margin-top:6px; font-size:13px; overflow-wrap:anywhere; }
+      .record-actions { display:flex; justify-content:flex-end; gap:9px; }
+      .empty { padding:42px; text-align:center; color:#7c8490; }
+      .status { min-height:20px; color:#68707c; font-size:12px; }
+      dialog { width:min(520px,calc(100vw - 24px)); padding:0; border:1px solid #dfe3ea; border-radius:18px; color:#20242b; box-shadow:0 26px 70px rgba(20,25,36,.2); }
+      dialog::backdrop { background:rgba(24,28,38,.36); backdrop-filter:blur(3px); }
+      .dialog-inner { padding:23px; }
+      .dialog-head { display:flex; justify-content:space-between; gap:14px; }
+      .dialog-head h2 { margin:0; }
+      .close { width:38px; padding:0; border:0; background:#f1f3f6; }
+      .dialog-actions { display:flex; justify-content:flex-end; gap:10px; }
+      @media(max-width:650px){ .topbar{align-items:flex-start}.record-meta{grid-template-columns:1fr}.toolbar{align-items:stretch;flex-direction:column}.actions .back{display:none}.record-head{flex-direction:column}.record-actions{justify-content:stretch}.record-actions button{flex:1} }
+    </style>
+    <script type="module" src="/newbie-village-admin.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand"><small>INTERNAL · CHAT SYSTEM</small><strong>新手村保密协议审核</strong></div>
+      <div class="actions"><a class="button secondary back" href="/newbie-village" style="display:inline-flex;align-items:center;text-decoration:none">返回新手村</a><button class="secondary logout" type="button" hidden>退出管理</button></div>
+    </header>
+    <main>
+      <section class="panel login-panel">
+        <h1>管理员登录</h1>
+        <p>签署档案仅在 Chat 内部管理端可见，不进入 OA。</p>
+        <form class="login-form"><label>管理员密码<input name="password" type="password" autocomplete="current-password" required></label><div class="status login-status"></div><button class="primary" type="submit">登录审核台</button></form>
+      </section>
+      <section class="admin-app" hidden>
+        <h1>签署归档与审核</h1>
+        <p>每次签署自动归档。只有审核通过的校内账号才能进入个人主页和任务地图。</p>
+        <div class="toolbar"><label>查看状态<select class="status-filter"><option value="pending">待审核</option><option value="approved">已通过</option><option value="rejected">已驳回</option><option value="all">全部归档</option></select></label><button class="secondary refresh" type="button">刷新</button></div>
+        <div class="status list-status"></div>
+        <div class="records"></div>
+      </section>
+    </main>
+    <dialog class="review-dialog" aria-label="审核保密协议">
+      <div class="dialog-inner"><div class="dialog-head"><div><h2>审核签署记录</h2><p class="review-person"></p></div><button class="close" type="button" aria-label="关闭">×</button></div><form class="review-form"><label>审核备注<textarea name="reviewNote" maxlength="500" placeholder="通过时可选；驳回时必须填写原因。"></textarea></label><div class="status review-status"></div><div class="dialog-actions"><button class="danger reject" type="button">驳回</button><button class="primary approve" type="button">通过并准予入村</button></div></form></div>
+    </dialog>
+  </body>
+</html>
+
