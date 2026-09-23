@@ -84,7 +84,8 @@ function setTaskStatus(message, error = false) {
   elements.taskStatus.style.color = error ? "#b42318" : "#68707c";
 }
 
-function switchView(view) {
+function switchView(view, preserveHash = false) {
+  const wasPasses = location.hash === "#passes";
   state.activeView = view === "profile" ? "profile" : "tasks";
   document.querySelectorAll(".nav-button").forEach((button) => {
     button.classList.toggle("active", button.dataset.view === state.activeView);
@@ -92,7 +93,10 @@ function switchView(view) {
   elements.tasksView.hidden = state.activeView !== "tasks";
   elements.profileView.hidden = state.activeView !== "profile";
   const nextHash = state.activeView === "profile" ? "#profile" : "#tasks";
-  if (location.hash !== nextHash) history.replaceState(null, "", nextHash);
+  if (!preserveHash && location.hash !== nextHash) history.replaceState(null, "", nextHash);
+  if (wasPasses && !preserveHash) {
+    requestAnimationFrame(() => document.querySelector(".content")?.scrollIntoView({ block: "start" }));
+  }
 }
 
 function statusClass(status) {
@@ -222,7 +226,9 @@ function renderDashboard() {
   document.querySelector(".profile-role").textContent = data.user.roleLabel;
   document.querySelector(".profile-progress").textContent = `已完成 ${data.progress.completed}/${data.progress.total}`;
   document.querySelector(".avatar").textContent = displayName.slice(0, 1).toUpperCase() || "新";
-  switchView(state.activeView);
+  const showPasses = location.hash === "#passes";
+  switchView(state.activeView, showPasses);
+  if (showPasses) requestAnimationFrame(() => document.getElementById("passes")?.scrollIntoView({ block: "start" }));
 }
 
 function renderLoggedOut() {
@@ -412,7 +418,10 @@ document.querySelectorAll(".nav-button").forEach((button) => button.addEventList
 document.querySelector(".task-close").addEventListener("click", () => elements.taskDialog.close());
 document.querySelector(".task-start").addEventListener("click", () => void updateTask("in_progress"));
 document.querySelector(".task-complete").addEventListener("click", () => void updateTask("completed"));
-window.addEventListener("hashchange", () => switchView(location.hash === "#profile" ? "profile" : "tasks"));
+window.addEventListener("hashchange", () => {
+  if (location.hash === "#passes") return;
+  switchView(location.hash === "#profile" ? "profile" : "tasks");
+});
 
 void loadDashboard();
 
