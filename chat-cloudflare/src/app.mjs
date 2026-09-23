@@ -208,6 +208,9 @@ function emailCode() {
 async function sendCampusLoginCode(context, email, code) {
   const endpoint = typeof context.env.EMAIL_CODE_WEBHOOK_URL === "string" ? context.env.EMAIL_CODE_WEBHOOK_URL.trim() : "";
   const token = typeof context.env.EMAIL_CODE_WEBHOOK_TOKEN === "string" ? context.env.EMAIL_CODE_WEBHOOK_TOKEN.trim() : "";
+  const from = typeof context.env.EMAIL_CODE_FROM === "string" && context.env.EMAIL_CODE_FROM.trim()
+    ? context.env.EMAIL_CODE_FROM.trim()
+    : "magan@sztu.edu.cn";
   if (!endpoint) return { sent: false, devCode: code };
   const response = await context.runtime.fetch(endpoint, {
     method: "POST",
@@ -216,6 +219,7 @@ async function sendCampusLoginCode(context, email, code) {
       ...(token ? { authorization: `Bearer ${token}` } : {}),
     },
     body: JSON.stringify({
+      from,
       to: email,
       subject: "OriginMind Chat 登录验证码",
       text: `你的 OriginMind Chat 登录验证码是 ${code}，10 分钟内有效。`,

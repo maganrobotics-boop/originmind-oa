@@ -43,6 +43,7 @@
   "vars": {
     "APP_ORIGIN": "https://chat.omindos.ai",
     "ADMIN_EMAIL": "administrator@omindos.ai",
+    "EMAIL_CODE_FROM": "magan@sztu.edu.cn",
     "RELEASE_ID": "development"
   },
   "observability": {

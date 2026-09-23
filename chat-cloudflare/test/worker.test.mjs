@@ -238,6 +238,32 @@ test("campus email login accepts SZTU mailboxes without touching admin auth", as
   assert.equal(status.body.user.email, "student@stu.sztu.edu.cn");
 });
 
+test("campus email code webhook uses the configured SZTU sender", async (t) => {
+  let delivered;
+  const env = makeEnvironment({
+    EMAIL_CODE_WEBHOOK_URL: "https://mail.example.test/send",
+    EMAIL_CODE_WEBHOOK_TOKEN: "mail-token",
+    EMAIL_CODE_FROM: "magan@sztu.edu.cn",
+  });
+  t.after(() => env.DB.close());
+  const result = await responseJson(await handleRequest(apiRequest("/api/visitor/request-code", {
+    method: "POST",
+    body: { email: "teacher@sztu.edu.cn" },
+  }), env, {}, {
+    fetch: async (url, init) => {
+      delivered = { url: String(url), init, body: JSON.parse(String(init.body)) };
+      return Response.json({ ok: true });
+    },
+  }));
+  assert.equal(result.status, 200);
+  assert.equal(result.body.devCode, undefined);
+  assert.equal(delivered.url, "https://mail.example.test/send");
+  assert.equal(delivered.init.headers.authorization, "Bearer mail-token");
+  assert.equal(delivered.body.from, "magan@sztu.edu.cn");
+  assert.equal(delivered.body.to, "teacher@sztu.edu.cn");
+  assert.match(delivered.body.text, /\d{6}/u);
+});
+
 test("zero retrieved documents returns retrieval fallback and never invokes a model", async (t) => {
   let calls = 0;
   const env = makeEnvironment({ AI: { run: async () => { calls += 1; throw new Error("must not run"); } } });
