@@ -71,4 +71,3 @@ EMAIL_CODE_WEBHOOK_URL=https://<your-mail-webhook-domain>/send
 ```
 
 `EMAIL_CODE_WEBHOOK_TOKEN` must be the same token used by the webhook service.
-
