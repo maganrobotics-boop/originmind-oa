@@ -738,6 +738,17 @@ function saveConversation() {
   renderRecentConversations();
 }
 
+function rememberAssistantTurn(id, turn) {
+  const conversation = conversations.find((candidate) => candidate.id === id);
+  if (!conversation) return;
+  conversation.turns = [...conversation.turns, turn].slice(-20);
+  conversation.title = conversationTitle(conversation.turns);
+  conversation.updatedAt = Date.now();
+  conversations.sort((left, right) => right.updatedAt - left.updatedAt);
+  persistConversations();
+  renderRecentConversations();
+}
+
 function createConversation(turns = []) {
   const conversation = {
     id: conversationId(),
@@ -811,6 +822,7 @@ async function submitMessage(rawText) {
   }
   submittedQuestionCount += 1;
   if (!activeConversationId) createConversation();
+  const requestConversationId = activeConversationId;
   body.classList.add("chat-active");
   addMessage("user", [text, fileText].filter(Boolean).join("\n"));
   saveConversation();
@@ -833,14 +845,23 @@ async function submitMessage(rawText) {
     });
     const data = await response.json().catch(() => ({}));
     if (!response.ok) throw new Error(data.error || "服务暂不可用，请稍后重试。");
+    const assistantTurn = {
+      role: "assistant",
+      text: data.answer || "暂时没有生成回答。",
+      images: data.images || [],
+      publicSources: data.oaPublicStatus === "connected" && Array.isArray(data.sources) && data.sources.length > 0,
+    };
+    rememberAssistantTurn(requestConversationId, assistantTurn);
     await revealAssistantAnswer(typing, data.answer || "暂时没有生成回答。", {
       images: data.images,
-      publicSources: data.oaPublicStatus === "connected" && Array.isArray(data.sources) && data.sources.length > 0,
+      publicSources: assistantTurn.publicSources,
     });
   } catch (error) {
-    setAssistantContent(typing, error?.message || "服务暂不可用，请稍后重试。");
+    const message = error?.message || "服务暂不可用，请稍后重试。";
+    rememberAssistantTurn(requestConversationId, { role: "assistant", text: message, images: [], publicSources: false });
+    setAssistantContent(typing, message);
   }
-  saveConversation();
+  if (activeConversationId === requestConversationId) saveConversation();
 }
 
 function resetChat() {
