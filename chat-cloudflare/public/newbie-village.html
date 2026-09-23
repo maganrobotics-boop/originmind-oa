@@ -42,6 +42,7 @@
       }
       .nav-button:hover, .back-link:hover { background: #f0f2f6; }
       .nav-button.active { background: #eaf1ff; color: #245bdb; font-weight: 800; }
+      .nav-button:disabled { opacity: .5; cursor: not-allowed; }
       .nav-icon { width: 24px; text-align: center; font-size: 16px; }
       .side-foot { margin-top: auto; }
       .side-note { margin: 0 9px 14px; color: #9197a2; font-size: 11px; line-height: 1.6; }
@@ -109,6 +110,28 @@
       .task-card p { margin: 10px 0 18px; color: #666e7a; line-height: 1.65; }
       .task-open { margin-top: auto; align-self: flex-start; }
       .panel { padding: 24px; border-radius: 18px; }
+      .agreement-gate { max-width: 860px; margin: 0 auto; }
+      .agreement-head { margin-bottom: 22px; }
+      .agreement-head h1 { margin-bottom: 10px; font-size: clamp(34px,5vw,54px); }
+      .agreement-head p { margin: 0; color: #6f7783; line-height: 1.75; }
+      .agreement-card { padding: clamp(22px,4vw,38px); }
+      .agreement-meta { display: flex; flex-wrap: wrap; gap: 8px; margin: 18px 0 24px; }
+      .agreement-meta span { padding: 6px 10px; border-radius: 999px; background: #f1f4f9; color: #646c78; font-size: 12px; }
+      .agreement-introduction { margin: 0 0 22px; color: #4d5561; line-height: 1.8; }
+      .agreement-clauses { display: grid; gap: 14px; }
+      .agreement-clause { padding: 17px 18px; border: 1px solid #e5e8ee; border-radius: 14px; background: #fafbfc; }
+      .agreement-clause h2 { margin: 0 0 8px; font-size: 15px; }
+      .agreement-clause p { margin: 0; color: #5f6773; line-height: 1.75; }
+      .privacy-notice { margin: 20px 0 0; padding: 15px 17px; border-radius: 13px; background: #eef5ff; color: #3e5f8f; font-size: 13px; line-height: 1.75; }
+      .agreement-form { display: grid; gap: 15px; margin-top: 24px; padding-top: 22px; border-top: 1px solid #e7eaf0; }
+      .agreement-check { grid-template-columns: auto 1fr; align-items: start; gap: 10px; color: #3f4650; font-size: 13px; line-height: 1.65; cursor: pointer; }
+      .agreement-check input { width: 18px; height: 18px; margin-top: 2px; }
+      .agreement-review { margin-top: 24px; padding: 22px; border: 1px solid #e2e6ed; border-radius: 15px; background: #f8f9fb; }
+      .agreement-review.pending { border-color: #f0dca7; background: #fffbef; }
+      .agreement-review.rejected { border-color: #efc6c1; background: #fff6f5; }
+      .agreement-review h2 { margin: 0 0 9px; font-size: 19px; }
+      .agreement-review p { margin: 0; color: #646c78; line-height: 1.7; }
+      .agreement-review .review-note { margin-top: 12px; font-weight: 700; }
       .profile-grid { display: grid; grid-template-columns: minmax(220px,.62fr) minmax(0,1.38fr); gap: 18px; }
       .profile-card { min-height: 320px; background: linear-gradient(145deg,#edf4ff,#f7f3ff 58%,#effdfa); }
       .avatar { display: grid; place-items: center; width: 78px; height: 78px; border-radius: 24px; background: #3370ff; color: #fff; font-size: 28px; font-weight: 850; box-shadow: 0 14px 28px rgba(51,112,255,.2); }
@@ -193,8 +216,8 @@
         <div class="brand"><span class="brand-mark" aria-hidden="true"></span><div class="brand-copy"><strong>新手村</strong><span>OriginMind x ARTS Robotics</span></div></div>
         <div class="side-label">学习空间</div>
         <nav class="side-nav" aria-label="新手村导航">
-          <button class="nav-button active" type="button" data-view="tasks"><span class="nav-icon">⌁</span><span>任务地图</span></button>
-          <button class="nav-button" type="button" data-view="profile"><span class="nav-icon">◎</span><span>个人主页</span></button>
+          <button class="nav-button active" type="button" data-view="tasks" disabled><span class="nav-icon">⌁</span><span>任务地图</span></button>
+          <button class="nav-button" type="button" data-view="profile" disabled><span class="nav-icon">◎</span><span>个人主页</span></button>
         </nav>
         <div class="side-foot">
           <p class="side-note">新手村与 OA 独立运行，学习进度只保存在 Chat 系统。</p>
@@ -218,11 +241,31 @@
               <h2>第一版已可用</h2>
               <ul class="welcome-list">
                 <li><b>01</b><span>使用学号邮箱或教师邮箱验证身份</span></li>
-                <li><b>02</b><span>完善个人主页和学习方向</span></li>
-                <li><b>03</b><span>逐项解锁任务并保存证据</span></li>
-                <li><b>04</b><span>查看自己的完成进度和下一步</span></li>
+                <li><b>02</b><span>签署保密协议并等待管理员审核</span></li>
+                <li><b>03</b><span>完善个人主页和学习方向</span></li>
+                <li><b>04</b><span>逐项解锁任务并保存证据</span></li>
               </ul>
             </aside>
+          </section>
+
+          <section class="agreement-gate" hidden>
+            <header class="agreement-head">
+              <div class="eyebrow">CONFIDENTIALITY GATE</div>
+              <h1>先签署，审核后入村。</h1>
+              <p>协议会自动归档为内部记录。管理员审核通过前，个人主页和任务地图不会开放。</p>
+            </header>
+            <article class="panel agreement-card">
+              <div class="agreement-meta"><span class="agreement-version"></span><span class="agreement-effective"></span><span class="agreement-email"></span></div>
+              <p class="agreement-introduction"></p>
+              <div class="agreement-clauses"></div>
+              <p class="privacy-notice"></p>
+              <form class="agreement-form">
+                <label>签署姓名<input name="signerName" maxlength="80" autocomplete="name" placeholder="请输入真实姓名" required></label>
+                <label class="agreement-check"><input name="accepted" type="checkbox" required><span>我已完整阅读并同意当前版本的保密协议，确认以上签署姓名由本人填写，并同意系统保存本次签署记录。</span></label>
+                <div class="form-actions"><span class="agreement-status form-status" role="status"></span><button class="primary" type="submit">签署并提交审核</button></div>
+              </form>
+              <div class="agreement-review" hidden><h2></h2><p class="review-summary"></p><p class="review-note"></p></div>
+            </article>
           </section>
 
           <section class="dashboard" hidden>
@@ -288,5 +331,4 @@
     <div class="toast" role="status" aria-live="polite"></div>
   </body>
 </html>
-
 
