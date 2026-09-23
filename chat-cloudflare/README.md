@@ -37,6 +37,15 @@ reference hiding still runs before display and again when restoring history.
 
 - This Worker and its D1 database are separate from the internal OA Worker and
   OA D1 database.
+- Newbie Village access is gated by a versioned confidentiality agreement. A
+  campus user signs with their verified email identity and typed name; the
+  immutable-version record is archived in Chat D1 as pending until a Chat
+  administrator approves it. Profiles and tasks remain server-side locked before
+  approval. The archive is available only from the authenticated internal review
+  page at `/newbie-village/admin` and is never written to OA.
+- Agreement records deliberately omit IP addresses and browser fingerprints.
+  They retain only the campus email, signer name, agreement version and digest,
+  timestamps, review state and internal review note.
 - The public Chat application never receives OA sessions or internal-only
   knowledge.
 - Chat-local document writes remain drafts and never reach the public model.
@@ -65,6 +74,13 @@ reference hiding still runs before display and again when restoring history.
 | Secret | `APP_ENCRYPTION_KEY` | Optional Bailian credential encryption |
 | Secret | `RATE_LIMIT_HMAC_KEY` | Pseudonymous abuse-control identifiers |
 | Secret | `PUBLIC_LAB_AI_SERVICE_TOKEN` | OA public retrieval authentication |
+| Secret | `EMAIL_CODE_WEBHOOK_TOKEN` | Authenticates campus-code delivery to the SMTP webhook |
+
+Production campus login fails closed when `EMAIL_CODE_WEBHOOK_URL` is absent;
+verification codes are returned in responses only when the explicit local-test
+flag `EMAIL_CODE_DEV_MODE=1` is set. The production release points at the HTTPS
+mail webhook and requires its token to be supplied or already present on the
+Worker before deployment.
 
 `APP_ORIGIN` is strict: preview and production deployments must generate their
 own configuration with the exact public origin. Production disables both
@@ -94,3 +110,4 @@ live smoke test restores the previous proxy state so the Tencent origin remains
 the fallback.
 
 See `MIGRATION.md` for the audited Tencent-to-Workers mapping.
+
