@@ -253,13 +253,31 @@ export async function retrieveOaSuggestions(context) {
   }
 }
 
+function staticTaDocuments(question) {
+  if (!/(?:助教|TA|新手村|入门|保密协议|实验室大模型|机器人新手|怎么开始|下一步)/iu.test(question)) return [];
+  return [{
+    id: "static:ta",
+    title: "实验室 AI 助教与机器人新手村",
+    body: "实验室 AI 助教是 OriginMind × ARTS Robotics 面向学生与访客的常驻实验室大模型入口。它应该一直在学生旁边，帮助学生理解实验室、完成注册与新手村入门、阅读并签署保密协议、选择项目方向、进入课程学习和任务训练。机器人新手村是给新同学的入门路径，目标是把“不知道从哪里开始”变成“下一步可以这样做”。推荐流程是：第一步完善个人信息和学习目标；第二步阅读并签署新手村保密协议；第三步选择感知、导航、控制、机械或 AI 等项目方向；第四步进入课程与任务，按证据包、代码链接、截图或复盘提交阶段成果。助教回答这类问题时，应优先给出下一步行动，而不是只做概念解释。",
+    url: "",
+    category: "学生入门",
+    updatedAt: "2026-09-23",
+    published: 1,
+    sectionTitle: "助教定位与新手村流程",
+    paragraphRef: "ta-overview",
+    sourceLabel: "TA 页面公开说明",
+    origin: "static_public",
+  }];
+}
+
 export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS, cacheEnabled = true) {
   const token = context.env.PUBLIC_LAB_AI_SERVICE_TOKEN || "";
   const normalized = normalizedQuestion(question);
-  if (!PUBLIC_LAB_AI_SERVICE_TOKEN_PATTERN.test(token)) {
-    return { status: "not_configured", documents: [] };
-  }
   if (normalized.length < 2) return { status: "invalid_question", documents: [] };
+  const staticDocuments = staticTaDocuments(normalized);
+  if (!PUBLIC_LAB_AI_SERVICE_TOKEN_PATTERN.test(token)) {
+    return { status: staticDocuments.length ? "connected" : "not_configured", documents: staticDocuments };
+  }
   const cache = retrievalCache(context);
   const cached = cache.get(normalized);
   if (cacheEnabled && cached && Date.now() - cached.storedAt < RETRIEVAL_CACHE_TTL_MS) return cached.value;
@@ -291,7 +309,9 @@ export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS, cach
     }
     const value = {
       status: "connected",
-      documents: chunks.slice(0, 3).map((item) => ({
+      documents: [
+        ...staticDocuments,
+        ...chunks.slice(0, staticDocuments.length ? 2 : 3).map((item) => ({
         id: `oa:${item.id}`,
         title: item.title,
         body: item.excerpt,
@@ -305,6 +325,7 @@ export async function retrieveOa(question, context, timeoutMs = TIMEOUT_MS, cach
         origin: "oa_public",
         ...(item.assets?.length ? { assets: item.assets } : {}),
       })),
+      ],
     };
     if (cache.size >= 100) cache.delete(cache.keys().next().value);
     if (cacheEnabled) cache.set(normalized, { storedAt: Date.now(), value });
