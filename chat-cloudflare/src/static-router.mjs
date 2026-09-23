@@ -31,6 +31,8 @@ const TOPIC_TRAILING_REDIRECTS = new Map(
   TOPIC_PATHS.map((pathname) => [`${pathname}/`, pathname]),
 );
 const DIRECT_ASSET_PATHS = new Set([
+  "/orientation.html",
+  "/robotics-course.html",
   "/newbie-village.html",
   "/newbie-village.js",
   "/newbie-village-admin.html",
@@ -140,6 +142,14 @@ export async function routeStaticRequest(request, env) {
   if (url.pathname === "/newbie-village/admin") {
     if (!SAFE_METHODS.has(request.method)) return methodNotAllowed();
     return fetchAsset(request, env, "/newbie-village-admin.html", "no-store");
+  }
+  if (url.pathname === "/orientation") {
+    if (!SAFE_METHODS.has(request.method)) return methodNotAllowed();
+    return fetchAsset(request, env, "/orientation.html", "no-store");
+  }
+  if (url.pathname === "/robotics-course") {
+    if (!SAFE_METHODS.has(request.method)) return methodNotAllowed();
+    return fetchAsset(request, env, "/robotics-course.html", "no-store");
   }
 
   if (kind === RouteKind.SHELL) {
