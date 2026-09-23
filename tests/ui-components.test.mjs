@@ -123,7 +123,9 @@ test("makes the official Feishu QR the primary login and keeps ChatGPT and GitHu
     choiceSource,
     /\{githubLoginEnabled\s*&&\s*<a[^>]*href="\/api\/auth\/github\/start"/,
   );
-  assert.match(pageSource, /请登录账号/u);
+  assert.match(pageSource, /进入实验室大模型/u);
+  assert.match(pageSource, /游客试看公开问答/u);
+  assert.match(pageSource, /实习学生请使用飞书登录/u);
   assert.match(pageSource, /fetch\("\/api\/auth\/feishu\/name-binding"/u);
   assert.match(pageSource, /fetch\("\/api\/auth\/feishu\/provision"/u);
   assert.match(pageSource, /provision-feishu-member/u);
@@ -135,7 +137,8 @@ test("makes the official Feishu QR the primary login and keeps ChatGPT and GitHu
   assert.match(pageSource, /本机已登录飞书，直接继续/u);
   const gateSource = pageSource.slice(pageSource.indexOf("function RegistrationGate"), pageSource.indexOf("function IdentityAccessGate"));
   assert.doesNotMatch(gateSource, /首次使用登记|提交注册申请|<Field label="学号 \/ 工号|<Field label="当前认证身份"/u);
-  assert.match(gateSource, /扫码确认企业身份后即可进入 OA/u);
+  assert.match(gateSource, /完成基本信息和保密协议后进入个人主页与新手任务/u);
+  assert.match(gateSource, /游客仅能访问公开资料/u);
   assert.doesNotMatch(gateSource, /无需填写姓名、学号、工号或额外认证资料/u);
   assert.match(gateSource, /都不是我的，以当前飞书身份进入/u);
 });
@@ -220,14 +223,14 @@ test("lets a pending applicant sign out into a QR-first account switch screen", 
   assert.match(gateSource, /切换登录方式不会删除原账户的注册、审核或业务记录/u);
 });
 
-test("returns successful external sign-ins to the unified OA chat workspace", async () => {
+test("returns successful external sign-ins to the member home workspace", async () => {
   const pageSource = await readFile(path.join(root, "app/page.tsx"), "utf8");
-  assert.match(pageSource, /useState<ViewKey>\("chat"\)/u);
+  assert.match(pageSource, /useState<ViewKey>\("home"\)/u);
   assert.match(pageSource, /useState<KnowledgeTab>\("ask"\)/u);
 
   for (const provider of ["github", "feishu"]) {
     const signedInBranch = new RegExp(
-      `${provider}Status === "signed-in"\\) \\{[\\s\\S]*?setActiveView\\("chat"\\);[\\s\\S]*?setShowMineOnly\\(false\\);[\\s\\S]*?setMobileNavOpen\\(false\\);[\\s\\S]*?window\\.scrollTo\\(\\{ top: 0, left: 0, behavior: "auto" \\}\\);`,
+      `${provider}Status === "signed-in"\\) \\{[\\s\\S]*?setActiveView\\("home"\\);[\\s\\S]*?setShowMineOnly\\(false\\);[\\s\\S]*?setMobileNavOpen\\(false\\);[\\s\\S]*?window\\.scrollTo\\(\\{ top: 0, left: 0, behavior: "auto" \\}\\);`,
       "u",
     );
     assert.match(pageSource, signedInBranch);
