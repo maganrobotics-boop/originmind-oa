@@ -307,6 +307,25 @@ test("production email login fails closed instead of displaying a verification c
   assert.match(result.body.error, /邮件服务尚未配置/u);
 });
 
+test("campus email webhook exposes only short diagnostics behind the debug header", async (t) => {
+  const env = makeEnvironment({
+    EMAIL_CODE_WEBHOOK_URL: "https://mail.example.test/send",
+    EMAIL_CODE_WEBHOOK_TOKEN: "mail-token",
+  });
+  t.after(() => env.DB.close());
+  const request = apiRequest("/api/visitor/request-code", {
+    method: "POST",
+    body: { email: "teacher@sztu.edu.cn" },
+  });
+  request.headers.set("x-originmind-debug", "visitor-email");
+  const result = await responseJson(await handleRequest(request, env, {}, {
+    fetch: async () => Response.json({ error: "unauthorized", extra: "x".repeat(300) }, { status: 401 }),
+  }));
+  assert.equal(result.status, 502);
+  assert.match(result.body.error, /^webhook_status=401; /u);
+  assert.ok(result.body.error.length < 240);
+});
+
 test("campus login code rate limit tolerates classroom retries from the same network", async (t) => {
   const env = makeEnvironment();
   t.after(() => env.DB.close());
