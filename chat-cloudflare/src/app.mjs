@@ -311,6 +311,29 @@ function timeoutSignal(milliseconds) {
   return controller.signal;
 }
 
+async function ensureVisitorAuthSchema(context) {
+  await database(context).batch([
+    database(context).prepare(`CREATE TABLE IF NOT EXISTS email_login_challenges (
+      id TEXT PRIMARY KEY NOT NULL,
+      email TEXT NOT NULL,
+      code_hash TEXT NOT NULL,
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL,
+      attempts INTEGER DEFAULT 0 NOT NULL,
+      consumed_at INTEGER
+    )`),
+    database(context).prepare("CREATE INDEX IF NOT EXISTS idx_email_login_challenges_email_expires ON email_login_challenges (email, expires_at)"),
+    database(context).prepare(`CREATE TABLE IF NOT EXISTS visitor_sessions (
+      hash TEXT PRIMARY KEY NOT NULL,
+      email TEXT NOT NULL,
+      role TEXT NOT NULL CHECK (role IN ('student', 'staff')),
+      created_at INTEGER NOT NULL,
+      expires_at INTEGER NOT NULL
+    )`),
+    database(context).prepare("CREATE INDEX IF NOT EXISTS idx_visitor_sessions_expires ON visitor_sessions (expires_at)"),
+  ]);
+}
+
 async function sendCampusLoginCode(context, email, code) {
   const endpoint = typeof context.env.EMAIL_CODE_WEBHOOK_URL === "string" ? context.env.EMAIL_CODE_WEBHOOK_URL.trim() : "";
   const token = typeof context.env.EMAIL_CODE_WEBHOOK_TOKEN === "string" ? context.env.EMAIL_CODE_WEBHOOK_TOKEN.trim() : "";
@@ -558,6 +581,7 @@ async function visitorAuth(context) {
     return json({ signedIn: false }, 200, { "Set-Cookie": `${VISITOR_SESSION_COOKIE}=; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=0` });
   }
   if (path === "/api/visitor/request-code") {
+    await ensureVisitorAuthSchema(context);
     await limit(context, "visitor-code", 60, 900);
     const payload = await readJson(request, 2_000);
     const email = normalizeCampusEmail(payload?.email);
