@@ -356,7 +356,7 @@ async function sendCampusLoginCode(context, email, code) {
       subject: "OriginMind Chat 登录验证码",
       text: `你的 OriginMind Chat 登录验证码是 ${code}，10 分钟内有效。`,
     }),
-    redirect: "error",
+    redirect: "manual",
     signal: timeoutSignal(10_000),
   });
   if (!response.ok) throw new PublicError("验证码暂时无法发送，请稍后重试。", 502);
