@@ -359,7 +359,13 @@ async function sendCampusLoginCode(context, email, code) {
     redirect: "manual",
     signal: timeoutSignal(10_000),
   });
-  if (!response.ok) throw new PublicError("验证码暂时无法发送，请稍后重试。", 502);
+  if (!response.ok) {
+    if (context.request.headers.get("x-originmind-debug") === "visitor-email") {
+      const detail = (await response.text()).slice(0, 200);
+      throw new PublicError(`webhook_status=${response.status}; ${detail}`, 502);
+    }
+    throw new PublicError("验证码暂时无法发送，请稍后重试。", 502);
+  }
   return { sent: true };
 }
 
