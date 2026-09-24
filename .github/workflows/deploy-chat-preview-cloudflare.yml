@@ -68,6 +68,8 @@ jobs:
           CHAT_APP_ENCRYPTION_KEY: ${{ secrets.CHAT_APP_ENCRYPTION_KEY }}
           CHAT_RATE_LIMIT_HMAC_KEY: ${{ secrets.CHAT_RATE_LIMIT_HMAC_KEY }}
           CHAT_ADMIN_PASSWORD: ${{ secrets.CHAT_ADMIN_PASSWORD }}
+          EMAIL_CODE_WEBHOOK_URL: https://mailhook.omindos.ai/send
+          EMAIL_CODE_WEBHOOK_TOKEN: ${{ secrets.EMAIL_CODE_WEBHOOK_TOKEN }}
         run: node chat-cloudflare/scripts/release-preview-cloudflare.mjs
       - name: Preserve non-secret preview release evidence
         if: always()
