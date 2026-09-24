@@ -303,7 +303,9 @@ function emailCode() {
 }
 
 function timeoutSignal(milliseconds) {
-  if (typeof AbortSignal?.timeout === "function") return AbortSignal.timeout(milliseconds);
+  const abortSignal = globalThis.AbortSignal;
+  if (typeof abortSignal?.timeout === "function") return abortSignal.timeout(milliseconds);
+  if (typeof globalThis.AbortController !== "function") return undefined;
   const controller = new AbortController();
   setTimeout(() => controller.abort(), milliseconds);
   return controller.signal;
