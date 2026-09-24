@@ -63,6 +63,8 @@ function validateEnvironment(environment = process.env) {
   const encryptionKey = (environment.CHAT_APP_ENCRYPTION_KEY || "").trim();
   const rateLimitKey = (environment.CHAT_RATE_LIMIT_HMAC_KEY || "").trim();
   const adminPassword = environment.CHAT_ADMIN_PASSWORD || "";
+  const emailCodeWebhookUrl = (environment.EMAIL_CODE_WEBHOOK_URL || "").trim();
+  const emailCodeWebhookToken = (environment.EMAIL_CODE_WEBHOOK_TOKEN || "").trim();
   if (!adminPassword) throw new Error("CHAT_ADMIN_PASSWORD is required for the preview PDF/image extraction smoke check");
   if (encryptionKey && (encryptionKey.length < 40 || encryptionKey.length > 1_024)) {
     throw new Error("CHAT_APP_ENCRYPTION_KEY is invalid when supplied");
@@ -72,6 +74,18 @@ function validateEnvironment(environment = process.env) {
   }
   if (adminPassword.length < 12 || adminPassword.length > 256) {
     throw new Error("CHAT_ADMIN_PASSWORD is invalid when supplied");
+  }
+  if (emailCodeWebhookUrl) {
+    const webhookUrl = new URL(emailCodeWebhookUrl);
+    if (webhookUrl.protocol !== "https:" || webhookUrl.href !== emailCodeWebhookUrl) {
+      throw new Error("EMAIL_CODE_WEBHOOK_URL must be an exact HTTPS URL when supplied");
+    }
+  }
+  if (emailCodeWebhookToken && (emailCodeWebhookToken.length < 16 || emailCodeWebhookToken.length > 1_024)) {
+    throw new Error("EMAIL_CODE_WEBHOOK_TOKEN is invalid when supplied");
+  }
+  if (emailCodeWebhookToken && !emailCodeWebhookUrl) {
+    throw new Error("EMAIL_CODE_WEBHOOK_URL is required when EMAIL_CODE_WEBHOOK_TOKEN is supplied");
   }
   const suppliedSubdomain = (environment.CHAT_WORKERS_DEV_SUBDOMAIN || "").trim().toLowerCase();
   if (suppliedSubdomain && !SUBDOMAIN_PATTERN.test(suppliedSubdomain)) {
@@ -86,6 +100,8 @@ function validateEnvironment(environment = process.env) {
     encryptionKey,
     rateLimitKey,
     adminPassword,
+    emailCodeWebhookUrl,
+    emailCodeWebhookToken,
     releaseId,
     suppliedSubdomain,
   };
@@ -96,7 +112,7 @@ function relativeFromConfig(configPath, targetPath) {
   return value.startsWith(".") ? value : `./${value}`;
 }
 
-function buildPreviewConfig({ accountId, adminEmail, databaseId, configPath, oaWorkerName, origin, releaseId }) {
+function buildPreviewConfig({ accountId, adminEmail, databaseId, configPath, oaWorkerName, origin, releaseId, emailCodeWebhookUrl }) {
   if (!ACCOUNT_ID_PATTERN.test(accountId) || !UUID_PATTERN.test(databaseId) || oaWorkerName !== OA_WORKER_NAME) {
     throw new Error("Invalid preview Wrangler target");
   }
@@ -128,6 +144,8 @@ function buildPreviewConfig({ accountId, adminEmail, databaseId, configPath, oaW
     vars: {
       APP_ORIGIN: origin,
       ADMIN_EMAIL: adminEmail,
+      EMAIL_CODE_FROM: "magan@sztu.edu.cn",
+      ...(emailCodeWebhookUrl ? { EMAIL_CODE_WEBHOOK_URL: emailCodeWebhookUrl } : {}),
       RELEASE_ID: releaseId,
     },
   };
@@ -212,6 +230,7 @@ delete process.env.PUBLIC_LAB_AI_SERVICE_TOKEN;
 delete process.env.CHAT_ADMIN_PASSWORD;
 delete process.env.CHAT_APP_ENCRYPTION_KEY;
 delete process.env.CHAT_RATE_LIMIT_HMAC_KEY;
+delete process.env.EMAIL_CODE_WEBHOOK_TOKEN;
 const secretValues = [
   rawPublicToken,
   rawPublicToken.trim(),
@@ -220,6 +239,7 @@ const secretValues = [
   environment.encryptionKey,
   environment.rateLimitKey,
   environment.adminPassword,
+  environment.emailCodeWebhookToken,
 ].filter(Boolean);
 const releaseRoot = join(CHAT_ROOT, ".wrangler", "preview-releases", environment.releaseId);
 const evidenceRoot = join(releaseRoot, "evidence");
@@ -275,6 +295,7 @@ try {
     configPath: previewConfigPath,
     origin: PREVIEW_ORIGIN,
     releaseId: environment.releaseId,
+    emailCodeWebhookUrl: environment.emailCodeWebhookUrl,
   });
   await writeJson(previewConfigPath, previewConfig);
   await writeJson(join(evidenceRoot, "target.json"), {
@@ -293,6 +314,10 @@ try {
 
   progress("Inspecting existing preview Worker secret names without reading their values.");
   const existingSecretNames = await existingWorkerSecretNames(previewConfigPath, secretValues);
+  if (environment.emailCodeWebhookUrl && !environment.emailCodeWebhookToken &&
+      !existingSecretNames.has("EMAIL_CODE_WEBHOOK_TOKEN")) {
+    throw new Error("EMAIL_CODE_WEBHOOK_TOKEN must already exist on the preview Worker or be supplied for email login");
+  }
   await writeJson(join(evidenceRoot, "worker-secret-names-before.json"), {
     format: "originmind-chat-preview-worker-secret-names-v1",
     names: [...existingSecretNames].sort(),
@@ -307,6 +332,7 @@ try {
   if (rateLimitKey) secretValues.push(rateLimitKey);
   const workerSecrets = {
     PUBLIC_LAB_AI_SERVICE_TOKEN: environment.publicToken,
+    ...(environment.emailCodeWebhookToken ? { EMAIL_CODE_WEBHOOK_TOKEN: environment.emailCodeWebhookToken } : {}),
     ...(appEncryptionKey ? { APP_ENCRYPTION_KEY: appEncryptionKey } : {}),
     ...(rateLimitKey ? { RATE_LIMIT_HMAC_KEY: rateLimitKey } : {}),
   };
