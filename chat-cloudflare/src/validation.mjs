@@ -63,7 +63,7 @@ export function parseChatPayload(value) {
   const input = object(value);
   exactKeys(input, ["messages", "topic"], ["conversationToken", "suggestionToken", "analyticsSection"]);
   return {
-    messages: turns(input.messages, { min: 1, max: 9 }),
+    messages: turns(input.messages, { min: 1, max: 20 }),
     topic: oneOf(input.topic, TOPICS),
     conversationToken: input.conversationToken === undefined ? undefined : text(input.conversationToken, { max: 40_000 }),
     suggestionToken: input.suggestionToken === undefined ? undefined : text(input.suggestionToken, { min: 1, max: 4_000 }),
