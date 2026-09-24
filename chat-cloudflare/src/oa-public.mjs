@@ -254,7 +254,7 @@ export async function retrieveOaSuggestions(context) {
 }
 
 function staticTaDocuments(question) {
-  if (!/(?:助教|TA|新手村|入门|保密协议|实验室大模型|机器人新手|怎么开始|下一步)/iu.test(question)) return [];
+  if (!/(?:助教|\bTA\b|实验室大模型|问助教)/iu.test(question)) return [];
   return [{
     id: "static:ta",
     title: "实验室 AI 助教与机器人新手村",
