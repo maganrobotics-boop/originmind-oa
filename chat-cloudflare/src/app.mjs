@@ -302,6 +302,13 @@ function emailCode() {
   return String(number % 1_000_000).padStart(6, "0");
 }
 
+function timeoutSignal(milliseconds) {
+  if (typeof AbortSignal?.timeout === "function") return AbortSignal.timeout(milliseconds);
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), milliseconds);
+  return controller.signal;
+}
+
 async function sendCampusLoginCode(context, email, code) {
   const endpoint = typeof context.env.EMAIL_CODE_WEBHOOK_URL === "string" ? context.env.EMAIL_CODE_WEBHOOK_URL.trim() : "";
   const token = typeof context.env.EMAIL_CODE_WEBHOOK_TOKEN === "string" ? context.env.EMAIL_CODE_WEBHOOK_TOKEN.trim() : "";
@@ -325,7 +332,7 @@ async function sendCampusLoginCode(context, email, code) {
       text: `你的 OriginMind Chat 登录验证码是 ${code}，10 分钟内有效。`,
     }),
     redirect: "error",
-    signal: AbortSignal.timeout(10_000),
+    signal: timeoutSignal(10_000),
   });
   if (!response.ok) throw new PublicError("验证码暂时无法发送，请稍后重试。", 502);
   return { sent: true };
