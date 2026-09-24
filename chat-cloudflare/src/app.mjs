@@ -1716,6 +1716,15 @@ async function api(context) {
           releaseId: releaseId(context),
         });
       }
+      if (documents.some((document) => document.id === "static:ta")) {
+        return chatResult({
+          answer: "**机器人新手村**是新同学进入实验室工作方式的入门路径：先知道自己在哪里，再知道下一步做什么。[1]\n\n你现在可以先做四件事：\n\n1. **完善个人信息和学习目标**：写清楚专业、年级、已有基础、兴趣方向和每周可投入时间。[1]\n2. **阅读并签署新手村保密协议**：理解哪些资料、代码、数据和项目内容不能外传。[1]\n3. **选择一个初步项目方向**：可以先在感知、导航、控制、机械或 AI 中选一个，不确定也可以让助教根据你的基础帮你判断。[1]\n4. **进入课程与任务**：从一个小任务开始，提交代码链接、截图、运行记录或复盘作为证据包。[1]\n\n如果你不知道从哪里开始，就先告诉助教你的专业、会不会 Python/ROS、每周能投入多久、对机械/算法/AI 哪个更感兴趣，助教会把任务拆成今天能做的一步。[1]",
+          sources,
+          mode: "retrieval",
+          oaPublicStatus: oa.status,
+          releaseId: releaseId(context),
+        });
+      }
       if (questionRequestsKnowledgeImages(last.content)) {
         return chatResult({
           answer: documents.length
