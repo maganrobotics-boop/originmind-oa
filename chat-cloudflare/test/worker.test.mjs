@@ -288,6 +288,7 @@ test("campus email code webhook uses the configured SZTU sender", async (t) => {
   assert.equal(result.status, 200);
   assert.equal(result.body.devCode, undefined);
   assert.equal(delivered.url, "https://mail.example.test/send");
+  assert.equal(delivered.init.redirect, "manual");
   assert.equal(delivered.init.headers.authorization, "Bearer mail-token");
   assert.equal(delivered.body.from, "magan@sztu.edu.cn");
   assert.equal(delivered.body.to, "teacher@sztu.edu.cn");
