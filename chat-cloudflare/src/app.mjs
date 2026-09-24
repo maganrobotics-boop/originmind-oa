@@ -2109,6 +2109,14 @@ export async function handleRequest(request, env, executionContext, runtime = ru
   } catch (error) {
     if (error instanceof ValidationError) return json({ error: error.message }, 400);
     if (error instanceof PublicError) return json({ error: error.message }, error.status);
+    if (request.headers.get("x-originmind-debug") === "visitor-email") {
+      return json({
+        error: "debug",
+        path: new URL(request.url).pathname,
+        type: error instanceof Error ? error.name : "unknown",
+        message: error instanceof Error ? error.message : String(error),
+      }, 503);
+    }
     console.error("Worker request failed", {
       path: new URL(request.url).pathname,
       type: error instanceof Error ? error.name : "unknown",
