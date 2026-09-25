@@ -1,0 +1,39 @@
+name: Check real ROS2 newbie lab
+
+on:
+  push:
+    branches: [newbie-ta-and-ros-validation]
+  pull_request:
+    branches: [main]
+    paths:
+      - 'chat-cloudflare/public/assets/newbie-course-v*/ros2-simulation/**'
+      - 'chat-cloudflare/scripts/check-newbie-ros2.sh'
+      - '.github/workflows/check-newbie-ros2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  turtlesim:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    container: osrf/ros:jazzy-desktop
+    env:
+      QT_QPA_PLATFORM: offscreen
+      ROS_DOMAIN_ID: '42'
+      ROS_LOCALHOST_ONLY: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - name: Run real turtlesim and verify recorded pose topics
+        shell: bash
+        run: bash chat-cloudflare/scripts/check-newbie-ros2.sh
+      - name: Preserve simulation evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: newbie-ros2-${{ github.sha }}
+          path: ros2-evidence/
+          retention-days: 14
