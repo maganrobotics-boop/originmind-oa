@@ -40,12 +40,14 @@ ros2 run turtlesim turtlesim_node --ros-args -r __ns:=/newbie_lab
 终端 B 同样 source、设置同一 ROS_DOMAIN_ID，检查可见的系统：
 
 ```bash
-ros2 node list
-ros2 topic list -t
+ros2 node list --no-daemon --spin-time 3
+ros2 topic list -t --no-daemon --spin-time 3
 ros2 topic info /newbie_lab/turtle1/cmd_vel
 ros2 interface show geometry_msgs/msg/Twist
 ros2 topic echo /newbie_lab/turtle1/pose --once
 ```
+
+首次发现需要时间；上面两条命令等待 3 秒再输出，避免把短暂的空列表当成启动失败。
 
 应看到 `/newbie_lab/turtlesim` 节点；cmd_vel 类型是 `geometry_msgs/msg/Twist`，pose 类型是 `turtlesim/msg/Pose`。Twist 中 linear.x 控制前进，angular.z 控制转动；pose 是反馈，不能把“发出了命令”当成“已经到达”。
 

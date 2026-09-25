@@ -25,11 +25,12 @@ python3 check_pose.py synthetic_pose.csv</code></pre>
 <p>现在执行真实仿真。终端 A 完成环境 source 后启动：</p>
 <pre><code>ros2 run turtlesim turtlesim_node --ros-args -r __ns:=/newbie_lab</code></pre>
 <p>终端 B 同样 source、设置同一 ROS_DOMAIN_ID，检查可见的系统：</p>
-<pre><code>ros2 node list
-ros2 topic list -t
+<pre><code>ros2 node list --no-daemon --spin-time 3
+ros2 topic list -t --no-daemon --spin-time 3
 ros2 topic info /newbie_lab/turtle1/cmd_vel
 ros2 interface show geometry_msgs/msg/Twist
 ros2 topic echo /newbie_lab/turtle1/pose --once</code></pre>
+<p>首次发现需要时间；上面两条命令等待 3 秒再输出，避免把短暂的空列表当成启动失败。</p>
 <p>应看到 <code>/newbie_lab/turtlesim</code> 节点；cmd_vel 类型是 <code>geometry_msgs/msg/Twist</code>，pose 类型是 <code>turtlesim/msg/Pose</code>。Twist 中 linear.x 控制前进，angular.z 控制转动；pose 是反馈，不能把“发出了命令”当成“已经到达”。</p>
 <p>终端 C 进入材料目录，同样 source 和设置 domain，再运行：</p>
 <pre><code>python3 run_ros.py --output ros_pose.csv
