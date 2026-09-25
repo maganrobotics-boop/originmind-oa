@@ -17,7 +17,12 @@ const statusLabels = Object.freeze({
 
 const LOCAL_GUEST_KEY = "originmind-newbie-guest-v1";
 const GUEST_EMAIL = "guest@originmind.local";
-const PYTHON_LESSON = "/assets/newbie-python-v1/index.html";
+const COURSE_LESSONS = Object.freeze(Object.fromEntries(
+  ["registration", "toolkit", "git-basics", "python-basics", "ros2-simulation", "mini-project", "graduation"].map((id) => {
+    const base = id === "python-basics" ? "/assets/newbie-python-v1" : `/assets/newbie-course-v1/${id}`;
+    return [id, Object.freeze({ url: `${base}/index.html`, zip: `${base}/${id === "python-basics" ? "python-log-lab" : "lesson"}.zip` })];
+  }),
+));
 const LOCAL_AGREEMENT = Object.freeze({
   version: "2026-09-25-v2",
   title: "OriginMind × ARTS Robotics 新手村保密协议",
@@ -49,81 +54,91 @@ const LOCAL_AGREEMENT = Object.freeze({
 });
 const LOCAL_TASKS = Object.freeze([
   {
-    id: "registration",
-    index: 1,
-    title: "入村登记",
-    stage: "身份与方向",
-    summary: "完成个人信息、基础情况和学习方向登记。",
-    goal: "让导师和助教知道你是谁、每周能投入多少时间、已经会什么、想从哪个方向开始。",
-    steps: [
-      "填写姓名、年级、专业和联系方式。",
-      "记录每周可投入时间，例如每周 4 小时、8 小时或更多。",
-      "勾选已有基础：C/C++、Python、机械设计、电子电路、Linux、ROS、AI 等。",
-      "选择一个初始方向：感知、导航、控制、机械、嵌入式、AI 应用；不确定可以选“待选择”。",
+    "id": "registration",
+    "index": 1,
+    "title": "入村登记",
+    "stage": "身份与方向",
+    "summary": "用虚构示例和个人模板，把兴趣变成一周可执行计划。",
+    "goal": "写清当前基础、可投入时间、具体成果与证据；能解释任务取舍。",
+    "steps": [
+      "下载示例、个人计划模板和提交单；尚未安装 Python 可先按人工清单填写。",
+      "阅读 4 小时示例，核对任务总量和证据。",
+      "填写自己的计划，把 8 小时版本缩减为 4 小时版本并解释取舍。",
+      "对照信息、时间、目标、调整四项标准；可选运行 check_profile.py。",
+      "保存两版计划和复盘，返回本关记录证据。"
     ],
-    examples: [
-      "机械专业同学可以先选机械结构、测试记录或机器人装配相关任务。",
-      "计算机/自动化同学可以先选 Python、ROS2、导航或感知小任务。",
-      "基础较弱也可以参加，先从资料整理、复现实验和日志记录开始。",
+    "examples": [
+      "结构检查不验证身份，也不自动分配项目。",
+      "“完成日志分析并解释 10 m 路程”比“学会 Python”更便于验收。",
+      "公开课程阅读无需先签协议；个人计划不应包含证件或账号密码。"
     ],
-    taPrompts: [
-      "我适合哪个项目方向？",
-      "我每周只有 4 小时，可以从什么任务开始？",
-      "我现在基础比较弱，应该先补什么？",
+    "taPrompts": [
+      "我每周有 4 小时，如何把这份 8 小时计划缩小？",
+      "请检查我的学习目标是否有可观察结果。"
     ],
-    deliverables: ["个人主页信息完整", "选择或说明兴趣方向", "写下本阶段学习目标和每周可投入时间"],
+    "deliverables": [
+      "个人计划及每周时长",
+      "8 小时到 4 小时的调整前后对照",
+      "验收清单与取舍说明、一个需要帮助的问题"
+    ]
   },
   {
-    id: "toolkit",
-    index: 2,
-    title: "装备铺",
-    stage: "开发环境",
-    summary: "准备 Git、VS Code、Python 与 Linux/WSL，建立可复现的开发环境。",
-    goal: "让每个学生都有一套能写代码、跑命令、提交记录和排查问题的基本工具。",
-    steps: [
-      "安装 VS Code，并确认能打开项目文件夹。",
-      "安装 Git，运行 git --version，理解 commit 是学习证据的一部分。",
-      "安装 Python 3，运行 python --version 或 python3 --version。",
-      "Windows 用户安装 WSL/Ubuntu；Mac/Linux 用户确认能打开终端。",
-      "建立一个固定学习目录，例如 robotics-newbie，并把截图和代码都放进去。",
+    "id": "toolkit",
+    "index": 2,
+    "title": "装备铺",
+    "stage": "开发环境",
+    "summary": "运行并修改 hello.py，用检查程序核对 Python、Git 和学习目录。",
+    "goal": "在自己的电脑运行程序，能定位一次语法错误并记录可复现环境。",
+    "steps": [
+      "下载 hello.py、环境检查和提交单；准备 Python、Git、编辑器。",
+      "运行示例，核对问候语和 4 小时输出。",
+      "建立 code/data/evidence/notes，修改昵称和小时数；先预测再运行。",
+      "检查环境 PASS；制造并修复一次 SyntaxError，记录行号和原因。",
+      "提交修改代码、输出、环境报告与排错说明。"
     ],
-    examples: [
-      "终端能运行 git --version，说明 Git 基本可用。",
-      "终端能运行 python -V，说明 Python 基本可用。",
-      "如果装不上 ROS2，不影响先完成 Git 和 Python 两关。",
+    "examples": [
+      "本关无需先装 ROS2；手机可阅读，运行在电脑完成。",
+      "版本号因电脑而异，验收核对工具可用性而非相同截图。",
+      "环境检查不会自动安装软件，也不代表后续课程完成。"
     ],
-    taPrompts: [
-      "Windows 怎么安装 WSL？",
-      "git --version 找不到怎么办？",
-      "我应该怎么整理学习目录？",
+    "taPrompts": [
+      "这是命令和报错，请判断是目录、语法还是解释器问题。",
+      "我改了文件输出没变，应该先查哪里？"
     ],
-    deliverables: ["Git 版本截图", "Python 版本截图", "个人学习目录结构截图或说明"],
+    "deliverables": [
+      "修改后的 code/hello.py、预测与实际输出",
+      "环境报告与四目录说明",
+      "一次错误定位和修复；操作系统与工具版本"
+    ]
   },
   {
-    id: "git-basics",
-    index: 3,
-    title: "Git 训练场",
-    stage: "协作基础",
-    summary: "用一个小仓库练习 add、commit、branch、merge 和 README。",
-    goal: "能独立维护一个小型仓库，用清晰提交记录说明自己做过什么。",
-    steps: [
-      "新建一个仓库 robotics-newbie-log。",
-      "写 README.md：介绍自己、方向兴趣、第一周计划。",
-      "提交至少 3 次 commit：初始化、补充方向、补充学习记录。",
-      "创建一个 practice 分支，修改 README 后合并回 main。",
-      "在 README 里写 100 字复盘：Git 最容易混淆的地方是什么。",
+    "id": "git-basics",
+    "index": 3,
+    "title": "Git 训练场",
+    "stage": "协作基础",
+    "summary": "先观察可运行的提交示例，再独立完成三次内容提交和分支合并。",
+    "goal": "用可读历史说明每一次修改，区分工作区、暂存区和提交记录。",
+    "steps": [
+      "下载 README 模板、示例生成器、仓库检查和提交单。",
+      "运行 make_demo.py，观察 3 次内容提交和 1 次合并；示例不作为个人作业。",
+      "新建个人仓库，分三次补充目标、方向和复盘，再合并 practice。",
+      "用 check_repo.py 检查历史与工作区；另做 improvement 分支变化练习。",
+      "提交 README、图形日志、差异与复盘。"
     ],
-    examples: [
-      "常用命令：git status、git add .、git commit -m \"message\"、git log --oneline。",
-      "好的提交信息应该能看懂，例如 add python setup note，而不是 update。",
-      "不会公开仓库时，可以先提交截图，后续再统一规范 GitHub/Gitee。",
+    "examples": [
+      "仅需本地 Git，不要求公开仓库。",
+      "本题用 merge --no-ff 保留合并证据；哈希无需与示例一致。",
+      "add 不等于 commit，commit 不等于 push。"
     ],
-    taPrompts: [
-      "git add 和 git commit 有什么区别？",
-      "我提交错了怎么办？",
-      "README 应该怎么写？",
+    "taPrompts": [
+      "这份 git status 表示修改在哪个阶段？",
+      "如何判断 practice 的内容已经合并到 main？"
     ],
-    deliverables: ["仓库链接或本地提交截图", "至少 3 次有效提交", "README 复盘"],
+    "deliverables": [
+      "至少三次实际内容提交和合并记录",
+      "README、最终哈希与干净工作区结果",
+      "自主分支改动前后对照与至少约 100 字复盘"
+    ]
   },
   {
     id: "python-basics",
@@ -152,82 +167,94 @@ const LOCAL_TASKS = Object.freeze([
     deliverables: ["独立完成的 exercise.py、运行命令和八项自检输出", "正常与异常日志的分析结果；标准指标误差不超过 0.001", "一份自建数据及手算值与运行值对照", "填写 submission.md，解释四个问题并记录复盘与助教帮助"],
   },
   {
-    id: "ros2-simulation",
-    index: 5,
-    title: "ROS2 仿真场",
-    stage: "机器人基础",
-    summary: "用 turtlesim 理解 ROS2 节点、话题、消息和发布订阅。",
-    goal: "理解一个最小机器人软件系统如何由节点、话题和消息组成。",
-    steps: [
-      "安装或使用已有 ROS2 环境，能运行 ros2 --help。",
-      "启动 turtlesim_node，并用 teleop 控制小海龟移动。",
-      "运行 ros2 topic list、ros2 topic echo、ros2 node list，观察系统结构。",
-      "写一个 publisher，让小海龟自动走直线或转圈。",
-      "写一个 subscriber，读取 pose 并输出当前位置。",
+    "id": "ros2-simulation",
+    "index": 5,
+    "title": "ROS2 仿真场",
+    "stage": "机器人基础",
+    "summary": "控制 turtlesim 走圆并记录 pose，改半径后对照理论与实录。",
+    "goal": "理解发布、订阅和状态反馈，完成可复现的 ROS2 圆形轨迹实验。",
+    "steps": [
+      "下载参数、发布订阅程序、离线轨迹程序与检查器；准备 Ubuntu 24.04 + Jazzy。",
+      "先做离线理论预检，再在独立命名空间启动 turtlesim，核对节点和话题。",
+      "运行 run_ros.py 保存真实 pose；把线速度从 1 改到 0.5 后重跑。",
+      "对照半径、时长、路程、闭合误差和轨迹外接框；再做反向转圈实验。",
+      "提交真实 CSV、截图、参数、代码解释与误差复盘。"
     ],
-    examples: [
-      "turtlesim 不是玩具，它对应真实机器人里的运动命令和状态反馈。",
-      "cmd_vel 可以理解为给机器人发速度命令。",
-      "pose 可以理解为机器人反馈自己的位置和朝向。",
+    "examples": [
+      "原始圆理论半径 1、路程约 6.283；半速圆半径 0.5、路程约 3.142。",
+      "坐标使用 turtlesim 仿真单位，不当作真实米制测量。",
+      "离线轨迹预检不等于真实 ROS2 实验；环境未就绪时保留进行中。"
     ],
-    taPrompts: [
-      "ROS2 节点、话题、消息分别是什么？",
-      "turtlesim 跑不起来怎么排查？",
-      "publisher/subscriber 最小代码怎么写？",
+    "taPrompts": [
+      "根据节点和话题列表，请判断我的记录程序为何等不到 pose。",
+      "为什么线速度减半、角速度不变时周期不变而半径减半？"
     ],
-    deliverables: ["节点/话题截图", "终端日志", "publisher 或 subscriber 关键代码"],
+    "deliverables": [
+      "修改前后真实 CSV 与轨迹检查输出",
+      "节点/话题、海龟轨迹截图或视频",
+      "motion.py 修改、四处发布订阅代码解释与自主实验",
+      "理论/实际对照、误差分析或未完成阻塞"
+    ]
   },
   {
-    id: "mini-project",
-    index: 6,
-    title: "任务大厅",
-    stage: "小型项目",
-    summary: "从感知、导航、控制、机械或 AI 中选择一个可交付小任务。",
-    goal: "把工具和基础知识组合成一项可演示、可复盘的小成果。",
-    steps: [
-      "从小任务池选择一个方向，不确定时先问助教。",
-      "写清楚任务目标、输入、输出和验收标准。",
-      "完成一个最小可演示版本，不追求大而全。",
-      "记录遇到的问题、排查过程和下一步改进。",
+    "id": "mini-project",
+    "index": 6,
+    "title": "任务大厅",
+    "stage": "巡检路线项目",
+    "summary": "在栅格地图上实现最短路径，检验可达、绕行和无解。",
+    "goal": "把需求写成项目卡，用代码、测试和变化地图交付可复现结果。",
+    "steps": [
+      "下载地图、参考搜索器、练习模板、六项自检与项目卡。",
+      "运行参考程序：课程地图 10 步，隔断地图无解。",
+      "独立完成 BFS 的三个 TODO，说明队列和 parents 的作用。",
+      "运行六项个人自检；构造中心障碍绕行与整列封路的地图，先预测再验证。",
+      "提交代码、地图、项目卡、结果与适用边界。"
     ],
-    examples: [
-      "感知：用一组图片做目标标注，整理常见误检案例。",
-      "导航：画一个简化地图，说明机器人从 A 到 B 的路径和障碍物。",
-      "控制：解释一个速度曲线，说明加速度过大为什么会抖。",
-      "机械：调研一个机器人底盘或夹爪结构，画出关键受力/运动关系。",
-      "AI：把一份实验记录整理成结构化摘要，并设计 5 个问答样例。",
+    "examples": [
+      "只允许四邻域、每步代价 1；坐标为 [行, 列]。",
+      "最短路径不唯一，合法且达到最短步数即可。",
+      "不处理机器人尺寸或运动控制，不能直接部署到真机。"
     ],
-    taPrompts: [
-      "根据我的专业，推荐一个一周能完成的小任务。",
-      "帮我把这个任务拆成目标、输入、输出、验收标准。",
-      "什么成果才算能在机器人上用？",
+    "taPrompts": [
+      "请提示这张 3×3 地图下一轮队列怎样变化。",
+      "为什么 BFS 在本题中能找到最少步数路径？"
     ],
-    deliverables: ["演示截图或视频链接", "代码/文档/设计文件链接", "问题与改进复盘"],
+    "deliverables": [
+      "项目卡、个人 exercise.py 与六项个人自检",
+      "课程地图 10 步和隔断地图无解结果",
+      "两份变化地图、预测/实际对照",
+      "队列变化解释、复盘和真机应用缺口"
+    ]
   },
   {
-    id: "graduation",
-    index: 7,
-    title: "出村考核",
-    stage: "成果复盘",
-    summary: "整理证据包和个人主页，形成可审核的阶段成果。",
-    goal: "证明自己能完成任务、记录过程，并清楚说明下一步适合进入哪个项目方向。",
-    steps: [
-      "整理所有关卡证据：截图、代码、日志、README、复盘。",
-      "更新个人主页：方向、技能、已完成任务和希望参与项目。",
-      "写一页复盘：学到了什么、卡在哪里、下一步想做什么。",
-      "向导师或助教提交证据包，等待进入正式项目任务。",
+    "id": "graduation",
+    "index": 7,
+    "title": "出村考核",
+    "stage": "证据交付",
+    "summary": "按清单整理六关真实成果，检查文件并生成可复现证据包。",
+    "goal": "让另一个人能看懂改动、找到证据、复现结果，并知道下一阶段计划。",
+    "steps": [
+      "下载虚构样例、个人 manifest 模板、检查打包程序和提交单。",
+      "运行样例检查，理解命令、预期、实际、改动、解释和文件的对应关系。",
+      "用自己的六关证据填写清单；未完成的关卡如实保留进行中。",
+      "检查并打包；做一次文件缺失与恢复实验，核对版本和文件哈希。",
+      "提交证据包、一页反思、下一阶段计划与 3 分钟演示。"
     ],
-    examples: [
-      "好的证据包不是堆文件，而是能让别人快速判断你做了什么。",
-      "复盘要写具体问题，例如 ROS2 环境变量、Git 分支冲突、Python 数据读取错误。",
-      "下一阶段可以申请加入矿区巡检、四足机器人、AI 助教、机械结构等方向。",
+    "examples": [
+      "示例标为 DEMO_ONLY，不能作为个人成果。",
+      "结构检查只检查字段和文件，不能代替教师内容验收。",
+      "下载打包程序不会自动上传；本机标记不授予项目或真机权限。"
     ],
-    taPrompts: [
-      "帮我检查证据包是否完整。",
-      "我的复盘怎么写更清楚？",
-      "我下一阶段适合进哪个项目组？",
+    "taPrompts": [
+      "请依据清单指出缺失证据，不要补写我没有完成的实验。",
+      "我的 3 分钟演示能否清楚说明一次改动和一次失败？"
     ],
-    deliverables: ["完整证据包", "个人复盘", "下一阶段计划"],
+    "deliverables": [
+      "六关真实证据清单与版本化证据包",
+      "完整性检查及文件缺失/恢复记录",
+      "一页反思、下一步计划和演示提纲",
+      "参考代码与助教帮助说明"
+    ]
   },
 ]);
 
@@ -419,9 +446,9 @@ function createTaskCard(task) {
   open.textContent = "查看课程与任务";
   open.addEventListener("click", () => openTask(task.id));
   article.append(top, title, stage, summary, open);
-  if (task.id === "python-basics") {
+  if (COURSE_LESSONS[task.id]) {
     const lesson = document.createElement("a");
-    lesson.href = PYTHON_LESSON;
+    lesson.href = COURSE_LESSONS[task.id].url;
     lesson.className = "lesson-link";
     lesson.textContent = "完整实训与材料下载";
     article.append(lesson);
@@ -686,7 +713,12 @@ function openTask(id) {
   document.querySelector(".task-title-dialog").textContent = task.title;
   document.querySelector(".task-summary-dialog").textContent = task.summary;
   document.querySelector(".task-goal").textContent = task.goal;
-  document.querySelector(".task-materials").hidden = task.id !== "python-basics";
+  const lesson = COURSE_LESSONS[task.id];
+  document.querySelector(".task-materials").hidden = !lesson;
+  if (lesson) {
+    document.querySelector(".task-lesson-link").href = lesson.url;
+    document.querySelector(".task-download-link").href = lesson.zip;
+  }
   const fillList = (selector, items = []) => {
     const list = document.querySelector(selector);
     list.replaceChildren(...items.map((item) => {

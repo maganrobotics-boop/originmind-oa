@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>第 7 关：把学习过程交付给另一个人复现 · 新手村</title><style>
+*{box-sizing:border-box}body{margin:0;color:#20242b;background:#fff;font:16px/1.8 system-ui,-apple-system,Segoe UI,sans-serif}
+header,main,footer{max-width:960px;margin:auto;padding:24px}header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;border-bottom:1px solid #e5e8ee}
+a{color:#245ed1;text-underline-offset:3px}a:focus-visible{outline:3px solid #245ed1;outline-offset:4px}h1{font-size:30px;line-height:1.4;margin:18px 0 24px}h2{font-size:23px;line-height:1.5;margin:42px 0 16px;padding-top:20px;border-top:1px solid #e5e8ee;scroll-margin-top:16px}h3{font-size:18px}p{margin:14px 0}li{margin:8px 0}
+pre{background:#f4f6f9;border-radius:8px;padding:18px;overflow:auto;font-size:14px;line-height:1.6}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}pre code{overflow-wrap:normal}
+.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;text-align:left;font-size:15px}th,td{border-bottom:1px solid #e0e5ee;padding:10px 12px;vertical-align:top}th{background:#f4f6f9}nav{display:flex;flex-wrap:wrap;gap:10px 16px;margin:18px 0;font-size:14px}.note{padding:14px 18px;background:#f0f6ff;border-left:3px solid #3774df}.actions{display:flex;gap:12px;flex-wrap:wrap;margin:28px 0}.button{display:inline-block;padding:10px 16px;background:#2866e7;color:white;border-radius:7px;text-decoration:none;font-weight:600}footer{color:#647083;font-size:14px;border-top:1px solid #e5e8ee}.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{padding:20px;border:1px solid #dce3ee;border-radius:12px}.card h2{border:0;padding:0;margin:0 0 12px;font-size:21px}
+@media(max-width:640px){header,main,footer{padding-left:18px;padding-right:18px}h1{font-size:25px}h2{font-size:21px}.cards{grid-template-columns:1fr}th,td{padding:8px}}
+</style></head><body><header><a href="/newbie-village">新手村 · 任务地图</a><span>OriginMind × ARTS Robotics</span></header><main><nav aria-label="学习步骤"><a href="#step-1">下载材料</a><a href="#step-2">运行示例</a><a href="#step-3">独立修改</a><a href="#step-4">对照标准</a><a href="#step-5">提交证据</a></nav><h1>第 7 关：把学习过程交付给另一个人复现</h1>
+<p>建议 45–60 分钟。前置：前六关的真实成果与记录。本关不是再上传一堆截图，而是把“目标、改动、结果、解释、文件”对应起来。</p>
+<h2 id="step-1">1. 下载证据整理材料</h2>
+<p><a href="lesson.zip" download>下载完整材料包</a> · <a href="sample/manifest.json" download>虚构样例清单</a> · <a href="manifest.template.json" download>个人清单模板</a> · <a href="audit_evidence.py" download>检查与打包程序</a> · <a href="submission.md" download>提交单</a></p>
+<p>sample 目录仅含教学用虚构说明，字段 is_demo 为 true，不是实际学生完成课程的证据。你自己的成果放在单独的 my-evidence 文件夹中。</p>
+<h2 id="step-2">2. 跟着样例整理一次</h2>
+<p>在材料目录运行：</p>
+<pre><code>python audit_evidence.py sample/manifest.json
+python audit_evidence.py sample/manifest.json --pack demo-evidence.zip</code></pre>
+<p>应看到 <code>DEMO_ONLY 示例结构通过，不可作为个人作业</code>，并统计 6 个关卡、6 个样例文件。压缩包包含清单、文件与 SHA256SUMS.txt。哈希用于核对文件是否被改变，不能证明作者身份、真实运行或内容正确。</p>
+<p>逐项观察 manifest：id 对应关卡，command 是实际运行命令或登记操作，expected 是事先预测，actual 是实际结果，change 是你做的改动，explanation 是你对结果的解释，files 是能支撑结论的本地文件路径。</p>
+<h2 id="step-3">3. 修改成自己的证据清单</h2>
+<p>新建 my-evidence，把 manifest.template.json 复制进去并重命名为 manifest.json，按关卡建立文件夹，把自己实际完成的代码、日志、结果与说明复制进去。</p>
+<p>把 is_demo 设置为 false；逐项填写前六关的真实状态与证据。files 使用相对路径，例如 <code>python/exercise.py</code> 和 <code>python/result.txt</code>。每关至少一个非空证据文件，实际验收仍以该关的提交要求为准。</p>
+<p>模板中的 status 默认为 in_progress。只有真正达到该关验收标准时才改为 completed。ROS2 只有离线预检时，应保留进行中并写出阻塞原因；程序会拒绝生成“已齐全”的提交包。不要用改状态来掩盖未完成工作。</p>
+<p>填写反思 reflection、下一步 next_goal、助教/AI 帮助 ai_help；未使用可写“未使用”。保留个人思考和真实排错记录，使用参考代码也应说明。</p>
+<pre><code>python audit_evidence.py my-evidence/manifest.json
+python audit_evidence.py my-evidence/manifest.json --pack my-evidence-v1.zip</code></pre>
+<p>打包不会覆盖同名文件；修改后用新版本名，例如 v2。超 25 MB 的单个视频可保存到获准的共享位置，再把链接、访问权限和说明写进证据文本。不要把令牌、密码、私人信息或未经授权的项目资料装入包。</p>
+<p>变化任务：暂时把一个证据文件改名，运行检查，确认它准确报告缺失；恢复文件名后再检查。保存这次失败与修复的记录，证明你理解清单与文件的对应关系。</p>
+<h2 id="step-4">4. 对照验收标准</h2>
+<div class="table-wrap"><table><thead><tr><th>维度</th><th>通过标准</th></tr></thead><tbody><tr><td>完整性</td><td>前六关各有状态、命令/操作、预期、实际、改动、解释和证据</td></tr><tr><td>可复现性</td><td>他人能用 README 中的环境和命令找到并复现关键结果</td></tr><tr><td>正确性</td><td>结果符合各关标准，真实仿真与理论样例明确区分</td></tr><tr><td>可解释性</td><td>能解释至少一次失败、定位依据和修复后的变化</td></tr><tr><td>可追溯性</td><td>证据路径可打开，代码版本和助教帮助有记录</td></tr></tbody></table></div>
+<p>结构检查只做字段、路径和文件存在性检查；它不会自动批改报告，不会确认文件内容是本人完成，也不会自动授予真机或项目权限。</p>
+<h2 id="step-5">5. 提交证据与下一阶段计划</h2>
+<p>填写 submission.md，附证据包、检查结果、一页反思和下一阶段计划。做一次 3 分钟演示：30 秒介绍目标，90 秒展示一项修改前后结果，60 秒解释一次失败和下一步。</p>
+<p>返回第 7 关，把证据包的授权访问链接与内容摘要填入证据栏。免登录模式仅记录在当前浏览器；正式提交需登录。下载打包程序不会自动上传文件，保存本机进度也不等于教师验收通过。</p>
+<h2>常见问题与助教提示</h2>
+<ul><li>文件缺失：manifest 中的路径相对于 manifest 所在目录，不是电脑桌面或程序所在目录。</li><li>结构通过但导师打不开链接：检查共享权限与有效期，先用未登录窗口确认授权的阅读方式，不公开不应公开的资料。</li><li>还有一关没完成：先记录阻塞和下一步，不要把示例充当成果；可继续整理其他关证据。</li><li>问助教：“请依据这个清单指出缺失证据，不要把未完成关卡改为通过，也不要替我编造实验结果。”</li></ul><div class="actions"><a class="button" href="lesson.zip" download>下载本关全部材料</a><a href="/newbie-village#graduation">返回本关记录成果</a><a href="../index.html">全部七关</a></div></main><footer>公开学习无需登录。解压后可离线阅读；返回系统和外部参考链接需联网。正式提交与项目权限按系统实际流程办理。</footer></body></html>

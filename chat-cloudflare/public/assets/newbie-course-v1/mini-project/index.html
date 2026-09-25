@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>第 6 关：为巡检任务规划一条可验证的路线 · 新手村</title><style>
+*{box-sizing:border-box}body{margin:0;color:#20242b;background:#fff;font:16px/1.8 system-ui,-apple-system,Segoe UI,sans-serif}
+header,main,footer{max-width:960px;margin:auto;padding:24px}header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;border-bottom:1px solid #e5e8ee}
+a{color:#245ed1;text-underline-offset:3px}a:focus-visible{outline:3px solid #245ed1;outline-offset:4px}h1{font-size:30px;line-height:1.4;margin:18px 0 24px}h2{font-size:23px;line-height:1.5;margin:42px 0 16px;padding-top:20px;border-top:1px solid #e5e8ee;scroll-margin-top:16px}h3{font-size:18px}p{margin:14px 0}li{margin:8px 0}
+pre{background:#f4f6f9;border-radius:8px;padding:18px;overflow:auto;font-size:14px;line-height:1.6}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}pre code{overflow-wrap:normal}
+.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;text-align:left;font-size:15px}th,td{border-bottom:1px solid #e0e5ee;padding:10px 12px;vertical-align:top}th{background:#f4f6f9}nav{display:flex;flex-wrap:wrap;gap:10px 16px;margin:18px 0;font-size:14px}.note{padding:14px 18px;background:#f0f6ff;border-left:3px solid #3774df}.actions{display:flex;gap:12px;flex-wrap:wrap;margin:28px 0}.button{display:inline-block;padding:10px 16px;background:#2866e7;color:white;border-radius:7px;text-decoration:none;font-weight:600}footer{color:#647083;font-size:14px;border-top:1px solid #e5e8ee}.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{padding:20px;border:1px solid #dce3ee;border-radius:12px}.card h2{border:0;padding:0;margin:0 0 12px;font-size:21px}
+@media(max-width:640px){header,main,footer{padding-left:18px;padding-right:18px}h1{font-size:25px}h2{font-size:21px}.cards{grid-template-columns:1fr}th,td{padding:8px}}
+</style></head><body><header><a href="/newbie-village">新手村 · 任务地图</a><span>OriginMind × ARTS Robotics</span></header><main><nav aria-label="学习步骤"><a href="#step-1">下载材料</a><a href="#step-2">运行示例</a><a href="#step-3">独立修改</a><a href="#step-4">对照标准</a><a href="#step-5">提交证据</a></nav><h1>第 6 关：为巡检任务规划一条可验证的路线</h1>
+<p>建议 90–120 分钟。前置：Python 日志关；不依赖 ROS2。本关先把“巡检路线规划”这一个项目做完整：给定起点、终点和障碍，输出最少步数路径；没有路时明确报告无解。</p>
+<h2 id="step-1">1. 下载数据与代码</h2>
+<p><a href="lesson.zip" download>下载完整材料包</a> · <a href="map.json" download>巡检地图</a> · <a href="blocked.json" download>隔断地图</a> · <a href="planner.py" download>参考实现</a> · <a href="exercise.py" download>练习模板</a> · <a href="check_work.py" download>六项自检</a> · <a href="project-card.md" download>项目卡</a> · <a href="submission.md" download>提交单</a></p>
+<p>数据是教学构造的栅格地图，不是真实矿井图。grid 每一行是字符串：<code>.</code> 可走、<code>#</code> 障碍。坐标 <code>[行, 列]</code> 从 0 开始，行向下、列向右。只允许上下左右相邻移动，每步代价 1，不允许斜走。机器人在本题被简化成一个点。</p>
+<h2 id="step-2">2. 跟着参考示例运行</h2>
+<p>完整解压后，在材料目录执行：</p>
+<pre><code>python planner.py map.json
+python planner.py blocked.json
+python check_work.py --reference</code></pre>
+<p>map.json 是 5 行 7 列，起点 [0,0]，终点 [4,6]。参考输出 reachable 为 true、steps 为 10。一条最短路径为：</p>
+<pre><code>[[0,0],[0,1],[0,2],[0,3],[0,4],[0,5],[0,6],[1,6],[2,6],[3,6],[4,6]]</code></pre>
+<p>最短路径可以不唯一，只要合法且 10 步就正确。blocked.json 的竖直墙把起终点隔开，输出应为 reachable: false、steps: null、path: null。不能用空列表假装到达，也不能返回穿墙的路线。参考自检应显示 6 项通过。</p>
+<p>为什么主地图至少 10 步？从 [0,0] 到 [4,6] 至少改变 4 次行坐标、6 次列坐标；参考路线刚好达到下界，所以是最短路径。</p>
+<h2 id="step-3">3. 修改代码，完成自己的搜索器</h2>
+<p>先填写 project-card.md：目标、输入、输出、验收。然后完成 exercise.py 的三个 TODO。</p>
+<p>使用广度优先搜索 BFS：队列先放起点；每次取队首，按固定次序查看四个相邻格；只加入没有访问过的合法空格。把每个新格子的前一个格子记在 parents 中。找到终点后沿 parents 回溯，再反转得到路径；队列耗尽仍未找到时返回 None。</p>
+<pre><code>python exercise.py map.json
+python exercise.py blocked.json
+python check_work.py</code></pre>
+<p>最后一条不加 --reference，才检查自己的实现。模板未完成会报 TODO，这是正常起点。不要只针对一张地图写死路径。</p>
+<p>独立变化任务：复制地图为 my_map.json。在 3×3 空地图中，把中心格改成障碍，起点 [1,0]、终点 [1,2]。先预测绕行应为 4 步，再运行。接着封住整列，预测无路可走并验证。保存两份地图及结果。</p>
+<h2 id="step-4">4. 对照标准结果</h2>
+<div class="table-wrap"><table><thead><tr><th>测试</th><th>预期</th></tr></thead><tbody><tr><td>课程地图</td><td>10 步，起终点正确，无穿墙</td></tr><tr><td>3×3 中心障碍绕行</td><td>4 步</td></tr><tr><td>隔断地图</td><td>None，即明确无解</td></tr><tr><td>起点即终点</td><td>路径仅一个点，0 步</td></tr><tr><td>对角线仅两空格</td><td>无解，因为不允许斜走</td></tr><tr><td>单行反向走廊</td><td>4 步</td></tr></tbody></table></div>
+<p>自检同时检查路径连续性、边界、障碍和步数。六项通过后，仍需解释算法和提交自己的地图变化实验。</p>
+<p>进阶思考：如果每格代价不同，BFS 还能保证总代价最小吗？如果机器人有宽度，一条仅一个格子宽的通道是否一定能通过？这套代码尚未处理机器人外形、动态障碍、定位误差或运动控制，不能直接用于真机导航。</p>
+<h2 id="step-5">5. 提交证据</h2>
+<p>提交项目卡、自己实现的 exercise.py、原始和两份变化地图、运行命令与输出、六项个人自检、路线示意或截图、100–200 字复盘。证据必须能回答“输入是什么、做了什么改动、怎样判断结果正确”。</p>
+<p>可将输出保存到文件：</p>
+<pre><code>python exercise.py map.json &gt; result.json</code></pre>
+<p>不要把 --reference 的自检输出作为自己的实现验收。填写 submission.md，返回第 6 关保存证据摘要或正式提交。</p>
+<h2>常见问题与助教提示</h2>
+<ul><li>KeyError/JSON 报错：核对 grid、start、goal 字段，使用英文标点。</li><li>循环停不下来：检查是否在加入队列时记录 visited/parents，而不是反复加入同一个格子。</li><li>路径方向反了：检查是否在回溯后反转列表。</li><li>自检全过但不理解：拿 3×3 小地图，手写前三轮队列变化再解释。</li><li>问助教：“请用这张小地图提示我下一次出队和入队的格子，不要直接替我写完整函数。”</li></ul><div class="actions"><a class="button" href="lesson.zip" download>下载本关全部材料</a><a href="/newbie-village#mini-project">返回本关记录成果</a><a href="../index.html">全部七关</a></div></main><footer>公开学习无需登录。解压后可离线阅读；返回系统和外部参考链接需联网。正式提交与项目权限按系统实际流程办理。</footer></body></html>

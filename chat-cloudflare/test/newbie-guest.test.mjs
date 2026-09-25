@@ -78,6 +78,14 @@ test('Python deep link opens current lesson while retaining saved progress', asy
   assert.match(app.node('.task-summary-dialog').textContent, /模拟巡检日志/);
   assert.equal(app.run("state.dashboard.tasks.find(t => t.id === 'python-basics').status"), 'completed');
   assert.equal(app.node('.task-evidence').value, 'saved work');
-  app.run('openTask("toolkit")');
-  assert.equal(app.node('.task-materials').hidden, true);
+  for (const id of ['registration', 'toolkit', 'git-basics', 'python-basics', 'ros2-simulation', 'mini-project', 'graduation']) {
+    app.run(`openTask(${JSON.stringify(id)})`);
+    assert.equal(app.node('.task-materials').hidden, false);
+    assert.match(app.node('.task-lesson-link').href, /\/assets\/newbie-.*\/index\.html$/);
+    assert.match(app.node('.task-download-link').href, /\.zip$/);
+    const lessonFile = new URL('../public' + app.node('.task-lesson-link').href, import.meta.url);
+    assert.match(readFileSync(lessonFile, 'utf8'), /提交/);
+    const zipFile = new URL('../public' + app.node('.task-download-link').href, import.meta.url);
+    assert.equal(readFileSync(zipFile).subarray(0, 2).toString(), 'PK');
+  }
 });

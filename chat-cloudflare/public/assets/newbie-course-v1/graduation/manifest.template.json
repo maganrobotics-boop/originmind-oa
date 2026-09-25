@@ -1,0 +1,81 @@
+{
+  "is_demo": false,
+  "learner": "待填写",
+  "reflection": "待填写",
+  "next_goal": "待填写",
+  "ai_help": "待填写",
+  "stages": [
+    {
+      "id": "registration",
+      "status": "in_progress",
+      "command": "待填写",
+      "expected": "待填写",
+      "actual": "待填写",
+      "change": "待填写",
+      "explanation": "待填写",
+      "files": [
+        "registration/待填写.txt"
+      ]
+    },
+    {
+      "id": "toolkit",
+      "status": "in_progress",
+      "command": "待填写",
+      "expected": "待填写",
+      "actual": "待填写",
+      "change": "待填写",
+      "explanation": "待填写",
+      "files": [
+        "toolkit/待填写.txt"
+      ]
+    },
+    {
+      "id": "git-basics",
+      "status": "in_progress",
+      "command": "待填写",
+      "expected": "待填写",
+      "actual": "待填写",
+      "change": "待填写",
+      "explanation": "待填写",
+      "files": [
+        "git-basics/待填写.txt"
+      ]
+    },
+    {
+      "id": "python-basics",
+      "status": "in_progress",
+      "command": "待填写",
+      "expected": "待填写",
+      "actual": "待填写",
+      "change": "待填写",
+      "explanation": "待填写",
+      "files": [
+        "python-basics/待填写.txt"
+      ]
+    },
+    {
+      "id": "ros2-simulation",
+      "status": "in_progress",
+      "command": "待填写",
+      "expected": "待填写",
+      "actual": "待填写",
+      "change": "待填写",
+      "explanation": "待填写",
+      "files": [
+        "ros2-simulation/待填写.txt"
+      ]
+    },
+    {
+      "id": "mini-project",
+      "status": "in_progress",
+      "command": "待填写",
+      "expected": "待填写",
+      "actual": "待填写",
+      "change": "待填写",
+      "explanation": "待填写",
+      "files": [
+        "mini-project/待填写.txt"
+      ]
+    }
+  ]
+}

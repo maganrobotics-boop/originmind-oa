@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>第 3 关：让别人看懂你的修改历史 · 新手村</title><style>
+*{box-sizing:border-box}body{margin:0;color:#20242b;background:#fff;font:16px/1.8 system-ui,-apple-system,Segoe UI,sans-serif}
+header,main,footer{max-width:960px;margin:auto;padding:24px}header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;border-bottom:1px solid #e5e8ee}
+a{color:#245ed1;text-underline-offset:3px}a:focus-visible{outline:3px solid #245ed1;outline-offset:4px}h1{font-size:30px;line-height:1.4;margin:18px 0 24px}h2{font-size:23px;line-height:1.5;margin:42px 0 16px;padding-top:20px;border-top:1px solid #e5e8ee;scroll-margin-top:16px}h3{font-size:18px}p{margin:14px 0}li{margin:8px 0}
+pre{background:#f4f6f9;border-radius:8px;padding:18px;overflow:auto;font-size:14px;line-height:1.6}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}pre code{overflow-wrap:normal}
+.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;text-align:left;font-size:15px}th,td{border-bottom:1px solid #e0e5ee;padding:10px 12px;vertical-align:top}th{background:#f4f6f9}nav{display:flex;flex-wrap:wrap;gap:10px 16px;margin:18px 0;font-size:14px}.note{padding:14px 18px;background:#f0f6ff;border-left:3px solid #3774df}.actions{display:flex;gap:12px;flex-wrap:wrap;margin:28px 0}.button{display:inline-block;padding:10px 16px;background:#2866e7;color:white;border-radius:7px;text-decoration:none;font-weight:600}footer{color:#647083;font-size:14px;border-top:1px solid #e5e8ee}.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{padding:20px;border:1px solid #dce3ee;border-radius:12px}.card h2{border:0;padding:0;margin:0 0 12px;font-size:21px}
+@media(max-width:640px){header,main,footer{padding-left:18px;padding-right:18px}h1{font-size:25px}h2{font-size:21px}.cards{grid-template-columns:1fr}th,td{padding:8px}}
+</style></head><body><header><a href="/newbie-village">新手村 · 任务地图</a><span>OriginMind × ARTS Robotics</span></header><main><nav aria-label="学习步骤"><a href="#step-1">下载材料</a><a href="#step-2">运行示例</a><a href="#step-3">独立修改</a><a href="#step-4">对照标准</a><a href="#step-5">提交证据</a></nav><h1>第 3 关：让别人看懂你的修改历史</h1>
+<p>建议 45–60 分钟。前置：第 2 关能运行 Git 和 Python。本关只操作新的本地练习仓库，不需要注册 GitHub，也不要求公开个人资料。</p>
+<h2 id="step-1">1. 下载材料</h2>
+<p><a href="lesson.zip" download>下载完整材料包</a> · <a href="make_demo.py" download>自动示例</a> · <a href="README.template.md" download>README 模板</a> · <a href="check_repo.py" download>仓库检查</a> · <a href="submission.md" download>提交单</a></p>
+<p>材料目录与个人练习仓库应并列，检查脚本保留在材料目录中。不要把练习建在已有项目仓库里面。</p>
+<h2 id="step-2">2. 跟着示例观察</h2>
+<p>在材料目录运行：</p>
+<pre><code>python make_demo.py
+python check_repo.py demo-repo
+git -C demo-repo log --oneline --graph --all</code></pre>
+<p>脚本只新建 demo-repo，已有同名目录就停止；使用虚构作者且只设置此示例仓库。示例包含 3 次内容提交和 1 次合并提交。检查应输出“仓库结构检查通过”。哈希由提交内容和时间决定，不需要与教材相同。自动生成的示例不能作为个人作业。</p>
+<p>理解三个位置：工作区是你正在编辑的文件；暂存区是下一次提交选中的内容；提交记录是已经保存的快照。add 不等于 commit，commit 也不等于 push。</p>
+<h2 id="step-3">3. 自己完成三次修改与合并</h2>
+<p>在材料目录中新建独立的 my-repo（材料目录本身不能处于其他 Git 仓库中）：</p>
+<pre><code>mkdir my-repo
+cd my-repo
+git init -b main
+git config user.name &quot;My Learning Name&quot;
+git config user.email &quot;learner@example.invalid&quot;</code></pre>
+<p>这里的示例作者仅用于本地练习，你可换成自己的学习昵称。正式团队仓库再按团队身份规范设置，不要修改全局配置。</p>
+<p>用编辑器将上级目录的 README.template.md 另存为 my-repo/README.md，并完成“本周目标”。执行第一次提交：</p>
+<pre><code>git status
+git add README.md
+git diff --cached
+git commit -m &quot;docs: add weekly goal&quot;</code></pre>
+<p>补充“兴趣方向”和“学习记录”，再 add、查看 diff、commit，提交信息写 <code>docs: record first exercise</code>。每次必须有实际内容变化，不能用空提交凑数。</p>
+<p>创建分支并完成“合并复盘”，至少约 100 字，解释工作区、暂存区和提交记录，并记下一个自己的疑问：</p>
+<pre><code>git switch -c practice</code></pre>
+<p>编辑并保存 README 后：</p>
+<pre><code>git add README.md
+git commit -m &quot;docs: explain branch workflow&quot;
+git switch main
+git merge --no-ff practice -m &quot;merge: practice notes&quot;
+git log --oneline --graph --all
+git status --short
+python ../check_repo.py .</code></pre>
+<p><code>--no-ff</code> 在本题中保留一个明确的合并提交，便于观察。验收前保留 practice 分支。不要用 reset --hard 清除不明修改。</p>
+<p>变化任务：再建 <code>improvement</code> 分支，把目标中的一个模糊词改成可验证指标，提交并合并。记录修改前后，解释为什么更便于验收。</p>
+<h2 id="step-4">4. 对照标准结果</h2>
+<div class="table-wrap"><table><thead><tr><th>项目</th><th>标准</th></tr></thead><tbody><tr><td>当前分支</td><td>main</td></tr><tr><td>内容历史</td><td>至少 3 次有意义的内容提交；主练习共至少 4 次提交含合并</td></tr><tr><td>合并</td><td>practice 已包含在 main 历史中，有合并提交</td></tr><tr><td>工作区</td><td>git status --short 不输出未提交项</td></tr><tr><td>README</td><td>四节齐全、无“待填写”，能解释修改过程</td></tr><tr><td>自检</td><td>check_repo.py 退出码为 0；仍需人工阅读内容</td></tr></tbody></table></div>
+<h2 id="step-5">5. 提交证据</h2>
+<p>填写 submission.md，附 README、图形日志和干净工作区截图、一次差异记录、个人变化任务。无需上传整个 .git；为保证可追溯可保存完整提交哈希。自检结果建议写在仓库外的 evidence 文件夹，以免刚生成的证据又变成未提交文件。</p>
+<h2>常见问题与助教提示</h2>
+<ul><li>nothing to commit：检查是否修改并保存、是否 add 了正确文件。</li><li>Author identity unknown：在本练习仓库设置上面的两项 user 配置。</li><li>合并冲突：先用 git status 定位文件，理解两边内容后在编辑器保留正确版本、去掉冲突标记，再 add 和 commit；不确定时把完整差异交给助教解释。</li><li>问助教：“我在这个目录运行了这些命令，状态如下。请说明改动目前在工作区、暂存区还是历史里。”</li></ul>
+<h2>参考资料</h2>
+<p><a href="https://git-scm.com/book/en/v2/Git-Branching-Basic-Branching-and-Merging">Git 官方：分支与合并</a>。本课示例独立编写，命令和图形输出以你本机的实际结果为准。</p><div class="actions"><a class="button" href="lesson.zip" download>下载本关全部材料</a><a href="/newbie-village#git-basics">返回本关记录成果</a><a href="../index.html">全部七关</a></div></main><footer>公开学习无需登录。解压后可离线阅读；返回系统和外部参考链接需联网。正式提交与项目权限按系统实际流程办理。</footer></body></html>

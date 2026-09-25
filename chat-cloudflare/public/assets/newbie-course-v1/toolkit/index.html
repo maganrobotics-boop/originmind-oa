@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>第 2 关：让一段程序在自己的电脑上运行 · 新手村</title><style>
+*{box-sizing:border-box}body{margin:0;color:#20242b;background:#fff;font:16px/1.8 system-ui,-apple-system,Segoe UI,sans-serif}
+header,main,footer{max-width:960px;margin:auto;padding:24px}header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;border-bottom:1px solid #e5e8ee}
+a{color:#245ed1;text-underline-offset:3px}a:focus-visible{outline:3px solid #245ed1;outline-offset:4px}h1{font-size:30px;line-height:1.4;margin:18px 0 24px}h2{font-size:23px;line-height:1.5;margin:42px 0 16px;padding-top:20px;border-top:1px solid #e5e8ee;scroll-margin-top:16px}h3{font-size:18px}p{margin:14px 0}li{margin:8px 0}
+pre{background:#f4f6f9;border-radius:8px;padding:18px;overflow:auto;font-size:14px;line-height:1.6}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}pre code{overflow-wrap:normal}
+.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;text-align:left;font-size:15px}th,td{border-bottom:1px solid #e0e5ee;padding:10px 12px;vertical-align:top}th{background:#f4f6f9}nav{display:flex;flex-wrap:wrap;gap:10px 16px;margin:18px 0;font-size:14px}.note{padding:14px 18px;background:#f0f6ff;border-left:3px solid #3774df}.actions{display:flex;gap:12px;flex-wrap:wrap;margin:28px 0}.button{display:inline-block;padding:10px 16px;background:#2866e7;color:white;border-radius:7px;text-decoration:none;font-weight:600}footer{color:#647083;font-size:14px;border-top:1px solid #e5e8ee}.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{padding:20px;border:1px solid #dce3ee;border-radius:12px}.card h2{border:0;padding:0;margin:0 0 12px;font-size:21px}
+@media(max-width:640px){header,main,footer{padding-left:18px;padding-right:18px}h1{font-size:25px}h2{font-size:21px}.cards{grid-template-columns:1fr}th,td{padding:8px}}
+</style></head><body><header><a href="/newbie-village">新手村 · 任务地图</a><span>OriginMind × ARTS Robotics</span></header><main><nav aria-label="学习步骤"><a href="#step-1">下载材料</a><a href="#step-2">运行示例</a><a href="#step-3">独立修改</a><a href="#step-4">对照标准</a><a href="#step-5">提交证据</a></nav><h1>第 2 关：让一段程序在自己的电脑上运行</h1>
+<p>建议 40–60 分钟，首次安装可另留时间。目标是使用编辑器、终端、Python 和 Git，记录能让别人复现的环境信息。手机可看教程，实际运行需电脑。</p>
+<h2 id="step-1">1. 下载与准备</h2>
+<p><a href="lesson.zip" download>下载完整材料包</a> · <a href="hello.py" download>示例程序 hello.py</a> · <a href="check_environment.py" download>环境检查程序</a> · <a href="submission.md" download>提交单</a></p>
+<p>安装 <a href="https://www.python.org/downloads/">Python</a>、<a href="https://git-scm.com/install/">Git</a> 和 <a href="https://code.visualstudio.com/download">VS Code</a>。本套练习采用 Python 3.10 或以上，除 ROS2 关外只用标准库。Windows 安装后重新打开终端，让 PATH 更新生效。</p>
+<p>Windows 可用 PowerShell；macOS/Linux 可用系统终端。先运行：</p>
+<pre><code>python --version
+git --version</code></pre>
+<p>macOS/Linux 常用 <code>python3</code>；Windows 若 <code>python</code> 不存在，试 <code>py -3 --version</code>。确定一种可用方式后，下文所有 python 命令统一替换，不要混用多个解释器。</p>
+<p>ROS2 关采用 Ubuntu 24.04 + ROS2 Jazzy。当前关无需先装 ROS2。Windows 到第 5 关前可按 <a href="https://learn.microsoft.com/en-us/windows/wsl/install">微软 WSL 安装说明</a> 准备 Ubuntu；先用 <code>wsl --list --online</code> 查看可用发行版，再选择 Ubuntu 24.04。安装及重启在个人电脑上完成，不在 OA 服务器上做练习。macOS 可用已有的 Ubuntu 虚拟机或实验室电脑。</p>
+<h2 id="step-2">2. 跟着示例运行</h2>
+<p>解压到一个新的学习目录。用 VS Code 的“打开文件夹”打开它，再选择“终端 → 新建终端”。运行：</p>
+<pre><code>python hello.py</code></pre>
+<p>标准输出为 <code>你好，学习者！本周计划学习 4 小时。</code> 命令里没有 <code>&gt;&gt;&gt;</code>；看到 <code>&gt;&gt;&gt;</code> 表示你进入了 Python 交互模式，先输入 <code>exit()</code> 返回系统终端。</p>
+<p>建立四个目录（也可以在文件管理器中新建）：</p>
+<pre><code>python -c &quot;from pathlib import Path; [Path(p).mkdir(exist_ok=True) for p in (&#x27;code&#x27;,&#x27;data&#x27;,&#x27;evidence&#x27;,&#x27;notes&#x27;)]&quot;</code></pre>
+<p>用编辑器把 hello.py 另存为 code/hello.py。code 放代码，data 放原始数据，evidence 放输出与截图，notes 放说明。保留材料包原文件作对照。</p>
+<h2 id="step-3">3. 修改代码并解释</h2>
+<p>把 code/hello.py 的 <code>NAME</code> 改成自己的昵称，把 <code>HOURS</code> 改成第 1 关实际计划的时间。先在 notes 中写下预计出现的整行文字，再运行：</p>
+<pre><code>python code/hello.py
+python check_environment.py .</code></pre>
+<p>第二条应输出 JSON，包含实际 Python/Git 版本、四个目录均为 true、hello_exists 为 true、errors 为空列表、status 为 PASS。版本号因电脑而异，不要求和别人的截图一致。程序不会安装软件，也不会检查你是否真正理解了代码。</p>
+<p>变化任务：把 HOURS 从整数 4 改成小数 2.5，预测输出。再故意把一对引号删掉，运行并记录 SyntaxError 的行号，随后修复。不要提交仍然报错的最终版本。</p>
+<h2 id="step-4">4. 对照验收标准</h2>
+<div class="table-wrap"><table><thead><tr><th>检查</th><th>通过标准</th></tr></thead><tbody><tr><td>基础环境</td><td>同一终端能运行 Python 和 Git 的版本命令</td></tr><tr><td>文件组织</td><td>四目录存在，code/hello.py 能从学习目录运行</td></tr><tr><td>修改结果</td><td>输出与你事先写下的昵称、小时数一致</td></tr><tr><td>排错</td><td>能指出一次报错的文件、行号、原因和修复</td></tr><tr><td>环境记录</td><td>写清操作系统、解释器调用方式和版本</td></tr></tbody></table></div>
+<p>截图只截必要的输出区域，避免把私人目录、令牌或无关桌面内容放入证据。</p>
+<h2 id="step-5">5. 提交证据</h2>
+<p>填写 submission.md，附修改后的 code/hello.py、初始与修改输出、环境检查结果、一次错误及修复说明。保存环境报告可用：</p>
+<pre><code>python check_environment.py . &gt; evidence/environment.json</code></pre>
+<p>重定向后屏幕不显示结果是正常的，用编辑器打开该文件。返回第 2 关填入证据摘要或链接。</p>
+<h2>常见问题与助教提示</h2>
+<ul><li>“找不到文件”：核对终端当前目录和 code/hello.py 是否真的保存；不要把 .py 保存成 .py.txt。</li><li>Git 装了仍找不到：关闭旧终端并重新打开；检查安装位置是否进入 PATH。</li><li>中文乱码：文件保存为 UTF-8，先保留原始输出，不要用乱码截图冒充正确结果。</li><li>问助教：“这是命令、完整报错、文件路径和预期输出。请先帮我判断是目录问题、语法问题还是环境问题。”</li></ul>
+<h2>我能解释</h2>
+<p>编辑器与终端分别负责什么？为什么修改文件但不保存，运行结果可能不变？环境检查 PASS 能否证明所有后续课程已经完成？</p><div class="actions"><a class="button" href="lesson.zip" download>下载本关全部材料</a><a href="/newbie-village#toolkit">返回本关记录成果</a><a href="../index.html">全部七关</a></div></main><footer>公开学习无需登录。解压后可离线阅读；返回系统和外部参考链接需联网。正式提交与项目权限按系统实际流程办理。</footer></body></html>

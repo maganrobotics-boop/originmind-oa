@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>第 5 关：发布运动命令，记录实际反馈 · 新手村</title><style>
+*{box-sizing:border-box}body{margin:0;color:#20242b;background:#fff;font:16px/1.8 system-ui,-apple-system,Segoe UI,sans-serif}
+header,main,footer{max-width:960px;margin:auto;padding:24px}header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;border-bottom:1px solid #e5e8ee}
+a{color:#245ed1;text-underline-offset:3px}a:focus-visible{outline:3px solid #245ed1;outline-offset:4px}h1{font-size:30px;line-height:1.4;margin:18px 0 24px}h2{font-size:23px;line-height:1.5;margin:42px 0 16px;padding-top:20px;border-top:1px solid #e5e8ee;scroll-margin-top:16px}h3{font-size:18px}p{margin:14px 0}li{margin:8px 0}
+pre{background:#f4f6f9;border-radius:8px;padding:18px;overflow:auto;font-size:14px;line-height:1.6}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}pre code{overflow-wrap:normal}
+.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;text-align:left;font-size:15px}th,td{border-bottom:1px solid #e0e5ee;padding:10px 12px;vertical-align:top}th{background:#f4f6f9}nav{display:flex;flex-wrap:wrap;gap:10px 16px;margin:18px 0;font-size:14px}.note{padding:14px 18px;background:#f0f6ff;border-left:3px solid #3774df}.actions{display:flex;gap:12px;flex-wrap:wrap;margin:28px 0}.button{display:inline-block;padding:10px 16px;background:#2866e7;color:white;border-radius:7px;text-decoration:none;font-weight:600}footer{color:#647083;font-size:14px;border-top:1px solid #e5e8ee}.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{padding:20px;border:1px solid #dce3ee;border-radius:12px}.card h2{border:0;padding:0;margin:0 0 12px;font-size:21px}
+@media(max-width:640px){header,main,footer{padding-left:18px;padding-right:18px}h1{font-size:25px}h2{font-size:21px}.cards{grid-template-columns:1fr}th,td{padding:8px}}
+</style></head><body><header><a href="/newbie-village">新手村 · 任务地图</a><span>OriginMind × ARTS Robotics</span></header><main><nav aria-label="学习步骤"><a href="#step-1">下载材料</a><a href="#step-2">运行示例</a><a href="#step-3">独立修改</a><a href="#step-4">对照标准</a><a href="#step-5">提交证据</a></nav><h1>第 5 关：发布运动命令，记录实际反馈</h1>
+<p>建议 60–90 分钟，ROS2 安装时间另计。前置：Python 日志关。目标是在 turtlesim 中完成一整圈，理解节点、话题和消息，修改圆的半径，并用记录的 pose 判断是否达到预期。</p>
+<h2 id="step-1">1. 下载材料与核对环境</h2>
+<p><a href="lesson.zip" download>下载完整材料包</a> · <a href="motion.py" download>运动参数 motion.py</a> · <a href="run_ros.py" download>ROS2 发布与记录程序</a> · <a href="simulate.py" download>离线理论轨迹</a> · <a href="check_pose.py" download>轨迹检查</a> · <a href="submission.md" download>提交单</a></p>
+<p>本课环境基线为 Ubuntu 24.04 + ROS2 Jazzy，使用系统 python3 和 turtlesim。先按 <a href="https://docs.ros.org/en/jazzy/Installation/Ubuntu-Install-Debians.html">ROS2 官方安装说明</a> 完成软件源与 Jazzy 安装；不要把不同 Ubuntu/ROS2 版本的安装命令混用。ROS2 官方 <a href="https://github.com/ros2/ros2/releases">发布说明</a> 也列出了 Jazzy 对应平台。</p>
+<p>已完成官方软件源配置后，如缺少 turtlesim，可在 Ubuntu 终端运行 <code>sudo apt install ros-jazzy-turtlesim</code>。每个新终端都先执行：</p>
+<pre><code>source /opt/ros/jazzy/setup.bash
+export ROS_DOMAIN_ID=42
+ros2 --help</code></pre>
+<p>本题只操作独立命名空间 <code>/newbie_lab</code> 下的海龟仿真。关闭其他同名练习，避免多个发布者同时控制一只海龟；不把话题改为真实机器人的 cmd_vel。</p>
+<p>Windows 使用支持图形界面的 WSL2/Ubuntu 或实验室 Ubuntu 电脑；macOS 可用 Ubuntu 虚拟机。若 GUI 尚未就绪，可先完成离线部分，但本关状态应保留“进行中”。</p>
+<h2 id="step-2">2. 跟着示例运行</h2>
+<p>先在材料目录跑纯 Python 预检，不需要 ROS2：</p>
+<pre><code>python3 simulate.py synthetic_pose.csv
+python3 check_pose.py synthetic_pose.csv</code></pre>
+<p>标准理论值：半径 1 仿真单位，角速度 1 rad/s，一圈约 6.283 s，路程约 6.283，起终点偏差约 0。simulate.py 明确标注 SYNTHETIC_ONLY；它是公式生成的数据，不是 ROS2 运行日志。</p>
+<p>现在执行真实仿真。终端 A 完成环境 source 后启动：</p>
+<pre><code>ros2 run turtlesim turtlesim_node --ros-args -r __ns:=/newbie_lab</code></pre>
+<p>终端 B 同样 source、设置同一 ROS_DOMAIN_ID，检查可见的系统：</p>
+<pre><code>ros2 node list
+ros2 topic list -t
+ros2 topic info /newbie_lab/turtle1/cmd_vel
+ros2 interface show geometry_msgs/msg/Twist
+ros2 topic echo /newbie_lab/turtle1/pose --once</code></pre>
+<p>应看到 <code>/newbie_lab/turtlesim</code> 节点；cmd_vel 类型是 <code>geometry_msgs/msg/Twist</code>，pose 类型是 <code>turtlesim/msg/Pose</code>。Twist 中 linear.x 控制前进，angular.z 控制转动；pose 是反馈，不能把“发出了命令”当成“已经到达”。</p>
+<p>终端 C 进入材料目录，同样 source 和设置 domain，再运行：</p>
+<pre><code>python3 run_ros.py --output ros_pose.csv
+python3 check_pose.py ros_pose.csv</code></pre>
+<p>程序等待海龟 pose 与命令订阅者就绪，再持续发布约一圈的速度命令，同时订阅并保存 pose，最后发布零速度并结束。超过 10 秒没有就绪就报错，不会假装生成成功结果。输出文件若存在，改用新文件名；旧证据不会被覆盖。</p>
+<h2 id="step-3">3. 修改代码，先预测再运行</h2>
+<p>在 motion.py 中把 <code>LINEAR = 1.0</code> 改为 <code>LINEAR = 0.5</code>，保留 <code>ANGULAR = 1.0</code> 和一圈时长。先写预测：半径等于 |v/ω|，因此半径变为 0.5，周期不变，路程约 3.142。</p>
+<p>先运行离线检查：</p>
+<pre><code>python3 simulate.py synthetic_half.csv
+python3 check_pose.py synthetic_half.csv --radius 0.5</code></pre>
+<p>关闭并重新启动终端 A 的 turtlesim，让海龟回到初始状态；保持同一命名空间和 domain。再运行：</p>
+<pre><code>python3 run_ros.py --output ros_half.csv
+python3 check_pose.py ros_half.csv --radius 0.5</code></pre>
+<p>读代码练习：在 run_ros.py 中找到 create_publisher、create_subscription、定时回调和零速度发送各在哪里，用自己的话注释这四处。补充一个自主变化实验：把 ANGULAR 改成 -1，预测旋转方向变化，重新启动海龟再验证；保持本课参数范围。</p>
+<h2 id="step-4">4. 对照标准结果</h2>
+<div class="table-wrap"><table><thead><tr><th>指标</th><th>原始圆</th><th>半速圆</th></tr></thead><tbody><tr><td>理论半径</td><td>1</td><td>0.5</td></tr><tr><td>一圈理论时长</td><td>2π，约 6.283 s</td><td>同左</td></tr><tr><td>理论路程</td><td>2π，约 6.283</td><td>π，约 3.142</td></tr><tr><td>实录时长容差</td><td>6.0–7.2 s，含停止缓冲</td><td>同左</td></tr><tr><td>实录路程容差</td><td>与理论值差不超过 0.5</td><td>同左</td></tr><tr><td>闭合误差</td><td>不超过 0.35</td><td>同左</td></tr><tr><td>外接框宽/高</td><td>与直径 2 的差各不超过 0.35</td><td>与直径 1 的差各不超过 0.35</td></tr></tbody></table></div>
+<p>这些坐标是 turtlesim 仿真单位，不是经过标定的真实米制结果。采样和调度会产生偏差，不要求每行数据完全相同。检查程序只判断几何指标，无法证明日志来源，必须同时提交真实 ROS2 运行证据。</p>
+<h2 id="step-5">5. 提交证据</h2>
+<p>提交修改前后的 motion.py、两份真实 CSV、节点/话题输出、海龟轨迹截图或短视频、两次检查结果、理论值与实际值对照、四处代码解释和自主实验。填写 submission.md。</p>
+<p>未完成真实仿真时如实填写阻塞原因、已尝试命令和报错；离线数据不得更名为实录或标记整关完成。助教可以协助排错，最终运行需本人完成。</p>
+<h2>常见问题与助教提示</h2>
+<ul><li>ros2 不存在或 No module named rclpy：在 Ubuntu 系统终端重新 source，使用系统 python3，不在未配置 ROS 的 Python 虚拟环境里运行。</li><li>看不到海龟/Qt 无法连接显示：先确认 Ubuntu 图形终端可用，再排查 WSLg 或虚拟机桌面；这不是 Python 路程公式的问题。</li><li>10 秒等待超时：比较三个终端的 domain、命名空间，核对节点和话题输出。</li><li>圆形不闭合或撞墙：重启干净的海龟，关闭其他速度发布者，先恢复原参数再试，不要直接放宽验收阈值。</li><li>问助教：“这是真实 pose 的前后几行、节点/话题列表、参数和检查结果。请判断是通信、初始状态还是几何计算问题。”</li></ul>
+<h2>参考资料</h2>
+<p><a href="https://docs.ros.org/en/jazzy/Tutorials/Beginner-CLI-Tools/Introducing-Turtlesim/Introducing-Turtlesim.html">ROS2 官方 turtlesim 教程</a> · <a href="https://docs.ros.org/en/jazzy/Tutorials/Beginner-Client-Libraries/Writing-A-Simple-Py-Publisher-And-Subscriber.html">ROS2 官方 Python 发布/订阅</a>。本课代码独立编写；运行结果以你自己的实验日志为准。</p><div class="actions"><a class="button" href="lesson.zip" download>下载本关全部材料</a><a href="/newbie-village#ros2-simulation">返回本关记录成果</a><a href="../index.html">全部七关</a></div></main><footer>公开学习无需登录。解压后可离线阅读；返回系统和外部参考链接需联网。正式提交与项目权限按系统实际流程办理。</footer></body></html>
