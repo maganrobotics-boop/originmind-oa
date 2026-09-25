@@ -41,6 +41,7 @@ import {
 import { generateValidatedAnswer } from "./answer-retry.mjs";
 import { answerMode } from "./answer-mode.mjs";
 import { siteKnowledgeDocuments } from "./site-knowledge.mjs";
+import { newbieCourseDocument } from "./newbie-tutor.mjs";
 import {
   inspectOaPublicKnowledge,
   probeOaPublicKnowledge,
@@ -1948,9 +1949,10 @@ async function api(context) {
         }, 200, chatTimingHeaders(chatTiming));
       };
       const suggestionReference = suggestionKnowledgeReference(sourceQuestion || last.content);
-      const localSiteDocuments = sourceQuestion ? [] : siteKnowledgeDocuments(last.content);
+      const courseDocument = sourceQuestion ? null : newbieCourseDocument(payload.messages);
+      const localSiteDocuments = sourceQuestion ? [] : courseDocument ? [courseDocument] : siteKnowledgeDocuments(last.content);
       const retrievedDocuments = [
-        ...oa.documents,
+        ...oa.documents.filter((document) => !courseDocument || document.id !== "static:ta"),
         ...localSiteDocuments.filter((siteDocument) => (
           !oa.documents.some((document) => document.id === siteDocument.id)
         )),

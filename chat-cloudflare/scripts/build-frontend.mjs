@@ -73,6 +73,7 @@ async function expectedBuild() {
   }
   return {
     html: Buffer.from(html, "utf8"),
+    backendFiles: new Map([["newbie-course-data.mjs", Buffer.from(`// Generated from the public task map; run build:frontend.\nexport const NEWBIE_COURSES = ${JSON.stringify(courses)};\n`, "utf8")]]),
     rootFiles: new Map([["zip-import-addon.js", zipImportBundle]]),
     assets: new Map([
       [appName, app],
@@ -107,6 +108,9 @@ async function equalFile(path, expected) {
 
 async function checkBuild(expected) {
   const problems = [];
+  for (const [name, bytes] of expected.backendFiles) {
+    if (!(await equalFile(join(ROOT, "src", name), bytes))) problems.push(`src/${name} is missing or stale`);
+  }
   if (!(await equalFile(join(PUBLIC_DIRECTORY, "index.html"), expected.html))) {
     problems.push("public/index.html is stale");
   }
@@ -132,6 +136,7 @@ async function checkBuild(expected) {
 
 async function writeBuild(expected) {
   await mkdir(PUBLIC_ASSET_DIRECTORY, { recursive: true });
+  for (const [name, bytes] of expected.backendFiles) await writeFile(join(ROOT, "src", name), bytes);
   for (const [name, bytes] of expected.rootFiles) await writeFile(join(PUBLIC_DIRECTORY, name), bytes);
   for (const [name, bytes] of expected.assets) {
     await writeFile(join(PUBLIC_ASSET_DIRECTORY, name), bytes);
