@@ -15,8 +15,106 @@ const statusLabels = Object.freeze({
   completed: "已完成",
 });
 
+const LOCAL_GUEST_KEY = "originmind-newbie-guest-v1";
+const GUEST_EMAIL = "guest@originmind.local";
+const LOCAL_AGREEMENT = Object.freeze({
+  version: "2026-09-25-v2",
+  title: "OriginMind × ARTS Robotics 新手村保密协议",
+  effectiveDate: "2026-09-25",
+  introduction: "为保护实验室成员、合作方和项目资料，在进入新手村并接触学习任务前，请阅读并同意以下保密约定。",
+  privacyNotice: "免登录访问模式下，签署记录暂存在本机浏览器；正式加入项目或领取权限时，实验室可要求补充实名信息并归档到 OA。",
+  clauses: [
+    {
+      title: "一、保密信息范围",
+      text: "保密信息包括通过新手村、实验室成员或项目协作接触到的未公开代码、数据、模型、设计、文档、实验记录、账号信息、会议内容，以及其他已标注或依其性质应当保密的信息。",
+    },
+    {
+      title: "二、使用与保护义务",
+      text: "保密信息仅可用于获准的新手村学习和实验室任务；未经书面许可，不得向无关人员披露、复制到非授权平台、公开发布或用于其他目的。应妥善保管账号和资料，发现误传、泄露或异常访问时应立即报告。",
+    },
+    {
+      title: "三、不属于保密信息的情形",
+      text: "能够证明在接收前已合法知悉、并非因违反本协议而公开、从有权披露的第三方合法取得、独立开发形成，或已取得实验室书面公开许可的信息，不受本协议限制。",
+    },
+    {
+      title: "四、保密期限与资料处理",
+      text: "保密义务自签署时起生效，持续至相关信息依法公开或实验室书面解除保密要求。任务结束、退出项目或收到要求时，应停止使用并按要求归还或删除相关资料。",
+    },
+    {
+      title: "五、违规处理",
+      text: "违反本协议可能导致新手村或项目权限暂停、任务资格取消，并应按适用规则和法律承担相应责任。涉及第三方权益或安全事件时，应配合采取补救措施。",
+    },
+  ],
+});
+const LOCAL_TASKS = Object.freeze([
+  {
+    id: "registration",
+    index: 1,
+    title: "入村登记",
+    stage: "身份与方向",
+    summary: "完善个人主页，确认学习方向和当前基础。",
+    goal: "让导师和后续任务知道你是谁、想学什么，以及目前可以从哪里开始。",
+    deliverables: ["完成个人主页", "选择兴趣方向", "写下本阶段学习目标"],
+  },
+  {
+    id: "toolkit",
+    index: 2,
+    title: "装备铺",
+    stage: "开发环境",
+    summary: "准备 Git、VS Code、Python 与 Linux/WSL 环境。",
+    goal: "建立一套能复现、能提交、能排查问题的个人开发环境。",
+    deliverables: ["Git 版本截图", "Python 版本截图", "工作目录说明"],
+  },
+  {
+    id: "git-basics",
+    index: 3,
+    title: "Git 训练场",
+    stage: "协作基础",
+    summary: "完成分支、提交、合并与 README 练习。",
+    goal: "能独立维护一个小型仓库，并用清晰提交记录说明自己的工作。",
+    deliverables: ["仓库链接", "至少 3 次有效提交", "README 复盘"],
+  },
+  {
+    id: "python-basics",
+    index: 4,
+    title: "Python 训练场",
+    stage: "编程基础",
+    summary: "完成数据处理、函数拆分和基础测试任务。",
+    goal: "用可读、可运行、可验证的代码解决一个小问题。",
+    deliverables: ["源代码链接", "运行结果", "测试说明"],
+  },
+  {
+    id: "ros2-simulation",
+    index: 5,
+    title: "ROS2 仿真场",
+    stage: "机器人基础",
+    summary: "运行 turtlesim，并完成 publisher/subscriber 练习。",
+    goal: "理解节点、话题和消息如何组成一个最小机器人软件系统。",
+    deliverables: ["节点图截图", "终端日志", "关键代码链接"],
+  },
+  {
+    id: "mini-project",
+    index: 6,
+    title: "任务大厅",
+    stage: "小型项目",
+    summary: "从感知、导航、控制、机械或 AI 中完成一个小任务。",
+    goal: "把工具和基础知识组合成一项可演示、可复盘的小成果。",
+    deliverables: ["演示截图或视频链接", "代码链接", "问题与改进"],
+  },
+  {
+    id: "graduation",
+    index: 7,
+    title: "出村考核",
+    stage: "成果复盘",
+    summary: "整理证据包和个人主页，形成可审核的阶段成果。",
+    goal: "证明自己能完成任务、记录过程并清楚说明下一步方向。",
+    deliverables: ["完整证据包", "个人复盘", "下一阶段计划"],
+  },
+]);
+
 const state = {
   dashboard: null,
+  localGuest: false,
   currentTaskId: "",
   activeView: location.hash === "#profile" ? "profile" : "tasks",
 };
@@ -47,6 +145,76 @@ const elements = {
   toast: document.querySelector(".toast"),
 };
 let toastTimer;
+
+function readLocalGuest() {
+  try {
+    return JSON.parse(localStorage.getItem(LOCAL_GUEST_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function writeLocalGuest(value) {
+  localStorage.setItem(LOCAL_GUEST_KEY, JSON.stringify(value));
+}
+
+function localDashboard() {
+  const saved = readLocalGuest();
+  const now = Date.now();
+  const agreementAccepted = Boolean(saved.agreement?.approved);
+  const progressByTask = new Map(Object.entries(saved.tasks || {}));
+  let previousCompleted = true;
+  const tasks = LOCAL_TASKS.map((task) => {
+    const progress = progressByTask.get(task.id) || {};
+    const status = progress.status || "not_started";
+    const result = {
+      ...task,
+      status,
+      evidence: progress.evidence || "",
+      updatedAt: progress.updatedAt || null,
+      unlocked: previousCompleted,
+    };
+    previousCompleted = status === "completed";
+    return result;
+  });
+  const profile = {
+    displayName: saved.profile?.displayName || "访客学生",
+    grade: saved.profile?.grade || "",
+    major: saved.profile?.major || "",
+    direction: saved.profile?.direction || "undecided",
+    bio: saved.profile?.bio || "",
+    updatedAt: saved.profile?.updatedAt || now,
+  };
+  return {
+    user: {
+      email: GUEST_EMAIL,
+      role: "guest",
+      roleLabel: "免登录访客",
+    },
+    agreement: {
+      ...LOCAL_AGREEMENT,
+      accepted: agreementAccepted,
+      approved: agreementAccepted,
+      reviewStatus: agreementAccepted ? "approved" : "unsigned",
+      signerName: saved.agreement?.signerName || "",
+      acceptedAt: saved.agreement?.acceptedAt || null,
+      reviewNote: saved.agreement?.reviewNote || "",
+    },
+    profile: agreementAccepted ? profile : null,
+    tasks: agreementAccepted ? tasks : [],
+    progress: {
+      completed: agreementAccepted ? tasks.filter((task) => task.status === "completed").length : 0,
+      total: LOCAL_TASKS.length,
+    },
+  };
+}
+
+function enterLocalGuestMode(message) {
+  state.localGuest = true;
+  state.dashboard = localDashboard();
+  renderDashboard();
+  if (message) showToast(message);
+}
 
 async function requestJson(path, options = {}) {
   const response = await fetch(path, {
@@ -245,21 +413,17 @@ function renderLoggedOut() {
 async function loadDashboard() {
   try {
     state.dashboard = await requestJson("/api/newbie/dashboard", { cache: "no-store" });
+    state.localGuest = false;
     renderDashboard();
   } catch (error) {
-    if (error.status === 401) {
-      renderLoggedOut();
-      return;
-    }
-    renderLoggedOut();
-    showToast(error.message);
+    enterLocalGuestMode(error.status === 401 || error.status === 404
+      ? "已开启免登录访问"
+      : "接口暂不可用，已进入免登录模式");
   }
 }
 
 function openLogin() {
-  setLoginStatus("");
-  elements.loginDialog.showModal();
-  elements.email.focus();
+  enterLocalGuestMode("已进入免登录新手村");
 }
 
 async function requestCode() {
@@ -309,24 +473,28 @@ async function saveProfile(event) {
   const submit = elements.profileForm.querySelector('button[type="submit"]');
   submit.disabled = true;
   elements.profileStatus.textContent = "正在保存…";
+  const form = new FormData(elements.profileForm);
+  const profile = {
+    displayName: String(form.get("displayName") || ""),
+    grade: String(form.get("grade") || ""),
+    major: String(form.get("major") || ""),
+    direction: String(form.get("direction") || "undecided"),
+    bio: String(form.get("bio") || ""),
+    updatedAt: Date.now(),
+  };
   try {
-    const form = new FormData(elements.profileForm);
-    state.dashboard = await requestJson("/api/newbie/profile", {
-      method: "PATCH",
-      body: JSON.stringify({
-        displayName: String(form.get("displayName") || ""),
-        grade: String(form.get("grade") || ""),
-        major: String(form.get("major") || ""),
-        direction: String(form.get("direction") || "undecided"),
-        bio: String(form.get("bio") || ""),
-      }),
-    });
+    if (state.localGuest) throw new Error("LOCAL_GUEST");
+    state.dashboard = await requestJson("/api/newbie/profile", { method: "PATCH", body: JSON.stringify(profile) });
+  } catch (error) {
+    const saved = readLocalGuest();
+    writeLocalGuest({ ...saved, profile });
+    state.localGuest = true;
+    state.dashboard = localDashboard();
+    if (error.message !== "LOCAL_GUEST") console.info("Falling back to local guest profile save.", error);
+  } finally {
     renderDashboard();
     elements.profileStatus.textContent = "已保存";
     showToast("个人主页已更新");
-  } catch (error) {
-    elements.profileStatus.textContent = error.message;
-  } finally {
     submit.disabled = false;
   }
 }
@@ -338,6 +506,7 @@ async function signAgreement(event) {
   submit.disabled = true;
   elements.agreementStatus.textContent = "正在自动归档…";
   try {
+    if (state.localGuest) throw new Error("LOCAL_GUEST");
     state.dashboard = await requestJson("/api/newbie/agreement", {
       method: "POST",
       body: JSON.stringify({
@@ -346,11 +515,23 @@ async function signAgreement(event) {
         accepted: true,
       }),
     });
-    renderDashboard();
-    showToast("已签署并自动归档");
   } catch (error) {
-    elements.agreementStatus.textContent = error.message;
+    const saved = readLocalGuest();
+    writeLocalGuest({
+      ...saved,
+      agreement: {
+        approved: true,
+        signerName: signerName || saved.profile?.displayName || "访客学生",
+        acceptedAt: Date.now(),
+        reviewNote: "免登录模式本地签署",
+      },
+    });
+    state.localGuest = true;
+    state.dashboard = localDashboard();
+    if (error.message !== "LOCAL_GUEST") console.info("Falling back to local guest agreement save.", error);
   } finally {
+    renderDashboard();
+    showToast("已签署并进入新手村");
     submit.disabled = false;
   }
 }
@@ -383,16 +564,31 @@ async function updateTask(status) {
   buttons.forEach((button) => { button.disabled = true; });
   setTaskStatus(status === "completed" ? "正在保存完成记录…" : "正在开始任务…");
   try {
+    if (state.localGuest) throw new Error("LOCAL_GUEST");
     state.dashboard = await requestJson(`/api/newbie/tasks/${encodeURIComponent(task.id)}`, {
       method: "POST",
       body: JSON.stringify({ status, evidence: elements.taskEvidence.value.trim() }),
     });
+  } catch (error) {
+    const saved = readLocalGuest();
+    writeLocalGuest({
+      ...saved,
+      tasks: {
+        ...(saved.tasks || {}),
+        [task.id]: {
+          status,
+          evidence: elements.taskEvidence.value.trim(),
+          updatedAt: Date.now(),
+        },
+      },
+    });
+    state.localGuest = true;
+    state.dashboard = localDashboard();
+    if (error.message !== "LOCAL_GUEST") console.info("Falling back to local guest task save.", error);
+  } finally {
     renderDashboard();
     elements.taskDialog.close();
     showToast(status === "completed" ? "任务已完成，下一关已解锁" : "任务已开始");
-  } catch (error) {
-    setTaskStatus(error.message, true);
-  } finally {
     buttons.forEach((button) => { button.disabled = false; });
   }
 }
@@ -400,11 +596,11 @@ async function updateTask(status) {
 async function logout() {
   elements.logout.disabled = true;
   try {
-    await requestJson("/api/visitor/logout", { method: "POST", body: "{}" });
+    if (!state.localGuest) await requestJson("/api/visitor/logout", { method: "POST", body: "{}" });
   } catch { /* Local state still returns to the signed-out view. */ }
   elements.logout.disabled = false;
-  renderLoggedOut();
-  showToast("已退出新手村");
+  localStorage.removeItem(LOCAL_GUEST_KEY);
+  enterLocalGuestMode("已重置免登录进度");
 }
 
 document.querySelectorAll(".login-trigger").forEach((button) => button.addEventListener("click", openLogin));
