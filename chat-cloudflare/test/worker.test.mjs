@@ -341,8 +341,24 @@ test("campus login code rate limit tolerates classroom retries from the same net
   }
 });
 
-test("newbie village keeps an authenticated task path and personal homepage independent from OA", async (t) => {
-  const env = makeEnvironment();
+test("newbie village auto-approves signed agreements and archives them in OA before admission", async (t) => {
+  const oaArchiveCalls = [];
+  let oaAvailable = false;
+  const env = makeEnvironment({
+    OA_SERVICE: {
+      async fetch(request) {
+        assert.equal(new URL(request.url).pathname, "/api/public/lab-ai/newbie-agreement");
+        assert.equal(request.headers.get("x-originmind-public-lab-ai-service-token"), SERVICE_TOKEN);
+        const body = await request.json();
+        if (!oaAvailable) return Response.json({ error: "OA unavailable" }, { status: 503 });
+        oaArchiveCalls.push(body);
+        return Response.json({
+          approval: { id: "newbie-oa-test-record", status: "已归档" },
+          idempotent: false,
+        }, { status: 201 });
+      },
+    },
+  });
   t.after(() => env.DB.close());
 
   const anonymous = await responseJson(await handleRequest(
@@ -378,6 +394,17 @@ test("newbie village keeps an authenticated task path and personal homepage inde
   }), env, {}, runtime()));
   assert.equal(unsignedCrossOrigin.status, 403);
 
+  const unavailable = await responseJson(await handleRequest(apiRequest("/api/newbie/agreement", {
+    method: "POST",
+    cookie,
+    body: { agreementVersion: initial.body.agreement.version, signerName: "小深同学", accepted: true },
+  }), env, {}, runtime()));
+  assert.equal(unavailable.status, 502);
+  assert.equal((await env.DB.prepare(
+    "SELECT COUNT(*) AS count FROM newbie_agreement_acceptances WHERE email=?",
+  ).bind("student@stumail.sztu.edu.cn").first()).count, 0);
+
+  oaAvailable = true;
   const signed = await responseJson(await handleRequest(apiRequest("/api/newbie/agreement", {
     method: "POST",
     cookie,
@@ -386,54 +413,45 @@ test("newbie village keeps an authenticated task path and personal homepage inde
   assert.equal(signed.status, 200);
   assert.equal(signed.body.signed, true);
   assert.equal(signed.body.archived, true);
+  assert.equal(signed.body.autoApproved, true);
+  assert.equal(signed.body.oaApprovalId, "newbie-oa-test-record");
   assert.equal(signed.body.agreement.accepted, true);
-  assert.equal(signed.body.agreement.approved, false);
-  assert.equal(signed.body.agreement.reviewStatus, "pending");
-  assert.equal(signed.body.profile, null);
-  assert.deepEqual(signed.body.tasks, []);
+  assert.equal(signed.body.agreement.approved, true);
+  assert.equal(signed.body.agreement.reviewStatus, "approved");
+  assert.equal(signed.body.profile.displayName, "student");
+  assert.equal(signed.body.tasks[0].id, "registration");
+  assert.equal(oaArchiveCalls.length, 1);
+  assert.equal(oaArchiveCalls[0].email, "student@stumail.sztu.edu.cn");
+  assert.equal(oaArchiveCalls[0].signerName, "小深同学");
+  assert.equal(oaArchiveCalls[0].agreement.version, initial.body.agreement.version);
+  assert.match(oaArchiveCalls[0].contentSha256, /^[a-f0-9]{64}$/u);
+  assert.match(oaArchiveCalls[0].agreementText, /自动审核记录同步到 OA/u);
 
   const archive = await env.DB.prepare(
     "SELECT * FROM newbie_agreement_acceptances WHERE email=? AND agreement_version=?",
   ).bind("student@stumail.sztu.edu.cn", initial.body.agreement.version).first();
   assert.equal(archive.signer_name, "小深同学");
   assert.match(archive.content_sha256, /^[a-f0-9]{64}$/u);
-  assert.equal(archive.review_status, "pending");
+  assert.equal(archive.review_status, "approved");
+  assert.equal(archive.reviewed_by, "system:auto:oa:newbie-oa-test-record");
+  assert.equal(archive.review_note, "已自动审核通过并同步至 OA。");
   assert.equal(Object.hasOwn(archive, "ip"), false);
   assert.equal(Object.hasOwn(archive, "user_agent"), false);
 
-  const blockedPending = await responseJson(await handleRequest(apiRequest("/api/newbie/profile", {
-    method: "PATCH",
-    cookie,
-    body: { displayName: "小深", grade: "2024", major: "机器人工程", direction: "navigation", bio: "" },
-  }), env, {}, runtime()));
-  assert.equal(blockedPending.status, 423);
-
   const visitorCannotReadArchive = await responseJson(await handleRequest(
-    apiRequest("/api/admin/newbie-agreements?status=pending", { cookie }), env, {}, runtime(),
+    apiRequest("/api/admin/newbie-agreements?status=all", { cookie }), env, {}, runtime(),
   ));
   assert.equal(visitorCannotReadArchive.status, 403);
 
   const adminCookie = await ownerCookie(env.DB);
   const queue = await responseJson(await handleRequest(
-    apiRequest("/api/admin/newbie-agreements?status=pending", { cookie: adminCookie }), env, {}, runtime(),
+    apiRequest("/api/admin/newbie-agreements?status=approved", { cookie: adminCookie }), env, {}, runtime(),
   ));
   assert.equal(queue.status, 200);
   assert.equal(queue.body.records.length, 1);
   assert.equal(queue.body.records[0].email, "student@stumail.sztu.edu.cn");
-  assert.equal(queue.body.records[0].reviewStatus, "pending");
+  assert.equal(queue.body.records[0].reviewStatus, "approved");
   assert.match(queue.body.agreement.title, /保密协议/u);
-
-  const reviewed = await responseJson(await handleRequest(apiRequest("/api/admin/newbie-agreements/review", {
-    method: "POST",
-    cookie: adminCookie,
-    body: {
-      email: "student@stumail.sztu.edu.cn",
-      agreementVersion: initial.body.agreement.version,
-      reviewStatus: "approved",
-      reviewNote: "身份与签署信息一致。",
-    },
-  }), env, {}, runtime()));
-  assert.deepEqual(reviewed, { status: 200, body: { saved: true, reviewStatus: "approved" } });
 
   const admitted = await responseJson(await handleRequest(
     apiRequest("/api/newbie/dashboard", { cookie }), env, {}, runtime(),
@@ -445,6 +463,7 @@ test("newbie village keeps an authenticated task path and personal homepage inde
   assert.equal(admitted.body.tasks[0].id, "registration");
   assert.equal(admitted.body.tasks[0].unlocked, true);
   assert.equal(admitted.body.tasks[1].unlocked, false);
+  assert.equal(oaArchiveCalls.length, 1);
 
   const profile = await responseJson(await handleRequest(apiRequest("/api/newbie/profile", {
     method: "PATCH",

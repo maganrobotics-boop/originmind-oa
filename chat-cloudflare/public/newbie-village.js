@@ -336,7 +336,7 @@ async function signAgreement(event) {
   const submit = elements.agreementForm.querySelector('button[type="submit"]');
   const signerName = String(new FormData(elements.agreementForm).get("signerName") || "").trim();
   submit.disabled = true;
-  elements.agreementStatus.textContent = "正在归档签署记录…";
+  elements.agreementStatus.textContent = "正在自动审核并同步到 OA…";
   try {
     state.dashboard = await requestJson("/api/newbie/agreement", {
       method: "POST",
@@ -347,7 +347,7 @@ async function signAgreement(event) {
       }),
     });
     renderDashboard();
-    showToast("已签署并归档，等待管理员审核");
+    showToast("已签署、自动审核通过并同步到 OA");
   } catch (error) {
     elements.agreementStatus.textContent = error.message;
   } finally {

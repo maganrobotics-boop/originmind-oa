@@ -6,7 +6,14 @@ import { chatKnowledgeImages, proxyKnowledgeAsset } from "./knowledge-assets.mjs
 import { protectAnswerTechnicalText } from "./answer-math.mjs";
 import { cleanAnswerPresentation } from "./answer-presentation.mjs";
 import { completeModelAnswer } from "./answer-completion.mjs";
-import { APP_NAME, DEFAULT_MODEL, SECURITY_HEADERS, WORKERS_AI_MODEL } from "./constants.mjs";
+import {
+  APP_NAME,
+  DEFAULT_MODEL,
+  OA_NEWBIE_AGREEMENT_URL,
+  PUBLIC_LAB_AI_SERVICE_TOKEN_PATTERN,
+  SECURITY_HEADERS,
+  WORKERS_AI_MODEL,
+} from "./constants.mjs";
 import { analyticsReport, recordAnalyticsEvents } from "./analytics.mjs";
 import {
   decryptSecret,
@@ -266,12 +273,7 @@ const NEWBIE_TASKS = Object.freeze([
   },
 ]);
 
-const NEWBIE_AGREEMENT = Object.freeze({
-  version: "2026-09-23-v1",
-  title: "OriginMind × ARTS Robotics 新手村保密协议",
-  effectiveDate: "2026-09-23",
-  introduction: "为保护实验室成员、合作方和项目资料，在进入新手村并接触学习任务前，请阅读并同意以下保密约定。",
-  clauses: Object.freeze([
+const NEWBIE_AGREEMENT_CLAUSES = Object.freeze([
     Object.freeze({
       title: "一、保密信息范围",
       text: "保密信息包括通过新手村、实验室成员或项目协作接触到的未公开代码、数据、模型、设计、文档、实验记录、账号信息、会议内容，以及其他已标注或依其性质应当保密的信息。",
@@ -292,9 +294,132 @@ const NEWBIE_AGREEMENT = Object.freeze({
       title: "五、违规处理",
       text: "违反本协议可能导致新手村或项目权限暂停、任务资格取消，并应按适用规则和法律承担相应责任。涉及第三方权益或安全事件时，应配合采取补救措施。",
     }),
-  ]),
+]);
+
+const LEGACY_NEWBIE_AGREEMENT = Object.freeze({
+  version: "2026-09-23-v1",
+  title: "OriginMind × ARTS Robotics 新手村保密协议",
+  effectiveDate: "2026-09-23",
+  introduction: "为保护实验室成员、合作方和项目资料，在进入新手村并接触学习任务前，请阅读并同意以下保密约定。",
+  clauses: NEWBIE_AGREEMENT_CLAUSES,
   privacyNotice: "签署时系统仅记录校内邮箱、签署姓名、协议版本、协议内容摘要和签署时间，用于身份确认、访问控制和签署记录。记录保存在 Chat 系统，不写入 OA，也不收集 IP 或浏览器指纹。不同意时仍可使用公开 Chat，但不能进入新手村。",
 });
+
+const NEWBIE_AGREEMENT = Object.freeze({
+  version: "2026-09-25-v2",
+  title: "OriginMind × ARTS Robotics 新手村保密协议",
+  effectiveDate: "2026-09-25",
+  introduction: "为保护实验室成员、合作方和项目资料，在进入新手村并接触学习任务前，请阅读并同意以下保密约定。",
+  clauses: NEWBIE_AGREEMENT_CLAUSES,
+  privacyNotice: "签署时系统仅记录校内邮箱、签署姓名、协议版本、协议内容摘要和签署时间，用于身份确认、访问控制和签署记录。记录保存在 Chat 系统，并以已归档的自动审核记录同步到 OA；不收集 IP 或浏览器指纹。不同意时仍可使用公开 Chat，但不能进入新手村。",
+});
+
+const NEWBIE_AGREEMENTS_BY_VERSION = new Map([
+  [LEGACY_NEWBIE_AGREEMENT.version, LEGACY_NEWBIE_AGREEMENT],
+  [NEWBIE_AGREEMENT.version, NEWBIE_AGREEMENT],
+]);
+
+function newbieAgreementText(agreement) {
+  return [
+    agreement.title,
+    `协议版本：${agreement.version}`,
+    `生效日期：${agreement.effectiveDate}`,
+    agreement.introduction,
+    ...agreement.clauses.flatMap((clause) => [clause.title, clause.text]),
+    `隐私说明：${agreement.privacyNotice}`,
+  ].join("\n");
+}
+
+async function boundedOaArchiveJson(response, maximum = 16 * 1024) {
+  const mediaType = response.headers.get("content-type")?.split(";", 1)[0].trim().toLowerCase();
+  if (mediaType !== "application/json") throw new Error("OA_NEWBIE_ARCHIVE_INVALID_RESPONSE");
+  const declared = Number(response.headers.get("content-length") || 0);
+  if (Number.isFinite(declared) && declared > maximum) throw new Error("OA_NEWBIE_ARCHIVE_RESPONSE_TOO_LARGE");
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("OA_NEWBIE_ARCHIVE_EMPTY_RESPONSE");
+  const chunks = [];
+  let length = 0;
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      length += value.length;
+      if (length > maximum) {
+        await reader.cancel();
+        throw new Error("OA_NEWBIE_ARCHIVE_RESPONSE_TOO_LARGE");
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+  const bytes = new Uint8Array(length);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bytes.set(chunk, offset);
+    offset += chunk.length;
+  }
+  const value = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("OA_NEWBIE_ARCHIVE_INVALID_RESPONSE");
+  return value;
+}
+
+async function syncNewbieAgreementToOa(context, { visitor, signerName, agreement, contentSha256, acceptedAt }) {
+  const token = context.env.PUBLIC_LAB_AI_SERVICE_TOKEN || "";
+  if (!PUBLIC_LAB_AI_SERVICE_TOKEN_PATTERN.test(token)) {
+    throw new PublicError("保密协议暂时无法同步到 OA，请联系管理员。", 503);
+  }
+  const init = {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+      "x-originmind-public-lab-ai-service-token": token,
+    },
+    body: JSON.stringify({
+      email: visitor.email,
+      signerName,
+      acceptedAt: new Date(acceptedAt).toISOString(),
+      contentSha256,
+      agreement,
+      agreementText: newbieAgreementText(agreement),
+    }),
+    redirect: "manual",
+    cache: "no-store",
+    credentials: "omit",
+    signal: timeoutSignal(8_000),
+  };
+  let response;
+  try {
+    response = typeof context.env.OA_SERVICE?.fetch === "function"
+      ? await context.env.OA_SERVICE.fetch(new Request(OA_NEWBIE_AGREEMENT_URL, init))
+      : await context.runtime.fetch(OA_NEWBIE_AGREEMENT_URL, init);
+  } catch {
+    throw new PublicError("保密协议暂时无法同步到 OA，请稍后重试。", 503);
+  }
+  let result;
+  try {
+    result = await boundedOaArchiveJson(response);
+  } catch {
+    throw new PublicError("OA 未返回有效的保密协议归档结果，请稍后重试。", 502);
+  }
+  if (!response.ok) {
+    throw new PublicError(
+      response.status === 401 || response.status === 403
+        ? "保密协议同步凭证无效，请联系管理员。"
+        : typeof result.error === "string" && result.error.length <= 200
+          ? result.error
+          : "保密协议暂时无法同步到 OA，请稍后重试。",
+      response.status === 409 ? 409 : 502,
+    );
+  }
+  const approval = result.approval;
+  if (!approval || typeof approval !== "object" || Array.isArray(approval) ||
+      typeof approval.id !== "string" || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(approval.id) ||
+      approval.status !== "已归档") {
+    throw new PublicError("OA 未确认保密协议已归档，请稍后重试。", 502);
+  }
+  return approval.id;
+}
 
 function emailCode() {
   const bytes = crypto.getRandomValues(new Uint8Array(4));
@@ -414,7 +539,46 @@ async function requireNewbieAgreement(context, visitor) {
   return agreement;
 }
 
+async function syncLegacyNewbieAgreement(context, visitor) {
+  const acceptance = await database(context)
+    .prepare(
+      "SELECT agreement_version AS agreementVersion,signer_name AS signerName,content_sha256 AS contentSha256," +
+      "accepted_at AS acceptedAt,review_status AS reviewStatus,reviewed_by AS reviewedBy " +
+      "FROM newbie_agreement_acceptances WHERE email=? AND agreement_version<>? " +
+      "AND review_status IN ('pending','approved') AND reviewed_by NOT LIKE 'system:auto:oa:%' " +
+      "ORDER BY accepted_at DESC LIMIT 1",
+    )
+    .bind(visitor.email, NEWBIE_AGREEMENT.version)
+    .first();
+  if (!acceptance) return;
+  const agreement = NEWBIE_AGREEMENTS_BY_VERSION.get(acceptance.agreementVersion);
+  if (!agreement) return;
+  const expectedSha256 = await sha256Hex(JSON.stringify(agreement));
+  if (expectedSha256 !== acceptance.contentSha256) return;
+  try {
+    const approvalId = await syncNewbieAgreementToOa(context, {
+      visitor,
+      signerName: acceptance.signerName,
+      agreement,
+      contentSha256: acceptance.contentSha256,
+      acceptedAt: acceptance.acceptedAt,
+    });
+    await database(context)
+      .prepare(
+        "UPDATE newbie_agreement_acceptances SET review_status='approved',reviewed_by=?," +
+        "reviewed_at=COALESCE(reviewed_at,accepted_at),review_note='已自动审核通过并同步至 OA。' " +
+        "WHERE email=? AND agreement_version=? AND content_sha256=? AND review_status IN ('pending','approved')",
+      )
+      .bind(`system:auto:oa:${approvalId}`, visitor.email, acceptance.agreementVersion, acceptance.contentSha256)
+      .run();
+  } catch {
+    // Legacy records are synchronized opportunistically. A temporary OA outage
+    // must not hide the current agreement or block the public Chat surface.
+  }
+}
+
 async function newbieDashboard(context, visitor) {
+  await syncLegacyNewbieAgreement(context, visitor);
   const agreement = await newbieAgreement(context, visitor);
   if (!agreement.approved) {
     return {
@@ -497,16 +661,50 @@ async function newbieApi(context) {
     const signerName = profileText(input.signerName ?? "", 80, "签署姓名");
     if (signerName.length < 2) throw new PublicError("请填写真实签署姓名。", 400);
     const contentSha256 = await sha256Hex(JSON.stringify(NEWBIE_AGREEMENT));
+    const existing = await database(context)
+      .prepare(
+        "SELECT signer_name AS signerName,accepted_at AS acceptedAt,review_status AS reviewStatus,reviewed_by AS reviewedBy " +
+        "FROM newbie_agreement_acceptances WHERE email=? AND agreement_version=? AND content_sha256=?",
+      )
+      .bind(visitor.email, NEWBIE_AGREEMENT.version, contentSha256)
+      .first();
+    if (existing?.reviewStatus === "approved" && existing.reviewedBy?.startsWith("system:auto:oa:")) {
+      return json({ signed: true, archived: true, autoApproved: true, ...(await newbieDashboard(context, visitor)) });
+    }
+    const reusableAcceptance = existing && existing.reviewStatus !== "rejected" ? existing : null;
+    const acceptedAt = reusableAcceptance?.acceptedAt || Date.now();
+    const archivedSignerName = reusableAcceptance?.signerName || signerName;
+    const approvalId = await syncNewbieAgreementToOa(context, {
+      visitor,
+      signerName: archivedSignerName,
+      agreement: NEWBIE_AGREEMENT,
+      contentSha256,
+      acceptedAt,
+    });
     await database(context)
       .prepare(
-        "INSERT INTO newbie_agreement_acceptances(email,agreement_version,signer_name,content_sha256,accepted_at) VALUES(?,?,?,?,?) " +
-        "ON CONFLICT(email,agreement_version) DO UPDATE SET signer_name=excluded.signer_name,content_sha256=excluded.content_sha256," +
-        "accepted_at=excluded.accepted_at,review_status='pending',reviewed_by='',reviewed_at=NULL,review_note='' " +
-        "WHERE newbie_agreement_acceptances.review_status='rejected'",
+        "INSERT INTO newbie_agreement_acceptances(" +
+        "email,agreement_version,signer_name,content_sha256,accepted_at,review_status,reviewed_by,reviewed_at,review_note" +
+        ") VALUES(?,?,?,?,?,'approved',?,?,?) " +
+        "ON CONFLICT(email,agreement_version) DO UPDATE SET signer_name=excluded.signer_name," +
+        "content_sha256=excluded.content_sha256,accepted_at=excluded.accepted_at,review_status='approved'," +
+        "reviewed_by=excluded.reviewed_by,reviewed_at=excluded.reviewed_at,review_note=excluded.review_note " +
+        "WHERE newbie_agreement_acceptances.review_status IN ('pending','rejected') " +
+        "OR (newbie_agreement_acceptances.review_status='approved' " +
+        "AND newbie_agreement_acceptances.reviewed_by NOT LIKE 'system:auto:oa:%')",
       )
-      .bind(visitor.email, NEWBIE_AGREEMENT.version, signerName, contentSha256, Date.now())
+      .bind(
+        visitor.email,
+        NEWBIE_AGREEMENT.version,
+        archivedSignerName,
+        contentSha256,
+        acceptedAt,
+        `system:auto:oa:${approvalId}`,
+        acceptedAt,
+        "已自动审核通过并同步至 OA。",
+      )
       .run();
-    return json({ signed: true, archived: true, ...(await newbieDashboard(context, visitor)) });
+    return json({ signed: true, archived: true, autoApproved: true, oaApprovalId: approvalId, ...(await newbieDashboard(context, visitor)) });
   }
 
   if (pathname === "/api/newbie/profile" && request.method === "PATCH") {

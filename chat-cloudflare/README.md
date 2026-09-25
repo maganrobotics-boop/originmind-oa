@@ -39,10 +39,11 @@ reference hiding still runs before display and again when restoring history.
   OA D1 database.
 - Newbie Village access is gated by a versioned confidentiality agreement. A
   campus user signs with their verified email identity and typed name; the
-  immutable-version record is archived in Chat D1 as pending until a Chat
-  administrator approves it. Profiles and tasks remain server-side locked before
-  approval. The archive is available only from the authenticated internal review
-  page at `/newbie-village/admin` and is never written to OA.
+  immutable-version record is automatically approved, archived in Chat D1, and
+  synchronized through the private OA service binding as an idempotent archived
+  approval. Profiles and tasks remain server-side locked until OA confirms the
+  archive. The authenticated review page at `/newbie-village/admin` remains
+  available for legacy records and audit inspection.
 - Agreement records deliberately omit IP addresses and browser fingerprints.
   They retain only the campus email, signer name, agreement version and digest,
   timestamps, review state and internal review note.
