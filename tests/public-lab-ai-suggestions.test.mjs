@@ -263,7 +263,7 @@ test("daily OA selection returns fewer than five when fewer answerable sources e
   assert.deepEqual(result.suggestions.map((item) => item.id), ["1", "2"]);
 });
 
-test("sections without searchable terms fall back to a title-bound question", async () => {
+test("suggestions remain title-bound even when section metadata exists", async () => {
   globalThis[stateKey].candidates = [{
     title: "星云夹爪维护周报",
     sectionTitle: "如何",
@@ -372,7 +372,7 @@ test("OA generates up to five clean title-bound questions and deduplicates versi
   const body = await response.json();
   assert.equal(body.suggestions.length, 5);
   assert.deepEqual(body.suggestions.map((item) => item.id), ["1", "2", "3", "4", "5"]);
-  assert.ok(body.suggestions.some((item) => /《矿井巡检》中的“导航”/u.test(item.question)));
+  assert.ok(body.suggestions.some((item) => item.question === "《矿井巡检》有哪些值得关注的核心内容？"));
   assert.ok(body.suggestions.some((item) => /《多机协作》/u.test(item.question)));
-  assert.doesNotMatch(JSON.stringify(body), /脱敏|脱密|重复章节/u);
+  assert.doesNotMatch(JSON.stringify(body), /脱敏|脱密|导航|重复章节/u);
 });

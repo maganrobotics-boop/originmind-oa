@@ -171,17 +171,14 @@ export function buildPublicLabAiSuggestionsResponse(
   const seenTitles = new Set<string>();
   for (const candidate of candidates) {
     const title = cleanPublicChatText(boundedLine(candidate.title, 100));
-    const sectionTitle = cleanPublicChatText(boundedLine(candidate.sectionTitle, 100));
     const updatedAt = validDate(candidate.updatedAt);
     const normalizedTitle = title.toLocaleLowerCase("zh-CN");
     const titleTerms = knowledgeSearchTerms(title);
     if (title.length < 2 || !titleTerms.length || !updatedAt || seenTitles.has(normalizedTitle)) continue;
-    const meaningfulSection = sectionTitle.length >= 2 &&
-      sectionTitle.toLocaleLowerCase("zh-CN") !== normalizedTitle &&
-      knowledgeSearchTerms(sectionTitle).length > 0;
-    const question = meaningfulSection
-      ? `《${title}》中的“${sectionTitle}”有哪些值得关注的内容？`
-      : `《${title}》有哪些值得关注的核心内容？`;
+    // Keep suggestions title-bound. A representative section can change which
+    // chunk ranks first, leaving a valid document suggestion unable to match
+    // the exact section again during the release and visitor retrieval checks.
+    const question = `《${title}》有哪些值得关注的核心内容？`;
     const questionTerms = new Set(knowledgeSearchTerms(question));
     if (question.length > 300 || !questionTerms.size || !titleTerms.some((term) => questionTerms.has(term))) continue;
     seenTitles.add(normalizedTitle);
