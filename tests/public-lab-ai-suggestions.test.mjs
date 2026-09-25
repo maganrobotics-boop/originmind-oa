@@ -55,6 +55,26 @@ const vite = await createServer({
             if (globalThis.${stateKey}.storeError) throw new Error("store unavailable");
             return globalThis.${stateKey}.candidates;
           }
+          export async function getPublicActiveKnowledgeChunks(question) {
+            globalThis.${stateKey}.retrievalCalls += 1;
+            if (globalThis.${stateKey}.storeError) throw new Error("store unavailable");
+            const title = /^《([^》]+)》/u.exec(question)?.[1] || "";
+            if (globalThis.${stateKey}.unretrievableTitles.has(title)) return [];
+            return globalThis.${stateKey}.candidates.filter(candidate => candidate.title === title).map((candidate, index) => ({
+              id: String(index + 1),
+              itemId: String(index + 1),
+              revisionId: String(index + 1),
+              title: candidate.title,
+              category: "测试",
+              sourceLabel: "公开知识库",
+              sourceUrl: "",
+              sectionTitle: candidate.sectionTitle,
+              paragraphRef: "第 1 段",
+              content: "这是已审核公开知识的代表内容。",
+              searchText: \`\${candidate.title}\\n\${candidate.sectionTitle}\\n这是已审核公开知识的代表内容。\`,
+              updatedAt: candidate.updatedAt,
+            }));
+          }
         `;
       }
       return null;
@@ -99,7 +119,9 @@ beforeEach(() => {
     buckets: new Map(),
     d1Calls: 0,
     storeCalls: 0,
+    retrievalCalls: 0,
     storeError: false,
+    unretrievableTitles: new Set(),
     candidateLimits: [],
     candidates: [
       {
@@ -190,6 +212,7 @@ test("success returns at most five exact, answerable questions without internal 
   assert.deepEqual(globalThis[stateKey].candidateLimits, [20]);
   assert.equal(JSON.stringify(body).includes("must-not-leak"), false);
   assert.equal(JSON.stringify(body).includes("https://"), false);
+  assert.equal(globalThis[stateKey].retrievalCalls, 5);
   for (const suggestion of body.suggestions) {
     assert.deepEqual(Object.keys(suggestion), ["id", "question", "updatedAt"]);
     assert.ok(suggestion.question.length >= 2 && suggestion.question.length <= 300);
@@ -213,6 +236,16 @@ test("success returns at most five exact, answerable questions without internal 
       updatedAt: source.updatedAt,
     }], 1).length, 1);
   }
+});
+
+test("suggestions omit sources that cannot be retrieved and keep response IDs contiguous", async () => {
+  globalThis[stateKey].unretrievableTitles.add("机器人开源项目观察");
+  const response = await route.GET(request());
+  assert.equal(response.status, 200);
+  const body = await response.json();
+  assert.equal(body.suggestions.length, 4);
+  assert.deepEqual(body.suggestions.map((suggestion) => suggestion.id), ["1", "2", "3", "4"]);
+  assert.equal(body.suggestions.some((suggestion) => suggestion.question.includes("机器人开源项目观察")), false);
 });
 
 test("daily OA selection is stable within a Beijing day and rotates at Beijing midnight", () => {

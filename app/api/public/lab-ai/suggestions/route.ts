@@ -1,4 +1,9 @@
-import { getLatestPublicKnowledgeSuggestionCandidates } from "../../../../../lib/knowledge-store";
+import { suggestionMatchesKnowledge } from "../../../../../chat-cloudflare/src/oa-public.mjs";
+import { rankKnowledgeChunks } from "../../../../../lib/knowledge-policy";
+import {
+  getLatestPublicKnowledgeSuggestionCandidates,
+  getPublicActiveKnowledgeChunks,
+} from "../../../../../lib/knowledge-store";
 import { isMigrationWriteFrozen } from "../../../../../lib/migration-freeze";
 import { consumePublicLabAiSuggestionsRateLimit } from "../_lib/rate-limit";
 import { buildPublicLabAiSuggestionsResponse, publicLabAiJson } from "../_lib/response-contract";
@@ -26,7 +31,17 @@ export async function GET(request: Request): Promise<Response> {
       return errorResponse("知识推荐请求过于频繁，请稍后再试。", 429, { "retry-after": "60" });
     }
     const candidates = await getLatestPublicKnowledgeSuggestionCandidates(SUGGESTION_CANDIDATE_LIMIT);
-    return publicLabAiJson(buildPublicLabAiSuggestionsResponse(candidates));
+    const draft = buildPublicLabAiSuggestionsResponse(candidates);
+    const checked = await Promise.all(draft.suggestions.map(async (suggestion) => {
+      const chunks = await getPublicActiveKnowledgeChunks(suggestion.question);
+      const ranked = rankKnowledgeChunks(suggestion.question, chunks, 6);
+      return ranked.some((chunk) => suggestionMatchesKnowledge(suggestion.question, chunk))
+        ? suggestion
+        : null;
+    }));
+    const suggestions = checked.filter((suggestion) => suggestion !== null)
+      .map((suggestion, index) => ({ ...suggestion, id: String(index + 1) }));
+    return publicLabAiJson({ suggestions });
   } catch {
     return errorResponse("知识推荐话题暂不可用。", 503);
   }
