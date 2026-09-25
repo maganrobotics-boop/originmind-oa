@@ -64,3 +64,20 @@ test('server failure never becomes successful submission or local agreement', as
   assert.equal(app.node('.task-dialog').open, true);
   assert.ok(app.node('.task-status').textContent);
 });
+
+test('Python deep link opens current lesson while retaining saved progress', async () => {
+  const app = setup();
+  app.run('location.hash = "#python-basics"');
+  await app.run('loadDashboard()');
+  assert.equal(app.node('.task-dialog').open, true);
+  assert.equal(app.node('.task-materials').hidden, false);
+  app.run(`state.dashboard.tasks.find(t => t.id === 'python-basics').summary = 'old server text';
+    state.dashboard.tasks.find(t => t.id === 'python-basics').status = 'completed';
+    state.dashboard.tasks.find(t => t.id === 'python-basics').evidence = 'saved work';
+    renderDashboard(); openTask('python-basics');`);
+  assert.match(app.node('.task-summary-dialog').textContent, /模拟巡检日志/);
+  assert.equal(app.run("state.dashboard.tasks.find(t => t.id === 'python-basics').status"), 'completed');
+  assert.equal(app.node('.task-evidence').value, 'saved work');
+  app.run('openTask("toolkit")');
+  assert.equal(app.node('.task-materials').hidden, true);
+});

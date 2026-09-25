@@ -170,7 +170,10 @@
       .task-detail h3 { margin: 20px 0 8px; font-size: 15px; }
       .task-detail p, .task-detail li { color: #626a75; line-height: 1.7; }
       .task-detail ul { padding-left: 20px; }
-      .task-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+      .task-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 10px; margin-top: 16px; }
+      .lesson-link { display: block; margin-top: 12px; color: #235fd6; line-height: 1.6; }
+      .task-materials { padding: 14px 0; border-bottom: 1px solid #e5e8ee; }
+      .task-materials a { display: inline-block; margin: 4px 14px 4px 0; color: #235fd6; }
       .toast {
         position: fixed; left: calc(50% + 122px); bottom: 28px; z-index: 30; transform: translate(-50%,18px);
         padding: 10px 15px; border-radius: 999px; background: #20242b; color: #fff; opacity: 0; pointer-events: none; transition: .18s ease;
@@ -225,7 +228,7 @@
         h1 { font-size: 42px; }
       }
     </style>
-    <script type="module" src="/newbie-village.js?v=20260925-public-learning"></script>
+    <script type="module" src="/newbie-village.js?v=20260925-python-v1"></script>
   </head>
   <body>
     <div class="app">
@@ -365,6 +368,10 @@
         <div class="task-detail">
           <h3>任务目标</h3>
           <p class="task-goal"></p>
+          <section class="task-materials" hidden>
+            <a href="/assets/newbie-python-v1/index.html">打开完整 Python 实训</a>
+            <a href="/assets/newbie-python-v1/python-log-lab.zip" download>下载数据与代码包</a>
+          </section>
           <section class="task-extra-section">
             <h3>学习步骤</h3>
             <ul class="task-steps"></ul>

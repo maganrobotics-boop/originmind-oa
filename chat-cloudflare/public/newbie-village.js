@@ -17,6 +17,7 @@ const statusLabels = Object.freeze({
 
 const LOCAL_GUEST_KEY = "originmind-newbie-guest-v1";
 const GUEST_EMAIL = "guest@originmind.local";
+const PYTHON_LESSON = "/assets/newbie-python-v1/index.html";
 const LOCAL_AGREEMENT = Object.freeze({
   version: "2026-09-25-v2",
   title: "OriginMind × ARTS Robotics 新手村保密协议",
@@ -129,26 +130,26 @@ const LOCAL_TASKS = Object.freeze([
     index: 4,
     title: "Python 训练场",
     stage: "编程基础",
-    summary: "完成一个机器人数据处理小任务，练习函数拆分和结果验证。",
-    goal: "用可读、可运行、可验证的 Python 代码解决一个小问题。",
+    summary: "用模拟巡检日志计算路程、速率和电量变化；含完整教程、数据、代码模板与自检。",
+    goal: "在 60–90 分钟内完成一次可复现的日志分析，能区分路程和位移，定位可疑区间并解释结果。",
     steps: [
-      "新建 motion_log.csv，包含 time、x、y、yaw、battery 五列，至少 20 行数据。",
-      "写 Python 程序读取 CSV，计算总路程、平均速度、电量下降。",
-      "把计算逻辑拆成函数，例如 load_log、compute_distance、summarize。",
-      "输出一段中文总结：机器人走了多远、速度是否异常、电量是否明显下降。",
-      "可选：用 matplotlib 画出 x-y 轨迹图。",
+      "打开完整实训，下载并解压材料包；仅需 Python 3，无第三方依赖。",
+      "运行 analyze.py 和参考自检，核对 21 个采样点、10 m 路程、0.5 m/s 平均速率。",
+      "学习相邻点距离、时间间隔和电量百分点，完成 exercise.py 的三个 TODO。",
+      "运行 python check_work.py 检查自己的实现，再分析 position_jump.csv 中的 1–2 s 位置跳变。",
+      "构造一份静止、斜线或非等间隔数据，先手算再运行，填写提交单。",
     ],
     examples: [
-      "这个任务对应真实机器人里的日志分析和实验复盘。",
-      "代码不要求复杂，但必须能从命令行运行，并能复现同样结果。",
-      "如果不会 CSV，可以先用 Python 内置 csv 模块，不必马上学 pandas。",
+      "本课数据均为教学模拟，不是真实实验记录。完整教材含命令、标准输出和报错排查。",
+      "正方形路径回到起点，位移为 0 m，累计路程仍为 10 m；电量从 90% 到 85% 是下降 5 个百分点。",
+      "运行参考程序不等于完成个人练习；本机标记和八项自检也不等于教师审核通过。",
     ],
     taPrompts: [
-      "帮我生成一个 motion_log.csv 示例。",
-      "怎么计算二维轨迹的总路程？",
-      "Python 函数应该怎么拆？",
+      "我在 Python 日志关，为什么位移为 0，路程仍为 10 m？",
+      "非等间隔采样测试得到 0.667 而不是 0.5，请提示我检查计算过程。",
+      "1–2 s 的可疑分段显示 10 m/s，还需要哪些证据才能判断原因？",
     ],
-    deliverables: ["源代码链接或截图", "运行结果截图", "100 字测试说明"],
+    deliverables: ["独立完成的 exercise.py、运行命令和八项自检输出", "正常与异常日志的分析结果；标准指标误差不超过 0.001", "一份自建数据及手算值与运行值对照", "填写 submission.md，解释四个问题并记录复盘与助教帮助"],
   },
   {
     id: "ros2-simulation",
@@ -418,6 +419,13 @@ function createTaskCard(task) {
   open.textContent = "查看课程与任务";
   open.addEventListener("click", () => openTask(task.id));
   article.append(top, title, stage, summary, open);
+  if (task.id === "python-basics") {
+    const lesson = document.createElement("a");
+    lesson.href = PYTHON_LESSON;
+    lesson.className = "lesson-link";
+    lesson.textContent = "完整实训与材料下载";
+    article.append(lesson);
+  }
   return article;
 }
 
@@ -489,8 +497,11 @@ function renderDashboard() {
   // Public course content is independent of account and agreement status.
   const publicData = localDashboard();
   data.profile ||= publicData.profile;
-  data.tasks = LOCAL_TASKS.map((course) => ({ ...course, status: "not_started", unlocked: false, ...(data.tasks || []).find((task) => task.id === course.id),
-    steps: course.steps, examples: course.examples, taPrompts: course.taPrompts }));
+  data.tasks = LOCAL_TASKS.map((course) => {
+    const progress = (data.tasks || []).find((task) => task.id === course.id);
+    return { ...course, status: progress?.status || "not_started", unlocked: Boolean(progress?.unlocked),
+      evidence: progress?.evidence || "", updatedAt: progress?.updatedAt || null };
+  });
   elements.loggedOut.hidden = true;
   elements.agreementGate.hidden = true;
   elements.dashboard.hidden = false;
@@ -521,7 +532,9 @@ function renderDashboard() {
   document.querySelector(".profile-progress").textContent = `已完成 ${data.progress.completed}/${data.progress.total}`;
   document.querySelector(".avatar").textContent = displayName.slice(0, 1).toUpperCase() || "新";
   const showPasses = location.hash === "#passes";
-  switchView(state.activeView, showPasses);
+  const requestedTask = data.tasks.find((task) => location.hash === `#${task.id}`);
+  switchView(state.activeView, showPasses || Boolean(requestedTask));
+  if (requestedTask && !elements.taskDialog.open) openTask(requestedTask.id);
   if (showPasses) requestAnimationFrame(() => document.getElementById("passes")?.scrollIntoView({ block: "start" }));
 }
 
@@ -673,6 +686,7 @@ function openTask(id) {
   document.querySelector(".task-title-dialog").textContent = task.title;
   document.querySelector(".task-summary-dialog").textContent = task.summary;
   document.querySelector(".task-goal").textContent = task.goal;
+  document.querySelector(".task-materials").hidden = task.id !== "python-basics";
   const fillList = (selector, items = []) => {
     const list = document.querySelector(selector);
     list.replaceChildren(...items.map((item) => {
@@ -807,6 +821,12 @@ document.querySelector(".agreement-back").addEventListener("click", renderDashbo
 document.querySelectorAll(".start-learning").forEach((button) => button.addEventListener("click", () => enterLocalGuestMode()));
 window.addEventListener("hashchange", () => {
   if (location.hash === "#passes") return;
+  const requestedTask = state.dashboard?.tasks.find((task) => location.hash === `#${task.id}`);
+  if (requestedTask) {
+    switchView("tasks", true);
+    if (!elements.taskDialog.open) openTask(requestedTask.id);
+    return;
+  }
   switchView(location.hash === "#profile" ? "profile" : "tasks");
 });
 
