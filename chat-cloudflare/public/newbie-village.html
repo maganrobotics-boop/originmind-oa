@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-    <meta name="description" content="机器人学习新手村：使用校内邮箱登录，按关卡完成任务、保存学习进度，并了解方向任务、真机训练和项目组申请所需的通行证。">
+    <meta name="description" content="机器人学习新手村：免登录学习 Git、Python、ROS2 和项目实践，本机保存进度，登录后正式提交。">
     <meta name="robots" content="noindex,nofollow">
     <meta name="theme-color" content="#f5f7fb">
     <title>新手村 · 个人学习主页</title>
@@ -225,7 +225,7 @@
         h1 { font-size: 42px; }
       }
     </style>
-    <script type="module" src="/newbie-village.js"></script>
+    <script type="module" src="/newbie-village.js?v=20260925-public-learning"></script>
   </head>
   <body>
     <div class="app">
@@ -245,20 +245,20 @@
       <main class="main">
         <header class="topbar">
           <div class="topbar-title"><small>ROBOT LEARNING QUEST</small><strong>机器人学习闯关系统</strong></div>
-          <div class="account-actions"><span class="user-chip" hidden></span><button class="secondary login-trigger" type="button">免登录进入</button><button class="ghost logout-trigger" type="button" hidden>重置</button></div>
+          <div class="account-actions"><span class="user-chip" hidden></span><button class="secondary login-trigger" type="button">登录并同步进度</button><button class="secondary sync-progress" type="button" hidden>同步本机进度</button><button class="ghost logout-trigger" type="button" hidden>退出账号</button></div>
         </header>
         <div class="content">
           <section class="welcome logged-out">
             <div class="welcome-copy">
               <div class="eyebrow">START HERE</div>
               <h1>从第一项任务，走到能交付。</h1>
-              <p class="lead">新手村把环境配置、协作基础、ROS2 仿真和小型项目拆成清晰关卡。登录后会生成你的个人主页，并在这个独立系统里持续保存学习进度。</p>
-              <div class="welcome-actions"><button class="primary login-trigger" type="button">免登录进入新手村</button><a class="secondary" href="#passes" style="display:inline-flex;align-items:center;text-decoration:none">先了解通行证</a><a class="ghost" href="/" style="display:inline-flex;align-items:center;text-decoration:none">去问实验室大模型</a></div>
+              <p class="lead">直接学习环境配置、Git、Python、ROS2 仿真和小型项目。学习进度先保存在当前浏览器，正式提交时再登录。</p>
+              <div class="welcome-actions"><button class="primary start-learning" type="button">开始学习</button><a class="secondary" href="#passes" style="display:inline-flex;align-items:center;text-decoration:none">先了解通行证</a><a class="ghost" href="/" style="display:inline-flex;align-items:center;text-decoration:none">去问实验室大模型</a></div>
             </div>
             <aside class="welcome-card">
               <h2>第一版已可用</h2>
               <ul class="welcome-list">
-                <li><b>01</b><span>免登录进入，先完成保密协议和基础登记</span></li>
+                <li><b>01</b><span>免登录浏览全部课程，无需先签协议</span></li>
                 <li><b>02</b><span>签署保密协议，系统自动归档</span></li>
                 <li><b>03</b><span>完善个人主页和学习方向</span></li>
                 <li><b>04</b><span>逐项解锁任务并保存证据</span></li>
@@ -267,6 +267,7 @@
           </section>
 
           <section class="agreement-gate" hidden>
+            <button class="secondary agreement-back" type="button">返回课程，稍后签署</button>
             <header class="agreement-head">
               <div class="eyebrow">CONFIDENTIALITY GATE</div>
               <h1>先签署，自动入村。</h1>
@@ -289,7 +290,7 @@
           <section class="dashboard" hidden>
             <div class="tasks-view">
               <div class="view-head">
-                <div><div class="eyebrow">YOUR JOURNEY</div><h1>任务地图</h1><p>完成当前关卡后，下一项任务会自动解锁。</p></div>
+                <div><div class="eyebrow">YOUR JOURNEY</div><h1>任务地图</h1><p>全部课程可直接查看，建议按顺序学习。</p><p class="storage-note" role="status"></p><a href="/">问实验室助教</a></div>
                 <div class="progress-summary"><div><span class="progress-number">0</span> / <span class="progress-total">7</span></div><div class="progress-track"><div class="progress-bar"></div></div></div>
               </div>
               <div class="metrics">
@@ -331,7 +332,7 @@
               <div class="passes-note">当前版本先保存个人资料、任务进度和证据。高级通行证将在人工审核流程接入后逐步开放，页面中的“完成任务”不等于自动获得真机或项目权限。</div>
             </div>
             <div class="pass-grid">
-              <article class="pass-card"><div class="pass-title"><span>入门</span><h3>入村资格</h3></div><dl><div><dt>获得条件</dt><dd>完成基础登记和保密协议签署。</dd></div><div><dt>审核方式</dt><dd>免登录模式下先本地记录，后续可补充归档。</dd></div><div><dt>解锁范围</dt><dd>基础课程、正式任务和证据提交。</dd></div></dl></article>
+              <article class="pass-card"><div class="pass-title"><span>入门</span><h3>学习与提交</h3></div><dl><div><dt>公开学习</dt><dd>所有基础课程免登录开放，无需签署协议。</dd></div><div><dt>正式提交</dt><dd>登录后完成实名协议签署，系统自动归档，无需人工审核协议。</dd></div><div><dt>权限范围</dt><dd>本机学习记录不授予内部资料、真机或项目权限。</dd></div></dl></article>
               <article class="pass-card"><div class="pass-title"><span>基础</span><h3>新手村毕业通行证</h3></div><dl><div><dt>获得条件</dt><dd>完成规定基础关卡，并提交合格的出村证据包。</dd></div><div><dt>审核方式</dt><dd>AI 初评，助教或老师终审；退回后可按意见重交。</dd></div><div><dt>解锁范围</dt><dd>方向任务、进阶教程和项目组申请。</dd></div></dl></article>
               <article class="pass-card"><div class="pass-title"><span>开发</span><h3>工具通行证</h3></div><dl><div><dt>获得条件</dt><dd>完成 Linux、Git、VS Code 和基础开发任务。</dd></div><div><dt>审核方式</dt><dd>自动检查与人工抽查结合。</dd></div><div><dt>解锁范围</dt><dd>基础开发任务和协作仓库练习。</dd></div></dl></article>
               <article class="pass-card"><div class="pass-title"><span>仿真</span><h3>ROS2 通行证</h3></div><dl><div><dt>获得条件</dt><dd>完成节点、话题、服务和基础仿真任务。</dd></div><div><dt>审核方式</dt><dd>检查运行结果、日志和代码说明。</dd></div><div><dt>解锁范围</dt><dd>ROS2 仿真任务和进阶教程。</dd></div></dl></article>
@@ -361,7 +362,27 @@
     <dialog class="modal task-dialog" aria-label="任务详情">
       <div class="modal-inner">
         <div class="modal-head"><div><div class="eyebrow task-stage-dialog"></div><h2 class="task-title-dialog"></h2><p class="task-summary-dialog"></p></div><button class="close task-close" type="button" aria-label="关闭">×</button></div>
-        <div class="task-detail"><h3>任务目标</h3><p class="task-goal"></p><h3>提交内容</h3><ul class="task-deliverables"></ul><label>任务证据或复盘<textarea class="task-evidence" maxlength="1000" placeholder="可以填写仓库链接、截图说明、运行结果和问题复盘。"></textarea></label><div class="task-status" role="status"></div><div class="task-actions"><button class="secondary task-start" type="button">开始任务</button><button class="primary task-complete" type="button">提交完成</button></div></div>
+        <div class="task-detail">
+          <h3>任务目标</h3>
+          <p class="task-goal"></p>
+          <section class="task-extra-section">
+            <h3>学习步骤</h3>
+            <ul class="task-steps"></ul>
+          </section>
+          <section class="task-extra-section">
+            <h3>示例与说明</h3>
+            <ul class="task-examples"></ul>
+          </section>
+          <section class="task-extra-section">
+            <h3>可以问助教</h3>
+            <ul class="task-ta-prompts"></ul>
+          </section>
+          <h3>提交内容</h3>
+          <ul class="task-deliverables"></ul>
+          <label>任务证据或复盘<textarea class="task-evidence" maxlength="1000" placeholder="可以填写仓库链接、截图说明、运行结果和问题复盘。"></textarea></label>
+          <div class="task-status" role="status"></div>
+          <div class="task-actions"><button class="secondary task-start" type="button">开始任务</button><button class="primary task-complete" type="button">标记学完（本机）</button><button class="secondary task-submit" type="button">登录后正式提交</button></div>
+        </div>
       </div>
     </dialog>
     <div class="toast" role="status" aria-live="polite"></div>

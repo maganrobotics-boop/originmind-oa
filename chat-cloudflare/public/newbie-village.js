@@ -52,54 +52,156 @@ const LOCAL_TASKS = Object.freeze([
     index: 1,
     title: "入村登记",
     stage: "身份与方向",
-    summary: "完善个人主页，确认学习方向和当前基础。",
-    goal: "让导师和后续任务知道你是谁、想学什么，以及目前可以从哪里开始。",
-    deliverables: ["完成个人主页", "选择兴趣方向", "写下本阶段学习目标"],
+    summary: "完成个人信息、基础情况和学习方向登记。",
+    goal: "让导师和助教知道你是谁、每周能投入多少时间、已经会什么、想从哪个方向开始。",
+    steps: [
+      "填写姓名、年级、专业和联系方式。",
+      "记录每周可投入时间，例如每周 4 小时、8 小时或更多。",
+      "勾选已有基础：C/C++、Python、机械设计、电子电路、Linux、ROS、AI 等。",
+      "选择一个初始方向：感知、导航、控制、机械、嵌入式、AI 应用；不确定可以选“待选择”。",
+    ],
+    examples: [
+      "机械专业同学可以先选机械结构、测试记录或机器人装配相关任务。",
+      "计算机/自动化同学可以先选 Python、ROS2、导航或感知小任务。",
+      "基础较弱也可以参加，先从资料整理、复现实验和日志记录开始。",
+    ],
+    taPrompts: [
+      "我适合哪个项目方向？",
+      "我每周只有 4 小时，可以从什么任务开始？",
+      "我现在基础比较弱，应该先补什么？",
+    ],
+    deliverables: ["个人主页信息完整", "选择或说明兴趣方向", "写下本阶段学习目标和每周可投入时间"],
   },
   {
     id: "toolkit",
     index: 2,
     title: "装备铺",
     stage: "开发环境",
-    summary: "准备 Git、VS Code、Python 与 Linux/WSL 环境。",
-    goal: "建立一套能复现、能提交、能排查问题的个人开发环境。",
-    deliverables: ["Git 版本截图", "Python 版本截图", "工作目录说明"],
+    summary: "准备 Git、VS Code、Python 与 Linux/WSL，建立可复现的开发环境。",
+    goal: "让每个学生都有一套能写代码、跑命令、提交记录和排查问题的基本工具。",
+    steps: [
+      "安装 VS Code，并确认能打开项目文件夹。",
+      "安装 Git，运行 git --version，理解 commit 是学习证据的一部分。",
+      "安装 Python 3，运行 python --version 或 python3 --version。",
+      "Windows 用户安装 WSL/Ubuntu；Mac/Linux 用户确认能打开终端。",
+      "建立一个固定学习目录，例如 robotics-newbie，并把截图和代码都放进去。",
+    ],
+    examples: [
+      "终端能运行 git --version，说明 Git 基本可用。",
+      "终端能运行 python -V，说明 Python 基本可用。",
+      "如果装不上 ROS2，不影响先完成 Git 和 Python 两关。",
+    ],
+    taPrompts: [
+      "Windows 怎么安装 WSL？",
+      "git --version 找不到怎么办？",
+      "我应该怎么整理学习目录？",
+    ],
+    deliverables: ["Git 版本截图", "Python 版本截图", "个人学习目录结构截图或说明"],
   },
   {
     id: "git-basics",
     index: 3,
     title: "Git 训练场",
     stage: "协作基础",
-    summary: "完成分支、提交、合并与 README 练习。",
-    goal: "能独立维护一个小型仓库，并用清晰提交记录说明自己的工作。",
-    deliverables: ["仓库链接", "至少 3 次有效提交", "README 复盘"],
+    summary: "用一个小仓库练习 add、commit、branch、merge 和 README。",
+    goal: "能独立维护一个小型仓库，用清晰提交记录说明自己做过什么。",
+    steps: [
+      "新建一个仓库 robotics-newbie-log。",
+      "写 README.md：介绍自己、方向兴趣、第一周计划。",
+      "提交至少 3 次 commit：初始化、补充方向、补充学习记录。",
+      "创建一个 practice 分支，修改 README 后合并回 main。",
+      "在 README 里写 100 字复盘：Git 最容易混淆的地方是什么。",
+    ],
+    examples: [
+      "常用命令：git status、git add .、git commit -m \"message\"、git log --oneline。",
+      "好的提交信息应该能看懂，例如 add python setup note，而不是 update。",
+      "不会公开仓库时，可以先提交截图，后续再统一规范 GitHub/Gitee。",
+    ],
+    taPrompts: [
+      "git add 和 git commit 有什么区别？",
+      "我提交错了怎么办？",
+      "README 应该怎么写？",
+    ],
+    deliverables: ["仓库链接或本地提交截图", "至少 3 次有效提交", "README 复盘"],
   },
   {
     id: "python-basics",
     index: 4,
     title: "Python 训练场",
     stage: "编程基础",
-    summary: "完成数据处理、函数拆分和基础测试任务。",
-    goal: "用可读、可运行、可验证的代码解决一个小问题。",
-    deliverables: ["源代码链接", "运行结果", "测试说明"],
+    summary: "完成一个机器人数据处理小任务，练习函数拆分和结果验证。",
+    goal: "用可读、可运行、可验证的 Python 代码解决一个小问题。",
+    steps: [
+      "新建 motion_log.csv，包含 time、x、y、yaw、battery 五列，至少 20 行数据。",
+      "写 Python 程序读取 CSV，计算总路程、平均速度、电量下降。",
+      "把计算逻辑拆成函数，例如 load_log、compute_distance、summarize。",
+      "输出一段中文总结：机器人走了多远、速度是否异常、电量是否明显下降。",
+      "可选：用 matplotlib 画出 x-y 轨迹图。",
+    ],
+    examples: [
+      "这个任务对应真实机器人里的日志分析和实验复盘。",
+      "代码不要求复杂，但必须能从命令行运行，并能复现同样结果。",
+      "如果不会 CSV，可以先用 Python 内置 csv 模块，不必马上学 pandas。",
+    ],
+    taPrompts: [
+      "帮我生成一个 motion_log.csv 示例。",
+      "怎么计算二维轨迹的总路程？",
+      "Python 函数应该怎么拆？",
+    ],
+    deliverables: ["源代码链接或截图", "运行结果截图", "100 字测试说明"],
   },
   {
     id: "ros2-simulation",
     index: 5,
     title: "ROS2 仿真场",
     stage: "机器人基础",
-    summary: "运行 turtlesim，并完成 publisher/subscriber 练习。",
-    goal: "理解节点、话题和消息如何组成一个最小机器人软件系统。",
-    deliverables: ["节点图截图", "终端日志", "关键代码链接"],
+    summary: "用 turtlesim 理解 ROS2 节点、话题、消息和发布订阅。",
+    goal: "理解一个最小机器人软件系统如何由节点、话题和消息组成。",
+    steps: [
+      "安装或使用已有 ROS2 环境，能运行 ros2 --help。",
+      "启动 turtlesim_node，并用 teleop 控制小海龟移动。",
+      "运行 ros2 topic list、ros2 topic echo、ros2 node list，观察系统结构。",
+      "写一个 publisher，让小海龟自动走直线或转圈。",
+      "写一个 subscriber，读取 pose 并输出当前位置。",
+    ],
+    examples: [
+      "turtlesim 不是玩具，它对应真实机器人里的运动命令和状态反馈。",
+      "cmd_vel 可以理解为给机器人发速度命令。",
+      "pose 可以理解为机器人反馈自己的位置和朝向。",
+    ],
+    taPrompts: [
+      "ROS2 节点、话题、消息分别是什么？",
+      "turtlesim 跑不起来怎么排查？",
+      "publisher/subscriber 最小代码怎么写？",
+    ],
+    deliverables: ["节点/话题截图", "终端日志", "publisher 或 subscriber 关键代码"],
   },
   {
     id: "mini-project",
     index: 6,
     title: "任务大厅",
     stage: "小型项目",
-    summary: "从感知、导航、控制、机械或 AI 中完成一个小任务。",
+    summary: "从感知、导航、控制、机械或 AI 中选择一个可交付小任务。",
     goal: "把工具和基础知识组合成一项可演示、可复盘的小成果。",
-    deliverables: ["演示截图或视频链接", "代码链接", "问题与改进"],
+    steps: [
+      "从小任务池选择一个方向，不确定时先问助教。",
+      "写清楚任务目标、输入、输出和验收标准。",
+      "完成一个最小可演示版本，不追求大而全。",
+      "记录遇到的问题、排查过程和下一步改进。",
+    ],
+    examples: [
+      "感知：用一组图片做目标标注，整理常见误检案例。",
+      "导航：画一个简化地图，说明机器人从 A 到 B 的路径和障碍物。",
+      "控制：解释一个速度曲线，说明加速度过大为什么会抖。",
+      "机械：调研一个机器人底盘或夹爪结构，画出关键受力/运动关系。",
+      "AI：把一份实验记录整理成结构化摘要，并设计 5 个问答样例。",
+    ],
+    taPrompts: [
+      "根据我的专业，推荐一个一周能完成的小任务。",
+      "帮我把这个任务拆成目标、输入、输出、验收标准。",
+      "什么成果才算能在机器人上用？",
+    ],
+    deliverables: ["演示截图或视频链接", "代码/文档/设计文件链接", "问题与改进复盘"],
   },
   {
     id: "graduation",
@@ -107,7 +209,23 @@ const LOCAL_TASKS = Object.freeze([
     title: "出村考核",
     stage: "成果复盘",
     summary: "整理证据包和个人主页，形成可审核的阶段成果。",
-    goal: "证明自己能完成任务、记录过程并清楚说明下一步方向。",
+    goal: "证明自己能完成任务、记录过程，并清楚说明下一步适合进入哪个项目方向。",
+    steps: [
+      "整理所有关卡证据：截图、代码、日志、README、复盘。",
+      "更新个人主页：方向、技能、已完成任务和希望参与项目。",
+      "写一页复盘：学到了什么、卡在哪里、下一步想做什么。",
+      "向导师或助教提交证据包，等待进入正式项目任务。",
+    ],
+    examples: [
+      "好的证据包不是堆文件，而是能让别人快速判断你做了什么。",
+      "复盘要写具体问题，例如 ROS2 环境变量、Git 分支冲突、Python 数据读取错误。",
+      "下一阶段可以申请加入矿区巡检、四足机器人、AI 助教、机械结构等方向。",
+    ],
+    taPrompts: [
+      "帮我检查证据包是否完整。",
+      "我的复盘怎么写更清楚？",
+      "我下一阶段适合进哪个项目组？",
+    ],
     deliverables: ["完整证据包", "个人复盘", "下一阶段计划"],
   },
 ]);
@@ -155,7 +273,13 @@ function readLocalGuest() {
 }
 
 function writeLocalGuest(value) {
-  localStorage.setItem(LOCAL_GUEST_KEY, JSON.stringify(value));
+  try {
+    localStorage.setItem(LOCAL_GUEST_KEY, JSON.stringify(value));
+    return true;
+  } catch {
+    showToast("浏览器无法保存，请允许网站存储后重试。当前记录未保存。");
+    return false;
+  }
 }
 
 function localDashboard() {
@@ -163,7 +287,6 @@ function localDashboard() {
   const now = Date.now();
   const agreementAccepted = Boolean(saved.agreement?.approved);
   const progressByTask = new Map(Object.entries(saved.tasks || {}));
-  let previousCompleted = true;
   const tasks = LOCAL_TASKS.map((task) => {
     const progress = progressByTask.get(task.id) || {};
     const status = progress.status || "not_started";
@@ -172,9 +295,8 @@ function localDashboard() {
       status,
       evidence: progress.evidence || "",
       updatedAt: progress.updatedAt || null,
-      unlocked: previousCompleted,
+      unlocked: true,
     };
-    previousCompleted = status === "completed";
     return result;
   });
   const profile = {
@@ -200,10 +322,10 @@ function localDashboard() {
       acceptedAt: saved.agreement?.acceptedAt || null,
       reviewNote: saved.agreement?.reviewNote || "",
     },
-    profile: agreementAccepted ? profile : null,
-    tasks: agreementAccepted ? tasks : [],
+    profile,
+    tasks,
     progress: {
-      completed: agreementAccepted ? tasks.filter((task) => task.status === "completed").length : 0,
+      completed: tasks.filter((task) => task.status === "completed").length,
       total: LOCAL_TASKS.length,
     },
   };
@@ -293,8 +415,7 @@ function createTaskCard(task) {
   const open = document.createElement("button");
   open.className = "secondary task-open";
   open.type = "button";
-  open.disabled = !task.unlocked;
-  open.textContent = task.unlocked ? "查看任务" : "先完成上一关";
+  open.textContent = "查看课程与任务";
   open.addEventListener("click", () => openTask(task.id));
   article.append(top, title, stage, summary, open);
   return article;
@@ -365,16 +486,21 @@ function renderAgreement() {
 function renderDashboard() {
   const data = state.dashboard;
   if (!data) return;
-  if (!data.agreement?.approved) {
-    renderAgreement();
-    return;
-  }
+  // Public course content is independent of account and agreement status.
+  const publicData = localDashboard();
+  data.profile ||= publicData.profile;
+  data.tasks = LOCAL_TASKS.map((course) => ({ ...course, status: "not_started", unlocked: false, ...(data.tasks || []).find((task) => task.id === course.id),
+    steps: course.steps, examples: course.examples, taPrompts: course.taPrompts }));
   elements.loggedOut.hidden = true;
   elements.agreementGate.hidden = true;
   elements.dashboard.hidden = false;
   elements.userChip.hidden = false;
-  elements.logout.hidden = false;
-  document.querySelectorAll(".login-trigger").forEach((button) => { button.hidden = true; });
+  elements.logout.hidden = state.localGuest;
+  document.querySelectorAll(".login-trigger").forEach((button) => { button.hidden = !state.localGuest; });
+  document.querySelector(".sync-progress").hidden = state.localGuest;
+  document.querySelector(".storage-note").textContent = state.localGuest
+    ? "学习进度仅保存在当前浏览器。换设备或清除浏览器数据后无法找回；正式提交需登录。"
+    : "已登录。可同步本机学习记录；正式提交仍需完成协议归档和前置任务。";
   document.querySelectorAll(".nav-button").forEach((button) => { button.disabled = false; });
   elements.userChip.textContent = `${data.user.roleLabel} · ${data.user.email}`;
 
@@ -415,15 +541,19 @@ async function loadDashboard() {
     state.dashboard = await requestJson("/api/newbie/dashboard", { cache: "no-store" });
     state.localGuest = false;
     renderDashboard();
+    return true;
   } catch (error) {
     enterLocalGuestMode(error.status === 401 || error.status === 404
       ? "已开启免登录访问"
       : "接口暂不可用，已进入免登录模式");
+    return false;
   }
 }
 
 function openLogin() {
-  enterLocalGuestMode("已进入免登录新手村");
+  elements.taskDialog.close();
+  setLoginStatus("登录用于同步进度和正式提交；关闭后可继续免登录学习。");
+  elements.loginDialog.showModal();
 }
 
 async function requestCode() {
@@ -459,8 +589,7 @@ async function verifyCode(event) {
     });
     elements.loginDialog.close();
     elements.loginForm.reset();
-    await loadDashboard();
-    showToast("登录成功，欢迎来到新手村");
+    if (await loadDashboard()) showToast("登录成功，可同步本机进度");
   } catch (error) {
     setLoginStatus(error.message, true);
   } finally {
@@ -480,18 +609,27 @@ async function saveProfile(event) {
     major: String(form.get("major") || ""),
     direction: String(form.get("direction") || "undecided"),
     bio: String(form.get("bio") || ""),
-    updatedAt: Date.now(),
   };
   try {
     if (state.localGuest) throw new Error("LOCAL_GUEST");
     state.dashboard = await requestJson("/api/newbie/profile", { method: "PATCH", body: JSON.stringify(profile) });
   } catch (error) {
+    if (!state.localGuest) {
+      elements.profileStatus.textContent = error.message;
+      submit.disabled = false;
+      return;
+    }
     const saved = readLocalGuest();
-    writeLocalGuest({ ...saved, profile });
+    if (!writeLocalGuest({ ...saved, profile })) {
+      elements.profileStatus.textContent = "未保存";
+      submit.disabled = false;
+      return;
+    }
     state.localGuest = true;
     state.dashboard = localDashboard();
     if (error.message !== "LOCAL_GUEST") console.info("Falling back to local guest profile save.", error);
-  } finally {
+  }
+  {
     renderDashboard();
     elements.profileStatus.textContent = "已保存";
     showToast("个人主页已更新");
@@ -501,12 +639,12 @@ async function saveProfile(event) {
 
 async function signAgreement(event) {
   event.preventDefault();
+  if (state.localGuest) return openLogin();
   const submit = elements.agreementForm.querySelector('button[type="submit"]');
   const signerName = String(new FormData(elements.agreementForm).get("signerName") || "").trim();
   submit.disabled = true;
   elements.agreementStatus.textContent = "正在自动归档…";
   try {
-    if (state.localGuest) throw new Error("LOCAL_GUEST");
     state.dashboard = await requestJson("/api/newbie/agreement", {
       method: "POST",
       body: JSON.stringify({
@@ -516,20 +654,11 @@ async function signAgreement(event) {
       }),
     });
   } catch (error) {
-    const saved = readLocalGuest();
-    writeLocalGuest({
-      ...saved,
-      agreement: {
-        approved: true,
-        signerName: signerName || saved.profile?.displayName || "访客学生",
-        acceptedAt: Date.now(),
-        reviewNote: "免登录模式本地签署",
-      },
-    });
-    state.localGuest = true;
-    state.dashboard = localDashboard();
-    if (error.message !== "LOCAL_GUEST") console.info("Falling back to local guest agreement save.", error);
-  } finally {
+    elements.agreementStatus.textContent = error.message;
+    submit.disabled = false;
+    return;
+  }
+  {
     renderDashboard();
     showToast("已签署并进入新手村");
     submit.disabled = false;
@@ -538,21 +667,37 @@ async function signAgreement(event) {
 
 function openTask(id) {
   const task = state.dashboard?.tasks.find((candidate) => candidate.id === id);
-  if (!task || !task.unlocked) return;
+  if (!task) return;
   state.currentTaskId = id;
   document.querySelector(".task-stage-dialog").textContent = `第 ${task.index} 关 · ${task.stage}`;
   document.querySelector(".task-title-dialog").textContent = task.title;
   document.querySelector(".task-summary-dialog").textContent = task.summary;
   document.querySelector(".task-goal").textContent = task.goal;
-  const list = document.querySelector(".task-deliverables");
-  list.replaceChildren(...task.deliverables.map((item) => {
-    const li = document.createElement("li");
-    li.textContent = item;
-    return li;
-  }));
+  const fillList = (selector, items = []) => {
+    const list = document.querySelector(selector);
+    list.replaceChildren(...items.map((item) => {
+      const li = document.createElement("li");
+      li.textContent = item;
+      return li;
+    }));
+  };
+  fillList(".task-steps", task.steps);
+  fillList(".task-examples", task.examples);
+  fillList(".task-ta-prompts", task.taPrompts);
+  fillList(".task-deliverables", task.deliverables);
+  document.querySelectorAll(".task-extra-section").forEach((section) => {
+    const list = section.querySelector("ul");
+    section.hidden = !list || list.children.length === 0;
+  });
+  const evidenceHints = [
+    `当前任务：${task.title}`,
+    "建议填写：完成了什么、证据链接/截图说明、遇到的问题、下一步计划。",
+  ];
+  elements.taskEvidence.placeholder = evidenceHints.join("\n");
   elements.taskEvidence.value = task.evidence || "";
   document.querySelector(".task-start").hidden = task.status !== "not_started";
-  document.querySelector(".task-complete").textContent = task.status === "completed" ? "更新证据" : "提交完成";
+  document.querySelector(".task-complete").textContent = state.localGuest ? "标记学完（本机）" : "正式提交";
+  document.querySelector(".task-submit").hidden = !state.localGuest;
   setTaskStatus(task.status === "completed" ? "这个任务已经完成，你仍可以更新证据和复盘。" : "");
   elements.taskDialog.showModal();
 }
@@ -560,6 +705,11 @@ function openTask(id) {
 async function updateTask(status) {
   const task = state.dashboard?.tasks.find((candidate) => candidate.id === state.currentTaskId);
   if (!task) return;
+  if (!state.localGuest && !state.dashboard.agreement?.approved) {
+    elements.taskDialog.close();
+    renderAgreement();
+    return;
+  }
   const buttons = elements.taskDialog.querySelectorAll("button");
   buttons.forEach((button) => { button.disabled = true; });
   setTaskStatus(status === "completed" ? "正在保存完成记录…" : "正在开始任务…");
@@ -570,8 +720,13 @@ async function updateTask(status) {
       body: JSON.stringify({ status, evidence: elements.taskEvidence.value.trim() }),
     });
   } catch (error) {
+    if (!state.localGuest) {
+      setTaskStatus(error.message, true);
+      buttons.forEach((button) => { button.disabled = false; });
+      return;
+    }
     const saved = readLocalGuest();
-    writeLocalGuest({
+    if (!writeLocalGuest({
       ...saved,
       tasks: {
         ...(saved.tasks || {}),
@@ -581,14 +736,19 @@ async function updateTask(status) {
           updatedAt: Date.now(),
         },
       },
-    });
+    })) {
+      setTaskStatus("未保存，请允许浏览器存储后重试。", true);
+      buttons.forEach((button) => { button.disabled = false; });
+      return;
+    }
     state.localGuest = true;
     state.dashboard = localDashboard();
     if (error.message !== "LOCAL_GUEST") console.info("Falling back to local guest task save.", error);
-  } finally {
+  }
+  {
     renderDashboard();
     elements.taskDialog.close();
-    showToast(status === "completed" ? "任务已完成，下一关已解锁" : "任务已开始");
+    showToast(state.localGuest ? "学习记录已保存到本机，尚未正式提交" : "任务记录已保存到账号");
     buttons.forEach((button) => { button.disabled = false; });
   }
 }
@@ -597,10 +757,37 @@ async function logout() {
   elements.logout.disabled = true;
   try {
     if (!state.localGuest) await requestJson("/api/visitor/logout", { method: "POST", body: "{}" });
-  } catch { /* Local state still returns to the signed-out view. */ }
+  } catch {
+    elements.logout.disabled = false;
+    showToast("退出失败，请重试");
+    return;
+  }
   elements.logout.disabled = false;
-  localStorage.removeItem(LOCAL_GUEST_KEY);
-  enterLocalGuestMode("已重置免登录进度");
+  enterLocalGuestMode("已退出账号，本机学习进度已保留");
+}
+
+async function syncProgress() {
+  if (state.localGuest) return openLogin();
+  if (!state.dashboard.agreement?.approved) return renderAgreement();
+  const button = document.querySelector(".sync-progress");
+  button.disabled = true;
+  try {
+    const saved = readLocalGuest();
+    for (const course of LOCAL_TASKS) {
+      const local = saved.tasks?.[course.id];
+      const remote = state.dashboard.tasks.find((task) => task.id === course.id);
+      if (!local || remote?.status === "completed" || remote?.evidence || !remote?.unlocked) continue;
+      state.dashboard = await requestJson(`/api/newbie/tasks/${encodeURIComponent(course.id)}`, {
+        method: "POST", body: JSON.stringify({ status: local.status, evidence: local.evidence || "" }),
+      });
+    }
+    renderDashboard();
+    showToast("已同步可提交的记录；未同步内容仍保留在本机");
+  } catch (error) {
+    showToast(`同步未完成：${error.message}，本机记录已保留`);
+  } finally {
+    button.disabled = false;
+  }
 }
 
 document.querySelectorAll(".login-trigger").forEach((button) => button.addEventListener("click", openLogin));
@@ -614,10 +801,15 @@ document.querySelectorAll(".nav-button").forEach((button) => button.addEventList
 document.querySelector(".task-close").addEventListener("click", () => elements.taskDialog.close());
 document.querySelector(".task-start").addEventListener("click", () => void updateTask("in_progress"));
 document.querySelector(".task-complete").addEventListener("click", () => void updateTask("completed"));
+document.querySelector(".task-submit").addEventListener("click", openLogin);
+document.querySelector(".sync-progress").addEventListener("click", () => void syncProgress());
+document.querySelector(".agreement-back").addEventListener("click", renderDashboard);
+document.querySelectorAll(".start-learning").forEach((button) => button.addEventListener("click", () => enterLocalGuestMode()));
 window.addEventListener("hashchange", () => {
   if (location.hash === "#passes") return;
   switchView(location.hash === "#profile" ? "profile" : "tasks");
 });
 
+enterLocalGuestMode();
 void loadDashboard();
 
