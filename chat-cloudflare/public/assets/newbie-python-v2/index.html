@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Python 日志分析实训 · 新手村</title>
+  <meta name="description" content="从模拟机器人日志出发，完成数据读取、路程和速率计算、异常定位及自检。附可下载的数据与代码。">
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#fff;color:#20242b;font:16px/1.75 system-ui,-apple-system,"Segoe UI",sans-serif}a{color:#235fd6;text-underline-offset:3px}a:focus-visible,summary:focus-visible{outline:3px solid #235fd6;outline-offset:4px}header,main,footer{max-width:1000px;margin:auto;padding:24px}header{border-bottom:1px solid #e5e8ee;display:flex;gap:16px;justify-content:space-between;flex-wrap:wrap}main{padding-top:30px}h1{font-size:30px;line-height:1.35;margin:10px 0 16px}h2{font-size:24px;line-height:1.4;margin:0 0 16px}h3{font-size:18px;margin:24px 0 8px}p{margin:10px 0}section{padding:32px 0;border-bottom:1px solid #e5e8ee;scroll-margin-top:16px}.intro{padding-top:0}.meta{color:#647083;font-size:14px}.actions{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}.button{padding:10px 16px;border:1px solid #c9d4e9;border-radius:6px;text-decoration:none;display:inline-block;font-weight:600}.primary{background:#2866e7;color:white;border-color:#2866e7}nav{display:flex;gap:16px;flex-wrap:wrap;font-size:14px;padding:14px 0}ul,ol{padding-left:24px}li{margin:7px 0}pre{background:#f4f6f9;padding:16px;border-radius:6px;overflow-x:auto;line-height:1.6;font-size:14px}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}pre code{overflow-wrap:normal}.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;font-size:15px;text-align:left}th,td{padding:10px 12px;border-bottom:1px solid #e2e7ef;vertical-align:top}th{background:#f4f6f9}.note{border-left:3px solid #249278;padding:8px 16px;background:#f4faf7}.split{display:grid;grid-template-columns:1fr 1fr;gap:24px}.downloads{display:flex;flex-wrap:wrap;gap:8px 20px}details{padding:12px 0;border-bottom:1px solid #e5e8ee}summary{cursor:pointer;font-weight:600}footer{font-size:14px;color:#647083} @media(max-width:640px){header,main,footer{padding-left:18px;padding-right:18px}h1{font-size:25px}.split{grid-template-columns:1fr;gap:8px}.button{max-width:100%}th,td{padding:8px}section{padding-top:26px;padding-bottom:26px}}
+  </style>
+</head>
+<body>
+  <header><a href="/newbie-village">新手村 · 返回任务地图</a><span>OriginMind × ARTS Robotics</span></header>
+  <main>
+    <section class="intro">
+      <div class="meta">第 4 关 · 建议 60–90 分钟 · Python 3 · 无需登录</div>
+      <h1>Python：读懂一次机器人巡检日志</h1>
+      <p>机器人回到起点，是否意味着没有移动？用一份日志计算累计路程、平均速率和电量变化，再找出一次位置跳变。</p>
+      <p class="meta">前置基础：能打开终端，认识变量、列表、字典和 for 循环。仅用 Python 自带模块，无需 ROS2、真机或第三方依赖。手机可阅读，代码练习建议在电脑上完成。</p>
+      <div class="actions"><a class="button primary" href="python-log-lab.zip" download>下载完整实训包（ZIP）</a><a class="button" href="#run">开始：运行第一个结果</a></div>
+      <nav aria-label="本课导航"><a href="#data">数据说明</a><a href="#concepts">计算方法</a><a href="#exercise">独立练习</a><a href="#debug">问题排查</a><a href="#submit">验收与提交</a></nav>
+      <p class="note">两份数据均为本课程构造的模拟数据，不是真实机器人实验记录。1.5 m/s 仅是本题的演示阈值，不作为设备安全限速。</p>
+    </section>
+    <section id="run">
+      <h2>1. 先跑通一个完整例子</h2>
+      <ol>
+        <li>下载并解压 ZIP，进入含有 <code>analyze.py</code> 的文件夹。在这个文件夹中打开终端。</li>
+        <li>运行 <code>python --version</code>，确认显示 Python 3。macOS/Linux 若使用 <code>python3</code>，下文所有 <code>python</code> 均替换为 <code>python3</code>。</li>
+        <li>运行参考程序和参考自检：</li>
+      </ol>
+      <pre><code>python analyze.py data/motion_log.csv
+python check_work.py --reference</code></pre>
+      <div class="split"><div><h3>标准输出</h3><pre><code>采样点：21
+记录时长：20.000 s
+累计路程：10.000 m
+平均速率：0.500 m/s
+最大分段速率：0.500 m/s
+起终点位移：0.000 m
+电量下降：5.00 个百分点
+可疑分段：0（阈值 1.500 m/s）</code></pre></div><div><h3>看到什么算跑通</h3><p>数值应与左侧一致；参考自检应显示 <code>Ran 8 tests</code> 和 <code>OK</code>。这只证明环境和参考程序正常，尚未完成个人练习。</p><p>直接下载单项材料：</p><div class="downloads"><a href="data/motion_log.csv" download>正常日志 CSV</a><a href="data/position_jump.csv" download>异常日志 CSV</a><a href="analyze.py" download>参考程序</a><a href="exercise.py" download>练习模板</a><a href="check_work.py" download>自检程序</a><a href="expected.json" download>标准数值 JSON</a><a href="submission.md" download>提交单</a></div></div></div>
+    </section>
+    <section id="data">
+      <h2>2. 读懂这五列数据</h2>
+      <div class="table-wrap"><table><thead><tr><th>字段</th><th>含义与单位</th><th>本题约定</th></tr></thead><tbody>
+        <tr><td><code>time</code></td><td>相对时间，秒</td><td>必须严格递增；第一份日志为 0–20 s</td></tr>
+        <tr><td><code>x, y</code></td><td>平面位置，米</td><td>同一固定坐标系；每两行代表一个移动区间</td></tr>
+        <tr><td><code>yaw</code></td><td>朝向，弧度</td><td>绕平面法向的朝向角；本关不用于计算路程</td></tr>
+        <tr><td><code>battery</code></td><td>电量百分数，0–100</td><td>90 表示 90%，不是 0.90；不能当作能量单位 Wh</td></tr>
+      </tbody></table></div>
+      <p>正常日志模拟沿边长 2.5 m 的正方形走一圈，共 21 个位置点、20 个移动区间。相邻点相隔 0.5 m、1 s，因此累计路程 10 m。</p>
+      <h3>从 CSV 到数字</h3>
+      <pre><code>import csv
+
+with open("data/motion_log.csv", encoding="utf-8-sig", newline="") as f:
+    for row in csv.DictReader(f):
+        print(float(row["time"]), float(row["x"]), float(row["y"]))</code></pre>
+      <p><code>DictReader</code> 让你通过列名取值；CSV 读出来的字段仍是文字，计算前要转为 <code>float</code>。参考程序的 <code>load_log</code> 还检查缺列、空值、无穷值、电量范围和时间顺序。</p>
+    </section>
+    <section id="concepts">
+      <h2>3. 把问题拆成四个计算</h2>
+      <ol>
+        <li><strong>每段路程：</strong>对相邻两点求 dx、dy，再用 <code>math.hypot(dx, dy)</code> 计算直线距离；累计所有段得到总路程。</li>
+        <li><strong>平均速率：</strong>总路程除以末尾时间与起始时间之差。时间间隔不相等时，不能直接平均各段速率。</li>
+        <li><strong>电量下降：</strong>起始电量减去结束电量。90% 到 85% 是下降 5 个百分点。模拟数据没有提供电池容量、负载和正常基线，不能据此诊断电池异常。</li>
+        <li><strong>可疑分段：</strong>每段路程除以该段时间间隔；本题把严格大于阈值的区间记录下来。</li>
+      </ol>
+      <pre><code>import math
+
+for before, after in zip(rows, rows[1:]):
+    dx = after["x"] - before["x"]
+    dy = after["y"] - before["y"]
+    distance = math.hypot(dx, dy)
+    dt = after["time"] - before["time"]
+    speed = distance / dt</code></pre>
+      <p><strong>路程与位移不同：</strong>绕一圈回到起点，累计路程是 10 m，起终点位移大小是 0 m。这里由采样点连线估算路程，稀疏采样和定位噪声都可能影响真实实验的估计值。</p>
+      <details><summary>基础补充：zip、列表和字典分别做什么？</summary><p><code>rows</code> 是按时间排列的列表；每个元素是一个字典，例如 <code>{"time": 1, "x": 0.5, "y": 0}</code>。<code>rows[1:]</code> 跳过首行，<code>zip(rows, rows[1:])</code> 就能每次取出相邻两行。用 <code>distances.append(distance)</code> 保存每段结果，再用 <code>sum(distances)</code> 求总和。</p></details>
+    </section>
+    <section id="exercise">
+      <h2>4. 独立完成，再用新数据验证</h2>
+      <ol>
+        <li>打开 <code>exercise.py</code>，完成三个 TODO：阈值检查、相邻点计算、按约定返回结果字典。输入检查和终端输出已由公共代码提供。</li>
+        <li>运行自己的代码和自检；这次不加 <code>--reference</code>：</li>
+      </ol>
+      <pre><code>python exercise.py data/motion_log.csv
+python check_work.py
+python exercise.py data/position_jump.csv</code></pre>
+      <p>模板尚未完成时会提示“请按教程完成三个 TODO”，自检也会失败。这是预期状态。完成后应通过八项测试：正方形、斜线、静止、非等间隔采样、位置跳变、阈值、无效时间和无效字段。最后两项验证的是已提供的读入函数。</p>
+      <h3>异常样例的标准结果</h3>
+      <div class="table-wrap"><table><thead><tr><th>项目</th><th>position_jump.csv 的结果</th></tr></thead><tbody><tr><td>时长 / 路程</td><td>3 s / 11 m</td></tr><tr><td>平均 / 最大分段速率</td><td>约 3.667 m/s / 10 m/s</td></tr><tr><td>可疑区间</td><td>1–2 s，共 1 段（阈值 1.5 m/s）</td></tr><tr><td>电量下降</td><td>0.75 个百分点</td></tr></tbody></table></div>
+      <p>10 m/s 是由位置差推算出的数值，不能直接断言机器人真的跑到这个速度。请提出至少两种原因，例如定位跳变、时间单位错误，并说明应如何用原始定位或时间戳记录核对。</p>
+      <h3>再做一个自选实验</h3>
+      <p>复制一份 CSV，保留五列。先手算预期值，再运行自己的程序。任选一项：</p>
+      <ul><li>静止：所有 x、y 不变，时间递增，路程和速率都应为 0。</li><li>斜向：两点为 (0, 0) 和 (3, 4)，相隔 2 s，路程 5 m、平均速率 2.5 m/s。</li><li>非等间隔：时间 0、1、4 s，x 为 0、1、2 m，y 均为 0，平均速率应为 0.5 m/s。</li></ul>
+      <details><summary>完成前先看提示，不直接抄答案</summary><p>把空列表放在循环前；可疑分段的字典字段为 <code>start</code>、<code>end</code>、<code>speed</code>；用 <code>rows[0]</code> 和 <code>rows[-1]</code> 取得起终点；不等间隔测试失败时，先检查平均速率的分母。</p></details>
+    </section>
+    <section id="debug">
+      <h2>5. 遇到问题，先定位这一项</h2>
+      <div class="table-wrap"><table><thead><tr><th>现象</th><th>检查方法</th></tr></thead><tbody>
+        <tr><td>找不到 python 命令</td><td>确认安装 Python 3；Windows 可试 <code>py -3 --version</code>，成功后用 <code>py -3</code> 替代 python；macOS/Linux 可试 python3。</td></tr>
+        <tr><td>找不到 data/motion_log.csv</td><td>完整解压 ZIP；在含 analyze.py 的目录打开终端，确认 data 子目录仍在。不要只下载单个代码文件。</td></tr>
+        <tr><td>提示完成 TODO</td><td>你运行的是练习模板。先用 analyze.py 验证环境，再实现 exercise.py。</td></tr>
+        <tr><td>缺列、空值或时间重复</td><td>用文本编辑器检查表头和对应行，CSV 用英文逗号分隔；时间严格递增，不要把异常行直接删掉掩盖问题。</td></tr>
+        <tr><td>算出路程 0 或平均速率不对</td><td>检查是否只算起终点距离，或把各段速率直接平均。用斜线和非等间隔样例定位。</td></tr>
+      </tbody></table></div>
+      <p>需要助教时，附上：命令、完整报错、相关代码和你的预期值。可提问：“我在 Python 日志关，非等间隔测试得到 0.667 而不是 0.5，请提示我检查计算过程。”</p>
+      <a href="/?ta=1&amp;course=python-basics" class="button">问本关助教</a>
+    </section>
+    <section id="submit">
+      <h2>6. 验收与提交</h2>
+      <p>以下四项全部满足后再正式提交。本机“标记学完”和自检结果都不代表教师已经审核。</p>
+      <ol><li><strong>计算正确：</strong>正常数据的七项指标与标准值一致，允许误差 0.001；定位异常数据的 1–2 s 区间。</li><li><strong>能独立复现：</strong>提交自己完成的 exercise.py、运行命令、八项自检输出和必要的环境信息。</li><li><strong>做了变化实验：</strong>提交一份自己的数据，并记录手算预期、程序输出及两者比较。</li><li><strong>能解释与复盘：</strong>回答提交单中的四个问题，记录一个排查过程，注明参考代码和助教的帮助。</li></ol>
+      <div class="actions"><a class="button" href="submission.md" download>下载提交单</a><a class="button primary" href="/newbie-village#python-basics">返回第 4 关记录成果</a></div>
+      <p class="meta">回到任务详情后可先保存本机记录；账号正式提交需登录。参考答案、自检通过和“已完成”标记不会自动授予项目或真机权限。</p>
+    </section>
+    <section>
+      <h2>参考资料</h2>
+      <p>课程代码和模拟数据由本课程编写。模块用法可核对 Python 官方文档：</p>
+      <div class="downloads"><a href="https://docs.python.org/3/library/csv.html">csv：CSV 读取</a><a href="https://docs.python.org/3/library/math.html#math.hypot">math.hypot：欧氏距离</a><a href="https://docs.python.org/3/library/unittest.html">unittest：程序自检</a></div>
+    </section>
+  </main>
+  <footer>新手村 · Python 日志分析实训 V1 · 数据均为教学模拟</footer>
+</body>
+</html>

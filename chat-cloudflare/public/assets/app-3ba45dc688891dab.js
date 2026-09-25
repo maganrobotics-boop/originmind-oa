@@ -701,15 +701,48 @@ let conversations = [];
 let activeConversationId = "";
 let submittedQuestionCount = 0;
 
+const NEWBIE_COURSES = {"registration":{"index":1,"title":"入村登记","goal":"写清当前基础、可投入时间、具体成果与证据；能解释任务取舍。","steps":["下载示例、个人计划模板和提交单；尚未安装 Python 可先按人工清单填写。","阅读 4 小时示例，核对任务总量和证据。","填写自己的计划，把 8 小时版本缩减为 4 小时版本并解释取舍。","对照信息、时间、目标、调整四项标准；可选运行 check_profile.py。","保存两版计划和复盘，返回本关记录证据。"],"deliverables":["个人计划及每周时长","8 小时到 4 小时的调整前后对照","验收清单与取舍说明、一个需要帮助的问题"],"taPrompts":["我每周有 4 小时，如何把这份 8 小时计划缩小？","请检查我的学习目标是否有可观察结果。"]},"toolkit":{"index":2,"title":"装备铺","goal":"在自己的电脑运行程序，能定位一次语法错误并记录可复现环境。","steps":["下载 hello.py、环境检查和提交单；准备 Python、Git、编辑器。","运行示例，核对问候语和 4 小时输出。","建立 code/data/evidence/notes，修改昵称和小时数；先预测再运行。","检查环境 PASS；制造并修复一次 SyntaxError，记录行号和原因。","提交修改代码、输出、环境报告与排错说明。"],"deliverables":["修改后的 code/hello.py、预测与实际输出","环境报告与四目录说明","一次错误定位和修复；操作系统与工具版本"],"taPrompts":["这是命令和报错，请判断是目录、语法还是解释器问题。","我改了文件输出没变，应该先查哪里？"]},"git-basics":{"index":3,"title":"Git 训练场","goal":"用可读历史说明每一次修改，区分工作区、暂存区和提交记录。","steps":["下载 README 模板、示例生成器、仓库检查和提交单。","运行 make_demo.py，观察 3 次内容提交和 1 次合并；示例不作为个人作业。","新建个人仓库，分三次补充目标、方向和复盘，再合并 practice。","用 check_repo.py 检查历史与工作区；另做 improvement 分支变化练习。","提交 README、图形日志、差异与复盘。"],"deliverables":["至少三次实际内容提交和合并记录","README、最终哈希与干净工作区结果","自主分支改动前后对照与至少约 100 字复盘"],"taPrompts":["这份 git status 表示修改在哪个阶段？","如何判断 practice 的内容已经合并到 main？"]},"python-basics":{"index":4,"title":"Python 训练场","goal":"在 60–90 分钟内完成一次可复现的日志分析，能区分路程和位移，定位可疑区间并解释结果。","steps":["打开完整实训，下载并解压材料包；仅需 Python 3，无第三方依赖。","运行 analyze.py 和参考自检，核对 21 个采样点、10 m 路程、0.5 m/s 平均速率。","学习相邻点距离、时间间隔和电量百分点，完成 exercise.py 的三个 TODO。","运行 python check_work.py 检查自己的实现，再分析 position_jump.csv 中的 1–2 s 位置跳变。","构造一份静止、斜线或非等间隔数据，先手算再运行，填写提交单。"],"deliverables":["独立完成的 exercise.py、运行命令和八项自检输出","正常与异常日志的分析结果；标准指标误差不超过 0.001","一份自建数据及手算值与运行值对照","填写 submission.md，解释四个问题并记录复盘与助教帮助"],"taPrompts":["我在 Python 日志关，为什么位移为 0，路程仍为 10 m？","非等间隔采样测试得到 0.667 而不是 0.5，请提示我检查计算过程。","1–2 s 的可疑分段显示 10 m/s，还需要哪些证据才能判断原因？"]},"ros2-simulation":{"index":5,"title":"ROS2 仿真场","goal":"理解发布、订阅和状态反馈，完成可复现的 ROS2 圆形轨迹实验。","steps":["下载参数、发布订阅程序、离线轨迹程序与检查器；准备 Ubuntu 24.04 + Jazzy。","先做离线理论预检，再在独立命名空间启动 turtlesim，核对节点和话题。","运行 run_ros.py 保存真实 pose；把线速度从 1 改到 0.5 后重跑。","对照半径、时长、路程、闭合误差和轨迹外接框；再做反向转圈实验。","提交真实 CSV、截图、参数、代码解释与误差复盘。"],"deliverables":["修改前后真实 CSV 与轨迹检查输出","节点/话题、海龟轨迹截图或视频","motion.py 修改、四处发布订阅代码解释与自主实验","理论/实际对照、误差分析或未完成阻塞"],"taPrompts":["根据节点和话题列表，请判断我的记录程序为何等不到 pose。","为什么线速度减半、角速度不变时周期不变而半径减半？"]},"mini-project":{"index":6,"title":"任务大厅","goal":"把需求写成项目卡，用代码、测试和变化地图交付可复现结果。","steps":["下载地图、参考搜索器、练习模板、六项自检与项目卡。","运行参考程序：课程地图 10 步，隔断地图无解。","独立完成 BFS 的三个 TODO，说明队列和 parents 的作用。","运行六项个人自检；构造中心障碍绕行与整列封路的地图，先预测再验证。","提交代码、地图、项目卡、结果与适用边界。"],"deliverables":["项目卡、个人 exercise.py 与六项个人自检","课程地图 10 步和隔断地图无解结果","两份变化地图、预测/实际对照","队列变化解释、复盘和真机应用缺口"],"taPrompts":["请提示这张 3×3 地图下一轮队列怎样变化。","为什么 BFS 在本题中能找到最少步数路径？"]},"graduation":{"index":7,"title":"出村考核","goal":"让另一个人能看懂改动、找到证据、复现结果，并知道下一阶段计划。","steps":["下载虚构样例、个人 manifest 模板、检查打包程序和提交单。","运行样例检查，理解命令、预期、实际、改动、解释和文件的对应关系。","用自己的六关证据填写清单；未完成的关卡如实保留进行中。","检查并打包；做一次文件缺失与恢复实验，核对版本和文件哈希。","提交证据包、一页反思、下一阶段计划与 3 分钟演示。"],"deliverables":["六关真实证据清单与版本化证据包","完整性检查及文件缺失/恢复记录","一页反思、下一步计划和演示提纲","参考代码与助教帮助说明"],"taPrompts":["请依据清单指出缺失证据，不要补写我没有完成的实验。","我的 3 分钟演示能否清楚说明一次改动和一次失败？"]}};
+
+function newbieCourseLaunch(params) {
+  const id = params.get("course");
+  if (params.get("ta") !== "1" || !Object.hasOwn(NEWBIE_COURSES, id)) return null;
+  const course = NEWBIE_COURSES[id];
+  const hint = params.get("hint") || "";
+  const question = /^[0-9]$/u.test(hint) ? course.taPrompts[Number(hint)] : "";
+  const text = [
+    `我正在学习新手村第 ${course.index} 关：${course.title}。`,
+    `本关目标：${course.goal}`,
+    "学习任务：", ...course.steps.map((step, i) => `${i + 1}. ${step}`),
+    "验收与提交要求：", ...course.deliverables.map((item) => `- ${item}`),
+    "请先根据我的问题给出排查步骤或提示，必要时追问运行命令、实际输出和预期结果。不要虚构实验结果，也不要把 AI 建议当作教师验收。",
+    `我的问题：${question || "（请在这里补充你卡住的步骤、尝试和报错）"}`,
+  ].join("\n");
+  return { text, title: `第 ${course.index} 关 · ${course.title}`, id };
+}
+
 function launchPromptFromUrl() {
   const params = new URLSearchParams(window.location.search);
-  const prompt = String(params.get("prompt") || "").trim();
-  if (!prompt || prompt.length > 500 || activeConversationId) return;
-  promptInput.value = prompt;
-  promptInput.placeholder = params.get("ta") === "1" ? "向实验室 AI 助教提问" : promptInput.placeholder;
+  const course = newbieCourseLaunch(params);
+  if (course) {
+    resetChat();
+    promptInput.value = course.text;
+    promptInput.placeholder = "补充你的问题，确认后发送给本关助教";
+    heroTitle.textContent = course.title;
+    heroSubtitle.textContent = "已带入本关任务和验收标准。补充问题后发送；学习记录和个人资料不会自动附带。";
+  } else {
+    const prompt = String(params.get("prompt") || "").trim();
+    if (!prompt || prompt.length > 500) return;
+    resetChat();
+    promptInput.value = prompt;
+    promptInput.placeholder = params.get("ta") === "1" ? "向实验室 AI 助教提问" : promptInput.placeholder;
+  }
   autoResize();
   updateSendState();
-  window.setTimeout(() => promptInput.focus(), 120);
+  window.setTimeout(() => {
+    promptInput.focus();
+    promptInput.setSelectionRange(promptInput.value.length, promptInput.value.length);
+    promptInput.scrollTop = promptInput.scrollHeight;
+  }, 120);
 }
 
 function showToast(message) {
@@ -1053,6 +1086,8 @@ function createConversation(turns = []) {
 function renderConversation(id) {
   const conversation = conversations.find((candidate) => candidate.id === id);
   if (!conversation) return;
+  heroTitle.textContent = MODE_COPY[currentMode][0];
+  heroSubtitle.textContent = MODE_COPY[currentMode][1];
   activeConversationId = id;
   messageList.replaceChildren();
   body.classList.toggle("chat-active", conversation.turns.length > 0);
@@ -1153,6 +1188,8 @@ async function submitMessage(rawText) {
 }
 
 function resetChat() {
+  heroTitle.textContent = MODE_COPY[currentMode][0];
+  heroSubtitle.textContent = MODE_COPY[currentMode][1];
   messageList.innerHTML = "";
   promptInput.value = "";
   promptInput.style.height = "auto";

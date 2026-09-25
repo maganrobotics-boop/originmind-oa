@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>第 1 关：把兴趣变成一周能完成的计划 · 新手村</title><style>
+*{box-sizing:border-box}body{margin:0;color:#20242b;background:#fff;font:16px/1.8 system-ui,-apple-system,Segoe UI,sans-serif}
+header,main,footer{max-width:960px;margin:auto;padding:24px}header{display:flex;flex-wrap:wrap;justify-content:space-between;gap:12px;border-bottom:1px solid #e5e8ee}
+a{color:#245ed1;text-underline-offset:3px}a:focus-visible{outline:3px solid #245ed1;outline-offset:4px}h1{font-size:30px;line-height:1.4;margin:18px 0 24px}h2{font-size:23px;line-height:1.5;margin:42px 0 16px;padding-top:20px;border-top:1px solid #e5e8ee;scroll-margin-top:16px}h3{font-size:18px}p{margin:14px 0}li{margin:8px 0}
+pre{background:#f4f6f9;border-radius:8px;padding:18px;overflow:auto;font-size:14px;line-height:1.6}code{font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}pre code{overflow-wrap:normal}
+.table-wrap{overflow-x:auto}table{border-collapse:collapse;width:100%;text-align:left;font-size:15px}th,td{border-bottom:1px solid #e0e5ee;padding:10px 12px;vertical-align:top}th{background:#f4f6f9}nav{display:flex;flex-wrap:wrap;gap:10px 16px;margin:18px 0;font-size:14px}.note{padding:14px 18px;background:#f0f6ff;border-left:3px solid #3774df}.actions{display:flex;gap:12px;flex-wrap:wrap;margin:28px 0}.button{display:inline-block;padding:10px 16px;background:#2866e7;color:white;border-radius:7px;text-decoration:none;font-weight:600}footer{color:#647083;font-size:14px;border-top:1px solid #e5e8ee}.cards{display:grid;grid-template-columns:1fr 1fr;gap:18px}.card{padding:20px;border:1px solid #dce3ee;border-radius:12px}.card h2{border:0;padding:0;margin:0 0 12px;font-size:21px}
+@media(max-width:640px){header,main,footer{padding-left:18px;padding-right:18px}h1{font-size:25px}h2{font-size:21px}.cards{grid-template-columns:1fr}th,td{padding:8px}}
+</style></head><body><header><a href="/newbie-village">新手村 · 任务地图</a><span>OriginMind × ARTS Robotics</span></header><main><nav aria-label="学习步骤"><a href="#step-1">下载材料</a><a href="#step-2">运行示例</a><a href="#step-3">独立修改</a><a href="#step-4">对照标准</a><a href="#step-5">提交证据</a></nav><h1>第 1 关：把兴趣变成一周能完成的计划</h1>
+<p>建议 20–30 分钟。无需编程基础，可先用手机阅读、下载和填写。完成后应能说明“我现在会什么、投入多少时间、下周拿什么结果来证明”。</p>
+<h2 id="step-1">1. 下载材料</h2>
+<p><a href="lesson.zip" download>下载完整材料包</a> · <a href="profile.example.json" download>虚构示例</a> · <a href="profile.template.json" download>个人模板</a> · <a href="check_profile.py" download>可选检查程序</a> · <a href="submission.md" download>提交单</a></p>
+<p>完整解压后打开 index.html，可离线阅读本课。JSON 可用文本编辑器打开；尚未安装 Python 时按下方人工清单核对，完成第 2 关后再运行可选检查。不要因环境没装好卡在登记关。</p>
+<h2 id="step-2">2. 跟着示例做一次</h2>
+<p>示例同学是虚构的机械工程大二学生，每周可用 4 小时。他把 2 小时分配给环境和 Git，2 小时分配给 Python，证据分别是版本输出、提交记录和分析结果。计划总量 4 小时，没有超过可用时间。</p>
+<p>先回答：如果环境安装用了 3 小时，Python 任务还适合原样安排吗？应缩小本周任务或调整时间，而不是填一个不可能完成的计划。</p>
+<p>如果电脑已有 Python，可在材料目录中运行：</p>
+<pre><code>python check_profile.py profile.example.json</code></pre>
+<p>标准输出：<code>资料结构检查通过；方向匹配仍需本人和导师讨论。</code> 这不是实名认证、注册成功或项目录取通知。</p>
+<h2 id="step-3">3. 修改自己的资料</h2>
+<p>复制 profile.template.json，另存为 profile.json。填写昵称、专业、年级、当前基础、学习目标和需要的帮助。不要填写身份证号、家庭地址或账号密码；课程证据不需要这些信息。正式身份与联系方式在系统个人主页中按实际需要填写，不放进公开仓库。</p>
+<p>方向代码：<code>perception</code> 感知、<code>navigation</code> 导航、<code>control</code> 控制、<code>mechanics</code> 机械、<code>embedded</code> 嵌入式、<code>ai</code> AI 应用、<code>undecided</code> 待选择。这里是学习意向，不自动分配项目；系统个人主页没有对应选项时，在简介补充即可。</p>
+<ul><li><code>weekly_hours</code> 写你实际能稳定安排的时间。</li><li><code>week_plan</code> 每项同时写任务、小时数和具体证据；总时长不得超过可用时间。</li><li><code>goal</code> 写可观察结果，例如“能解释并复现 10 m 路程的计算”，不要只写“学会 Python”。</li><li><code>skills</code> 可以写“零基础”，无需虚报；<code>help_needed</code> 写当前最大的一个障碍。</li></ul>
+<p>独立变化任务：先拟一个 8 小时计划，再缩减到 4 小时。指出保留哪项、推迟哪项，以及依据。保留修改前后两个版本，解释取舍。</p>
+<h2 id="step-4">4. 对照标准核对</h2>
+<div class="table-wrap"><table><thead><tr><th>验收项</th><th>通过标准</th><th>不通过的例子</th></tr></thead><tbody><tr><td>信息</td><td>模板无“待填写”，基础描述真实</td><td>全写“熟练”，无具体经历</td></tr><tr><td>时间</td><td>每项可执行，总量不超过可用时间</td><td>可用 4 小时却安排 8 小时</td></tr><tr><td>目标</td><td>有任务、输出和判断标准</td><td>“努力学习机器人”</td></tr><tr><td>调整</td><td>能解释 8 小时到 4 小时的取舍</td><td>只把数字改小，任务完全不变</td></tr></tbody></table></div>
+<p>可选运行 <code>python check_profile.py profile.json</code>。程序仅检查字段和时间，目标是否合理仍要对照清单自评。你也可以把计划表直接写在提交单中，按同一标准验收。</p>
+<h2 id="step-5">5. 提交证据</h2>
+<p>填写 submission.md：个人计划、调整前后对照、一个具体问题和下周交付。返回第 1 关，把证据链接或摘要粘贴进证据栏。免登录时只保存本机；正式提交需登录。文件仍应保留在自己的学习目录中。</p>
+<p>本关不以签署保密协议或等待审批作为公开课程阅读的前提。</p>
+<h2>常见问题与助教提示</h2>
+<ul><li>JSON 报错：检查英文双引号和逗号，最后一个字段后不加逗号。也可先用提交单完成内容。</li><li>不知道选什么方向：先选待选择，做完 Python 和小项目后再比较兴趣，不必现在决定整个毕业课题。</li><li>问助教：“我每周只有 4 小时，下面两项任务哪项应缩小？请根据验收结果而不是兴趣标签给建议。”</li></ul>
+<h2>我能解释</h2>
+<p>“想研究导航”和“本周完成一张地图的最短路径验证”有什么区别？基础薄弱时如何给出诚实且可执行的计划？</p><div class="actions"><a class="button" href="lesson.zip" download>下载本关全部材料</a><a href="/newbie-village#registration">返回本关记录成果</a><a href="/?ta=1&amp;course=registration">问本关助教</a><a href="../index.html">全部七关</a></div></main><footer>公开学习无需登录。解压后可离线阅读；返回系统和外部参考链接需联网。正式提交与项目权限按系统实际流程办理。</footer></body></html>

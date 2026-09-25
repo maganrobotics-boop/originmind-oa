@@ -1,0 +1,14 @@
+{
+  "display_name": "示例同学（虚构）",
+  "major": "机械工程",
+  "year": "大二",
+  "direction": "navigation",
+  "skills": ["会用终端", "Python 刚入门"],
+  "weekly_hours": 4,
+  "week_plan": [
+    {"task": "环境与 Git 练习", "hours": 2, "evidence": "版本输出和三次提交记录"},
+    {"task": "Python 日志分析", "hours": 2, "evidence": "练习代码、自检输出与复盘"}
+  ],
+  "goal": "本周能独立运行日志分析，解释路程和位移的区别。",
+  "help_needed": "需要助教提示如何定位终端报错。"
+}

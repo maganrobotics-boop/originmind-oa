@@ -9,7 +9,7 @@ import re
 import zipfile
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[1] / "public/assets/newbie-course-v1"
+ROOT = Path(__file__).resolve().parents[1] / "public/assets/newbie-course-v2"
 LESSONS = ("registration", "toolkit", "git-basics", "ros2-simulation", "mini-project", "graduation")
 STYLE = """
 *{box-sizing:border-box}body{margin:0;color:#20242b;background:#fff;font:16px/1.8 system-ui,-apple-system,Segoe UI,sans-serif}
@@ -99,7 +99,7 @@ def build():
         markdown = (folder / "README.md").read_text()
         title = markdown.splitlines()[0].lstrip("# ")
         nav = '<nav aria-label="学习步骤">'+"".join(f'<a href="#step-{i}">{label}</a>' for i, label in enumerate(("下载材料", "运行示例", "独立修改", "对照标准", "提交证据"), 1))+"</nav>"
-        body = nav+render(markdown)+f'<div class="actions"><a class="button" href="lesson.zip" download>下载本关全部材料</a><a href="/newbie-village#{slug}">返回本关记录成果</a><a href="../index.html">全部七关</a></div>'
+        body = nav+render(markdown)+f'<div class="actions"><a class="button" href="lesson.zip" download>下载本关全部材料</a><a href="/newbie-village#{slug}">返回本关记录成果</a><a href="/?ta=1&amp;course={slug}">问本关助教</a><a href="../index.html">全部七关</a></div>'
         (folder / "index.html").write_text(page(title, body))
         entries = [p for p in sorted(folder.rglob("*")) if p.is_file() and p.suffix not in (".zip", ".pyc") and "__pycache__" not in p.parts]
         with zipfile.ZipFile(folder/"lesson.zip", "w", compression=zipfile.ZIP_DEFLATED) as bundle:
@@ -109,7 +109,7 @@ def build():
                 info.external_attr = 0o644 << 16
                 bundle.writestr(info, path.read_bytes())
         cards.append((int(title[2]), f'<article class="card"><h2>{html.escape(title)}</h2><a href="{slug}/index.html">打开完整教程</a> · <a href="{slug}/lesson.zip" download>下载材料包</a></article>'))
-    cards.append((4, '<article class="card"><h2>第 4 关：Python 日志分析</h2><a href="../newbie-python-v1/index.html">打开完整教程</a> · <a href="../newbie-python-v1/python-log-lab.zip" download>下载材料包</a></article>'))
+    cards.append((4, '<article class="card"><h2>第 4 关：Python 日志分析</h2><a href="../newbie-python-v2/index.html">打开完整教程</a> · <a href="../newbie-python-v2/python-log-lab.zip" download>下载材料包</a></article>'))
     body = '<h1>七关，从第一条命令到可复现成果</h1><p>每一关都按同一条路径学习：下载材料 → 跟着示例运行 → 自己修改 → 对照标准 → 提交证据。</p><p class="note">可直接阅读和下载，无需账号。示例、自检、本机进度和教师验收分别记录；第 5 关必须补齐真实 ROS2 实验。</p><div class="cards">'+"".join(card for _, card in sorted(cards))+"</div>"
     (ROOT/"index.html").write_text(page("完整课程与材料", body))
     print("Built 6 lessons, 6 ZIP bundles and the seven-course index")

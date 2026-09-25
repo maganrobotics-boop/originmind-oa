@@ -19,7 +19,7 @@ const LOCAL_GUEST_KEY = "originmind-newbie-guest-v1";
 const GUEST_EMAIL = "guest@originmind.local";
 const COURSE_LESSONS = Object.freeze(Object.fromEntries(
   ["registration", "toolkit", "git-basics", "python-basics", "ros2-simulation", "mini-project", "graduation"].map((id) => {
-    const base = id === "python-basics" ? "/assets/newbie-python-v1" : `/assets/newbie-course-v1/${id}`;
+    const base = id === "python-basics" ? "/assets/newbie-python-v2" : `/assets/newbie-course-v2/${id}`;
     return [id, Object.freeze({ url: `${base}/index.html`, zip: `${base}/${id === "python-basics" ? "python-log-lab" : "lesson"}.zip` })];
   }),
 ));
@@ -452,6 +452,11 @@ function createTaskCard(task) {
     lesson.className = "lesson-link";
     lesson.textContent = "完整实训与材料下载";
     article.append(lesson);
+    const tutor = document.createElement("a");
+    tutor.href = `/?ta=1&course=${encodeURIComponent(task.id)}`;
+    tutor.className = "lesson-link";
+    tutor.textContent = "问本关助教";
+    article.append(tutor);
   }
   return article;
 }
@@ -718,6 +723,7 @@ function openTask(id) {
   if (lesson) {
     document.querySelector(".task-lesson-link").href = lesson.url;
     document.querySelector(".task-download-link").href = lesson.zip;
+    document.querySelector(".task-ta-link").href = `/?ta=1&course=${encodeURIComponent(task.id)}`;
   }
   const fillList = (selector, items = []) => {
     const list = document.querySelector(selector);
@@ -729,7 +735,14 @@ function openTask(id) {
   };
   fillList(".task-steps", task.steps);
   fillList(".task-examples", task.examples);
-  fillList(".task-ta-prompts", task.taPrompts);
+  document.querySelector(".task-ta-prompts").replaceChildren(...(task.taPrompts || []).map((prompt, hint) => {
+    const li = document.createElement("li");
+    const link = document.createElement("a");
+    link.href = `/?ta=1&course=${encodeURIComponent(task.id)}&hint=${hint}`;
+    link.textContent = prompt;
+    li.append(link);
+    return li;
+  }));
   fillList(".task-deliverables", task.deliverables);
   document.querySelectorAll(".task-extra-section").forEach((section) => {
     const list = section.querySelector("ul");
@@ -864,4 +877,3 @@ window.addEventListener("hashchange", () => {
 
 enterLocalGuestMode();
 void loadDashboard();
-

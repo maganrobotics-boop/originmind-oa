@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
+import { runInNewContext } from "node:vm";
 
 const SCRIPT_DIRECTORY = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(SCRIPT_DIRECTORY, "..");
@@ -53,7 +54,15 @@ async function expectedBuild() {
     "export function knowledgeImageReferences", "function knowledgeImageReferences");
   const zipImportBundle = Buffer.from(`"use strict";\n(() => {\n${imageReferencesScript}\n${zipImportAddon}\n})();\n`, "utf8");
   const mathName = `katex-${digest(math)}.mjs`;
-  const app = Buffer.from(`${messageActions}\n${replaceExactlyOnce(appSource.toString("utf8"), "__KATEX_ASSET__", `/assets/${mathName}`)}\nvoid openIncomingSharedAnswer();\n`, "utf8");
+  // Build course context from the same public curriculum used by the task map.
+  const village = await readFile(join(PUBLIC_DIRECTORY, "newbie-village.js"), "utf8");
+  const curriculum = village.match(/const LOCAL_TASKS = Object\.freeze\((\[[\s\S]*?\n\])\);/u);
+  if (!curriculum) throw new Error("Public newbie curriculum is missing");
+  const tasks = runInNewContext(`(${curriculum[1]})`, Object.create(null), { timeout: 1000 });
+  const courses = Object.fromEntries(tasks.map(({ id, index, title, goal, steps, deliverables, taPrompts }) =>
+    [id, { index, title, goal, steps, deliverables, taPrompts }]));
+  const courseApp = replaceExactlyOnce(appSource.toString("utf8"), "__NEWBIE_COURSES__", JSON.stringify(courses));
+  const app = Buffer.from(`${messageActions}\n${replaceExactlyOnce(courseApp, "__KATEX_ASSET__", `/assets/${mathName}`)}\nvoid openIncomingSharedAnswer();\n`, "utf8");
   const style = Buffer.concat([baseStyle, Buffer.from("\n"), actionStyle]);
   const appName = `app-${digest(app)}.js`;
   const styleName = `styles-${digest(style)}.css`;

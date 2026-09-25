@@ -425,15 +425,48 @@ let conversations = [];
 let activeConversationId = "";
 let submittedQuestionCount = 0;
 
+const NEWBIE_COURSES = __NEWBIE_COURSES__;
+
+function newbieCourseLaunch(params) {
+  const id = params.get("course");
+  if (params.get("ta") !== "1" || !Object.hasOwn(NEWBIE_COURSES, id)) return null;
+  const course = NEWBIE_COURSES[id];
+  const hint = params.get("hint") || "";
+  const question = /^[0-9]$/u.test(hint) ? course.taPrompts[Number(hint)] : "";
+  const text = [
+    `我正在学习新手村第 ${course.index} 关：${course.title}。`,
+    `本关目标：${course.goal}`,
+    "学习任务：", ...course.steps.map((step, i) => `${i + 1}. ${step}`),
+    "验收与提交要求：", ...course.deliverables.map((item) => `- ${item}`),
+    "请先根据我的问题给出排查步骤或提示，必要时追问运行命令、实际输出和预期结果。不要虚构实验结果，也不要把 AI 建议当作教师验收。",
+    `我的问题：${question || "（请在这里补充你卡住的步骤、尝试和报错）"}`,
+  ].join("\n");
+  return { text, title: `第 ${course.index} 关 · ${course.title}`, id };
+}
+
 function launchPromptFromUrl() {
   const params = new URLSearchParams(window.location.search);
-  const prompt = String(params.get("prompt") || "").trim();
-  if (!prompt || prompt.length > 500 || activeConversationId) return;
-  promptInput.value = prompt;
-  promptInput.placeholder = params.get("ta") === "1" ? "向实验室 AI 助教提问" : promptInput.placeholder;
+  const course = newbieCourseLaunch(params);
+  if (course) {
+    resetChat();
+    promptInput.value = course.text;
+    promptInput.placeholder = "补充你的问题，确认后发送给本关助教";
+    heroTitle.textContent = course.title;
+    heroSubtitle.textContent = "已带入本关任务和验收标准。补充问题后发送；学习记录和个人资料不会自动附带。";
+  } else {
+    const prompt = String(params.get("prompt") || "").trim();
+    if (!prompt || prompt.length > 500) return;
+    resetChat();
+    promptInput.value = prompt;
+    promptInput.placeholder = params.get("ta") === "1" ? "向实验室 AI 助教提问" : promptInput.placeholder;
+  }
   autoResize();
   updateSendState();
-  window.setTimeout(() => promptInput.focus(), 120);
+  window.setTimeout(() => {
+    promptInput.focus();
+    promptInput.setSelectionRange(promptInput.value.length, promptInput.value.length);
+    promptInput.scrollTop = promptInput.scrollHeight;
+  }, 120);
 }
 
 function showToast(message) {
@@ -777,6 +810,8 @@ function createConversation(turns = []) {
 function renderConversation(id) {
   const conversation = conversations.find((candidate) => candidate.id === id);
   if (!conversation) return;
+  heroTitle.textContent = MODE_COPY[currentMode][0];
+  heroSubtitle.textContent = MODE_COPY[currentMode][1];
   activeConversationId = id;
   messageList.replaceChildren();
   body.classList.toggle("chat-active", conversation.turns.length > 0);
@@ -877,6 +912,8 @@ async function submitMessage(rawText) {
 }
 
 function resetChat() {
+  heroTitle.textContent = MODE_COPY[currentMode][0];
+  heroSubtitle.textContent = MODE_COPY[currentMode][1];
   messageList.innerHTML = "";
   promptInput.value = "";
   promptInput.style.height = "auto";

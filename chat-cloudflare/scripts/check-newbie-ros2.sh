@@ -4,12 +4,13 @@ set -eo pipefail
 source /opt/ros/jazzy/setup.bash
 set -u
 repo_dir=$(cd "$(dirname "$0")/../.." && pwd)
-lesson_dir="$repo_dir/chat-cloudflare/public/assets/newbie-course-v1/ros2-simulation"
+lesson_dir="$repo_dir/chat-cloudflare/public/assets/newbie-course-v2/ros2-simulation"
 evidence_dir="$repo_dir/ros2-evidence"
 mkdir -p "$evidence_dir"
 export QT_QPA_PLATFORM=${QT_QPA_PLATFORM:-offscreen}
 export ROS_DOMAIN_ID=${ROS_DOMAIN_ID:-42}
-export ROS_LOCALHOST_ONLY=1
+export ROS_AUTOMATIC_DISCOVERY_RANGE=LOCALHOST
+unset ROS_LOCALHOST_ONLY
 sim_pid=''
 cleanup() {
   if [ -n "$sim_pid" ]; then
@@ -27,11 +28,11 @@ for variant in standard half-speed reverse; do
   cp "$lesson_dir/"*.py "$work/"
   if [ "$variant" = half-speed ]; then sed -i 's/LINEAR = 1.0/LINEAR = 0.5/' "$work/motion.py"; fi
   if [ "$variant" = reverse ]; then sed -i 's/ANGULAR = 1.0/ANGULAR = -1.0/' "$work/motion.py"; fi
-  ros2 run turtlesim turtlesim_node --ros-args -r __ns:=/newbie_lab > "$work/turtlesim.log" 2>&1 &
+  "$(ros2 pkg prefix turtlesim)/lib/turtlesim/turtlesim_node" --ros-args -r __ns:=/newbie_lab > "$work/turtlesim.log" 2>&1 &
   sim_pid=$!
   timeout 25s python3 "$work/run_ros.py" --output "$work/ros_pose.csv" 2>&1 | tee "$work/recorder.log"
-  timeout 10s ros2 node list > "$work/nodes.txt"
-  timeout 10s ros2 topic list -t > "$work/topics.txt"
+  timeout 10s ros2 node list --no-daemon --spin-time 3 | tee "$work/nodes.txt"
+  timeout 10s ros2 topic list -t --no-daemon --spin-time 3 | tee "$work/topics.txt"
   grep -F '/newbie_lab/turtlesim' "$work/nodes.txt"
   grep -F '/newbie_lab/turtle1/pose [turtlesim/msg/Pose]' "$work/topics.txt"
   radius=1

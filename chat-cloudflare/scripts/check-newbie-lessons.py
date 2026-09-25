@@ -18,7 +18,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, unquote
 
 PUBLIC = Path(__file__).resolve().parents[1] / "public"
-ROOT = PUBLIC / "assets/newbie-course-v1"
+ROOT = PUBLIC / "assets/newbie-course-v2"
 ENV = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
 
 

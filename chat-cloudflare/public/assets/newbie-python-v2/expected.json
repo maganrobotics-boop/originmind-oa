@@ -1,0 +1,13 @@
+{
+  "dataset": "data/motion_log.csv",
+  "synthetic": true,
+  "threshold_mps": 1.5,
+  "samples": 21,
+  "duration_s": 20,
+  "distance_m": 10,
+  "mean_speed_mps": 0.5,
+  "max_speed_mps": 0.5,
+  "displacement_m": 0,
+  "battery_drop_pp": 5,
+  "suspicious": []
+}

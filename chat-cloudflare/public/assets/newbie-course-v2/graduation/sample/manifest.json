@@ -1,0 +1,81 @@
+{
+  "is_demo": true,
+  "learner": "虚构示例同学",
+  "reflection": "这是说明清单结构的教学样例，不是真实实验或个人成绩。",
+  "next_goal": "在真实课程中逐关替换为本人证据。",
+  "ai_help": "本样例由课程作者编写。",
+  "stages": [
+    {
+      "id": "registration",
+      "status": "completed",
+      "command": "示例占位：本关实际命令写在此处",
+      "expected": "示例占位：事先预测",
+      "actual": "示例占位：实际测量",
+      "change": "示例占位：个人修改",
+      "explanation": "示例占位：原因说明",
+      "files": [
+        "registration.md"
+      ]
+    },
+    {
+      "id": "toolkit",
+      "status": "completed",
+      "command": "示例占位：本关实际命令写在此处",
+      "expected": "示例占位：事先预测",
+      "actual": "示例占位：实际测量",
+      "change": "示例占位：个人修改",
+      "explanation": "示例占位：原因说明",
+      "files": [
+        "toolkit.md"
+      ]
+    },
+    {
+      "id": "git-basics",
+      "status": "completed",
+      "command": "示例占位：本关实际命令写在此处",
+      "expected": "示例占位：事先预测",
+      "actual": "示例占位：实际测量",
+      "change": "示例占位：个人修改",
+      "explanation": "示例占位：原因说明",
+      "files": [
+        "git-basics.md"
+      ]
+    },
+    {
+      "id": "python-basics",
+      "status": "completed",
+      "command": "示例占位：本关实际命令写在此处",
+      "expected": "示例占位：事先预测",
+      "actual": "示例占位：实际测量",
+      "change": "示例占位：个人修改",
+      "explanation": "示例占位：原因说明",
+      "files": [
+        "python-basics.md"
+      ]
+    },
+    {
+      "id": "ros2-simulation",
+      "status": "completed",
+      "command": "示例占位：本关实际命令写在此处",
+      "expected": "示例占位：事先预测",
+      "actual": "示例占位：实际测量",
+      "change": "示例占位：个人修改",
+      "explanation": "示例占位：原因说明",
+      "files": [
+        "ros2-simulation.md"
+      ]
+    },
+    {
+      "id": "mini-project",
+      "status": "completed",
+      "command": "示例占位：本关实际命令写在此处",
+      "expected": "示例占位：事先预测",
+      "actual": "示例占位：实际测量",
+      "change": "示例占位：个人修改",
+      "explanation": "示例占位：原因说明",
+      "files": [
+        "mini-project.md"
+      ]
+    }
+  ]
+}
