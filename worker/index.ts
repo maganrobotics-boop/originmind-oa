@@ -54,7 +54,9 @@ function withSecurityHeaders(request: Request, response: Response) {
 function isApprovalJsonResponse(request: Request, response: Response) {
   if (!response.ok || !response.headers.get("content-type")?.toLowerCase().startsWith("application/json")) return false;
   const pathname = new URL(request.url).pathname;
-  return pathname === "/api/approvals" || /^\/api\/approvals\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(pathname);
+  return pathname === "/api/approvals"
+    || pathname === "/api/public/lab-ai/newbie-agreement"
+    || /^\/api\/approvals\/[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/u.test(pathname);
 }
 
 async function archiveApprovalsFromResponse(response: Response, env: Env) {
