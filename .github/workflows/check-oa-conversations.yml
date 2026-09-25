@@ -1,0 +1,45 @@
+name: Check OA conversation integration
+on:
+  pull_request:
+    branches: [main]
+    types: [opened, synchronize, reopened]
+permissions:
+  contents: read
+concurrency:
+  group: oa-conversations-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  evidence:
+    if: github.event.pull_request.head.repo.full_name == github.repository && github.event.pull_request.head.ref == 'feat/oa-unified-conversations-20260918'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Install the repository's exact locked development dependencies
+        run: npm run install:ci
+      - name: Preserve isolated reviewed source and dependency toolchain
+        run: |
+          mkdir -p /tmp/oa-conversation-evidence /tmp/oa-conversation-toolchain
+          git archive --format=tar HEAD -o /tmp/oa-conversation-evidence/source.tar
+          git rev-parse HEAD > /tmp/oa-conversation-evidence/commit.txt
+          sha256sum package-lock.json > /tmp/oa-conversation-toolchain/lockfile-sha256.txt
+          cp "$(command -v node)" /tmp/oa-conversation-toolchain/node
+          tar -czf /tmp/oa-conversation-toolchain/dependencies.tar.gz node_modules
+          sha256sum /tmp/oa-conversation-toolchain/dependencies.tar.gz > /tmp/oa-conversation-toolchain/dependency-sha256.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: oa-conversation-source-${{ github.event.pull_request.head.sha }}
+          path: /tmp/oa-conversation-evidence/
+          retention-days: 3
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: oa-conversation-toolchain-${{ github.event.pull_request.head.sha }}
+          path: /tmp/oa-conversation-toolchain/
+          retention-days: 3
