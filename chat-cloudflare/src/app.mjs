@@ -199,6 +199,14 @@ function normalizeCampusEmail(value) {
   return email;
 }
 
+function normalizeCampusAccount(value) {
+  if (typeof value !== "string") return null;
+  const raw = value.trim().toLowerCase();
+  if (!raw || raw.length > 254) return null;
+  if (/^\d{6,20}$/u.test(raw)) return `${raw}@stumail.sztu.edu.cn`;
+  return normalizeCampusEmail(raw);
+}
+
 function campusRole(email) {
   return email.endsWith("@stumail.sztu.edu.cn") ? "student" : "staff";
 }
@@ -311,7 +319,7 @@ const NEWBIE_AGREEMENT = Object.freeze({
   effectiveDate: "2026-09-25",
   introduction: "为保护实验室成员、合作方和项目资料，在进入新手村并接触学习任务前，请阅读并同意以下保密约定。",
   clauses: NEWBIE_AGREEMENT_CLAUSES,
-  privacyNotice: "签署时系统仅记录校内邮箱、签署姓名、协议版本、协议内容摘要和签署时间，用于身份确认、访问控制和签署记录。记录保存在 Chat 系统，并以已归档的自动审核记录同步到 OA；不收集 IP 或浏览器指纹。不同意时仍可使用公开 Chat，但不能进入新手村。",
+  privacyNotice: "签署时系统仅记录校内邮箱、签署姓名、协议版本、协议内容摘要和签署时间，用于身份确认、访问控制和签署记录。记录保存在 Chat 系统，并以自动归档记录同步到 OA；不收集 IP 或浏览器指纹。不同意时仍可使用公开 Chat，但不能进入新手村。",
 });
 
 const NEWBIE_AGREEMENTS_BY_VERSION = new Map([
@@ -534,8 +542,8 @@ async function newbieAgreement(context, visitor) {
 async function requireNewbieAgreement(context, visitor) {
   const agreement = await newbieAgreement(context, visitor);
   if (!agreement.accepted) throw new PublicError("请先签署新手村保密协议。", 428);
-  if (agreement.reviewStatus === "pending") throw new PublicError("保密协议正在等待管理员审核。", 423);
-  if (!agreement.approved) throw new PublicError("保密协议尚未通过审核。", 403);
+  if (agreement.reviewStatus === "pending") throw new PublicError("保密协议已签署，正在自动归档，请稍后刷新。", 423);
+  if (!agreement.approved) throw new PublicError("保密协议尚未完成归档。", 403);
   return agreement;
 }
 
@@ -566,7 +574,7 @@ async function syncLegacyNewbieAgreement(context, visitor) {
     await database(context)
       .prepare(
         "UPDATE newbie_agreement_acceptances SET review_status='approved',reviewed_by=?," +
-        "reviewed_at=COALESCE(reviewed_at,accepted_at),review_note='已自动审核通过并同步至 OA。' " +
+        "reviewed_at=COALESCE(reviewed_at,accepted_at),review_note='已自动归档至 OA。' " +
         "WHERE email=? AND agreement_version=? AND content_sha256=? AND review_status IN ('pending','approved')",
       )
       .bind(`system:auto:oa:${approvalId}`, visitor.email, acceptance.agreementVersion, acceptance.contentSha256)
@@ -701,7 +709,7 @@ async function newbieApi(context) {
         acceptedAt,
         `system:auto:oa:${approvalId}`,
         acceptedAt,
-        "已自动审核通过并同步至 OA。",
+        "已自动归档至 OA。",
       )
       .run();
     return json({ signed: true, archived: true, autoApproved: true, oaApprovalId: approvalId, ...(await newbieDashboard(context, visitor)) });
@@ -806,6 +814,28 @@ async function visitorAuth(context) {
     ]);
     const delivery = await sendCampusLoginCode(context, email, code);
     return json({ sent: true, email, expiresIn: EMAIL_CODE_SECONDS, ...(!delivery.sent && delivery.devCode ? { devCode: delivery.devCode } : {}) });
+  }
+  if (path === "/api/visitor/login") {
+    await ensureVisitorAuthSchema(context);
+    await limit(context, "visitor-login", 60, 900);
+    const payload = await readJson(request, 2_000);
+    const email = normalizeCampusAccount(payload?.account);
+    const password = typeof payload?.password === "string" ? payload.password.trim() : "";
+    if (!email) throw new PublicError("请输入学号、学号邮箱或 @sztu.edu.cn 邮箱。", 400);
+    const expectedPassword = email.split("@", 1)[0];
+    if (!password || password.toLowerCase() !== expectedPassword) {
+      throw new PublicError("账号或密码不正确。首次登录密码就是账号前缀，例如学号邮箱的密码为学号。", 401);
+    }
+    const token = randomHex(32);
+    const role = campusRole(email);
+    await database(context).batch([
+      database(context).prepare("DELETE FROM visitor_sessions WHERE expires_at<=?").bind(now),
+      database(context).prepare("INSERT INTO visitor_sessions(hash,email,role,created_at,expires_at) VALUES(?,?,?,?,?)")
+        .bind(await sha256Hex(token), email, role, now, now + VISITOR_SESSION_SECONDS * 1000),
+    ]);
+    return json({ signedIn: true, user: { email, role, roleLabel: roleLabel(role) } }, 200, {
+      "Set-Cookie": `${VISITOR_SESSION_COOKIE}=${token}; Path=/; Secure; HttpOnly; SameSite=Strict; Max-Age=${VISITOR_SESSION_SECONDS}`,
+    });
   }
   if (path === "/api/visitor/verify-code") {
     await limit(context, "visitor-verify", 20, 900);

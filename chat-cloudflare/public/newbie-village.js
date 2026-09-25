@@ -181,12 +181,12 @@ function renderAgreement() {
   elements.agreementReview.hidden = !pending && !rejected;
   elements.agreementReview.className = `agreement-review${pending ? " pending" : rejected ? " rejected" : ""}`;
   if (pending || rejected) {
-    elements.agreementReview.querySelector("h2").textContent = pending ? "签署记录已归档，等待管理员审核" : "本次签署未通过审核";
+    elements.agreementReview.querySelector("h2").textContent = pending ? "签署记录正在自动归档" : "本次签署未完成归档";
     elements.agreementReview.querySelector(".review-summary").textContent =
       `签署人：${agreement.signerName} · 签署时间：${formatTime(agreement.acceptedAt)}`;
     elements.agreementReview.querySelector(".review-note").textContent = rejected
       ? `审核说明：${agreement.reviewNote || "请核对签署信息后重新提交。"}`
-      : "审核通过后，任务地图和个人主页会自动开放。";
+      : "归档完成后，任务地图和个人主页会自动开放。";
   }
   if (rejected) {
     const signer = elements.agreementForm.elements.namedItem("signerName");
@@ -284,13 +284,13 @@ async function verifyCode(event) {
   event.preventDefault();
   const button = document.querySelector(".verify-button");
   button.disabled = true;
-  setLoginStatus("正在验证…");
+  setLoginStatus("正在登录…");
   try {
-    await requestJson("/api/visitor/verify-code", {
+    await requestJson("/api/visitor/login", {
       method: "POST",
       body: JSON.stringify({
-        email: elements.email.value.trim(),
-        code: elements.code.value.trim(),
+        account: elements.email.value.trim(),
+        password: elements.code.value.trim(),
       }),
     });
     elements.loginDialog.close();
@@ -336,7 +336,7 @@ async function signAgreement(event) {
   const submit = elements.agreementForm.querySelector('button[type="submit"]');
   const signerName = String(new FormData(elements.agreementForm).get("signerName") || "").trim();
   submit.disabled = true;
-  elements.agreementStatus.textContent = "正在自动审核并同步到 OA…";
+  elements.agreementStatus.textContent = "正在自动归档…";
   try {
     state.dashboard = await requestJson("/api/newbie/agreement", {
       method: "POST",
@@ -347,7 +347,7 @@ async function signAgreement(event) {
       }),
     });
     renderDashboard();
-    showToast("已签署、自动审核通过并同步到 OA");
+    showToast("已签署并自动归档");
   } catch (error) {
     elements.agreementStatus.textContent = error.message;
   } finally {

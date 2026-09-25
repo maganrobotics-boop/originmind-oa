@@ -268,6 +268,31 @@ test("campus email login accepts SZTU mailboxes without touching admin auth", as
   assert.equal(status.body.user.email, "student@stumail.sztu.edu.cn");
 });
 
+test("newbie village accepts account password login using the account prefix", async (t) => {
+  const env = makeEnvironment({ EMAIL_CODE_DEV_MODE: "" });
+  t.after(() => env.DB.close());
+
+  const loggedInResponse = await handleRequest(apiRequest("/api/visitor/login", {
+    method: "POST",
+    body: { account: "202500101002", password: "202500101002" },
+  }), env, {}, runtime());
+  const loggedIn = await responseJson(loggedInResponse);
+  assert.equal(loggedIn.status, 200);
+  assert.deepEqual(loggedIn.body.user, {
+    email: "202500101002@stumail.sztu.edu.cn",
+    role: "student",
+    roleLabel: "学生",
+  });
+  const cookie = loggedInResponse.headers.get("set-cookie");
+  assert.match(cookie, /__Host-om-chat-session=[a-f0-9]{64}/u);
+
+  const rejected = await responseJson(await handleRequest(apiRequest("/api/visitor/login", {
+    method: "POST",
+    body: { account: "202500101002@stumail.sztu.edu.cn", password: "wrong" },
+  }), env, {}, runtime()));
+  assert.equal(rejected.status, 401);
+});
+
 test("campus email code webhook uses the configured SZTU sender", async (t) => {
   let delivered;
   const env = makeEnvironment({
@@ -425,7 +450,7 @@ test("newbie village auto-approves signed agreements and archives them in OA bef
   assert.equal(oaArchiveCalls[0].signerName, "小深同学");
   assert.equal(oaArchiveCalls[0].agreement.version, initial.body.agreement.version);
   assert.match(oaArchiveCalls[0].contentSha256, /^[a-f0-9]{64}$/u);
-  assert.match(oaArchiveCalls[0].agreementText, /自动审核记录同步到 OA/u);
+  assert.match(oaArchiveCalls[0].agreementText, /自动归档记录同步到 OA/u);
 
   const archive = await env.DB.prepare(
     "SELECT * FROM newbie_agreement_acceptances WHERE email=? AND agreement_version=?",
@@ -434,7 +459,7 @@ test("newbie village auto-approves signed agreements and archives them in OA bef
   assert.match(archive.content_sha256, /^[a-f0-9]{64}$/u);
   assert.equal(archive.review_status, "approved");
   assert.equal(archive.reviewed_by, "system:auto:oa:newbie-oa-test-record");
-  assert.equal(archive.review_note, "已自动审核通过并同步至 OA。");
+  assert.equal(archive.review_note, "已自动归档至 OA。");
   assert.equal(Object.hasOwn(archive, "ip"), false);
   assert.equal(Object.hasOwn(archive, "user_agent"), false);
 
