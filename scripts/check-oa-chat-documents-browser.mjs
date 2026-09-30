@@ -107,7 +107,11 @@ try {
     const preview = page.getByRole('dialog',{name:'文档预览',exact:true});
     const closePreview = async () => { await preview.waitFor(); await preview.getByRole('button',{name:'返回聊天',exact:true}).click(); await preview.waitFor({state:'hidden'}); };
     try {
-      await page.goto(origin); await page.locator('.collaboration-workspace').waitFor(); await page.locator('.collaboration-ai-entry').click(); await page.locator('.oa-shared-chat').waitFor();
+      await page.goto(origin);
+      // Home is the landing page; enter chat through the real workspace navigation.
+      if (name !== 'desktop') await page.getByRole('button',{name:'打开导航',exact:true}).click();
+      await page.locator(name === 'desktop' ? '.oa-desktop-navigation' : '.mobile-sidebar').getByRole('navigation',{name:'核心工作区',exact:true}).getByRole('button',{name:'聊天',exact:true}).click();
+      await page.locator('.collaboration-workspace').waitFor(); await page.locator('.collaboration-ai-entry').click(); await page.locator('.oa-shared-chat').waitFor();
       if (name==='desktop') await page.getByRole('button',{name:'收起侧栏',exact:true}).click();
       assert.equal(await page.getByRole('heading',{name:'实验室大模型能做什么',exact:true}).isVisible(),true);
       assert.equal(await page.locator('.empty-hero p').innerText(),'知识问答、资料整理、会议纪要、项目总结等');
@@ -222,7 +226,10 @@ try {
       await page.waitForTimeout(100); assert.equal(await preview.isVisible(),false);
       assert.equal(await page.locator('.oa-document-card').last().getByRole('button',{name:'下载 Word',exact:true}).count(),0);
       // Reload can restore owner-authorized saved documents without a separate page.
-      mode='success'; await page.reload(); await page.locator('.collaboration-workspace').waitFor();
+      mode='success'; await page.reload();
+      if (name !== 'desktop') await page.getByRole('button',{name:'打开导航',exact:true}).click();
+      await page.locator(name === 'desktop' ? '.oa-desktop-navigation' : '.mobile-sidebar').getByRole('navigation',{name:'核心工作区',exact:true}).getByRole('button',{name:'聊天',exact:true}).click();
+      await page.locator('.collaboration-workspace').waitFor();
       await page.locator('.collaboration-ai-entry').click(); await page.locator('.empty-hero').waitFor();
       await page.getByRole('button',{name:'已保存文档',exact:true}).click();
       const history=page.getByRole('dialog',{name:'本人已保存文档',exact:true}); await history.waitFor();

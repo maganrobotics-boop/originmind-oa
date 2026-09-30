@@ -16,6 +16,8 @@ type MobileChallenge = {
   createdAt: string;
   action: "login" | "link";
   displayName?: string;
+  linkTargetName?: string;
+  linkTargetAccountHint?: string;
   error?: string;
 };
 
@@ -184,16 +186,18 @@ export default function OaQrMobilePage() {
         <p className="oa-qr-mobile-help">如无法打开授权页面，请回到飞书或企业微信，使用应用内的“扫一扫”重新扫描电脑二维码。</p>
       </>}
       {!loading && challenge?.phase === "confirm" && <>
-        <p className="oa-qr-mobile-message">{isLink ? "确认将本次验证的企业微信身份绑定到电脑上已登录的 OA 账号。" : "请核对电脑上的验证码，仅确认你本人发起的登录。"}</p>
+        <p className="oa-qr-mobile-message">{isLink ? "请核对以下企业微信身份和 OA 成员账号，确认两者都属于你本人。" : "请核对电脑上的验证码，仅确认你本人发起的登录。"}</p>
         <div className="oa-qr-mobile-code"><span>核对验证码</span><output aria-label={`验证码 ${challenge.verificationCode}`}>{challenge.verificationCode}</output></div>
         <dl className="oa-qr-mobile-details">
-          {challenge.displayName && <div><dt>验证身份</dt><dd>{challenge.displayName}</dd></div>}
+          {challenge.displayName && <div><dt>{isLink ? "企业微信身份" : "验证身份"}</dt><dd>{challenge.displayName}</dd></div>}
+          {isLink && challenge.linkTargetName && <div><dt>绑定到 OA 成员</dt><dd>{challenge.linkTargetName}</dd></div>}
+          {isLink && challenge.linkTargetAccountHint && <div><dt>OA 账号提示</dt><dd>{challenge.linkTargetAccountHint}</dd></div>}
           <div><dt>请求设备</dt><dd>{challenge.desktopLabel || "扫码前打开的 OA 浏览器"}</dd></div>
           {createdLabel && <div><dt>发起时间</dt><dd>{createdLabel}</dd></div>}
         </dl>
-        <label className="oa-qr-mobile-check"><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} disabled={busy} /><span>电脑端验证码相同，这是我本人发起的请求。</span></label>
+        <label className="oa-qr-mobile-check"><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} disabled={busy} /><span>{isLink ? "两个账号都属于我本人，电脑端验证码相同。" : "电脑端验证码相同，这是我本人发起的请求。"}</span></label>
         <div className="oa-qr-mobile-actions">
-          <button className="oa-qr-mobile-primary" type="button" disabled={busy || !checked || !challenge.verificationCode} onClick={() => { void confirm(true); }}>{busy ? "正在处理…" : isLink ? "确认绑定" : "确认登录这台电脑"}</button>
+          <button className="oa-qr-mobile-primary" type="button" disabled={busy || !checked || !challenge.verificationCode || (isLink && (!challenge.linkTargetName || !challenge.linkTargetAccountHint))} onClick={() => { void confirm(true); }}>{busy ? "正在处理…" : isLink ? "确认绑定" : "确认登录这台电脑"}</button>
           <button className="oa-qr-mobile-secondary" type="button" disabled={busy} onClick={() => { void confirm(false); }}>取消本次请求</button>
         </div>
       </>}

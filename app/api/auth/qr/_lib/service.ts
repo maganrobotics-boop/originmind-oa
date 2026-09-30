@@ -185,6 +185,16 @@ export async function qrCallback(request: Request, provider: QrProvider) { retur
   return mobileRedirect(challenge.id);
 }); }
 
+function qrBindingAccountHint(account: string) {
+  const normalized = account.trim().toLowerCase();
+  const separator = normalized.indexOf("@");
+  if (separator <= 0 || separator !== normalized.lastIndexOf("@") || separator === normalized.length - 1) return "已验证的 OA 账号";
+  const domain = normalized.slice(separator + 1);
+  if (domain === "feishu.invalid") return "飞书成员账号";
+  if (domain === "github.invalid") return "GitHub 成员账号";
+  return `${Array.from(normalized.slice(0, separator))[0]}***@${domain}`;
+}
+
 export async function mobileQrInfo(request: Request) { return guarded(async () => {
   const url = new URL(request.url); if (url.origin !== qrLoginOrigin()) return failure("扫码地址无效。", 400);
   const id = url.searchParams.get("id"); if (!validQrNonce(id)) return failure("请扫描电脑 OA 登录页上的二维码。", 400);
@@ -202,7 +212,18 @@ export async function mobileQrInfo(request: Request) { return guarded(async () =
     return json({ phase: "choose", providers: enabledProviders(challenge.action), error, ...base });
   }
   if (!scannerNonceHash || scannerNonceHash !== challenge.scannerNonceHash) return json({ phase: "denied", error: "二维码已在另一台手机使用，请刷新电脑二维码。", providers: [] });
-  if (challenge.status === "verified") return json({ phase: "confirm", displayName: challenge.displayNameSnapshot, providers: [], ...base });
+  if (challenge.status === "verified") {
+    let linkTarget: { linkTargetName: string; linkTargetAccountHint: string } | undefined;
+    if (challenge.action === "link") {
+      const [member] = await db.select({ fullName: members.fullName, chatgptAccount: members.chatgptAccount }).from(members).where(and(
+        eq(members.id, challenge.linkMemberId || ""), eq(members.status, "active"),
+        eq(members.accountUserId, challenge.linkAccountUserId || ""), eq(members.mutationRevision, challenge.linkMemberRevision || ""),
+      )).limit(1);
+      if (!member) return json({ phase: "denied", error: "原 OA 账号状态已变化，请在电脑上重新发起绑定。", providers: [] });
+      linkTarget = { linkTargetName: member.fullName, linkTargetAccountHint: qrBindingAccountHint(member.chatgptAccount) };
+    }
+    return json({ phase: "confirm", displayName: challenge.displayNameSnapshot, providers: [], ...base, ...linkTarget });
+  }
   if (challenge.status === "approved" || challenge.status === "consumed") return json({ phase: "approved", providers: [], ...base });
   return json({ phase: "denied", error: challenge.denialReason === "wecom-not-linked"
     ? "该企微身份尚未绑定 OA。请先用已有登录方式进入 OA，在“我的”中绑定企业微信，再重新扫码。"

@@ -17,8 +17,12 @@ test("the staging release requires an explicit isolated target before running an
   assert.doesNotMatch(result.stderr, /command not found/u);
 });
 
-test("staging release uses one guarded immutable standalone artifact", () => {
-  assert.equal(packageJson.scripts["release:standalone:staging"], "bash scripts/release-standalone.sh staging");
+test("retired staging commands are absent while the retained shell preserves a guarded immutable artifact", () => {
+  assert.equal(packageJson.scripts["release:standalone:staging"], undefined);
+  assert.equal(packageJson.scripts["build:standalone:staging"], undefined);
+  assert.ok(Object.keys(packageJson.scripts).every(name => !name.startsWith("release:standalone:")));
+  assert.equal(packageJson.scripts.build, "bash scripts/build-verified.sh");
+  assert.doesNotMatch(packageJson.scripts.test, /release-standalone|wrangler|deploy/u);
   assert.match(releaseScript, /OA_STAGING_WORKER_NAME/u);
   assert.match(releaseScript, /OA_STAGING_D1_DATABASE_NAME/u);
   assert.match(releaseScript, /OA_STAGING_RELEASE_CONFIRM/u);

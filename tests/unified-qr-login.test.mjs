@@ -346,6 +346,8 @@ for (const provider of ["feishu", "wecom"]) {
     const info = await infoResponse.json();
     assert.equal(info.phase, "confirm");
     assert.equal(info.displayName, "原有成员");
+    assert.equal(info.linkTargetName, undefined);
+    assert.equal(info.linkTargetAccountHint, undefined);
     assert.equal(info.verificationCode, data.verificationCode);
     assert.equal(info.desktopLabel, "Windows 电脑");
     assert.equal(infoResponse.headers.get("cache-control"), "private, no-store, max-age=0");
@@ -595,6 +597,59 @@ test("WeCom binding requires an existing admitted PC account and never creates a
   assert.equal(sessionWrites(phone).length, 0);
   assert.deepEqual(sqlite.prepare("SELECT * FROM members WHERE id='member-one'").get(), memberBefore);
 });
+
+test("binding phone confirmation shows its verified source and guarded OA destination only to that phone", async () => {
+  sqlite.exec("DELETE FROM auth_identities WHERE provider='wecom'");
+  const auth = authorizedUser();
+  const pc = browser();
+  const phone = browser();
+  const data = await start(pc, "link", auth);
+  const publicInfo = await (await mobileInfo(browser(), data.id)).json();
+  assert.equal(publicInfo.phase, "choose");
+  assert.equal(publicInfo.linkTargetName, undefined);
+  assert.equal(publicInfo.linkTargetAccountHint, undefined);
+  const oauth = await scan(phone, data.id, "wecom");
+  const beforeVerification = await (await mobileInfo(phone, data.id)).json();
+  assert.equal(beforeVerification.phase, "choose");
+  assert.equal(beforeVerification.linkTargetName, undefined);
+  assert.equal(beforeVerification.linkTargetAccountHint, undefined);
+  await callback(phone, "wecom", oauth.state);
+  const denied = await (await mobileInfo(browser(), data.id)).json();
+  assert.equal(denied.phase, "denied");
+  assert.equal(denied.displayName, undefined);
+  assert.equal(denied.linkTargetName, undefined);
+  assert.equal(denied.linkTargetAccountHint, undefined);
+  const info = await (await mobileInfo(phone, data.id)).json();
+  assert.equal(info.phase, "confirm");
+  assert.equal(info.action, "link");
+  assert.equal(info.displayName, "平台显示名");
+  assert.equal(info.linkTargetName, "原有成员");
+  assert.equal(info.linkTargetAccountHint, "m***@example.test");
+  const serialized = JSON.stringify(info);
+  assert.ok(!serialized.includes("member-one@example.test"), "The phone must not receive the full OA email");
+  assert.ok(!serialized.includes("member-one"), "The phone must not receive the member ID or account subject");
+});
+
+for (const [label, mutation] of [
+  ["member revision", "UPDATE members SET mutation_revision='member-r2' WHERE id='member-one'"],
+  ["OA account subject", "UPDATE members SET account_user_id='email:changed@example.test' WHERE id='member-one'"],
+  ["member status", "UPDATE members SET status='departed' WHERE id='member-one'"],
+]) {
+  test(`binding phone info hides both identities when the target's ${label} changes`, async () => {
+    const { phone, data } = await verifiedFlow("wecom", { action: "link", authorized: authorizedUser() });
+    sqlite.exec(mutation);
+    const info = await (await mobileInfo(phone, data.id)).json();
+    assert.equal(info.phase, "denied");
+    assert.match(info.error, /重新发起绑定/u);
+    assert.equal(info.displayName, undefined);
+    assert.equal(info.linkTargetName, undefined);
+    assert.equal(info.linkTargetAccountHint, undefined);
+    assert.deepEqual(info.providers, []);
+    assert.equal(challengeRow(data.id).status, "verified", "Reading mobile info must not mutate the QR request");
+    assert.equal(count("oauth_sessions"), 0);
+    assert.equal(count("member_events"), 0);
+  });
+}
 
 test("binding refuses a changed authorization snapshot and membership changes at database commit", async () => {
   sqlite.exec("DELETE FROM auth_identities WHERE provider='wecom'");
