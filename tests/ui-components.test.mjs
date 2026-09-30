@@ -98,8 +98,11 @@ test("labels the internal laboratory AI wait and supports Chat-style send and st
   assert.doesNotMatch(source, /dangerouslySetInnerHTML|localStorage|conversationToken/u);
 });
 
-test("makes the official Feishu QR the primary login and keeps ChatGPT and GitHub under smaller alternatives", async () => {
-  const pageSource = await readFile(path.join(root, "app/page.tsx"), "utf8");
+test("uses one OA QR for enabled Feishu and WeCom accounts and keeps ChatGPT and GitHub under smaller alternatives", async () => {
+  const [pageSource, qrSource] = await Promise.all([
+    readFile(path.join(root, "app/page.tsx"), "utf8"),
+    readFile(path.join(root, "components/oa-qr-login.tsx"), "utf8"),
+  ]);
   const choiceStart = pageSource.indexOf(
     'className="login-entry-panel"',
   );
@@ -112,7 +115,9 @@ test("makes the official Feishu QR the primary login and keeps ChatGPT and GitHu
   assert.notEqual(choiceEnd, -1);
   const choiceSource = pageSource.slice(choiceStart, choiceEnd);
 
-  assert.match(choiceSource, /<FeishuQrLogin enabled=\{feishuLoginEnabled\}\s*\/>/u);
+  assert.match(choiceSource, /<FeishuQrLogin enabled=\{feishuLoginEnabled\}\s+wecomEnabled=\{wecomLoginEnabled\}\s*\/>/u);
+  assert.match(pageSource, /return <OaQrLogin feishuEnabled=\{enabled\} wecomEnabled=\{wecomEnabled\} \/>/u);
+  assert.match(pageSource, /<RegistrationGate[^>]*feishuLoginEnabled=\{session\.feishuLoginEnabled\}[^>]*wecomLoginEnabled=\{session\.wecomLoginEnabled\}/u);
   assert.match(choiceSource, /<details className="other-login-options">/u);
   assert.match(choiceSource, /<summary>采用其他方式登录<\/summary>/u);
   assert.match(
@@ -131,16 +136,39 @@ test("makes the official Feishu QR the primary login and keeps ChatGPT and GitHu
   assert.match(pageSource, /provision-feishu-member/u);
   assert.match(pageSource, /这是我的账户，确认绑定/u);
   assert.match(pageSource, /系统不会仅凭姓名自动合并/u);
-  assert.match(pageSource, /LarkSSOSDKWebQRCode-1\.0\.3\.js/u);
-  assert.match(pageSource, /qrLogin\.matchOrigin\(event\.origin\)\s*\|\|\s*!qrLogin\.matchData\(event\.data\)/u);
-  assert.match(pageSource, /authorizeUrl\.searchParams\.set\("tmp_code", temporaryCode\)/u);
-  assert.match(pageSource, /本机已登录飞书，直接继续/u);
+  assert.match(qrSource, /post<QrChallenge>\("\/api\/auth\/qr\/start", \{ action \}\)/u);
+  assert.match(qrSource, /post<StatusResponse>\("\/api\/auth\/qr\/status", \{ id: currentId \}\)/u);
+  assert.match(qrSource, /method: "POST"[\s\S]*?credentials: "same-origin"[\s\S]*?cache: "no-store"/u);
+  assert.match(qrSource, /scanUrl\.origin !== window\.location\.origin \|\| scanUrl\.pathname !== "\/auth\/qr"/u);
+  assert.match(qrSource, /身份已验证，请在手机上核对验证码并确认/u);
+  assert.match(qrSource, /href="\/api\/auth\/feishu\/start" target="_top">在本机打开飞书登录/u);
+  assert.doesNotMatch(pageSource + qrSource, /LarkSSOSDKWebQRCode|qrLogin\.matchData|searchParams\.set\("tmp_code"/u);
+  assert.doesNotMatch(qrSource, /localStorage|sessionStorage|dangerouslySetInnerHTML/u);
   const gateSource = pageSource.slice(pageSource.indexOf("function RegistrationGate"), pageSource.indexOf("function IdentityAccessGate"));
   assert.doesNotMatch(gateSource, /首次使用登记|提交注册申请|<Field label="学号 \/ 工号|<Field label="当前认证身份"/u);
   assert.match(gateSource, /完成基本信息和保密协议后进入个人主页与新手任务/u);
   assert.match(gateSource, /游客仅能访问公开资料/u);
   assert.doesNotMatch(gateSource, /无需填写姓名、学号、工号或额外认证资料/u);
   assert.match(gateSource, /都不是我的，以当前飞书身份进入/u);
+});
+
+test("the QR entry describes only enabled platforms and renders one shared QR frame", async () => {
+  const { OaQrLogin } = await vite.ssrLoadModule("/components/oa-qr-login.tsx");
+  for (const [feishuEnabled, wecomEnabled, title] of [
+    [true, false, "使用飞书扫码登录"],
+    [false, true, "使用企业微信扫码登录"],
+    [true, true, "使用飞书或企业微信扫码登录"],
+  ]) {
+    const html = renderToStaticMarkup(React.createElement(OaQrLogin, { feishuEnabled, wecomEnabled }));
+    assert.match(html, /aria-label="OA 统一扫码登录"/u);
+    assert.ok(html.includes(title), title);
+    assert.equal((html.match(/class="oa-qr-frame"/gu) || []).length, 1);
+    assert.equal(html.includes('href="/api/auth/feishu/start"'), feishuEnabled);
+    assert.equal(html.includes("企业微信暂未配置，当前可使用飞书扫码。"), !wecomEnabled);
+  }
+  const disabled = renderToStaticMarkup(React.createElement(OaQrLogin, { feishuEnabled: false, wecomEnabled: false }));
+  assert.match(disabled, /此 OA 尚未配置扫码登录/u);
+  assert.doesNotMatch(disabled, /class="oa-qr-frame"|href="\/api\/auth\/feishu\/start"/u);
 });
 
 test("lets a member change their name in personal settings and updates the current UI identity", async () => {
@@ -217,7 +245,7 @@ test("lets a pending applicant sign out into a QR-first account switch screen", 
   assert.match(gateSource, /fetch\("\/api\/session", \{ method: "DELETE", credentials: "same-origin" \}\)/u);
   assert.match(gateSource, /if \(!response\.ok\) throw new Error\("当前 OA 会话未能退出"\)/u);
   assert.match(gateSource, /切换 GitHub 账户登录/u);
-  assert.match(gateSource, /<FeishuQrLogin enabled=\{session\.feishuLoginEnabled === true\}\s*\/>/u);
+  assert.match(gateSource, /<FeishuQrLogin enabled=\{session\.feishuLoginEnabled === true\}\s+wecomEnabled=\{session\.wecomLoginEnabled === true\}\s*\/>/u);
   assert.match(gateSource, /<summary>采用其他方式登录<\/summary>/u);
   assert.match(gateSource, /href="\/api\/auth\/github\/start" target="_top"/u);
   assert.match(gateSource, /切换登录方式不会删除原账户的注册、审核或业务记录/u);

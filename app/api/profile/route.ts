@@ -3,6 +3,7 @@ import { getDb } from "../../../db";
 import { accountProfiles, authIdentities, memberEvents, members } from "../../../db/schema";
 import { authorizedMemberGuard, getAuthorizedUser, parseAccountProfile, type AccountProfile, type ProfileVisibility } from "../_lib/auth";
 import { isChatGPTLoginEnabled } from "../../../lib/auth-capabilities";
+import { WECOM_PROVIDER, isWecomLoginEnabled } from "../../../lib/wecom-oauth";
 import { FEISHU_PROVIDER, isFeishuLoginEnabled } from "../../../lib/feishu-oauth";
 import { GITHUB_PROVIDER, isGitHubLoginEnabled } from "../../../lib/github-oauth";
 import { isAllowedAvatarDataUrl } from "../../../lib/image-data-url";
@@ -35,8 +36,8 @@ export async function GET() {
     const parsedProfile = parseAccountProfile(profile?.profileJson);
     parsedProfile.department = memberDepartmentLabel(member?.departmentCode);
     const implicitProviders = member?.accountUserId?.startsWith("email:") ? ["chatgpt"] : [];
-    const linkedProviders = Array.from(new Set([...implicitProviders, ...linkedIdentityRows.map((row) => row.provider).filter((provider) => provider === GITHUB_PROVIDER || provider === FEISHU_PROVIDER)]));
-    return profileJson({ user: authorized.user, officialName: member?.status === "active" ? member.fullName : authorized.user.displayName, profile: { avatarDataUrl: profile?.avatarDataUrl || "", ...parsedProfile, lastSeenAt: profile?.lastSeenAt || "" }, linkedProviders, chatgptLoginEnabled: isChatGPTLoginEnabled(), githubLoginEnabled: isGitHubLoginEnabled(), feishuLoginEnabled: isFeishuLoginEnabled(), chatgptLinked: linkedProviders.includes("chatgpt"), githubLinked: linkedProviders.includes(GITHUB_PROVIDER), feishuLinked: linkedProviders.includes(FEISHU_PROVIDER) });
+    const linkedProviders = Array.from(new Set([...implicitProviders, ...linkedIdentityRows.map((row) => row.provider).filter((provider) => provider === GITHUB_PROVIDER || provider === FEISHU_PROVIDER || provider === WECOM_PROVIDER)]));
+    return profileJson({ user: authorized.user, officialName: member?.status === "active" ? member.fullName : authorized.user.displayName, profile: { avatarDataUrl: profile?.avatarDataUrl || "", ...parsedProfile, lastSeenAt: profile?.lastSeenAt || "" }, linkedProviders, chatgptLoginEnabled: isChatGPTLoginEnabled(), githubLoginEnabled: isGitHubLoginEnabled(), feishuLoginEnabled: isFeishuLoginEnabled(), chatgptLinked: linkedProviders.includes("chatgpt"), githubLinked: linkedProviders.includes(GITHUB_PROVIDER), feishuLinked: linkedProviders.includes(FEISHU_PROVIDER), wecomLoginEnabled: isWecomLoginEnabled(), wecomLinked: linkedProviders.includes(WECOM_PROVIDER) });
   } catch {
     return profileJson({ error: "个人资料暂不可用，请稍后重试。" }, { status: 500 });
   }

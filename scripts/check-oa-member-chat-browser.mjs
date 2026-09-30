@@ -37,7 +37,11 @@ try {
     }else if(url.pathname==='/api/approvals')data={approvals:[]};else if(url.pathname==='/api/members')data={members:[],pendingCount:0};else if(url.pathname==='/api/knowledge')data={items:[],pendingCount:0};else if(url.pathname==='/api/people')data={people:[]};else if(url.pathname==='/api/profile')data={profile:{}};
     return route.fulfill({json:data});
    });
-   await page.goto(origin);await page.locator('.collaboration-workspace').waitFor();await page.locator('.collaboration-ai-entry').click();await page.locator('.oa-shared-chat').waitFor();if(name==='desktop')await page.getByRole('button',{name:'收起侧栏',exact:true}).click();return page;
+   await page.goto(origin);
+   // Home is the landing page; enter chat through the real navigation for each user.
+   if(name!=='desktop')await page.getByRole('button',{name:'打开导航',exact:true}).click();
+   await page.locator(name==='desktop'?'.oa-desktop-navigation':'.mobile-sidebar').getByRole('navigation',{name:'核心工作区',exact:true}).getByRole('button',{name:'聊天',exact:true}).click();
+   await page.locator('.collaboration-workspace').waitFor();await page.locator('.collaboration-ai-entry').click();await page.locator('.oa-shared-chat').waitFor();if(name==='desktop')await page.getByRole('button',{name:'收起侧栏',exact:true}).click();return page;
   };
   const alice=await open(people[0]),bob=await open(people[1]);
   try {

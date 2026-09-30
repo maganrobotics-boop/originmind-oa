@@ -7,16 +7,19 @@ const shellPath = fileURLToPath(new URL('../scripts/release-production.sh', impo
 const shell = await readFile(shellPath, 'utf8');
 const workflow = await readFile(new URL('../.github/workflows/deploy-oa.yml', import.meta.url), 'utf8');
 
-test('activation is opt-in on the existing protected manual main release, never PR checks', () => {
+test('the retired workflow cannot activate Cloudflare services, while the retained shell remains opt-in and guarded', () => {
   assert.doesNotMatch(shell, /\r/u);
-  assert.match(workflow, /enable_ai_workbench:[\s\S]*?default: false[\s\S]*?type: boolean/u);
-  assert.match(workflow, /enable_meeting_bot:[\s\S]*?default: false[\s\S]*?type: boolean/u);
-  assert.match(workflow, /enable_feishu_webmail:[\s\S]*?default: false[\s\S]*?type: boolean/u);
-  assert.match(workflow, /name: production-oa/u);
-  assert.match(workflow, /group: oa-production/u);
-  assert.doesNotMatch(workflow.slice(workflow.indexOf('  test:'), workflow.indexOf('  deploy:')), /OA_PRODUCTION_ENABLE_AI_WORKBENCH:/u);
-  assert.doesNotMatch(workflow.slice(workflow.indexOf('  test:'), workflow.indexOf('  deploy:')), /OA_PRODUCTION_ENABLE_MEETING_BOT:/u);
-  assert.doesNotMatch(workflow.slice(workflow.indexOf('  test:'), workflow.indexOf('  deploy:')), /OA_PRODUCTION_ENABLE_FEISHU_WEBMAIL:/u);
+  assert.match(workflow, /^name: Check retired OA code$/mu);
+  assert.match(workflow, /on:\n  push:\n    branches: \[main\]\n  pull_request:\n    branches: \[main\]/u);
+  assert.match(workflow, /permissions:\n  contents: read/u);
+  const jobs = workflow.slice(workflow.indexOf('jobs:\n') + 'jobs:\n'.length);
+  assert.deepEqual([...jobs.matchAll(/^  ([a-z-]+):$/gmu)].map(match => match[1]), ['test']);
+  assert.match(workflow, /run: npm run install:ci/u);
+  assert.match(workflow, /run: npm run typecheck/u);
+  assert.match(workflow, /run: npm run lint/u);
+  assert.match(workflow, /run: npm test/u);
+  assert.doesNotMatch(workflow, /workflow_dispatch|pull_request_target|\bwrite\b|secrets\.|CLOUDFLARE_API_TOKEN|PUBLIC_LAB_AI_SERVICE_TOKEN|release:standalone|run_wrangler/u);
+  assert.doesNotMatch(workflow, /OA_PRODUCTION_ENABLE_(?:AI_WORKBENCH|MEETING_BOT|FEISHU_WEBMAIL):/u);
   assert.match(shell, /workbench_enabled="\$\{OA_PRODUCTION_ENABLE_AI_WORKBENCH:-false\}"/u);
   assert.equal((shell.match(/workbench_deploy_args=\(--var OA_AI_TASKS_ENABLED:true\)/gu) || []).length, 1);
   assert.equal((shell.match(/"\$\{workbench_deploy_args\[@\]\}"/gu) || []).length, 2);
@@ -42,4 +45,3 @@ test('release shell parses and refuses an unauthorised activation before running
   const webmailBlocked = spawnSync('/bin/bash', [shellPath, 'production'], { encoding: 'utf8', env: { PATH: '/nonexistent', OA_PRODUCTION_ENABLE_FEISHU_WEBMAIL: 'true' } });
   assert.equal(webmailBlocked.status, 64); assert.doesNotMatch(webmailBlocked.stderr, /command not found/u);
 });
-
