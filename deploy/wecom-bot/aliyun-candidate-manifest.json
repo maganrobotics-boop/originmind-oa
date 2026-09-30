@@ -1,0 +1,28 @@
+{
+  "productionSource": "/opt/omindos-deploy/releases/oa-8a0bffc8b1e1",
+  "mainBase": "e70c9118fe778291e95e1f3c109a8e0eff81c252",
+  "sourceFilesCopied": 959,
+  "authBeforeSha256": "6fb5eaef4ff347ba9d3ff56e2c25e96794a518c80d7f889d30985abd54a0ec2d",
+  "authAfterSha256": "164371b9557d75627e1acec7ecc6bcae9ca2b124ca2f3b0bfe63d3106c2ab6c4",
+  "overlayPaths": [
+    "WECOM_BOT.md",
+    "app/api/_lib/auth.ts",
+    "app/api/integrations/wecom-bot/link/route.ts",
+    "app/api/integrations/wecom-bot/messages/route.ts",
+    "app/integrations/wecom-bot/page.tsx",
+    "deploy/wecom-bot/originmind-wecom-bot.service",
+    "deploy/wecom-bot/package-lock.json",
+    "deploy/wecom-bot/package.json",
+    "drizzle/0036_wecom_bot.sql",
+    "lib/wecom-bot-contract.d.mts",
+    "lib/wecom-bot-contract.mjs",
+    "lib/wecom-bot-store.ts",
+    "lib/wecom-bot-transport.mjs",
+    "scripts/configure-wecom-bot.py",
+    "scripts/wecom-bot.mjs",
+    "tests/wecom-bot-configure.test.mjs",
+    "tests/wecom-bot-contract.test.mjs",
+    "tests/wecom-bot-store.test.mjs",
+    "tests/wecom-bot-transport.test.mjs"
+  ]
+}
