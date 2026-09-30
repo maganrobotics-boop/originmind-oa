@@ -7,7 +7,7 @@
 - 仅支持与机器人私聊的文字消息；群聊只回复公开使用提示。
 - 用户在已登录 OA 的 `/integrations/wecom-bot` 生成五分钟绑定码，私聊发给机器人，再回 OA 确认。绑定码仅保存哈希，不放在 URL、日志或浏览器持久存储中。
 - 身份按机器人 ID + 发送者 ID 关联现有成员。不会按姓名或邮箱匹配，不复用企微 OAuth 身份。
-- `我的待办` 或 `/待办` 只读取本人负责或创建的未完成工作项；普通提问调用现有 OA 已审核知识检索和助研。当前没有提交、审批或业务修改命令。
+- `我的待办` 或 `/待办` 只读取本人负责或创建的未完成工作项；普通提问调用现有 OA 已审核知识检索和助研。当前没有待审批列表、实时项目进度汇总、提交、审批或业务修改命令。
 - 每次调用及生成答案后重新检查成员、账号、角色、NDA 与绑定状态。管理员沿用 OA 的 NDA 豁免，仍须有已启用的成员记录。解绑、成员停用或重新绑定账号后，旧机器人身份不能读取 OA 数据。
 - 知识候选按提问关键词读取最多 256 个有效分块，再调用现有 OA 排序与问答逻辑。只读取当前有效且审核通过的内部/公开资料，既不依赖 NDA 缓存字段，也不修改已有资料库授权逻辑。
 - 模型调用前后精确核对所选证据的资料、版本、分块、权限与内容；生成过程中资料撤回或改写时，该回答不会返回。新增资料改变关键词候选排序不会使仍有效的证据被误判。
@@ -27,7 +27,7 @@
 
 本次开发基于 main `e70c9118fe778291e95e1f3c109a8e0eff81c252`。main 与当前生产源码已有差异，不能用 main 全量覆盖线上。新增文件可单独集成；`app/api/_lib/auth.ts` 只添加 `getAuthorizedIntegrationMember`，保留线上现有授权函数及阿里云数据库/模型适配。`deploy/wecom-bot/aliyun-auth.patch` 针对实际生产 `oa-8a0bffc8b1e1`，配套 manifest 记录原文件校验值；先核验校验值并在源码副本执行 `git apply --check`，再应用补丁。候选保留生产 package、Next 配置与适配器，不包含环境配置、业务数据库或上传文件。源码变更后须重新完成类型检查、构建和回归。
 
-新增 `drizzle/0036_wecom_bot.sql`，只创建机器人绑定、临时绑定请求与消息去重三张表及六个索引，不改审批、成员、资料或待办数据。`0035` 保留给尚未上线的二维码登录 PR；不能因此自动应用该 PR 的迁移。先备份数据库、核验新表尚不存在、在事务内应用并记录迁移，再检查精确表结构和索引。首次试用准备不执行生产迁移。
+新增独立、连续的 `drizzle/0035_wecom_bot.sql`，只创建机器人绑定、临时绑定请求与消息去重三张表及七个显式索引，不改审批、成员、资料或待办数据。配套 schema、Drizzle journal/snapshot 和已审核迁移 hash 必须一致。未合并的二维码 PR #115 需在后续合并前基于机器人迁移重新生成自己的下一编号，不能在本次自动应用其 OAuth 迁移。先备份数据库、核验新表尚不存在、在事务内应用并记录迁移，再检查精确表结构和索引。首次试用准备不执行生产迁移。
 
 SDK 锁定为 `@wecom/aibot-node-sdk@1.0.7`，依赖放在 `deploy/wecom-bot`，不加入 OA 网页构建依赖：
 
@@ -44,6 +44,18 @@ npm run typecheck
 OA 端需要 `WECOM_BOT_ENABLED=true`、`WECOM_BOT_ID`、`WECOM_BOT_BRIDGE_SECRET` 与 `OA_PUBLIC_ORIGIN=https://oa.omindos.cn`，配置程序将它们写入新的 `bridge.env`。机器人端需要 `WECOM_BOT_ID`、`WECOM_BOT_SECRET`、同一桥接密钥及 `WECOM_BOT_BRIDGE_URL`。当前 OA 主站上游为 `127.0.0.1:3000`；额外预览路径使用其他端口，不应作为机器人服务地址。桥接密钥是 43 字符 base64url 值；Bot Secret 仅用于官方 SDK，不发给 OA 请求接口。
 
 完成源码、迁移、配置及备份核对后，再执行 systemd daemon-reload、OA 切换/重启和机器人启动。未配置时 API 返回未启用，机器人不会连接。
+
+## 2026-10-01 接续检查点
+
+已预置独立机器人程序与 systemd unit，运行目录为 `/opt/originmind-wecom-bot/current`；服务尚未启用或启动。阿里云 OA 构建候选已保存为 `/opt/omindos-deploy/releases/oa-wecom-trial-20261001`，现网仍使用 `/opt/omindos-deploy/releases/oa-8a0bffc8b1e1`。生产库仅做表结构读取和空库演练，尚未应用机器人迁移。
+
+创建 API 长连接机器人后，在服务器终端安全配置：
+
+```sh
+sudo python3 /opt/originmind-wecom-bot/current/scripts/configure-wecom-bot.py
+```
+
+此步骤输入 Secret 时不回显，也不启动服务。配置后须由维护者重新核对当前线上版本、完成备份与事务迁移、切换增量候选，再启动及验收。main 的浏览器/公式基线修复仅用于仓库检查；生产前端和共享 renderer 与 main 不同，本候选保留生产文件，没有用 main 覆盖。
 
 ## 验证与运行边界
 

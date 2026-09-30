@@ -1,7 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHmac, randomBytes } from 'node:crypto';
-import { EventEmitter } from 'node:events';
+import { EventEmitter, once } from 'node:events';
+import { createServer } from 'node:http';
+import { readFile } from 'node:fs/promises';
 import { ACK_REPLY, attachBotClient, BotTransportError, boundStreamReply, BUSY_REPLY, createBotMessageHandler, createBridgeClient, createSafeLogger, EMPTY_REPLY,
   DEFAULT_BRIDGE_URL, FAILURE_REPLY, GROUP_HELP, MAX_BRIDGE_BYTES, MAX_STREAM_BYTES, PUBLIC_HELP,
   readBotEnvironment, signBridgeBody, validateBridgeSecret, validateBridgeUrl } from '../lib/wecom-bot-transport.mjs';
@@ -70,6 +72,104 @@ test('bridge signs exact UTF-8 JSON request with milliseconds and never forwards
   assert.deepEqual(JSON.parse(options.body), { botId, userId: 'user1', messageId: 'msg1', text: '我的资料？' });
   assert.notEqual(signBridgeBody(secret, '1790806700000', options.body), signBridgeBody(secret, '1790806700001', options.body));
   assert.throws(() => signBridgeBody(secret, '0', '{}'));
+});
+
+test('default loopback HTTP bridge passes the Aliyun proxy-origin guard on the wire', async (t) => {
+  // Isolated fixture of aliyun/oa-server.mjs's production guard. No OA process,
+  // business data, provider connection or existing configuration is accessed.
+  const publicOrigin = new URL('https://oa.omindos.cn/');
+  const accepted = [];
+  let responseMode = 'normal';
+  let hangingClosed;
+  const server = createServer(async (req, res) => {
+    const trustedHost = ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)
+      && req.headers.host === publicOrigin.host
+      && req.headers['x-forwarded-host'] === publicOrigin.host;
+    if (!trustedHost || req.headers['x-forwarded-proto'] !== 'https') {
+      res.writeHead(421, { 'cache-control': 'no-store' });
+      res.end('Invalid proxy origin');
+      return;
+    }
+    let body = '';
+    for await (const chunk of req) body += chunk;
+    accepted.push({ method: req.method, path: req.url, headers: req.headers, body });
+    if (responseMode === 'redirect') {
+      res.writeHead(302, { location: 'https://example.test/never-follow' });
+      res.end();
+    } else if (responseMode === 'too_large') {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.write(Buffer.alloc(MAX_BRIDGE_BYTES));
+      res.end(Buffer.alloc(1));
+    } else if (responseMode === 'hanging_body') {
+      hangingClosed = once(res, 'close');
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.flushHeaders();
+    } else {
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.end(JSON.stringify({ ok: true, reply: 'isolated guard accepted' }));
+    }
+  });
+  t.after(async () => {
+    server.closeAllConnections();
+    await new Promise((resolve, reject) => server.close((error) => error ? reject(error) : resolve()));
+  });
+  server.listen(0, '127.0.0.1');
+  await once(server, 'listening');
+  const localUrl = `http://127.0.0.1:${server.address().port}/api/integrations/wecom-bot/messages`;
+  const rejected = await fetch(localUrl, { method: 'POST', body: '{}' });
+  assert.equal(rejected.status, 421);
+  await rejected.arrayBuffer();
+  // Remap only the fixed local port in an isolated copy of the actual module,
+  // because production occupies port 3000. Exercise its default transport,
+  // proxy headers, response parser and HMAC without injecting a fake fetch.
+  const source = await readFile(new URL('../lib/wecom-bot-transport.mjs', import.meta.url), 'utf8');
+  const fixedPort = 'http://127.0.0.1:3000${BRIDGE_PATH}';
+  assert.equal(source.split(fixedPort).length, 2);
+  const isolatedSource = source.replace(fixedPort, `http://127.0.0.1:${server.address().port}\${BRIDGE_PATH}`);
+  const transport = await import(`data:text/javascript;base64,${Buffer.from(isolatedSource).toString('base64')}`);
+  assert.equal(transport.DEFAULT_BRIDGE_URL, localUrl);
+  const bridge = transport.createBridgeClient({ endpoint: localUrl, secret });
+  const payload = { botId, userId: 'user1', messageId: 'fixture1', text: 'isolated request' };
+  assert.equal(await bridge(payload), 'isolated guard accepted');
+  assert.equal(accepted.length, 1);
+  const request = accepted[0];
+  assert.equal(request.method, 'POST');
+  assert.equal(request.path, '/api/integrations/wecom-bot/messages');
+  assert.equal(request.headers.host, 'oa.omindos.cn');
+  assert.equal(request.headers['x-forwarded-host'], 'oa.omindos.cn');
+  assert.equal(request.headers['x-forwarded-proto'], 'https');
+  assert.deepEqual(JSON.parse(request.body), payload);
+  assert.equal(request.headers['x-oa-bot-signature'],
+    signBridgeBody(secret, request.headers['x-oa-bot-timestamp'], request.body));
+  responseMode = 'redirect';
+  await assert.rejects(bridge(payload), (error) => error.code === 'bridge_redirect_rejected');
+  responseMode = 'too_large';
+  await assert.rejects(bridge(payload), (error) => error.code === 'bridge_response_too_large');
+  responseMode = 'hanging_body';
+  const timedBridge = transport.createBridgeClient({ endpoint: localUrl, secret, timeoutMs: 100 });
+  await assert.rejects(timedBridge(payload), (error) => error.code === 'bridge_timeout');
+  assert.ok(hangingClosed, 'request must reach the fixture before the timeout');
+  // Abort must close the actual local response stream rather than merely reject
+  // a Promise while leaving an unbounded body read or socket alive.
+  await Promise.race([hangingClosed, new Promise((_, reject) => {
+    const timer = setTimeout(() => reject(new Error('timed-out socket remained open')), 1000);
+    timer.unref();
+  })]);
+});
+
+test('operator-selected HTTPS bridge uses its normal Host without Aliyun proxy headers', async () => {
+  const endpoint = 'https://bridge.example.test/api/integrations/wecom-bot/messages';
+  let requestHeaders;
+  const bridge = createBridgeClient({ endpoint, secret, fetchImpl: async (url, options) => {
+    assert.equal(url, endpoint);
+    requestHeaders = options.headers;
+    return jsonResponse();
+  } });
+  assert.equal(await bridge({ botId, userId: 'user1', messageId: 'https1', text: 'hello' }), '结果');
+  for (const key of ['host', 'x-forwarded-host', 'x-forwarded-proto']) {
+    assert.equal(Object.hasOwn(requestHeaders, key), false);
+  }
+  assert.equal(requestHeaders['content-type'], 'application/json');
 });
 
 test('bridge refuses redirects, external final URLs, content type and HTTP error bodies', async () => {

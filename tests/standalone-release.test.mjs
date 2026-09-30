@@ -17,8 +17,14 @@ test("the staging release requires an explicit isolated target before running an
   assert.doesNotMatch(result.stderr, /command not found/u);
 });
 
-test("staging release uses one guarded immutable standalone artifact", () => {
-  assert.equal(packageJson.scripts["release:standalone:staging"], "bash scripts/release-standalone.sh staging");
+test("retired Cloudflare release commands are not exposed by package scripts", () => {
+  assert.deepEqual(Object.keys(packageJson.scripts).filter(name => name.startsWith("release:standalone:")), []);
+  for (const [name, command] of Object.entries(packageJson.scripts)) {
+    assert.doesNotMatch(command, /release-(?:production|standalone)\.sh|wrangler\s+(?:deploy|publish)/u, `${name} must not reactivate a retired Cloudflare release`);
+  }
+});
+
+test("retained staging release shell uses one guarded immutable standalone artifact", () => {
   assert.match(releaseScript, /OA_STAGING_WORKER_NAME/u);
   assert.match(releaseScript, /OA_STAGING_D1_DATABASE_NAME/u);
   assert.match(releaseScript, /OA_STAGING_RELEASE_CONFIRM/u);

@@ -9,7 +9,7 @@ import { stripTypeScriptTypes } from 'node:module';
 import * as contract from '../lib/wecom-bot-contract.mjs';
 const { BOT_SQL } = contract;
 
-const migration = readFileSync(new URL('../drizzle/0036_wecom_bot.sql', import.meta.url), 'utf8');
+const migration = readFileSync(new URL('../drizzle/0035_wecom_bot.sql', import.meta.url), 'utf8');
 const now = '2026-10-01T00:00:00.000Z';
 const expiresAt = '2026-10-01T00:05:00.000Z';
 const base = {

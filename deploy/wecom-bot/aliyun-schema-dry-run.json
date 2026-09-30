@@ -1,0 +1,48 @@
+{
+  "source": "production sqlite_master schema only; no business rows copied",
+  "liveDatabaseMutated": false,
+  "onlyNewBotObjects": true,
+  "objectsAdded": [
+    {
+      "type": "index",
+      "name": "wecom_bot_links_active_member_unique"
+    },
+    {
+      "type": "index",
+      "name": "wecom_bot_messages_bot_rate_idx"
+    },
+    {
+      "type": "index",
+      "name": "wecom_bot_messages_expiry_idx"
+    },
+    {
+      "type": "index",
+      "name": "wecom_bot_messages_rate_idx"
+    },
+    {
+      "type": "index",
+      "name": "wecom_bot_pairings_active_member_unique"
+    },
+    {
+      "type": "index",
+      "name": "wecom_bot_pairings_code_hash_unique"
+    },
+    {
+      "type": "index",
+      "name": "wecom_bot_pairings_expiry_idx"
+    },
+    {
+      "type": "table",
+      "name": "wecom_bot_links"
+    },
+    {
+      "type": "table",
+      "name": "wecom_bot_messages"
+    },
+    {
+      "type": "table",
+      "name": "wecom_bot_pairings"
+    }
+  ],
+  "migrationSha256": "902eadc0dd428acf23168a1e41f4bbec7fe81e17d4d563749fc911d1d780cca0"
+}

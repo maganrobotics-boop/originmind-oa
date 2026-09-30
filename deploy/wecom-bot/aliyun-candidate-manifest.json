@@ -13,7 +13,7 @@
     "deploy/wecom-bot/originmind-wecom-bot.service",
     "deploy/wecom-bot/package-lock.json",
     "deploy/wecom-bot/package.json",
-    "drizzle/0036_wecom_bot.sql",
+    "drizzle/0035_wecom_bot.sql",
     "lib/wecom-bot-contract.d.mts",
     "lib/wecom-bot-contract.mjs",
     "lib/wecom-bot-store.ts",
@@ -23,6 +23,31 @@
     "tests/wecom-bot-configure.test.mjs",
     "tests/wecom-bot-contract.test.mjs",
     "tests/wecom-bot-store.test.mjs",
-    "tests/wecom-bot-transport.test.mjs"
-  ]
+    "tests/wecom-bot-transport.test.mjs",
+    "db/schema.ts",
+    "drizzle/meta/_journal.json",
+    "drizzle/meta/0035_snapshot.json",
+    "lib/production-release.mjs",
+    "tests/production-release.test.mjs"
+  ],
+  "migration": {
+    "name": "0035_wecom_bot.sql",
+    "sha256": "902eadc0dd428acf23168a1e41f4bbec7fe81e17d4d563749fc911d1d780cca0",
+    "prerequisiteMigration": "0034_lab_oa_v2_foundation.sql",
+    "requiresWecomQrLoginMigration": false,
+    "tables": [
+      "wecom_bot_links",
+      "wecom_bot_messages",
+      "wecom_bot_pairings"
+    ],
+    "indexes": [
+      "wecom_bot_links_active_member_unique",
+      "wecom_bot_messages_expiry_idx",
+      "wecom_bot_messages_rate_idx",
+      "wecom_bot_messages_bot_rate_idx",
+      "wecom_bot_pairings_code_hash_unique",
+      "wecom_bot_pairings_active_member_unique",
+      "wecom_bot_pairings_expiry_idx"
+    ]
+  }
 }
