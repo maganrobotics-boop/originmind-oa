@@ -1,3 +1,4 @@
+import { openCollaborationWorkspace } from './oa-chat-browser-navigation.mjs';
 // Actual OA components; synthetic APIs only, with all external requests blocked.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -76,13 +77,7 @@ try {
     });
     try {
       await page.goto(origin);
-      await page.locator('.oa-app').waitFor();
-      const desktopNavigation = page.locator('.oa-desktop-navigation');
-      const useDesktopNavigation = await desktopNavigation.isVisible();
-      if (!useDesktopNavigation) await page.getByRole('button',{name:'打开导航',exact:true}).click();
-      const initialNavigation = useDesktopNavigation ? desktopNavigation : page.locator('.mobile-sidebar');
-      await initialNavigation.getByRole('navigation',{name:'核心工作区',exact:true}).getByRole('button',{name:'聊天',exact:true}).click();
-      await page.locator('.collaboration-workspace').waitFor();
+      await openCollaborationWorkspace(page);
       for (const label of ['聊天','通讯录','管理台','邮箱']) assert.equal(await page.locator('.sidebar-nav-item').filter({hasText:label}).count() >= 1,true);
       if (name === 'desktop') {
         await page.screenshot({ path:resolve(output,'desktop-collaboration-workspace.png'),fullPage:true });
