@@ -10,7 +10,7 @@
 - `我的待办` 或 `/待办` 只读取本人负责或创建的未完成工作项；普通提问调用现有 OA 已审核知识检索和助研。当前没有待审批列表、实时项目进度汇总、提交、审批或业务修改命令。
 - 每次调用及生成答案后重新检查成员、账号、角色、NDA 与绑定状态。管理员沿用 OA 的 NDA 豁免，仍须有已启用的成员记录。解绑、成员停用或重新绑定账号后，旧机器人身份不能读取 OA 数据。
 - 知识候选按提问关键词读取最多 256 个有效分块，再调用现有 OA 排序与问答逻辑。只读取当前有效且审核通过的内部/公开资料，既不依赖 NDA 缓存字段，也不修改已有资料库授权逻辑。
-- 模型调用前后精确核对所选证据的资料、版本、分块、权限与内容；生成过程中资料撤回或改写时，该回答不会返回。新增资料改变关键词候选排序不会使仍有效的证据被误判。
+- 模型调用前及每个输出段落发送前，精确核对所选证据的资料、版本、分块、权限与内容。流式生成期间资料撤回、改写或成员权限变化时停止后续输出；已显示的段落在发送时已通过核验。新增资料改变关键词候选排序不会使仍有效的证据被误判。
 
 ## 创建机器人（唯一需要企微侧手工操作的部分）
 
@@ -37,7 +37,7 @@ node --test tests/wecom-bot-*.test.mjs
 npm run typecheck
 ```
 
-独立机器人服务目录应包含 `scripts/wecom-bot.mjs`、`lib/wecom-bot-transport.mjs` 及 `deploy/wecom-bot/package*.json` 和安装后的依赖；安装到 `/opt/originmind-wecom-bot/current`。创建无登录权限的 `originmind-wecom-bot` 系统用户，将服务文件安装为 `originmind-wecom-bot.service`，单个 Bot 只运行一个实例。服务指定当前阿里云的 `/usr/local/bin/node`（Node 22.23.3）；换服务器时须核验该路径与版本。
+独立机器人服务目录应包含 `scripts/wecom-bot.mjs`、`lib/wecom-bot-transport.mjs` 及 `deploy/wecom-bot/package*.json` 和安装后的依赖；安装到 `/opt/originmind-wecom-bot/current`。代码目录必须允许实际服务用户读取和遍历；配置目录仍保持 root 私有 0700、配置文件 0600。入口通过真实路径比较支持 `current` 链接执行。创建无登录权限的 `originmind-wecom-bot` 系统用户，将服务文件安装为 `originmind-wecom-bot.service`，单个 Bot 只运行一个实例。服务指定当前阿里云的 `/usr/local/bin/node`（Node 22.23.3）；换服务器时须核验该路径与版本。
 
 `scripts/configure-wecom-bot.py` 是本机交互配置程序：以 sudo 运行，输入 Bot ID 与不回显的 Bot Secret；它生成独立桥接密钥，仅写入新的机器人专用配置文件和 OA systemd EnvironmentFile 引用，不读取、改写 `/etc/originmind-oa/env`，不打印密钥，不启动服务。已有机器人配置时会拒绝覆盖。
 
@@ -47,7 +47,7 @@ OA 端需要 `WECOM_BOT_ENABLED=true`、`WECOM_BOT_ID`、`WECOM_BOT_BRIDGE_SECRE
 
 ## 2026-10-01 接续检查点
 
-已预置独立机器人程序与 systemd unit，运行目录为 `/opt/originmind-wecom-bot/current`；服务尚未启用或启动。阿里云 OA 构建候选已保存为 `/opt/omindos-deploy/releases/oa-wecom-trial-20261001`，现网仍使用 `/opt/omindos-deploy/releases/oa-8a0bffc8b1e1`。生产库仅做表结构读取和空库演练，尚未应用机器人迁移。
+已完成生产 SQLite 一致性备份及独立 0035 事务迁移，OA 试用版本和独立机器人服务均已启动。企业微信长连接鉴权成功，用户已确认本人绑定与待办私聊正常。随后发现旧 2000 字节回复限制及等待完整模型答案的问题，正在实施真实流式升级；问答整体及解绑/停用手机验收仍须分别记录，不能用基础待办验收代替。
 
 创建 API 长连接机器人后，在服务器终端安全配置：
 
@@ -59,6 +59,10 @@ sudo python3 /opt/originmind-wecom-bot/current/scripts/configure-wecom-bot.py
 
 ## 验证与运行边界
 
-桥接请求使用独立 HMAC 签名，严格限制时间窗口、JSON 字段、请求体和返回值大小，拒绝重定向。持久化消息 ID 去重；迁移冻结时不写入。SDK 日志不输出回调、消息正文或密钥；只记录固定状态码。流式回复先给静态处理提示，再给最终回答，单次文字回复保守限制为 2000 UTF-8 字节。
+桥接请求使用独立 HMAC 签名，严格限制时间窗口、JSON 字段、请求体和返回值大小，拒绝重定向。持久化消息 ID 去重；迁移冻结时不写入。SDK 日志不输出回调、消息正文或密钥；只记录固定状态码。普通命令保留 JSON 回复；问答通过同一签名服务的 `answer_stream` 操作接收实际模型 SSE，转换成受限 NDJSON。每个完成的小段先做引用和内容过滤、成员与资料权限核验，再累计更新当前企微消息。生成尚未结束时即可显示已核验段落；取消、解绑、权限变化或断线会中止后续处理。
+
+每个气泡使用官方长连接协议的 20480 UTF-8 字节限额。超长回答先结束当前气泡，复用原回调 `req_id`，以新 `streamId` 续发，完整保留文字。NDJSON 总传输、单行及累计答案均有独立上限，UTF-8 分片和结束状态严格校验。SDK ACK 串行等待；中间更新默认合并到 2.5 秒，所有出站回复帧共用会话每分钟 30 次、每小时 1000 次预算并预留结束帧位置，因为官方未明确同一流刷新是否免计数。
+
+流式模式只增加私有签名桥接分支，不修改现有 OA 网页和公开 Chat 的回答行为；Chat 与 OA 的生产源码均存在独立修改，部署时分别从各自线上版本复制后追加补丁。此次升级无需数据库迁移。官方协议：https://developer.work.weixin.qq.com/document/path/101463；百炼 SSE：https://help.aliyun.com/zh/model-studio/stream。
 
 试用验收：创建机器人 → 安全配置 → 服务认证成功 → 从真实 OA 登录绑定 → 私聊查询本人待办及问答 → 验证群聊不返回私有资料 → 解绑及停用后拒绝读取。未完成真实 Bot 配置与手机私聊之前，不宣称联调或上线完成。

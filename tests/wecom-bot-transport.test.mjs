@@ -4,7 +4,7 @@ import { createHmac, randomBytes } from 'node:crypto';
 import { EventEmitter, once } from 'node:events';
 import { createServer } from 'node:http';
 import { readFile } from 'node:fs/promises';
-import { ACK_REPLY, attachBotClient, BotTransportError, boundStreamReply, BUSY_REPLY, createBotMessageHandler, createBridgeClient, createSafeLogger, EMPTY_REPLY,
+import { ACK_REPLY, attachBotClient, BotTransportError, splitStreamReply, BUSY_REPLY, createBotMessageHandler, createBridgeClient, createSafeLogger, EMPTY_REPLY,
   DEFAULT_BRIDGE_URL, FAILURE_REPLY, GROUP_HELP, MAX_BRIDGE_BYTES, MAX_STREAM_BYTES, PUBLIC_HELP,
   readBotEnvironment, signBridgeBody, validateBridgeSecret, validateBridgeUrl } from '../lib/wecom-bot-transport.mjs';
 import { startBot } from '../scripts/wecom-bot.mjs';
@@ -371,23 +371,30 @@ test('bridge/reply failures never leak raw errors, credentials, question or answ
     assert.equal(/raw|private_question|仅本人的|查询我的/.test(line), false);
     assert.deepEqual(Object.keys(JSON.parse(line)), ['service', 'status']);
   }
-  const invalid = harness({ bridge: async () => 'x'.repeat(10_001) });
+  const invalid = harness({ bridge: async () => 'x'.repeat(12_001) });
   await invalid.handler.handle(frame());
   assert.equal(invalid.replies[1][2], FAILURE_REPLY);
 });
 
-test('single final stream frame is bounded in UTF-8 including truncation note and preserves code points', async () => {
+test('long answers preserve every code point across bounded, finished stream bubbles', async () => {
   const content = '😀这是一个较长的回答'.repeat(1000);
-  const bounded = boundStreamReply(content);
-  assert.ok(Buffer.byteLength(bounded, 'utf8') <= MAX_STREAM_BYTES);
-  assert.ok(bounded.endsWith('继续查询。）'));
-  assert.equal(Buffer.from(bounded).toString('utf8'), bounded);
-  const h = harness({ bridge: async () => '😀'.repeat(1000) });
+  const pieces = splitStreamReply(content);
+  assert.ok(pieces.length > 1);
+  assert.equal(pieces.join(''), content);
+  assert.ok(pieces.every((piece) => Buffer.byteLength(piece, 'utf8') <= MAX_STREAM_BYTES));
+  assert.ok(pieces.every((piece) => Buffer.from(piece).toString('utf8') === piece));
+  const answer = '这是完整长回答。'.repeat(1200);
+  const h = harness({ bridge: async () => answer });
   assert.equal(await h.handler.handle(frame()), 'replied');
-  assert.equal(h.replies.length, 2);
-  assert.equal(h.replies.filter((reply) => reply[3] === true).length, 1);
-  assert.equal(h.replies[1][3], true);
-  assert.ok(Buffer.byteLength(h.replies[1][2], 'utf8') <= MAX_STREAM_BYTES);
+  const finished = h.replies.filter((reply) => reply[3] === true);
+  assert.ok(finished.length > 1);
+  assert.equal(finished.map((reply) => reply[2]).join(''), answer);
+  assert.equal(new Set(finished.map((reply) => reply[1])).size, finished.length);
+  assert.ok(h.replies.every((reply) => Buffer.byteLength(reply[2], 'utf8') <= MAX_STREAM_BYTES));
+  assert.ok(h.replies.every((reply) => reply[0].headers.req_id === 'req_msg1'));
+  for (const [index, reply] of h.replies.entries()) {
+    if (reply[3]) assert.equal(h.replies.slice(index + 1).some((next) => next[1] === reply[1]), false);
+  }
 });
 
 test('client runs only after authentication and suppresses old queued/results across reconnects', async () => {

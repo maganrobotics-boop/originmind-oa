@@ -5,6 +5,8 @@ import {
   type BotActor, type BotLink,
 } from '../../../../../lib/wecom-bot-store';
 import { rankKnowledgeChunks } from '../../../../../lib/knowledge-policy';
+import { streamBotOaAnswer } from '../../../../../lib/wecom-bot-answer-stream';
+import { questionRequestsKnowledgeImages } from '../../../../../chat-cloudflare/src/question-scope.mjs';
 import { answerOaChatQuestion } from '../../../../../lib/oa-chat-client';
 import { OA_PROJECT } from '../../../../../lib/project-work-items';
 
@@ -19,6 +21,50 @@ async function actorStillCurrent(link: BotLink, original: BotActor) {
     && current.isAdmin === original.isAdmin && current.ndaApprovalId === original.ndaApprovalId
     && current.ndaAgreementVersion === original.ndaAgreementVersion && current.ndaAcceptedAt === original.ndaAcceptedAt
     && await isBotLinkCurrent(link, current));
+}
+
+function streamedReply(request: Request, question: string, ranked: Parameters<typeof streamBotOaAnswer>[1], link: BotLink, actor: BotActor) {
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  request.signal.addEventListener('abort', abort, { once: true });
+  if (request.signal.aborted) abort();
+  const iterator = streamBotOaAnswer(question, ranked, controller.signal);
+  const encoder = new TextEncoder();
+  let closed = false;
+  const cleanup = () => request.signal.removeEventListener('abort', abort);
+  const authorized = async () => {
+    if (controller.signal.aborted || !await actorStillCurrent(link, actor) || controller.signal.aborted) return false;
+    return await isBotKnowledgeCurrent(link, actor, ranked) && !controller.signal.aborted;
+  };
+  const body = new ReadableStream<Uint8Array>({
+    async pull(stream) {
+      try {
+        // Check again before a paid upstream request and before every visible part.
+        if (!await authorized()) throw new Error('WECOM_STREAM_REVOKED');
+        const value = await iterator.next();
+        if (closed) return;
+        if (!await authorized()) throw new Error('WECOM_STREAM_REVOKED');
+        if (closed) return;
+        if (controller.signal.aborted) throw new Error('WECOM_STREAM_REVOKED');
+        stream.enqueue(encoder.encode(JSON.stringify(value.done ? { type: 'done' } : { type: 'delta', text: value.value }) + '\n'));
+        if (value.done) { closed = true; cleanup(); stream.close(); }
+      } catch (error) {
+        if (closed) return;
+        closed = true; controller.abort(); cleanup();
+        if (request.signal.aborted) stream.error(new Error('WECOM_STREAM_CANCELLED'));
+        else {
+          stream.enqueue(encoder.encode(JSON.stringify({ type: 'error', code: error instanceof Error && error.message === 'WECOM_STREAM_REVOKED' ? 'revoked' : 'unavailable' }) + '\n'));
+          stream.close();
+        }
+        void iterator.return(undefined).catch(() => {});
+      }
+    },
+    async cancel() {
+      closed = true; controller.abort(); cleanup();
+      await iterator.return(undefined).catch(() => {});
+    },
+  }, { highWaterMark: 0 });
+  return new Response(body, { headers: { ...headers, 'content-type': 'application/x-ndjson; charset=utf-8', 'x-accel-buffering': 'no' } });
 }
 
 export async function POST(request: Request) {
@@ -59,6 +105,9 @@ export async function POST(request: Request) {
     if (!await actorStillCurrent(link, actor)) return reply('');
     const ranked = rankKnowledgeChunks(command.question, chunks);
     if (!await isBotKnowledgeCurrent(link, actor, ranked)) return reply('');
+    if (request.headers.get('accept')?.split(',').some(type => type.trim().split(';')[0] === 'application/x-ndjson') && !questionRequestsKnowledgeImages(command.question)) {
+      return streamedReply(request, command.question, ranked, link, actor);
+    }
     const answer = await answerOaChatQuestion(command.question, ranked);
     // No stale-link/disabled-member response may contain internal evidence.
     // This is deliberately checked after both asynchronous retrieval and model.
