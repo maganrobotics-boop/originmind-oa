@@ -59,7 +59,7 @@ export function validOaChatPayload(value) {
   if (exactKeys(value, ['operation', 'task']) && value.operation === 'task') return validTaskInput(value.task);
   if (exactKeys(value, ['operation']) && value.operation === 'status') return true;
   const answerType = value?.answerType || 'grounded';
-  if (!exactKeys(value, ['operation', 'answerType', 'question', 'history', 'documents']) || value.operation !== 'answer' || !['grounded', 'general'].includes(answerType) || !text(value.question, 2000) || value.question.trim().length < 2 || !Array.isArray(value.history) || value.history.length > 2 || !Array.isArray(value.documents) || value.documents.length > 6) return false;
+  if (!exactKeys(value, ['operation', 'answerType', 'question', 'history', 'documents']) || !['answer', 'answer_stream'].includes(value.operation) || !['grounded', 'general'].includes(answerType) || !text(value.question, 2000) || value.question.trim().length < 2 || !Array.isArray(value.history) || value.history.length > 2 || !Array.isArray(value.documents) || value.documents.length > 6) return false;
   if (value.history.some(item => !exactKeys(item, ['role', 'content']) || item.role !== 'user' || !text(item.content, 2000))) return false;
   if (answerType === 'general' && value.documents.length !== 0) return false;
   return value.documents.every(item => exactKeys(item, ['id', 'title', 'body', 'updatedAt', 'origin', 'assets']) && text(item.id, 100) && text(item.title, 300) && text(item.body, 3500) && text(item.updatedAt, 40) && ['oa_internal', 'oa_public'].includes(item.origin) && Array.isArray(item.assets) && item.assets.length <= 8 && item.assets.every(asset => exactKeys(asset, ['alt']) && text(asset.alt, 300)));
@@ -126,6 +126,12 @@ export async function handleOaChatBridge(context, engine, now = Date.now()) {
       // "prepared" is not "saved": the OA task store rechecks owner/NDA/revision
       // and cancellation before persisting. No tool creates an external side effect.
       return json({ received: true, ...result, mode: 'task', provider: 'bailian' });
+    }
+    if (payload.operation === 'answer_stream') {
+      if (active.provider !== 'bailian' || !config?.encryptedKey || !config?.verifiedAt || (payload.answerType !== 'general' && !payload.documents.length)) return json({ error: '流式问答服务暂不可用' }, 503);
+      await engine.globalBudget(context);
+      const { createOaAnswerStream } = await import('./wecom-oa-answer-stream.mjs');
+      return createOaAnswerStream(context, engine, config, payload);
     }
     const fallback = reason => json({ received: true, answer: fallbackAnswer(payload.documents), mode: 'retrieval', fallbackReason: reason });
     const answerType = payload.answerType || 'grounded';

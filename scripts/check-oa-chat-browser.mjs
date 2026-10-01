@@ -1,3 +1,4 @@
+import { openCollaborationWorkspace } from './oa-chat-browser-navigation.mjs';
 // Actual OA components; synthetic APIs only, with all external requests blocked.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -76,7 +77,7 @@ try {
     });
     try {
       await page.goto(origin);
-      await page.locator('.collaboration-workspace').waitFor();
+      await openCollaborationWorkspace(page);
       for (const label of ['聊天','通讯录','管理台','邮箱']) assert.equal(await page.locator('.sidebar-nav-item').filter({hasText:label}).count() >= 1,true);
       if (name === 'desktop') {
         await page.screenshot({ path:resolve(output,'desktop-collaboration-workspace.png'),fullPage:true });

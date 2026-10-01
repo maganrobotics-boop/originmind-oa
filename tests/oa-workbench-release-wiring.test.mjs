@@ -7,16 +7,20 @@ const shellPath = fileURLToPath(new URL('../scripts/release-production.sh', impo
 const shell = await readFile(shellPath, 'utf8');
 const workflow = await readFile(new URL('../.github/workflows/deploy-oa.yml', import.meta.url), 'utf8');
 
-test('activation is opt-in on the existing protected manual main release, never PR checks', () => {
+test('retired OA workflow cannot activate workbench, meeting bot, or webmail', () => {
+  assert.match(workflow, /name: Check retired OA code/u);
+  assert.match(workflow, /permissions:\n  contents: read/u);
+  assert.match(workflow, /persist-credentials: false/u);
+  assert.doesNotMatch(workflow, /workflow_dispatch|pull_request_target|^\s{2}deploy:|production-oa|oa-production/gmu);
+  assert.doesNotMatch(workflow, /enable_ai_workbench|enable_meeting_bot|enable_feishu_webmail|OA_PRODUCTION_ENABLE_|secrets\.|CLOUDFLARE_API_TOKEN|PUBLIC_LAB_AI_SERVICE_TOKEN/u);
+  assert.doesNotMatch(workflow, /release:standalone|release-production\.sh|release-standalone\.sh|wrangler\s+(?:deploy|publish)/u);
+  for (const command of ['npm run install:ci', 'npm run typecheck', 'npm run lint', 'npm test']) {
+    assert.ok(workflow.includes(`run: ${command}`), `retired CI must retain ${command}`);
+  }
+});
+
+test('retained historical release shell still gates feature activation and migration order', () => {
   assert.doesNotMatch(shell, /\r/u);
-  assert.match(workflow, /enable_ai_workbench:[\s\S]*?default: false[\s\S]*?type: boolean/u);
-  assert.match(workflow, /enable_meeting_bot:[\s\S]*?default: false[\s\S]*?type: boolean/u);
-  assert.match(workflow, /enable_feishu_webmail:[\s\S]*?default: false[\s\S]*?type: boolean/u);
-  assert.match(workflow, /name: production-oa/u);
-  assert.match(workflow, /group: oa-production/u);
-  assert.doesNotMatch(workflow.slice(workflow.indexOf('  test:'), workflow.indexOf('  deploy:')), /OA_PRODUCTION_ENABLE_AI_WORKBENCH:/u);
-  assert.doesNotMatch(workflow.slice(workflow.indexOf('  test:'), workflow.indexOf('  deploy:')), /OA_PRODUCTION_ENABLE_MEETING_BOT:/u);
-  assert.doesNotMatch(workflow.slice(workflow.indexOf('  test:'), workflow.indexOf('  deploy:')), /OA_PRODUCTION_ENABLE_FEISHU_WEBMAIL:/u);
   assert.match(shell, /workbench_enabled="\$\{OA_PRODUCTION_ENABLE_AI_WORKBENCH:-false\}"/u);
   assert.equal((shell.match(/workbench_deploy_args=\(--var OA_AI_TASKS_ENABLED:true\)/gu) || []).length, 1);
   assert.equal((shell.match(/"\$\{workbench_deploy_args\[@\]\}"/gu) || []).length, 2);

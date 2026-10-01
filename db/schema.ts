@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm";
-import { check, index, integer, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
+import { check, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core";
 
 export const approvals = sqliteTable(
   "approvals",
@@ -611,5 +611,79 @@ export const knowledgeEvents = sqliteTable(
   (table) => [
     index("knowledge_events_item_created_idx").on(table.itemId, table.createdAt),
     index("knowledge_events_actor_created_idx").on(table.actorMemberId, table.createdAt),
+  ],
+);
+
+
+export const wecomBotLinks = sqliteTable(
+  "wecom_bot_links",
+  {
+    botId: text("bot_id").notNull(),
+    userId: text("user_id").notNull(),
+    memberId: text("member_id").notNull(),
+    accountUserId: text("account_user_id").notNull(),
+    linkedMemberRevision: text("linked_member_revision").notNull(),
+    revision: text("revision").notNull(),
+    createdAt: text("created_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+    revokedAt: text("revoked_at"),
+  },
+  (table) => [
+    primaryKey({ columns: [table.botId, table.userId] }),
+    check("wecom_bot_links_bot_id_check", sql`length(${table.botId}) BETWEEN 1 AND 128`),
+    check("wecom_bot_links_user_id_check", sql`length(${table.userId}) BETWEEN 1 AND 128`),
+    check("wecom_bot_links_identity_check", sql`length(${table.memberId}) > 0 AND length(${table.accountUserId}) > 0 AND length(${table.revision}) > 0`),
+    uniqueIndex("wecom_bot_links_active_member_unique").on(table.botId, table.memberId).where(sql`${table.revokedAt} IS NULL`),
+  ],
+);
+
+export const wecomBotPairings = sqliteTable(
+  "wecom_bot_pairings",
+  {
+    id: text("id").primaryKey(),
+    botId: text("bot_id").notNull(),
+    codeHash: text("code_hash").notNull().unique(),
+    memberId: text("member_id").notNull(),
+    accountUserId: text("account_user_id").notNull(),
+    memberRevision: text("member_revision").notNull(),
+    memberNdaApprovalId: text("member_nda_approval_id"),
+    memberNdaAcceptedAt: text("member_nda_accepted_at"),
+    memberNdaAgreementVersion: text("member_nda_agreement_version"),
+    memberIsAdmin: integer("member_is_admin").notNull(),
+    state: text("state").$type<"pending" | "candidate" | "confirmed" | "cancelled">().notNull().default("pending"),
+    candidateUserId: text("candidate_user_id"),
+    linkRevision: text("link_revision"),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+    updatedAt: text("updated_at").notNull(),
+  },
+  (table) => [
+    check("wecom_bot_pairings_admin_check", sql`${table.memberIsAdmin} IN (0, 1)`),
+    check("wecom_bot_pairings_state_check", sql`${table.state} IN ('pending', 'candidate', 'confirmed', 'cancelled')`),
+    check("wecom_bot_pairings_code_hash_check", sql`length(${table.codeHash}) = 64 AND ${table.codeHash} NOT GLOB '*[^0-9a-f]*'`),
+    check("wecom_bot_pairings_expiry_check", sql`${table.expiresAt} > ${table.createdAt}`),
+    check("wecom_bot_pairings_pending_check", sql`(${table.state} = 'pending' AND ${table.candidateUserId} IS NULL) OR ${table.state} <> 'pending'`),
+    check("wecom_bot_pairings_candidate_check", sql`${table.state} NOT IN ('candidate', 'confirmed') OR length(${table.candidateUserId}) BETWEEN 1 AND 128`),
+    uniqueIndex("wecom_bot_pairings_active_member_unique").on(table.botId, table.memberId).where(sql`${table.state} IN ('pending', 'candidate')`),
+    index("wecom_bot_pairings_expiry_idx").on(table.expiresAt),
+  ],
+);
+
+export const wecomBotMessages = sqliteTable(
+  "wecom_bot_messages",
+  {
+    botId: text("bot_id").notNull(),
+    messageId: text("message_id").notNull(),
+    userId: text("user_id").notNull(),
+    createdAt: text("created_at").notNull(),
+    expiresAt: text("expires_at").notNull(),
+  },
+  (table) => [
+    primaryKey({ columns: [table.botId, table.messageId] }),
+    check("wecom_bot_messages_identity_check", sql`length(${table.botId}) BETWEEN 1 AND 128 AND length(${table.messageId}) BETWEEN 1 AND 128 AND length(${table.userId}) BETWEEN 1 AND 128`),
+    check("wecom_bot_messages_expiry_check", sql`${table.expiresAt} > ${table.createdAt}`),
+    index("wecom_bot_messages_expiry_idx").on(table.expiresAt),
+    index("wecom_bot_messages_rate_idx").on(table.botId, table.userId, table.createdAt),
+    index("wecom_bot_messages_bot_rate_idx").on(table.botId, table.createdAt),
   ],
 );

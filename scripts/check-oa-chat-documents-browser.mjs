@@ -1,3 +1,4 @@
+import { openCollaborationWorkspace } from './oa-chat-browser-navigation.mjs';
 // Real OA components; all document/task APIs are synthetic and all outside traffic is blocked.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -25,13 +26,14 @@ const origin = `http://127.0.0.1:${server.address().port}`;
 const session = { registered:true, status:'active', user:{ email:'documents-test@example.test', displayName:'测试成员', authProvider:'github' }, role:'project_owner', isAdmin:true, canReviewKnowledge:true, canReviewMembers:true, ndaCompleted:true, needsNda:false };
 const ready = { authorized:true, modelReady:true, knowledgeReady:true, retrievalReady:true, budgetReady:true };
 const result = '# 项目周报\n\n## 已完成\n\n**原型装配已完成。**\n\n## 待验证\n\n实机测试尚未完成。\n\n## 下一步\n\n负责人和日期：待补充。\n';
-const browser = await chromium.launch({ headless:true, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}) });
+// Preserve Unicode download filenames in Linux Chromium's process locale.
+const browser = await chromium.launch({ headless:true, env:{...process.env,LANG:'C.UTF-8',LC_ALL:'C.UTF-8'}, ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { executablePath:process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } : {}) });
 const results = [];
 try {
   for (const [name, width, height] of [['desktop',1280,900],['mobile',390,844],['mobile-small',320,700],['landscape',844,390]]) {
     const context = await browser.newContext({ viewport:{ width,height }, serviceWorkers:'block', acceptDownloads:true });
     const page = await context.newPage(), requests = [], errors = [], held = [], tasks = new Map(), ids = new Map();
-    const archived = new Map(); let failArchive = true, failSave = true;
+    const archived = new Map(); let failArchive = true, failSave = true, historyIds = [];
     let clock = 10, mode = 'success', loseCreate = false, unavailable = false;
     page.on('pageerror', error => errors.push(error.message));
     await page.route('**/*', async route => {
@@ -39,7 +41,7 @@ try {
       if (url.origin !== origin) return route.abort();
       if (!url.pathname.startsWith('/api/')) return route.continue();
       const body = request.headers()['content-type']?.includes('application/json') ? request.postDataJSON() : null;
-      requests.push({ path:url.pathname, method:request.method(), body });
+      requests.push({ path:url.pathname, method:request.method(), body, taskId:url.searchParams.get('id') });
       if (url.pathname === '/api/lab-ai/extract') return route.fulfill({json:{text:`已解析 ${decodeURIComponent(request.headers()['x-oa-file-name'])}，这是一段用于浏览器回归的完整合成内容。`}});
       if (url.pathname === '/api/knowledge/import-chat') return route.fulfill({status:201,json:{received:true,item:{id:body.document.id,status:'pending',visibility:'internal'},assetUpload:{revisionId:'test-revision',uploadToken:'test-token'}}});
       if (url.pathname.startsWith('/api/knowledge/assets')) return route.fulfill({json:{received:true}});
@@ -59,7 +61,7 @@ try {
         if (unavailable) return route.fulfill({ status:503, json:{ error:'文档处理服务暂不可用（合成测试）' } });
         if (request.method() === 'GET') {
           const id = url.searchParams.get('id'), format = url.searchParams.get('format');
-          if (!id) return route.fulfill({ json:{ tasks:[...tasks.values()].map(({ result, material, instruction, ...task }) => task) } });
+          if (!id) { historyIds = [...tasks.keys()]; return route.fulfill({ json:{ tasks:[...tasks.values()].map(({ result, material, instruction, ...task }) => task) } }); }
           const task = tasks.get(id);
           if (!task) return route.fulfill({ status:404, json:{ error:'任务不存在或无访问权限。' } });
           if (format) {
@@ -107,23 +109,24 @@ try {
     const preview = page.getByRole('dialog',{name:'文档预览',exact:true});
     const closePreview = async () => { await preview.waitFor(); await preview.getByRole('button',{name:'返回聊天',exact:true}).click(); await preview.waitFor({state:'hidden'}); };
     try {
-      await page.goto(origin); await page.locator('.collaboration-workspace').waitFor(); await page.locator('.collaboration-ai-entry').click(); await page.locator('.oa-shared-chat').waitFor();
+      await page.goto(origin); await openCollaborationWorkspace(page); await page.locator('.collaboration-ai-entry').click(); await page.locator('.oa-shared-chat').waitFor();
       if (name==='desktop') await page.getByRole('button',{name:'收起侧栏',exact:true}).click();
-      assert.equal(await page.getByRole('heading',{name:'实验室大模型能做什么',exact:true}).isVisible(),true);
-      assert.equal(await page.locator('.empty-hero p').innerText(),'知识问答、资料整理、会议纪要、项目总结等');
+      assert.equal(await page.getByRole('heading',{name:'先问问题，也可以让它带你完成新手村',exact:true}).isVisible(),true);
+      assert.equal(await page.locator('.empty-hero p').innerText(),'可用于知识问答、资料整理、会议纪要、项目总结和任务拆解。上传文件后，回答可整理成 OA 审核资料。');
       assert.equal(await page.locator('.empty-hero p').isVisible(),true);
       assert.ok(await page.locator('.empty-hero').evaluate(element => [...element.querySelectorAll('h2,p')].every(child => child.scrollWidth <= child.clientWidth + 1)));
       const hints = page.locator('.oa-chat-examples button');
-      assert.deepEqual(await hints.allTextContents(),['会议模式','知识问答','资料整理','会议纪要','项目总结']);
+      assert.deepEqual(await hints.locator('strong').allTextContents(),['知识问答','新手村助教','项目总结','资料归档','会议模式']);
+      assert.deepEqual(await hints.locator('span').allTextContents(),['查公开与内部资料','拆任务和给建议','周报和行动项','整理后送审','纪要和待办']);
       if (height > 520) {
         const prompts = [
-          '实验室有哪些研究方向？',
-          '请把材料整理成结构清晰的 Word 文档，保留关键事实。',
-          '请整理成会议纪要，区分讨论、决定和待办，未明确的信息标注待补充。',
-          '请把材料整理成项目总结文档，列出已完成工作、主要成果、存在问题和下一步计划，未明确的信息标注待补充。',
+          '机器人自主移动与操作实验室适合本科生参与的方向有哪些？',
+          '@项目总结 请把我的新手村任务拆成今天能做的清单：完善资料、确认可投入时间、阅读保密要求、选择项目方向、完成第一个学习记录。',
+          '@项目总结 请根据我上传或粘贴的材料，整理项目进展、问题、下一步行动项和负责人。',
+          '@资料归档 请把这份材料整理为 OA 可审核入库的 Markdown：标题、摘要、关键词、正文、待核验事项。',
         ];
         for (let index = 0; index < prompts.length; index++) {
-          await hints.nth(index + 1).click();
+          await hints.nth(index).click();
           assert.equal(await input.inputValue(),prompts[index]);
         }
         assert.equal(createRequests().length,0,'choosing a capability must not submit a task');
@@ -222,12 +225,25 @@ try {
       await page.waitForTimeout(100); assert.equal(await preview.isVisible(),false);
       assert.equal(await page.locator('.oa-document-card').last().getByRole('button',{name:'下载 Word',exact:true}).count(),0);
       // Reload can restore owner-authorized saved documents without a separate page.
-      mode='success'; await page.reload(); await page.locator('.collaboration-workspace').waitFor();
+      mode='success'; await page.reload(); await openCollaborationWorkspace(page);
       await page.locator('.collaboration-ai-entry').click(); await page.locator('.empty-hero').waitFor();
+      if (name==='desktop') await page.getByRole('button',{name:'收起侧栏',exact:true}).click();
       await page.getByRole('button',{name:'已保存文档',exact:true}).click();
       const history=page.getByRole('dialog',{name:'本人已保存文档',exact:true}); await history.waitFor();
-      await history.locator('.oa-document-history button').first().click(); await preview.waitFor();
-      assert.ok((await preview.innerText()).includes(finalBody)); await closePreview();
+      // History preserves API order; identify the saved document by ID even when titles repeat.
+      const savedIndex=historyIds.indexOf(firstTask.id); assert.ok(savedIndex>=0);
+      await history.locator('.oa-document-history button').nth(historyIds.length-1).waitFor();
+      assert.equal(await history.locator('.oa-document-history button').count(),historyIds.length);
+      await history.locator('.oa-document-history button').nth(savedIndex).click(); await preview.waitFor();
+      assert.equal(requests.filter(item=>item.path==='/api/lab-ai/tasks' && item.method==='GET' && item.taskId).at(-1).taskId,firstTask.id);
+      // Markdown soft line breaks display as spaces; retain every character of the rendered body.
+      assert.equal(await preview.locator('.oa-document-body p').innerText(),finalBody.replaceAll('\n',' '));
+      const restoredDownload=page.waitForEvent('download');
+      await preview.getByRole('button',{name:'下载 Markdown',exact:true}).click();
+      const restoredFile=await restoredDownload, restoredPath=resolve(output,`${name}-restored.md`);
+      await restoredFile.saveAs(restoredPath);
+      assert.equal(await readFile(restoredPath,'utf8'),confirmedResult,'restored download must retain the exact saved source');
+      await closePreview();
       assert.equal(new URL(page.url()).pathname,'/');
       // Unsupported import leaves existing material/results intact.
       await page.locator('.oa-shared-chat input[type=file][accept*=".markdown"]').setInputFiles({name:'不支持.pdf',mimeType:'application/pdf',buffer:Buffer.from('not a document')});
