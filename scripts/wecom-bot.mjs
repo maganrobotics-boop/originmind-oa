@@ -1,5 +1,6 @@
 #!/usr/bin/env node
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { attachBotClient, createBotMessageHandler, createBridgeClient, createSafeLogger, readBotEnvironment } from '../lib/wecom-bot-transport.mjs';
 
@@ -28,7 +29,18 @@ export async function startBot({ env = process.env, loadSdk = () => requireBotSd
   return runtime;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+function isMainModule() {
+  if (!process.argv[1]) return false;
+  try {
+    // systemd executes through the current release symlink; Node resolves the
+    // module URL to its real path, while argv retains the symlink path.
+    return realpathSync(fileURLToPath(import.meta.url)) === realpathSync(process.argv[1]);
+  } catch {
+    return false;
+  }
+}
+
+if (isMainModule()) {
   const logger = createSafeLogger();
   try {
     const runtime = await startBot({ logger });
