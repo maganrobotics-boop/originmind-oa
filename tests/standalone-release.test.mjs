@@ -17,8 +17,16 @@ test("the staging release requires an explicit isolated target before running an
   assert.doesNotMatch(result.stderr, /command not found/u);
 });
 
-test("staging release uses one guarded immutable standalone artifact", () => {
-  assert.equal(packageJson.scripts["release:standalone:staging"], "bash scripts/release-standalone.sh staging");
+test("standalone npm entry points remain retired while the archived staging artifact stays guarded", () => {
+  // PR #114 removed these commands; keeping the scripts does not re-enable them.
+  for (const command of [
+    "build:standalone:staging", "build:standalone:production",
+    "check:standalone:staging", "check:standalone:production",
+    "release:standalone:staging", "release:standalone:production",
+    "migration:import:staging", "migration:schema-fingerprint:staging", "migration:import:production",
+  ]) {
+    assert.ok(!Object.hasOwn(packageJson.scripts, command), `${command} must remain retired`);
+  }
   assert.match(releaseScript, /OA_STAGING_WORKER_NAME/u);
   assert.match(releaseScript, /OA_STAGING_D1_DATABASE_NAME/u);
   assert.match(releaseScript, /OA_STAGING_RELEASE_CONFIRM/u);

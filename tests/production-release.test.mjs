@@ -479,20 +479,27 @@ test("compiled production config preserves provider-managed state", async () => 
   }
 });
 
-test("workflow and shell expose the token only to a confirmed manual main release", { skip: process.platform === "win32" ? "requires a POSIX shell" : false }, () => {
-  const testJob = workflow.slice(workflow.indexOf("  test:"), workflow.indexOf("  reject-invalid-production-dispatch:"));
-  const deployJob = workflow.slice(workflow.indexOf("  deploy:"));
-  assert.doesNotMatch(workflow, /pull_request_target/u);
+test("retired OA workflow is CI-only while the archived shell still rejects unauthorized releases", { skip: process.platform === "win32" ? "requires a POSIX shell" : false }, async () => {
+  // PR #114 removed OA dispatch/deployment and the Chat Cloudflare workflows.
+  assert.match(workflow, /push:\s+branches: \[main\]/u);
+  assert.match(workflow, /pull_request:\s+branches: \[main\]/u);
+  assert.doesNotMatch(workflow, /workflow_dispatch|pull_request_target/u);
   assert.match(workflow, /permissions:\n  contents: read/u);
-  assert.doesNotMatch(testJob, /CLOUDFLARE_API_TOKEN|release:standalone:production/u);
-  assert.match(deployJob, /github\.event_name == 'workflow_dispatch'/u);
-  assert.match(deployJob, /github\.ref == 'refs\/heads\/main'/u);
-  assert.match(deployJob, /vars\.OA_PRODUCTION_CLOUDFLARE_ACCOUNT_ID/u);
-  assert.match(deployJob, /vars\.OA_PRODUCTION_PUBLIC_ORIGIN/u);
-  assert.match(deployJob, /vars\.OA_PRODUCTION_KNOWLEDGE_ASSETS_BUCKET_NAME/u);
-  assert.match(deployJob, /originmind-oa-knowledge-assets-production/u);
-  assert.equal([...workflow.matchAll(/^\s+CLOUDFLARE_API_TOKEN:/gmu)].length, 1);
-  assert.equal([...workflow.matchAll(/^\s+PUBLIC_LAB_AI_SERVICE_TOKEN:/gmu)].length, 1);
+  assert.deepEqual([...workflow.slice(workflow.indexOf("\njobs:\n")).matchAll(/^  ([\w-]+):/gmu)].map((match) => match[1]), ["test"]);
+  for (const command of ["npm run install:ci", "npm run typecheck", "npm run lint", "npm test"]) {
+    assert.ok(workflow.includes(`run: ${command}\n`), `CI must retain ${command}`);
+  }
+  assert.doesNotMatch(workflow, /CLOUDFLARE_API_TOKEN|PUBLIC_LAB_AI_SERVICE_TOKEN|OA_PRODUCTION_|secrets\.|release:standalone|release-production\.sh|\bwrangler\b/u);
+  const workflowFiles = await readdir(join(projectRoot, ".github", "workflows"));
+  for (const retiredWorkflow of [
+    "deploy-chat-cloudflare.yml",
+    "deploy-chat-preview-cloudflare.yml",
+    "deploy-chat-static-cloudflare.yml",
+    "initialize-chat-admin.yml",
+    "repair-chat-admin-pbkdf2.yml",
+  ]) {
+    assert.ok(!workflowFiles.includes(retiredWorkflow), `${retiredWorkflow} must remain retired`);
+  }
   assert.doesNotMatch(`${workflow}\n${releaseScript}`, /oa\.omindos\.ai|41e8b3404be24e1dd288556d77ffc951|34af7e92-7da5-47cd-b7c0-1270e157c0e6/u);
 
   const invalid = spawnSync("/bin/bash", [join(projectRoot, "scripts", "release-production.sh"), "production"], {
