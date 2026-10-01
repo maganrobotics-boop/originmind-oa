@@ -232,6 +232,7 @@ try {
       const history=page.getByRole('dialog',{name:'本人已保存文档',exact:true}); await history.waitFor();
       // History preserves API order; identify the saved document by ID even when titles repeat.
       const savedIndex=historyIds.indexOf(firstTask.id); assert.ok(savedIndex>=0);
+      await history.locator('.oa-document-history button').nth(historyIds.length-1).waitFor();
       assert.equal(await history.locator('.oa-document-history button').count(),historyIds.length);
       await history.locator('.oa-document-history button').nth(savedIndex).click(); await preview.waitFor();
       assert.equal(requests.filter(item=>item.path==='/api/lab-ai/tasks' && item.method==='GET' && item.taskId).at(-1).taskId,firstTask.id);
