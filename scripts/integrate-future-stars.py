@@ -8,6 +8,8 @@ import os
 import pwd
 import re
 import shutil
+import subprocess
+import sys
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--oa-root", type=Path, required=True)
@@ -68,7 +70,7 @@ change(args.oa_root, "app/page.tsx", [
      'import { FutureStars } from "@/components/future-stars/future-stars";\nimport { OaPrimaryNavigation, type OaPrimaryView }'),
     ('type ViewKey = "library" |', 'type ViewKey = "future-stars" | "library" |'),
     ('  const navigate = (view: ViewKey) => { setActiveView(view);',
-     '  useEffect(() => { if (session?.isAdmin && window.location.hash === "#future-stars") { setActiveView("future-stars"); setPrimaryView("future-stars"); } }, [session?.isAdmin]);\n  const navigate = (view: ViewKey) => { if (view === "future-stars" && !session?.isAdmin) return; window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search + (view === "future-stars" ? "#future-stars" : "")); setActiveView(view); if (view === "future-stars") setPrimaryView("future-stars");'),
+     '  const navigate = (view: ViewKey) => { if (view === "future-stars" && !session?.isAdmin) return; window.history.replaceState(window.history.state, "", window.location.pathname + window.location.search + (view === "future-stars" ? "#future-stars" : "")); setActiveView(view); if (view === "future-stars") setPrimaryView("future-stars");'),
     ('  const secondaryTitle = activeView === "library" ?',
      '  const secondaryTitle = activeView === "future-stars" ? "未来之星" : activeView === "library" ?'),
     ('        {activeView === "library" ?',
@@ -76,6 +78,14 @@ change(args.oa_root, "app/page.tsx", [
     ('<OaPrimaryNavigation active={primaryView} onNavigate=',
      '<OaPrimaryNavigation active={primaryView} isAdmin={Boolean(session.isAdmin)} onNavigate='),
 ])
+page_path = args.oa_root / "app/page.tsx"
+page_text = page_path.read_text()
+if 'window.location.hash === "#future-stars"' not in page_text:
+    anchor = "  const navigate = (view: ViewKey) => {"
+    if page_text.count(anchor) != 1:
+        raise RuntimeError("OA navigation hook anchor changed")
+    hook = '  useEffect(() => { if (session?.isAdmin && window.location.hash === "#future-stars") { setActiveView("future-stars"); setPrimaryView("future-stars"); } }, [session?.isAdmin]);\n'
+    page_path.write_text(page_text.replace(anchor, hook + anchor, 1))
 change(args.chat_root, "aliyun/learning/service-core.mjs", [
     ("import { DatabaseSync } from 'node:sqlite';",
      "import { DatabaseSync } from 'node:sqlite';\nimport { createLearningPeople } from './future-stars.mjs';"),
@@ -130,6 +140,9 @@ change(args.chat_root, "chat-cloudflare/src/app.mjs", [
      '    }\n'
      '    if (path === "internal/oa-admin") return handleOaAdminBridge'),
 ])
+subprocess.run([sys.executable, str(args.feature_root / "scripts/fix-oa-home.py"),
+                "--oa-root", str(args.oa_root)], check=True, capture_output=True, text=True)
+
 for root, account_name in [(args.oa_root, args.oa_user), (args.chat_root, args.chat_user)]:
     if not account_name:
         continue
