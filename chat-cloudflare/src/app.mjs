@@ -42,6 +42,7 @@ import { generateValidatedAnswer } from "./answer-retry.mjs";
 import { answerMode } from "./answer-mode.mjs";
 import { siteKnowledgeDocuments } from "./site-knowledge.mjs";
 import { newbieCourseDocument } from "./newbie-tutor.mjs";
+import { handleHonorsRequest } from "./learning-honors.mjs";
 import {
   inspectOaPublicKnowledge,
   probeOaPublicKnowledge,
@@ -2338,6 +2339,11 @@ export async function handleRequest(request, env, executionContext, runtime = ru
       return json({ app: APP_NAME, ready: Number(row?.ok) === 1, releaseId: releaseId(context) });
     }
     if (url.pathname.startsWith("/api/visitor/")) return await visitorAuth(context);
+    if (["/api/learning/honors", "/api/learning/my-honors"].includes(url.pathname) ||
+        url.pathname.startsWith("/api/learning/honors/") ||
+        url.pathname === "/api/admin/honors" || url.pathname.startsWith("/api/admin/honors/")) {
+      return await handleHonorsRequest(context, { json, readJson, currentVisitor, requireOwner, sameOrigin, limit });
+    }
     if (url.pathname.startsWith("/api/newbie/")) return await newbieApi(context);
     if (url.pathname.startsWith("/api/auth/")) return await auth(context);
     if (url.pathname.startsWith("/api/")) return await api(context);

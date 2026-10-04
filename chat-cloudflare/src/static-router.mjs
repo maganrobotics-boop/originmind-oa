@@ -45,8 +45,18 @@ const DIRECT_ASSET_PATHS = new Set([
   "/zip-import-addon.js",
 ]);
 const SAFE_METHODS = new Set(["GET", "HEAD"]);
+const HONOR_ASSETS = new Map([
+  ["/learning/honors", "/honors.html"],
+  ["/learning/honors/", "/honors.html"],
+  ["/learning/honors/admin", "/honors-admin.html"],
+  ["/learning/honors.css", "/honors.css"],
+  ["/learning/honors.mjs", "/honors.mjs"],
+  ["/learning/honors-admin.mjs", "/honors-admin.mjs"],
+  ["/learning/honors-trophy.svg", "/honors-trophy.svg"],
+]);
 
 export function classifyPath(pathname) {
+  if (HONOR_ASSETS.has(pathname)) return RouteKind.ASSET;
   if (SHELL_PATHS.has(pathname)) return RouteKind.SHELL;
   if (pathname === "/index.html") return RouteKind.REDIRECT_HOME;
   if (pathname === "/manage/") return RouteKind.REDIRECT_MANAGE;
@@ -130,6 +140,10 @@ export async function routeStaticRequest(request, env) {
   const kind = classifyPath(url.pathname);
 
   if (kind === RouteKind.DYNAMIC) return null;
+  if (HONOR_ASSETS.has(url.pathname)) {
+    if (!SAFE_METHODS.has(request.method)) return methodNotAllowed();
+    return fetchAsset(request, env, HONOR_ASSETS.get(url.pathname), "no-store");
+  }
 
   if (kind === RouteKind.REDIRECT_HOME) return redirect(request, "/");
   if (kind === RouteKind.REDIRECT_MANAGE) return redirect(request, "/manage");
