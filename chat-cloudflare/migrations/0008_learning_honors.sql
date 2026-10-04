@@ -34,24 +34,25 @@ CREATE TABLE learning_honor_events (
 );
 
 -- Preserve the IDs, wording and issuedAt read from the existing public API on
--- 2026-10-04. Completion was explicitly confirmed by Ma Gan. The public API
--- contains no verified account IDs: do not guess accounts from editable names.
--- Administrators must confirm a binding before these appear in a private profile.
+-- 2026-10-04. Completion and prior account verification were confirmed by Ma Gan.
+-- Keep private emails out of this portable migration. Import the already verified
+-- bindings from the existing honors registry; do not guess from editable names
+-- or require the user to repeat the earlier identity confirmation.
 INSERT INTO learning_honors
   (id, recipient_name, category, title, message, source_kind, source_reference,
    granted_by, granted_at, updated_at)
 VALUES
   ('newbie-20261004-1', '崔航阁', 'newbie', '新手村通关 · 机器人探索者',
    '每一次认真尝试，都是走向真实机器人的一步。', 'manual_confirmation',
-   '马淦于2026-10-04明确确认崔航阁完成新手村，并要求公开展示奖杯。原公开接口 /api/learning/honors 的 ID、标题和授予时间于2026-10-04读回核对；账户绑定尚需管理员核验。',
+   '马淦于2026-10-04明确确认崔航阁完成新手村，并要求公开展示奖杯。原公开接口 /api/learning/honors 的 ID、标题和授予时间于2026-10-04读回核对；账户此前已核验，部署时沿用现网既有绑定，私有邮箱不在公开迁移中硬编码。',
    'import:owner-confirmed-20261004', 1791099900000, CAST(strftime('%s','now') AS INTEGER) * 1000),
   ('newbie-20261004-2', '刘奕鹏', 'newbie', '新手村通关 · 机器人探索者',
    '每一次认真尝试，都是走向真实机器人的一步。', 'manual_confirmation',
-   '马淦于2026-10-04明确确认刘奕鹏完成新手村，并要求公开展示奖杯。原公开接口 /api/learning/honors 的 ID、标题和授予时间于2026-10-04读回核对；账户绑定尚需管理员核验。',
+   '马淦于2026-10-04明确确认刘奕鹏完成新手村，并要求公开展示奖杯。原公开接口 /api/learning/honors 的 ID、标题和授予时间于2026-10-04读回核对；账户此前已核验，部署时沿用现网既有绑定，私有邮箱不在公开迁移中硬编码。',
    'import:owner-confirmed-20261004', 1791099900000, CAST(strftime('%s','now') AS INTEGER) * 1000),
   ('newbie-20261004-3', '邱衡', 'newbie', '新手村通关 · 机器人探索者',
    '每一次认真尝试，都是走向真实机器人的一步。', 'manual_confirmation',
-   '马淦于2026-10-04明确确认邱衡完成新手村，并要求公开展示奖杯。原公开接口 /api/learning/honors 的 ID、标题和授予时间于2026-10-04读回核对；账户绑定尚需管理员核验。',
+   '马淦于2026-10-04明确确认邱衡完成新手村，并要求公开展示奖杯。原公开接口 /api/learning/honors 的 ID、标题和授予时间于2026-10-04读回核对；账户此前已核验，部署时沿用现网既有绑定，私有邮箱不在公开迁移中硬编码。',
    'import:owner-confirmed-20261004', 1791099900000, CAST(strftime('%s','now') AS INTEGER) * 1000);
 
 INSERT INTO learning_honor_events (honor_id, version, action, actor, occurred_at, note)
