@@ -120,10 +120,11 @@ try {
     await noOverflow(page);
     await page.evaluate(() => document.fonts.ready);
     await page.screenshot({ path: resolve(output, `honors-${label}.png`), fullPage: true });
-    await page.getByLabel('荣誉类别').selectOption('competition');
+    await page.getByRole('button', { name: '竞赛获奖', exact: true }).click();
+    assert.equal(await page.getByRole('button', { name: '竞赛获奖', exact: true }).getAttribute('aria-pressed'), 'true');
     await page.getByText('当前类别暂无公开荣誉。', { exact: true }).waitFor();
     assert.equal(await page.locator('.honors-card').count(), 0);
-    await page.getByLabel('荣誉类别').selectOption('newbie');
+    await page.getByRole('button', { name: '新手村通关', exact: true }).click();
     await page.locator('.honors-card').first().waitFor();
     assert.equal(await page.locator('.honors-card').count(), 3);
     assert.deepEqual(errors, []); passed(`${label}: public awards, category filter, empty state, no overflow or script errors`);
@@ -136,6 +137,7 @@ try {
   await admin.goto(origin + '/learning/honors/admin');
   await admin.locator('#honors-admin-list .honors-card').first().waitFor();
   assert.equal(await admin.locator('#honors-admin-list .honors-card').count(), 3);
+  assert.equal(await admin.locator('#honors-grant-form').isVisible(), false);
   const first = admin.locator('#honors-admin-list .honors-card').filter({ has: admin.getByRole('heading', { name: '崔航阁 · 新手村通关 · 机器人探索者' }) });
   await first.getByRole('button', { name: '绑定账户', exact: true }).click();
   const bind = admin.locator('#honors-action-dialog');
@@ -198,6 +200,13 @@ try {
 
   // Historical grant through the real admin form, with manual provenance.
   const form = admin.locator('#honors-grant-form');
+  await admin.getByRole('button', { name: '补录历史荣誉', exact: true }).click();
+  assert.equal(await admin.locator('#honors-grant-toggle').getAttribute('aria-expanded'), 'true');
+  await form.getByLabel('获奖人姓名').fill('历史测试同学');
+  await form.getByRole('button', { name: '收起表单', exact: true }).click();
+  assert.equal(await form.isVisible(), false);
+  await admin.getByRole('button', { name: '补录历史荣誉', exact: true }).click();
+  assert.equal(await form.getByLabel('获奖人姓名').inputValue(), '历史测试同学');
   await form.getByLabel('获奖人姓名').fill('历史测试同学');
   await form.getByLabel('荣誉类别').selectOption('alumni');
   await form.getByLabel('荣誉名称').fill('毕业纪念 · 合成测试');
@@ -207,6 +216,8 @@ try {
   await form.getByLabel('我已核对荣誉事实与来源；如关联账户，已确认该账户属于获奖人。').check();
   await form.getByRole('button', { name: '确认授予' }).click();
   await admin.getByText('荣誉已保存。', { exact: true }).waitFor();
+  assert.equal(await form.isVisible(), false);
+  assert.equal(await admin.locator('#honors-grant-toggle').getAttribute('aria-expanded'), 'false');
   const alumni = admin.locator('#honors-admin-list .honors-card').filter({ has: admin.getByRole('heading', { name: '历史测试同学 · 毕业纪念 · 合成测试' }) });
   await alumni.waitFor(); assert.ok(await alumni.getByText('事迹日期：2020-06-30', { exact: false }).isVisible());
   passed('historical grant through the form records separate achievement and grant dates without requiring an account');
@@ -232,12 +243,17 @@ try {
   assert.equal(await first.getByRole('button', { name: '恢复公开展示', exact: true }).count(), 0);
   await first.getByRole('button', { name: '查看来源与操作记录' }).click();
   await admin.locator('#honors-audit-list .honors-audit-item').first().waitFor();
+  assert.ok((await admin.locator('#honors-audit-list').innerText()).includes('马淦于2026-10-04明确确认'));
   assert.equal(await admin.locator('#honors-audit-list .honors-audit-item').count(), 5);
   await admin.locator('#honors-audit-dialog').getByRole('button', { name: '关闭', exact: true }).click();
   passed('hide, restore, revoke and preserved private audit trail through the real admin UI');
   await noOverflow(admin); assert.deepEqual(adminErrors, []);
   await admin.setViewportSize({ width: 320, height: 740 }); await noOverflow(admin);
   await admin.screenshot({ path: resolve(output, 'honors-admin-mobile.png'), fullPage: true });
+  await admin.getByRole('button', { name: '补录历史荣誉', exact: true }).click();
+  await noOverflow(admin);
+  await admin.screenshot({ path: resolve(output, 'honors-grant-mobile.png'), fullPage: true });
+  await form.getByRole('button', { name: '收起表单', exact: true }).click();
   passed('admin responsive layout at 320px, with no script errors');
 
   const member = await context('other', { width: 390, height: 844 }); const denied = await member.newPage();

@@ -24,6 +24,8 @@ function showLogin(message = '') {
   $('#honors-admin-list').replaceChildren();
   $('#honors-audit-list').replaceChildren();
   $('#honors-grant-form').reset();
+  setGrantOpen(false);
+  $('#honors-grant-status').textContent = '';
   document.querySelectorAll('.honors-account-picker [name="recipientEmail"]').forEach(select => select.replaceChildren(new Option('暂不绑定账户', '')));
   document.querySelectorAll('dialog[open]').forEach(dialog => dialog.close());
   $('#honors-admin-app').hidden = true; $('#honors-login').hidden = false; $('#honors-logout').hidden = true;
@@ -33,11 +35,17 @@ function adminError(error, status) {
   if ([401, 403].includes(error.status)) { showLogin(error.message); return; }
   status.textContent = error.message;
 }
+function setGrantOpen(open) {
+  $('#honors-grant-form').hidden = !open;
+  $('#honors-grant-toggle').setAttribute('aria-expanded', String(open));
+  $('#honors-grant-toggle').textContent = open ? '收起补录' : '补录历史荣誉';
+  if (open) $('#honors-grant-form [name="name"]').focus();
+}
 function record(award) {
   const card = el('article', undefined, 'honors-card');
   const head = el('div', undefined, 'honors-card-top');
   head.append(el('h2', `${award.name} · ${award.title}`), el('span', award.status === 'revoked' ? '已撤回' : award.visibility === 'public' ? '公开展示' : '仅本人可见', 'honors-badge'));
-  card.append(head, el('p', `账户：${award.recipientEmail || '待核验绑定'}\n授予日期：${honorDate(award.issuedAt)}${award.achievementDate ? `\n事迹日期：${award.achievementDate}` : ''}\n确认依据：${award.sourceReference}\n授予记录：${award.grantedBy}`, 'honors-private'));
+  card.append(head, el('p', `账户：${award.recipientEmail || '待核验绑定'}\n授予日期：${honorDate(award.issuedAt)}${award.achievementDate ? `\n事迹日期：${award.achievementDate}` : ''}`, 'honors-private'));
   const actions = el('div', undefined, 'honors-actions');
   if (award.status === 'granted') {
     for (const action of ['bind', award.visibility === 'public' ? 'hide' : 'show', 'revoke']) {
@@ -106,6 +114,7 @@ async function showAudit(award) {
   try {
     const data = await request(`/api/admin/honors/${encodeURIComponent(award.id)}/events`);
     if (generation !== state.generation || auditGeneration !== state.auditGeneration || !$('#honors-audit-dialog').open) return;
+    $('#honors-audit-list').append(el('p', `确认方式：${award.sourceKind === 'reference' ? '可追溯来源' : '人工确认'}\n确认依据：${award.sourceReference}\n授予记录：${award.grantedBy}`, 'honors-private'));
     for (const event of data.events) {
       const entry = el('article', undefined, 'honors-audit-item');
       entry.append(el('h3', `第 ${event.version} 版 · ${actionLabels[event.action]}`),
@@ -127,6 +136,8 @@ $('#honors-grant-form').addEventListener('submit', async event => {
   try {
     await request('/api/admin/honors', { method: 'POST', body: JSON.stringify(data) });
     form.reset(); state.requestId = ''; state.grantSignature = '';
+    setGrantOpen(false);
+    $('#honors-grant-toggle').focus();
     $('#honors-grant-status').textContent = '荣誉已保存。'; await load(true);
   } catch (error) { adminError(error, $('#honors-grant-status')); }
   finally { button.disabled = false; }
@@ -158,6 +169,8 @@ $('#honors-logout').addEventListener('click', async () => {
 $('#honors-admin-filter').addEventListener('change', () => void load(true));
 $('#honors-admin-refresh').addEventListener('click', () => void load(true));
 $('#honors-admin-more').addEventListener('click', () => void load());
+$('#honors-grant-toggle').addEventListener('click', () => setGrantOpen($('#honors-grant-form').hidden));
+$('#honors-grant-cancel').addEventListener('click', () => { setGrantOpen(false); $('#honors-grant-toggle').focus(); });
 document.querySelectorAll('[data-close]').forEach(button => button.addEventListener('click', () => document.getElementById(button.dataset.close).close()));
 document.querySelectorAll('[data-search]').forEach(button => button.addEventListener('click', () => void searchAccounts(button.closest('.honors-account-picker'))));
 void load(true);

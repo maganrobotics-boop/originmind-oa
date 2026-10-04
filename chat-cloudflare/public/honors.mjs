@@ -16,8 +16,8 @@ export function honorCard(award, personal = false) {
   const image = element('img');
   image.src = '/learning/honors-trophy.svg';
   image.alt = `${award.name}的荣誉奖杯`;
-  image.width = 72; image.height = 72;
-  head.append(badge, image);
+  image.width = 52; image.height = 52;
+  head.append(image, badge);
   card.append(head, element(personal ? 'h3' : 'h2', award.name), element('p', award.title, 'honors-title'));
   if (award.message) card.append(element('p', award.message, 'honors-message'));
   if (award.achievementDate) card.append(element('span', `事迹日期：${award.achievementDate}`, 'honors-date'));
@@ -48,7 +48,7 @@ function startWall() {
   const status = document.getElementById('honors-status');
   const filter = document.getElementById('honors-category');
   const more = document.getElementById('honors-more');
-  let generation = 0, page = 0;
+  let generation = 0, page = 0, category = '';
   const records = new Map();
   async function load(reset = false) {
     if (reset) { generation++; page = 0; records.clear(); list.replaceChildren(); }
@@ -56,7 +56,7 @@ function startWall() {
     more.hidden = true;
     status.textContent = '正在读取荣誉…';
     const params = new URLSearchParams({ page: String(page + 1) });
-    if (filter.value) params.set('category', filter.value);
+    if (category) params.set('category', category);
     try {
       const data = await request(`/api/learning/honors?${params}`);
       if (current !== generation) return;
@@ -66,7 +66,7 @@ function startWall() {
       try { targetId = decodeURIComponent(location.hash.slice(1)); } catch { /* Ignore malformed anchors. */ }
       // Keep shared trophy links useful after the wall grows beyond one page.
       // The detail endpoint applies the same visibility checks as the wall.
-      if (reset && !filter.value && /^[a-z0-9-]{10,64}$/u.test(targetId) && !records.has(targetId)) {
+      if (reset && !category && /^[a-z0-9-]{10,64}$/u.test(targetId) && !records.has(targetId)) {
         try {
           const linked = await request(`/api/learning/honors/${encodeURIComponent(targetId)}`);
           if (current !== generation) return;
@@ -83,7 +83,13 @@ function startWall() {
       if (current === generation) { status.textContent = error.message; more.hidden = page === 0; }
     }
   }
-  filter.addEventListener('change', () => void load(true));
+  filter.addEventListener('click', event => {
+    const button = event.target.closest('button[data-category]');
+    if (!button || !filter.contains(button) || button.dataset.category === category) return;
+    category = button.dataset.category;
+    filter.querySelectorAll('button').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+    void load(true);
+  });
   document.getElementById('honors-refresh').addEventListener('click', () => void load(true));
   more.addEventListener('click', () => void load());
   window.addEventListener('pageshow', event => { if (event.persisted) void load(true); });
