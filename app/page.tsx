@@ -361,14 +361,13 @@ function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马�
     <button type="button" className="brand-lockup" onClick={() => setActiveView("home")} aria-label="返回主页" title="返回主页"><div className="brand-copy"><div className="brand-name">联合研发 OA</div><div className="brand-subtitle">{officialBrand}</div></div></button>
     <div className="oa-sidebar-scroll">
     <span className="sidebar-section-label">工作区</span>
-    <nav className="sidebar-nav" aria-label="核心工作区">{workspaceItems.map(({ key, label, icon: Icon }) => <button key={key} className={`sidebar-nav-item ${activeView === key ? "active" : ""}`} onClick={() => setActiveView(key)}><Icon className="size-[17px]" /><span>{label}</span></button>)}</nav>
+    <nav className="sidebar-nav" aria-label="核心工作区">{workspaceItems.map(({ key, label, icon: Icon }) => <button key={key} className={`sidebar-nav-item ${activeView === key ? "active" : ""}`} onClick={() => setActiveView(key)}><Icon className="size-[17px]" /><span>{label}</span></button>)}<a className="sidebar-nav-item" href="/people-workbench"><UsersRound className="size-[17px]" /><span>人员工作台</span></a></nav>
     <div className="sidebar-divider" />
     <button type="button" data-sidebar-section="office" className="sidebar-section-label sidebar-group-toggle" aria-expanded={officeOpen} aria-controls={officeId} onClick={() => setOfficeOpen(open => !open)}><span>审批办公</span><ChevronRight className="size-3.5" /></button>
     <div id={officeId} hidden={!officeOpen}>
     <nav className="sidebar-nav" aria-label="主导航">{items.map(({ key, label, icon: Icon }) => { const itemPendingCount = key === "dashboard" ? pendingApprovalCount : key === "members" ? pendingMemberCount : key === "knowledge" ? pendingKnowledgeCount : 0; const needsAttention = itemPendingCount > 0; const attentionClass = needsAttention ? `attention attention-${key}` : ""; return <button key={key} className={`sidebar-nav-item ${activeView === key ? "active" : ""} ${attentionClass}`} onClick={() => setActiveView(key)}><Icon className="size-[17px]" /><span>{label}</span>{needsAttention && <span className="nav-count nav-count-alert">{itemPendingCount > 99 ? "99+" : itemPendingCount}</span>}</button>; })}</nav>
     <button type="button" className="sidebar-nav-item" onClick={onMyPending}><Clock3 className="size-[17px]" /><span>待我审批</span></button>
     <button type="button" className="sidebar-nav-item" onClick={onNew}><Plus className="size-[17px]" /><span>新建审核申请</span></button>
-    <a className="sidebar-nav-item" href="/people-workbench"><Plus className="size-[17px]" /><span>人员工作台</span></a>
     </div>
     <div className="sidebar-divider" />
     <button type="button" data-sidebar-section="knowledge" className="sidebar-section-label sidebar-group-toggle" aria-expanded={knowledgeOpen} aria-controls={knowledgeId} onClick={() => setKnowledgeOpen(open => !open)}><span>实验室大模型</span><ChevronRight className="size-3.5" /></button>
