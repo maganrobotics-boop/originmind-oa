@@ -60,7 +60,7 @@ python3 scripts/integrate-future-stars-activity.py --oa-root /path/to/oa-candida
 
 ## 验证
 
-- 33 项数据/API/桥接测试通过：三窗口边界、去重、未来时间、全课程/子课程、累计进度优先及时间次序、分页、筛选、无记录、匿名与非管理员拒绝、只读授权、签名与防重放、Arena 独立数据源、正式平均成绩、超时/未接入/读取不完整。
+- 34 项数据/API/桥接测试通过：三窗口边界、去重、未来时间、全课程/子课程、累计进度优先及时间次序、分页、筛选、无记录、匿名与非管理员拒绝、只读授权、签名与防重放、Arena 独立数据源、正式平均成绩、超时/未接入/读取不完整，以及历史纯文本和非 JSON 点评的个人记录兼容。
 - 3 项 Python 集成测试通过：预检不写、接入与未接入、重复应用、源码变化时无部分写入；另在上述两份实际归档源码上执行预检/应用/重复应用及 JS 语法检查通过。
 - 47 项已有回归通过：OA bridge、Chat Worker contract、只读授权和新手村游客流程。
 - TypeScript、定向 ESLint、仓库生产构建通过。
@@ -76,3 +76,32 @@ npm run build
 # 需安装 Playwright 与 Chromium；可用 FUTURE_STARS_BROWSER_EXECUTABLE 指定已有浏览器
 node scripts/check-future-stars-browser.mjs
 ```
+
+## 生产部署记录：2026-10-07 06:27（北京时间）
+
+用户明确授权部署后，通过阿里云现有发布目录完成增量上线。运行代码提交 `3bfbbb83518a6672ef3ef46c2b9641dc6b880eb7`，对应 PR #121；没有合并或重做 #120。
+
+| 服务 | 新版本 | 回退版本 |
+| --- | --- | --- |
+| OA | `oa-stars-activity-20261007-v1` | `oa-pwa-safe-20261006-v2` |
+| Chat | `chat-stars-activity-20261007-v1` | `chat-arena-activity-20261006-v1` |
+
+均位于 `/opt/omindos-deploy/releases/`，由 `oa-current`、`chat-current` 链接选用。候选由当时线上实际版本复制，受保护源码校验覆盖 OA 1,123 个、Chat 1,205 个文件；保留既有 PWA、私有荣誉绑定和其他业务。未运行课程、荣誉或裁判数据迁移。
+
+服务器维护目录 `/opt/omindos-deploy/maintenance/future-stars-activity-20261007/` 保存源码哈希、集成清单、构建日志、数据库副本预检结果、发布记录和上线核验；`backup/` 保存发布前 OA、Chat、learning 三份 SQLite 备份，权限仅维护账户可读。回退时原子恢复上述两个 current 链接，依次重启 `originmind-chat` 和 `originmind-oa` 并核验健康；正常代码回退无需覆盖用户最新数据库。
+
+上线前以服务账户在 3300/3301 端口启动候选，使用数据库副本，课程与 Arena 三窗口均通过。实际数据发现旧点评包含纯文本，因此补充兼容读取和回归测试后再次通过预检。阿里云实际 TypeScript 与 Next.js webpack 生产构建通过。
+
+上线后使用既有服务签名进行只读核验，结果如下。数值为核验时快照，后续随活动和滚动窗口变化。
+
+| 窗口 | 课程活跃人数 | Arena 活跃人数 | Arena 测试结果数 |
+| --- | ---: | ---: | ---: |
+| 24 小时 | 8 | 3 | 1 |
+| 3 天 | 11 | 6 | 10 |
+| 7 天 | 21 | 6 | 10 |
+
+Arena 三次均为 `source.status=connected`；测试结果数对应默认地图 `originmind-quick-double-left-v1`、快速练习模式，不代表所有地图合计。课程目录包含 24 个记录入口、22 个去重父课程；检查了排序、去重、窗口边界、完整分页和个人全部记录入口。没有伪造用户活动或成绩。
+
+OA/Chat 公网首页、OA manifest/service worker、Arena health 均为 200；两服务均 active。三个窗口的匿名 OA 管理请求为 401，未签名桥接为 401，跨站写请求为 403，私人荣誉匿名访问为 401；荣誉公开字段及既有绑定检查通过。此处是服务签名与匿名公网核验，未冒充真实管理员浏览器登录验收；组件浏览器回归仍为合成 API。
+
+PR 的新增 Future Stars 专项检查在初始实现提交通过。Chat 通用 CI 曾在旧新手村浏览器检查的标题等待处失败，已对照 #120 相同失败位置，非此次引入；未移除或跳过该检查。
