@@ -41,9 +41,10 @@ def change(root, name, replacements):
 
 for name in ["lib/future-stars-client.ts", "app/api/admin/future-stars/route.ts",
              "components/future-stars/future-stars.tsx", "components/future-stars/future-stars.css",
+             "components/future-stars/arena-overview.tsx", "chat-cloudflare/src/activity-windows.mjs",
              "chat-cloudflare/src/future-stars-bridge.mjs"]:
     install(args.oa_root, name)
-for name in ["chat-cloudflare/src/future-stars-bridge.mjs", "chat-cloudflare/src/future-stars-service.mjs",
+for name in ["chat-cloudflare/src/activity-windows.mjs", "chat-cloudflare/src/future-stars-bridge.mjs", "chat-cloudflare/src/future-stars-service.mjs",
              "chat-cloudflare/src/learning-honors.mjs", "chat-cloudflare/migrations/0008_learning_honors.sql",
              "aliyun/learning/future-stars.mjs", "aliyun/future-stars-migrate.mjs",
              "chat-cloudflare/public/learning/honors-trophy.svg", "chat-cloudflare/public/learning/honors.html",
@@ -142,6 +143,10 @@ change(args.chat_root, "chat-cloudflare/src/app.mjs", [
 ])
 subprocess.run([sys.executable, str(args.feature_root / "scripts/fix-oa-home.py"),
                 "--oa-root", str(args.oa_root)], check=True, capture_output=True, text=True)
+
+subprocess.run([sys.executable, str(args.feature_root / "scripts/integrate-future-stars-activity.py"),
+                "--oa-root", str(args.oa_root), "--chat-root", str(args.chat_root),
+                "--feature-root", str(args.feature_root), "--apply"], check=True, capture_output=True, text=True)
 
 for root, account_name in [(args.oa_root, args.oa_user), (args.chat_root, args.chat_user)]:
     if not account_name:

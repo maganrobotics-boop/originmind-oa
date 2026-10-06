@@ -1,5 +1,6 @@
 // Copyright (c) 2026 OriginMind. All rights reserved.
 import { PublicError } from './errors.mjs';
+import { ACTIVITY_WINDOWS } from './activity-windows.mjs';
 
 export const FUTURE_STARS_PATH = '/api/internal/oa-future-stars';
 export const FUTURE_STARS_ORIGIN = 'https://chat.omindos.cn';
@@ -38,12 +39,21 @@ export function validStarsPayload(value) {
   if (!actor || typeof actor !== 'object' || Array.isArray(actor) || Object.keys(actor).some(k => !['email', 'subject'].includes(k)) ||
       typeof actor.email !== 'string' || actor.email.length > 254 || !/^[^\s@]+@[^\s@]+$/u.test(actor.email) ||
       typeof actor.subject !== 'string' || actor.subject.length < 1 || actor.subject.length > 200) return false;
-  const keys = { people: ['q', 'page', 'courseId', 'status'], records: ['email', 'courseId', 'page'],
+  const keys = { arena: ['q','page','window','sort','mapId','mode'], people: ['q', 'page', 'courseId', 'status', 'window', 'sort'], records: ['email', 'courseId', 'page'],
     honors: ['category', 'status', 'page'], recipients: ['q'], events: ['id'], grant: [], honor_action: ['id'] };
   if (!Object.hasOwn(keys, value.operation)) return false;
   const params = value.params ?? {};
   if (!params || typeof params !== 'object' || Array.isArray(params) || Object.keys(params).some(k => !keys[value.operation].includes(k)) ||
       Object.values(params).some(v => typeof v !== 'string' || v.length > 254)) return false;
+  if (['people', 'arena'].includes(value.operation)) {
+    if (params.window !== undefined && !Object.hasOwn(ACTIVITY_WINDOWS, params.window)) return false;
+    if (params.page !== undefined && !/^[1-9]\d{0,4}$/u.test(params.page)) return false;
+    if (params.q !== undefined && params.q.length > 100) return false;
+    const sorts = value.operation === 'people' ? ['progress', 'fastest', 'recent'] : ['best', 'recent', 'tests'];
+    if (params.sort !== undefined && !sorts.includes(params.sort)) return false;
+    if (value.operation === 'arena' && ((params.mode !== undefined && !['auto', 'full', 'quick'].includes(params.mode)) ||
+      (params.mapId && !/^[A-Za-z0-9_-]{1,128}$/u.test(params.mapId)))) return false;
+  }
   const writing = ['grant', 'honor_action'].includes(value.operation);
   return writing ? Boolean(value.body && typeof value.body === 'object' && !Array.isArray(value.body)) : value.body === undefined;
 }

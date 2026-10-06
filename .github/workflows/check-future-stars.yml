@@ -1,0 +1,32 @@
+name: Check future stars activity
+on:
+  pull_request:
+    paths:
+      - 'aliyun/**'
+      - 'components/future-stars/**'
+      - 'app/api/admin/future-stars/**'
+      - 'chat-cloudflare/src/future-stars*'
+      - 'chat-cloudflare/src/activity-windows.mjs'
+      - 'chat-cloudflare/src/app.mjs'
+      - 'tests/*future-stars*'
+      - 'tests/arena-admin.test.mjs'
+      - 'scripts/integrate-future-stars*'
+      - '.github/workflows/check-future-stars.yml'
+permissions:
+  contents: read
+jobs:
+  activity:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+          cache: npm
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm run typecheck
+      - run: node --test tests/future-stars.test.mjs tests/future-stars-activity.test.mjs tests/future-stars-api.test.mjs tests/arena-admin.test.mjs
+      - run: python3 tests/future-stars-integration.test.py

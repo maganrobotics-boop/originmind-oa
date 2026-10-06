@@ -21,7 +21,7 @@ function failure(error: unknown) {
 export async function GET(request: Request) {
   try {
     const user = await authorized(true), url = new URL(request.url), view = url.searchParams.get('view') || 'students';
-    const operation = ({ students: 'people', records: 'records', awards: 'honors', honors: 'honors', recipients: 'recipients', events: 'events' } as Record<string, string>)[view];
+    const operation = ({ arena: 'arena', students: 'people', records: 'records', awards: 'honors', honors: 'honors', recipients: 'recipients', events: 'events' } as Record<string, string>)[view];
     if (!operation) throw new FutureStarsError('查看内容不正确。', 400);
     const params: Record<string, string> = {};
     for (const [key, value] of url.searchParams) {
