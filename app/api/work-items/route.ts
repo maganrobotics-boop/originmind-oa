@@ -1,4 +1,5 @@
 import { getD1Database } from '../../../db';
+import { getOwnPersonnelTodos } from '../../../lib/personnel-todos.mjs';
 import { getAuthorizedUser } from '../_lib/auth';
 import { readBoundedJsonObject } from '../../../lib/bounded-json-request';
 import { OA_PROJECT, extractMeetingActions, serializeWorkItem, type WorkItemRow } from '../../../lib/project-work-items';
@@ -27,7 +28,8 @@ export async function GET() {
   try {
     const db = await getD1Database();
     const result = await db.prepare(`SELECT * FROM project_work_items WHERE project=? AND (id NOT LIKE 'personnel-%' OR lower(assignee_email)=? OR lower(created_by_email)=?) ORDER BY CASE status WHEN 'in_progress' THEN 0 WHEN 'open' THEN 1 ELSE 2 END, CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, COALESCE(due_at,'9999-12-31'), updated_at DESC LIMIT 500`).bind(OA_PROJECT, user.user.email.toLowerCase(), user.user.email.toLowerCase()).all<WorkItemRow>();
-    return json({ items: result.results.map(serializeWorkItem), currentUserEmail: user.user.email.toLowerCase() });
+    const personnel = await getOwnPersonnelTodos(db, user);
+    return json({ items: [...personnel, ...result.results.map(serializeWorkItem)], currentUserEmail: user.user.email.toLowerCase() });
   } catch { return json({ error: '统一待办暂不可用，请稍后重试。' }, 503); }
 }
 

@@ -6,6 +6,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, CalendarDays, CheckCircle2, CircleDot, ClipboardCheck, Flag, History, ListTodo, Plus, RefreshCw, Target, UsersRound } from 'lucide-react';
 import { toast } from 'sonner';
+import { PersonnelTaskLink } from './personnel-task-link';
 import type { WorkItem } from '@/lib/project-work-items';
 import './project-workspace.css';
 
@@ -97,7 +98,7 @@ export function ProjectWorkspace({ mode, approvals, currentUserEmail = '', peopl
     finally { setBackfilling(false); }
   };
 
-  const WorkItemRow = ({ item }: { item: WorkItem }) => item.id.startsWith('personnel-') ? <article className="project-task urgent"><div><strong>{item.title}</strong><p>{item.assigneeName} · 请在人员工作台查看和处理</p></div><a href="/people-workbench?disputes=1">处理异议</a></article> : <article className={`project-task ${item.priority === 'high' ? 'urgent' : ''}`}>
+  const WorkItemRow = ({ item }: { item: WorkItem }) => item.id.startsWith('personnel-') ? <PersonnelTaskLink key={item.id} item={item}/> : <article className={`project-task ${item.priority === 'high' ? 'urgent' : ''}`}>
     <button type="button" className="project-task-check" onClick={() => void update(item, item.status === 'done' ? 'open' : 'done')} aria-label={item.status === 'done' ? '重新打开' : '标记完成'}>{item.status === 'done' ? <CheckCircle2 /> : <CircleDot />}</button>
     <div><div className="project-task-title"><strong>{item.title}</strong><span>{kindLabel[item.kind]}</span></div><p>{item.assigneeName || '待指定负责人'}{item.dueAt ? ` · 截止 ${item.dueAt}` : ' · 暂无截止日期'}{item.sourceType === 'meeting' ? ' · 来自会议纪要' : ''}</p></div>
     <select value={item.status} onChange={event => void update(item, event.target.value as WorkItem['status'])} aria-label="工作项状态"><option value="open">待处理</option><option value="in_progress">进行中</option><option value="done">已完成</option><option value="cancelled">已取消</option></select>

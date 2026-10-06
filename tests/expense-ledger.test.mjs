@@ -68,3 +68,17 @@ test('progress requires evidence of actual funds and cannot exceed net expense',
  assert.throws(()=>validateClaim({stage:'awaiting',reimbursed_cents:8000},8000),/提交报销日期/);
  const c=validateClaim({stage:'settled',reimbursed_cents:8000,submitted_date:'2026-01-01',received_date:'2026-01-02',reference:'合成回单'},8000);assert.equal(c.reimbursed_cents,8000);
 });
+
+test('student todos contain only own actionable records and follow the confirmation/dispute lifecycle',async()=>{
+ const {getOwnPersonnelTodos,personnelTodoItems}=await import('../lib/personnel-todos.mjs');
+ const {db,user,act,raw}=fixture();await act('admin',{action:'import',csv,filename:'synthetic.csv'});
+ let tasks=await getOwnPersonnelTodos(db,user('member'));assert.equal(tasks.length,1);assert.match(tasks[0].id,/personnel-self-expenses-/);assert.equal(tasks[0].assigneeEmail,'member@test.invalid');assert.equal(tasks[0].sourceId,'member');
+ assert.deepEqual(await getOwnPersonnelTodos(db,user('other')),[]);assert.deepEqual(await getOwnPersonnelTodos(db,user('admin')),[]);
+ assert.deepEqual(personnelTodoItems(await loadLedger(db,user('admin')),user('other')),[]);
+ await act('member',{action:'confirm',ids:['payment0000001']});tasks=await getOwnPersonnelTodos(db,user('member'));assert.equal(tasks.length,1);assert.match(tasks[0].id,/personnel-self-reimbursement-/);
+ await act('member',{action:'dispute',ids:['payment0000001'],note:'确认后发现需要核对'});assert.deepEqual(await getOwnPersonnelTodos(db,user('member')),[]);
+ const d=raw.prepare('select id from personnel_disputes').get();await act('admin',{action:'resolve_dispute',id:d.id,resolution:'已核对，请再次确认'});
+ tasks=await getOwnPersonnelTodos(db,user('member'));assert.equal(tasks.length,1);assert.match(tasks[0].id,/personnel-self-expenses-/);
+ const w=await act('admin',{action:'work_create',memberId:'member',title:'本人周报',sourceText:'实际工作记录'});tasks=await getOwnPersonnelTodos(db,user('member'));assert.equal(tasks.length,2);assert.equal(tasks.filter(t=>t.id.startsWith('personnel-self-work-')).length,1);
+ await act('member',{action:'work_dispute',id:w.target,reason:'工作说明需要核对'});tasks=await getOwnPersonnelTodos(db,user('member'));assert.equal(tasks.filter(t=>t.id.startsWith('personnel-self-work-')).length,0);
+});
