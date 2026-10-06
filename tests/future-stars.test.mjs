@@ -45,7 +45,7 @@ function env(t) {
     graduationSummary: () => ({ status: 'not_attempted', passedAt: null }),
   });
   return { DB, APP_ORIGIN: origin, PUBLIC_LAB_AI_SERVICE_TOKEN: secret, ADMIN_EMAIL: actor.email,
-    APP_ENCRYPTION_KEY: 'e'.repeat(48), RATE_LIMIT_HMAC_KEY: 'r'.repeat(48), FUTURE_STARS_LEARNING };
+    APP_ENCRYPTION_KEY: 'e'.repeat(48), RATE_LIMIT_HMAC_KEY: 'r'.repeat(48), FUTURE_STARS_LEARNING, learningDb: learning };
 }
 async function call(env, payload, options = {}) {
   const result = await handleRequest(await signedRequest(payload, options), env, {});
@@ -107,6 +107,17 @@ test('records return only submitted evidence and AI feedback, without code paylo
   assert.equal(result.status, 200); assert.equal(result.data.records.length, 2);
   assert.equal(result.data.records.find(row => row.id === 's1').review.feedback, 'fixture点评');
   assert.ok(result.data.records.every(row => !Object.hasOwn(row, 'payload')));
+});
+test('legacy plain-text and malformed JSON reviews preserve readable personal records', async t => {
+  const environment = env(t);
+  const values = ['历史纯文本点评', '{incomplete JSON', '<script>literal text</script>'];
+  for (const [index, review] of values.entries()) environment.learningDb.prepare('INSERT INTO learning_submissions VALUES(?,?,?,?,?,?,?)')
+    .run('legacy-' + index, 'one@stumail.sztu.edu.cn', JSON.stringify({ courseId: 'navigation' }), 'done', review, null, 2000 + index);
+  const result = await call(environment, { actor, operation: 'records', params: { email: 'one@stumail.sztu.edu.cn' } });
+  assert.equal(result.status, 200); assert.equal(result.data.pagination.total, 5);
+  for (const [index, review] of values.entries()) assert.equal(result.data.records.find(row => row.id === 'legacy-' + index).review, review);
+  assert.equal(result.data.records.find(row => row.id === 's1').review.feedback, 'fixture点评');
+  assert.equal(result.data.records.find(row => row.id === 's2').review, null);
 });
 test('competition grants share the honor store and authenticated OA actor, and synchronize hiding', async t => {
   const environment = env(t);

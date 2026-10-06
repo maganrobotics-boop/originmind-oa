@@ -1,4 +1,8 @@
 // Read the existing learning records without changing completion or access grants.
+function readReview(value) {
+  if (!value) return null;
+  try { return JSON.parse(value); } catch { return value; }
+}
 export function createLearningPeople({ db, courses, progressFor, graduationSummary, canonicalId = id => courses.find(course => course.id === id)?.parentId || id, stages = [] }) {
   // Only authenticated requests update presence; admin reads never mark a learner online.
   db.exec('CREATE TABLE IF NOT EXISTS learning_presence(email TEXT PRIMARY KEY COLLATE NOCASE,last_seen INTEGER NOT NULL)');
@@ -69,7 +73,7 @@ export function createLearningPeople({ db, courses, progressFor, graduationSumma
       const total = db.prepare('SELECT COUNT(*) AS n FROM learning_submissions' + where).get(...args).n;
       const rows = db.prepare("SELECT id,created_at AS createdAt,review_state AS reviewState,review,error,COALESCE(json_extract(payload,'$.courseId'),'python-basics') AS courseId,json_extract(payload,'$.reflection') AS reflection FROM learning_submissions" + where + ' ORDER BY created_at DESC,id LIMIT 20 OFFSET ?').all(...args, (Number(page) - 1) * 20);
       return { records: rows.map(row => ({ ...row, title: catalogue.find(c => c.id === row.courseId)?.title || row.courseId,
-        review: row.review ? JSON.parse(row.review) : null })), pagination: { page: Number(page), total, totalPages: Math.ceil(total / 20) } };
+        review: readReview(row.review) })), pagination: { page: Number(page), total, totalPages: Math.ceil(total / 20) } };
     },
   };
 }
