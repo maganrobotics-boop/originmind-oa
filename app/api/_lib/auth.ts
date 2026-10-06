@@ -1,3 +1,4 @@
+import { financeIdentities } from '../../../lib/finance-identities.mjs';
 import { and, desc, eq, inArray, or, sql } from "drizzle-orm";
 import { cookies, headers } from "next/headers";
 import { getDb } from "../../../db";
@@ -556,7 +557,7 @@ function configuredPrivilegedRoles() {
   const roles = [
     { role: "管理员" as const, entries: configuredRoleEntries("管理员", "OA_ADMIN_EMAILS", "OA_ADMIN_NAMES", true) },
     { role: "项目负责人" as const, entries: configuredRoleEntries("项目负责人", "OA_PROJECT_OWNER_EMAILS", "OA_PROJECT_OWNER_NAMES") },
-    { role: "经费负责人" as const, entries: configuredRoleEntries("经费负责人", "OA_FINANCE_OWNER_EMAILS", "OA_FINANCE_OWNER_NAMES") },
+    { role: "经费负责人" as const, entries: [...configuredRoleEntries("经费负责人", "OA_FINANCE_OWNER_EMAILS", "OA_FINANCE_OWNER_NAMES"), ...financeIdentities(process.env.OA_FINANCE_IDENTITIES_JSON)] },
   ];
   const identitiesByEmail = new Map<string, { accountUserId: string; displayName: string; role: ConfiguredRoleName }>();
   const identitiesById = new Map<string, { email: string; displayName: string; role: ConfiguredRoleName }>();

@@ -1,4 +1,5 @@
-import { getDb } from "../../../../db";
+import { getDb, getD1Database } from "../../../../db";
+import { answerPersonnelQuestion } from "../../../../lib/personnel-chat.mjs";
 import { readBoundedJsonObject } from "../../../../lib/bounded-json-request";
 import { answerOaChatQuestion, questionRequestsKnowledgeImages, type OaChatHistory } from "../../../../lib/oa-chat-client";
 import { isWellFormedUnicode, rankKnowledgeChunks } from "../../../../lib/knowledge-policy";
@@ -76,6 +77,14 @@ export async function POST(request: Request) {
   try {
     const db = await getDb();
     if (!(await consumeWriteRateLimit(db, { actorSubject: authorized.accountUserId, scope: "lab_ai_ask", limit: MAX_QUESTIONS_PER_MINUTE }))) return finish(privateJson({ error: "提问过于频繁，请稍后再试。" }, { status: 429, headers: { "retry-after": "60" } }));
+    const personnel = await answerPersonnelQuestion(await getD1Database(), authorized, question, history);
+    if (personnel) {
+      const current = await getAuthorizedUser({ readOnly: true });
+      if (!current?.ndaCompleted || current.memberId !== authorized.memberId || current.accountUserId !== authorized.accountUserId ||
+        current.memberMutationRevision !== authorized.memberMutationRevision || current.isAdmin !== authorized.isAdmin || current.isFinanceOwner !== authorized.isFinanceOwner)
+        return finish(privateJson({ error: '人员权限已变化，请刷新后重试。' }, { status: 403 }));
+      return finish(privateJson(personnel));
+    }
     const actor: KnowledgeActor = {
       memberId: authorized.memberId, accountUserId: authorized.accountUserId, memberMutationRevision: authorized.memberMutationRevision,
       name: authorized.user.displayName, email: authorized.user.email, isAdmin: authorized.isAdmin,

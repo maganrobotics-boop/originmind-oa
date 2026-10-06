@@ -33,7 +33,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
       ? approval.type === "保密协议" && normalizeEmail(approval.requesterEmail) === email
       : authorized.isAdmin || authorized.role === "project_owner"
         ? true
-        : (authorized.isFinanceOwner && approval.type === "劳务报酬") || isApprovalRelated(approval, email, historicalActors);
+        : (authorized.isFinanceOwner && ["劳务报酬", "采购审核"].includes(approval.type)) || isApprovalRelated(approval, email, historicalActors);
     if (!canView) return Response.json({ error: "申请不存在或当前账号无权查看。" }, { status: 404 });
 
     const fullPayload = parseJsonObject(approval.payloadJson);

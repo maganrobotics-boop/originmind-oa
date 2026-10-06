@@ -57,7 +57,7 @@ function canSeePayload(row: typeof approvals.$inferSelect, authorized: NonNullab
   const email = normalizeEmail(authorized.user.email);
   return authorized.isAdmin
     || authorized.role === "project_owner"
-    || (authorized.isFinanceOwner && row.type === "劳务报酬")
+    || (authorized.isFinanceOwner && ["劳务报酬", "采购审核"].includes(row.type))
     || (row.type === "流转审批" && row.status !== "草稿" && isCirculationParticipant(parseJsonObject(row.payloadJson), email))
     || normalizeEmail(row.requesterEmail) === email
     || normalizeEmail(row.currentReviewerEmail) === email;
@@ -222,7 +222,7 @@ export async function GET() {
       : authorized.isAdmin || authorized.role === "project_owner"
         ? undefined
         : sql`(
-          ${authorized.isFinanceOwner ? sql`${approvals.type} = '劳务报酬' OR` : sql``}
+          ${authorized.isFinanceOwner ? sql`${approvals.type} IN ('劳务报酬', '采购审核') OR` : sql``}
           lower(${approvals.requesterEmail}) = ${currentEmail}
           OR lower(${approvals.currentReviewerEmail}) = ${currentEmail}
           OR EXISTS (

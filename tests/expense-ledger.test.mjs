@@ -82,3 +82,36 @@ test('student todos contain only own actionable records and follow the confirmat
  const w=await act('admin',{action:'work_create',memberId:'member',title:'本人周报',sourceText:'实际工作记录'});tasks=await getOwnPersonnelTodos(db,user('member'));assert.equal(tasks.length,2);assert.equal(tasks.filter(t=>t.id.startsWith('personnel-self-work-')).length,1);
  await act('member',{action:'work_dispute',id:w.target,reason:'工作说明需要核对'});tasks=await getOwnPersonnelTodos(db,user('member'));assert.equal(tasks.filter(t=>t.id.startsWith('personnel-self-work-')).length,0);
 });
+
+test('self reported historic reimbursement confirms ownership, preserves cash evidence and updates finance immediately',async()=>{
+ const {db,user,act,raw}=fixture();await act('admin',{action:'import',csv,filename:'synthetic.csv'});
+ await assert.rejects(act('admin',{action:'report_progress',ids:['payment0000001'],status:'reported_settled'}),/只能本人/);
+ await act('member',{action:'report_progress',ids:['payment0000001'],status:'reported_settled'});
+ let ledger=await loadLedger(db,user('admin'));assert.equal(ledger.records[0].confirmed,true);assert.equal(ledger.records[0].completed,true);assert.equal(ledger.records[0].claim.reimbursed_cents,0);
+ const finance={...user('other'),isFinanceOwner:true};assert.equal((await loadLedger(db,finance)).records[0].claim.stage,'reported_settled');
+ const {getOwnPersonnelTodos}=await import('../lib/personnel-todos.mjs');assert.deepEqual(await getOwnPersonnelTodos(db,user('member')),[]);
+ await act('member',{action:'report_progress',ids:['payment0000001'],status:'reported_in_progress'});assert.equal((await getOwnPersonnelTodos(db,user('member'))).length,1);
+ await act('member',{action:'dispute',ids:['payment0000001'],note:'历史状态需核对'});await assert.rejects(act('member',{action:'report_progress',ids:['payment0000001'],status:'reported_settled'}),/异议/);
+ assert.equal(raw.prepare("SELECT count(*) n FROM expense_events WHERE action='report_progress'").get().n,2);
+});
+
+test('personnel replies resolve linked aliases, use fresh ledger evidence and respect account scope',async()=>{
+ const {answerPersonnelQuestion}=await import('../lib/personnel-chat.mjs');const {db,user,act,raw}=fixture();
+ const u=id=>({...user(id),ndaCompleted:true});await act('admin',{action:'import',csv,filename:'synthetic.csv'});
+ raw.prepare("UPDATE expense_people SET bill_name='小甲' WHERE id='person'").run();
+ let answer=await answerPersonnelQuestion(db,u('admin'),'小甲做了什么工作，买了什么，有什么贡献');
+ assert.match(answer.answer,/80.00 元/);assert.match(answer.answer,/待本人确认 1 笔/);assert.match(answer.answer,/具体物品和用途尚待本人补充/);assert.match(answer.answer,/没有已审核归档的贡献/);assert.equal(answer.personnelLinks[0].href,'/people-workbench?person=member&tab=work');
+ assert.equal(await answerPersonnelQuestion(db,u('other'),'小甲买了什么'),null);
+ assert.equal(await answerPersonnelQuestion(db,u('admin'),'机器人导航怎么做'),null);
+ answer=await answerPersonnelQuestion(db,u('admin'),'他买了什么',[{role:'user',content:'小甲的情况'}]);assert.match(answer.answer,/80.00 元/);
+ await act('member',{action:'report_progress',ids:['payment0000001'],status:'reported_settled'});
+ answer=await answerPersonnelQuestion(db,u('admin'),'测试甲报销了吗');assert.match(answer.answer,/已报销（本人填报） 1 笔/);assert.doesNotMatch(answer.answer,/待本人确认 1 笔/);
+ raw.prepare("UPDATE members SET status='departed' WHERE id='other'").run();await assert.rejects(answerPersonnelQuestion(db,u('other'),'我的账单'),/权限已变化/);
+});
+
+test('finance role binds exact OAuth identity without granting an email lookalike',async()=>{
+ const {financeIdentities}=await import('../lib/finance-identities.mjs');const subject='feishu_'+'a'.repeat(64),email=subject.slice(0,63)+'@feishu.invalid';
+ assert.deepEqual(financeIdentities(undefined),[]);assert.equal(financeIdentities(JSON.stringify([{email,accountUserId:subject,displayName:'财务测试'}]))[0].accountUserId,subject);
+ assert.throws(()=>financeIdentities(JSON.stringify([{email,accountUserId:'feishu_'+'b'.repeat(64),displayName:'财务测试'}])),/bound/);
+ assert.throws(()=>financeIdentities(JSON.stringify([{email:'other@test.invalid',accountUserId:subject,displayName:'财务测试'}])),/bound/);
+});
