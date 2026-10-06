@@ -26,7 +26,7 @@ export async function GET() {
   if (!user) return json({ error: '请先完成 OA 准入和保密协议。' }, 403);
   try {
     const db = await getD1Database();
-    const result = await db.prepare(`SELECT * FROM project_work_items WHERE project=? ORDER BY CASE status WHEN 'in_progress' THEN 0 WHEN 'open' THEN 1 ELSE 2 END, CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, COALESCE(due_at,'9999-12-31'), updated_at DESC LIMIT 500`).bind(OA_PROJECT).all<WorkItemRow>();
+    const result = await db.prepare(`SELECT * FROM project_work_items WHERE project=? AND (id NOT LIKE 'personnel-%' OR lower(assignee_email)=? OR lower(created_by_email)=?) ORDER BY CASE status WHEN 'in_progress' THEN 0 WHEN 'open' THEN 1 ELSE 2 END, CASE priority WHEN 'high' THEN 0 WHEN 'normal' THEN 1 ELSE 2 END, COALESCE(due_at,'9999-12-31'), updated_at DESC LIMIT 500`).bind(OA_PROJECT, user.user.email.toLowerCase(), user.user.email.toLowerCase()).all<WorkItemRow>();
     return json({ items: result.results.map(serializeWorkItem), currentUserEmail: user.user.email.toLowerCase() });
   } catch { return json({ error: '统一待办暂不可用，请稍后重试。' }, 503); }
 }
@@ -90,6 +90,7 @@ export async function PATCH(request: Request) {
   const parsed = await readBoundedJsonObject(request, 20_000);
   if (!parsed.ok) return json({ error: '工作项操作格式错误。' }, 400);
   const input = parsed.value, id = uuid(input.id);
+  if (typeof input.id === 'string' && input.id.startsWith('personnel-')) return json({ error: '请在人员工作台填写异议处理意见，处理结果会同步到待办。' }, 409);
   const status = ['open', 'in_progress', 'done', 'cancelled'].includes(String(input.status)) ? String(input.status) : '';
   if (!id || !status) return json({ error: '工作项编号或状态不正确。' }, 400);
   const db = await getD1Database();

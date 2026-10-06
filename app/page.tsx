@@ -368,6 +368,7 @@ function Sidebar({ activeView, setActiveView, onNew, onProfile, userName = "马�
     <nav className="sidebar-nav" aria-label="主导航">{items.map(({ key, label, icon: Icon }) => { const itemPendingCount = key === "dashboard" ? pendingApprovalCount : key === "members" ? pendingMemberCount : key === "knowledge" ? pendingKnowledgeCount : 0; const needsAttention = itemPendingCount > 0; const attentionClass = needsAttention ? `attention attention-${key}` : ""; return <button key={key} className={`sidebar-nav-item ${activeView === key ? "active" : ""} ${attentionClass}`} onClick={() => setActiveView(key)}><Icon className="size-[17px]" /><span>{label}</span>{needsAttention && <span className="nav-count nav-count-alert">{itemPendingCount > 99 ? "99+" : itemPendingCount}</span>}</button>; })}</nav>
     <button type="button" className="sidebar-nav-item" onClick={onMyPending}><Clock3 className="size-[17px]" /><span>待我审批</span></button>
     <button type="button" className="sidebar-nav-item" onClick={onNew}><Plus className="size-[17px]" /><span>新建审核申请</span></button>
+    <a className="sidebar-nav-item" href="/people-workbench"><Plus className="size-[17px]" /><span>人员工作台</span></a>
     </div>
     <div className="sidebar-divider" />
     <button type="button" data-sidebar-section="knowledge" className="sidebar-section-label sidebar-group-toggle" aria-expanded={knowledgeOpen} aria-controls={knowledgeId} onClick={() => setKnowledgeOpen(open => !open)}><span>实验室大模型</span><ChevronRight className="size-3.5" /></button>
@@ -2204,6 +2205,11 @@ export default function Home() {
     : "";
   const needsNda = Boolean(session?.registered && (session.needsNda === true || session.ndaCompleted === false));
   const mainAccessReady = Boolean(session?.registered && session.status !== "pending" && !needsNda);
+  useEffect(() => {
+    if (!mainAccessReady) return;
+    const target = new URLSearchParams(window.location.search).get("approval");
+    if (target && /^[A-Za-z0-9._-]{1,128}$/.test(target)) { setActiveView("requests"); setSelectedId(target); }
+  }, [mainAccessReady]);
   useEffect(() => {
     fetch("/api/session", { headers: { accept: "application/json" } })
       .then((response) => response.json() as Promise<SessionInfo>)
