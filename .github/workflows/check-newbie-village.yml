@@ -1,0 +1,58 @@
+name: Check Newbie Village Contract
+
+# Push coverage also verifies the exact heads of draft/conflicting PRs; it does
+# not depend on GitHub being able to synthesize a pull-request merge commit.
+on:
+  push:
+    paths:
+      - 'chat-cloudflare/public/newbie-village*'
+      - 'chat-cloudflare/src/**'
+      - 'chat-cloudflare/migrations/**'
+      - 'chat-cloudflare/test/d1-adapter.mjs'
+      - 'chat-cloudflare/scripts/check-newbie-village-browser.mjs'
+      - '.github/workflows/check-newbie-village.yml'
+  pull_request:
+    paths:
+      - 'chat-cloudflare/public/newbie-village*'
+      - 'chat-cloudflare/src/**'
+      - 'chat-cloudflare/migrations/**'
+      - 'chat-cloudflare/test/d1-adapter.mjs'
+      - 'chat-cloudflare/scripts/check-newbie-village-browser.mjs'
+      - '.github/workflows/check-newbie-village.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: newbie-contract-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  browser:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
+        with:
+          node-version: '24'
+      - name: Install isolated browser tools
+        run: |
+          npm install --prefix "$RUNNER_TEMP/newbie-browser" --no-save --ignore-scripts playwright@1.63.0
+          node "$RUNNER_TEMP/newbie-browser/node_modules/playwright/cli.js" install --with-deps chromium
+      - name: Verify current guest, account and archive contract
+        env:
+          PLAYWRIGHT_MODULE: ${{ runner.temp }}/newbie-browser/node_modules/playwright/index.mjs
+          BROWSER_REPORT_DIR: ${{ runner.temp }}/newbie-browser-report
+        run: node chat-cloudflare/scripts/check-newbie-village-browser.mjs
+      - name: Preserve contract verification evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: newbie-contract-${{ github.sha }}
+          path: ${{ runner.temp }}/newbie-browser-report
+          if-no-files-found: warn
+          retention-days: 14
