@@ -1,4 +1,5 @@
 export const STAGES: Record<string,string>;
+export function billNames(person:{bill_name:string;aliases_json?:string}):string[];
 export class LedgerError extends Error {status:number;constructor(message:string,status?:number)}
 export function cents(value:unknown):number;
 export function csvRows(text:string):string[][];

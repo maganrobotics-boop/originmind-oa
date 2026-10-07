@@ -115,3 +115,17 @@ test('finance role binds exact OAuth identity without granting an email lookalik
  assert.throws(()=>financeIdentities(JSON.stringify([{email,accountUserId:'feishu_'+'b'.repeat(64),displayName:'财务测试'}])),/bound/);
  assert.throws(()=>financeIdentities(JSON.stringify([{email:'other@test.invalid',accountUserId:subject,displayName:'财务测试'}])),/bound/);
 });
+
+test('authorized bill aliases deduplicate into one person without rewriting source or claim history',async()=>{
+ const {db,user,act,raw}=fixture();
+ raw.exec(readFileSync(new URL('../migrations/expense-person-aliases-20261007.sql',import.meta.url),'utf8'));
+ raw.prepare('UPDATE expense_people SET aliases_json=? WHERE id=?').run(JSON.stringify(['历史账单名']),'person');
+ const source=csv.replaceAll('测试甲','历史账单名');
+ await act('admin',{action:'import',csv:source,filename:'historic.csv'});
+ await act('member',{action:'report_progress',ids:['payment0000001'],status:'reported_settled'});
+ const result=await act('admin',{action:'import',csv:source,filename:'historic-again.csv'});
+ assert.equal(result.preview.newCount,0);assert.equal(result.preview.duplicateCount,2);
+ const ledger=await loadLedger(db,user('admin'));assert.equal(ledger.records.length,1);assert.equal(ledger.people[0].netCents,8000);assert.equal(ledger.records[0].claim.stage,'reported_settled');assert.match(ledger.records[0].source_json,/历史账单名/);
+ const {answerPersonnelQuestion}=await import('../lib/personnel-chat.mjs');assert.match((await answerPersonnelQuestion(db,{...user('admin'),ndaCompleted:true},'历史账单名报销了吗')).answer,/测试甲的个人情况/);
+ assert.throws(()=>parseAlipay(source,[{id:'a',bill_name:'历史账单名'},{id:'b',bill_name:'另一个人',aliases_json:JSON.stringify(['历史账单名'])}]),/对应多个人员/);
+});
