@@ -131,31 +131,16 @@ try {
     await session.close();
   }
 
-  const adminContext = await context('admin', { width: 1280, height: 900 });
-  const admin = await adminContext.newPage(); const adminErrors = [];
-  admin.on('pageerror', error => adminErrors.push(error.message));
-  await admin.goto(origin + '/learning/honors/admin');
-  await admin.locator('#honors-admin-list .honors-card').first().waitFor();
-  assert.equal(await admin.locator('#honors-admin-list .honors-card').count(), 3);
-  assert.equal(await admin.locator('#honors-grant-form').isVisible(), false);
-  const first = admin.locator('#honors-admin-list .honors-card').filter({ has: admin.getByRole('heading', { name: '崔航阁 · 新手村通关 · 机器人探索者' }) });
-  await first.getByRole('button', { name: '绑定账户', exact: true }).click();
-  const bind = admin.locator('#honors-action-dialog');
-  await bind.getByRole('button', { name: '查询账户' }).click();
-  await bind.getByText('请核对真实身份后手动选择；同名账户需进一步确认。').waitFor();
-  assert.equal(await bind.locator('[name="recipientEmail"]').inputValue(), '');
-  await bind.getByLabel('选择已核对的账户').selectOption(fixtures.cui.email);
-  await bind.getByLabel('我已人工确认该账户属于此获奖人。').check();
-  await bind.getByLabel('操作说明（仅管理员可见）').fill('合成浏览器测试：核对测试账户与通关人身份。');
-  await bind.getByRole('button', { name: '确认操作' }).click();
-  await bind.waitFor({ state: 'hidden' });
-  if (!await admin.locator('#honors-admin-app').isVisible()) {
-    throw Error(`Admin unexpectedly returned to login: ${await admin.locator('#honors-login-status').innerText()}`);
-  }
-  await admin.getByText('已读取 3 条记录', { exact: true }).waitFor();
-  assert.ok((await first.locator('.honors-private').innerText()).includes(fixtures.cui.email));
-  passed('administrator searches and explicitly binds an account; no automatic selection');
-  for (const [index, role] of [[2, 'liu'], [3, 'qiu']]) {
+  // Management moved to OA Future Stars on main. Verify the actual redirect
+  // and operate only synthetic fixtures through the retained authenticated API.
+  const moved = await fetch(origin + '/learning/honors/admin', { redirect: 'manual' });
+  assert.equal(moved.status, 302);
+  assert.equal(moved.headers.get('location'), 'https://oa.omindos.cn/#future-stars');
+  assert.equal(moved.headers.get('cache-control'), 'no-store');
+  const denied = await fetch(origin + '/api/admin/honors', { headers: { 'X-Honors-Test-Role': 'other' } });
+  assert.equal(denied.status, 403);
+  passed('management redirects to OA Future Stars; ordinary members cannot read private admin records');
+  for (const [index, role] of [[1, 'cui'], [2, 'liu'], [3, 'qiu']]) {
     await api(`/api/admin/honors/newbie-20261004-${index}/action`, { action: 'bind', version: 1,
       recipientEmail: fixtures[role].email, confirmed: true, note: '合成测试：核验后关联账户。' });
   }
@@ -198,74 +183,20 @@ try {
   assert.equal(await race.locator('.personal-honors .honors-card').count(), 0);
   passed('late private response after an account change is discarded');
 
-  // Historical grant through the real admin form, with manual provenance.
-  const form = admin.locator('#honors-grant-form');
-  await admin.getByRole('button', { name: '补录历史荣誉', exact: true }).click();
-  assert.equal(await admin.locator('#honors-grant-toggle').getAttribute('aria-expanded'), 'true');
-  await form.getByLabel('获奖人姓名').fill('历史测试同学');
-  await form.getByRole('button', { name: '收起表单', exact: true }).click();
-  assert.equal(await form.isVisible(), false);
-  await admin.getByRole('button', { name: '补录历史荣誉', exact: true }).click();
-  assert.equal(await form.getByLabel('获奖人姓名').inputValue(), '历史测试同学');
-  await form.getByLabel('获奖人姓名').fill('历史测试同学');
-  await form.getByLabel('荣誉类别').selectOption('alumni');
-  await form.getByLabel('荣誉名称').fill('毕业纪念 · 合成测试');
-  await form.getByLabel('公开事迹说明').fill('历史毕业项目，合成测试记录。');
-  await form.getByLabel('事迹日期（未知可留空）').fill('2020-06-30');
-  await form.getByLabel('确认依据（仅管理员可见）').fill('合成测试毕业项目归档 TEST-2020；仅用于隔离浏览器验证。');
-  await form.getByLabel('我已核对荣誉事实与来源；如关联账户，已确认该账户属于获奖人。').check();
-  await form.getByRole('button', { name: '确认授予' }).click();
-  await admin.getByText('荣誉已保存。', { exact: true }).waitFor();
-  assert.equal(await form.isVisible(), false);
-  assert.equal(await admin.locator('#honors-grant-toggle').getAttribute('aria-expanded'), 'false');
-  const alumni = admin.locator('#honors-admin-list .honors-card').filter({ has: admin.getByRole('heading', { name: '历史测试同学 · 毕业纪念 · 合成测试' }) });
-  await alumni.waitFor(); assert.ok(await alumni.getByText('事迹日期：2020-06-30', { exact: false }).isVisible());
-  passed('historical grant through the form records separate achievement and grant dates without requiring an account');
-
-  await admin.getByLabel('记录状态').selectOption('public');
-  await first.getByRole('button', { name: '隐藏公开展示', exact: true }).click();
-  await bind.getByLabel('操作说明（仅管理员可见）').fill('合成测试：仅本人展示。');
-  await bind.getByRole('button', { name: '确认操作' }).click(); await bind.waitFor({ state: 'hidden' });
-  const publicAwards = (await api('/api/learning/honors', undefined, 'guest')).awards;
-  assert.equal(publicAwards.some(award => award.id === 'newbie-20261004-1'), false);
-  const hiddenMine = (await api('/api/learning/my-honors', undefined, 'cui')).awards;
-  assert.equal(hiddenMine[0].visibility, 'hidden');
-  await admin.getByLabel('记录状态').selectOption('hidden'); await first.waitFor();
-  await first.getByRole('button', { name: '恢复公开展示', exact: true }).click();
-  await bind.getByLabel('操作说明（仅管理员可见）').fill('合成测试：恢复公开。');
-  await bind.getByRole('button', { name: '确认操作' }).click(); await bind.waitFor({ state: 'hidden' });
-  await admin.getByLabel('记录状态').selectOption('public'); await first.waitFor();
-  await first.getByRole('button', { name: '撤回荣誉', exact: true }).click();
-  await bind.getByLabel('操作说明（仅管理员可见）').fill('合成测试：撤回，无生产数据。');
-  await bind.getByRole('button', { name: '确认操作' }).click(); await bind.waitFor({ state: 'hidden' });
+  // Exercise visibility and its private audit trail against the real handler.
+  // OA's management UI has separate Future Stars browser coverage.
+  const honorPath = '/api/admin/honors/newbie-20261004-1';
+  await api(honorPath + '/action', { action: 'hide', version: 2, note: '合成测试：仅本人可见。' });
+  assert.equal((await api('/api/learning/honors', undefined, 'guest')).awards.some(a => a.id === 'newbie-20261004-1'), false);
+  assert.equal((await api('/api/learning/my-honors', undefined, 'cui')).awards[0].visibility, 'hidden');
+  await api(honorPath + '/action', { action: 'show', version: 3, note: '合成测试：恢复公开。' });
+  assert.equal((await api('/api/learning/honors', undefined, 'guest')).awards.some(a => a.id === 'newbie-20261004-1'), true);
+  await api(honorPath + '/action', { action: 'revoke', version: 4, note: '合成测试：撤回。' });
   assert.equal((await api('/api/learning/my-honors', undefined, 'cui')).awards.length, 0);
-  await admin.getByLabel('记录状态').selectOption('revoked'); await first.waitFor();
-  assert.equal(await first.getByRole('button', { name: '恢复公开展示', exact: true }).count(), 0);
-  await first.getByRole('button', { name: '查看来源与操作记录' }).click();
-  await admin.locator('#honors-audit-list .honors-audit-item').first().waitFor();
-  assert.ok((await admin.locator('#honors-audit-list').innerText()).includes('马淦于2026-10-04明确确认'));
-  assert.equal(await admin.locator('#honors-audit-list .honors-audit-item').count(), 5);
-  await admin.locator('#honors-audit-dialog').getByRole('button', { name: '关闭', exact: true }).click();
-  passed('hide, restore, revoke and preserved private audit trail through the real admin UI');
-  await noOverflow(admin); assert.deepEqual(adminErrors, []);
-  await admin.setViewportSize({ width: 320, height: 740 }); await noOverflow(admin);
-  await admin.screenshot({ path: resolve(output, 'honors-admin-mobile.png'), fullPage: true });
-  await admin.getByRole('button', { name: '补录历史荣誉', exact: true }).click();
-  await noOverflow(admin);
-  await admin.screenshot({ path: resolve(output, 'honors-grant-mobile.png'), fullPage: true });
-  await form.getByRole('button', { name: '收起表单', exact: true }).click();
-  passed('admin responsive layout at 320px, with no script errors');
-
-  const member = await context('other', { width: 390, height: 844 }); const denied = await member.newPage();
-  await denied.goto(origin + '/learning/honors/admin');
-  await denied.locator('#honors-login-status').getByText('仅管理员可执行此操作', { exact: true }).waitFor();
-  assert.equal(await denied.locator('#honors-admin-app').isVisible(), false);
-  assert.equal(await denied.locator('#honors-admin-list .honors-card').count(), 0);
-  passed('ordinary member sees no management records or provenance');
-  await admin.getByRole('button', { name: '退出管理', exact: true }).click();
-  await admin.locator('#honors-login').waitFor();
-  assert.equal(await admin.locator('#honors-admin-list .honors-card').count(), 0);
-  passed('admin logout clears rendered private records');
+  const events = (await api(honorPath + '/events')).events;
+  assert.equal(events.length, 5);
+  assert.deepEqual(events.map(event => event.action).sort(), ['bind', 'hide', 'import', 'revoke', 'show']);
+  passed('real honor API protects hidden/private awards, restoration, revocation and audit history');
   const insert = db.sqlite.prepare("INSERT INTO learning_honors(id,recipient_name,category,title,source_kind,source_reference,granted_by,granted_at,updated_at) VALUES(?,'分页测试同学','competition','合成测试荣誉','reference','TEST','synthetic-test',?,1)");
   for (let i = 0; i < 28; i++) insert.run(`browser-pagination-${i}`, Date.now() + i);
   const linkedContext = await context('guest', { width: 390, height: 844 }); const linked = await linkedContext.newPage();
@@ -273,7 +204,7 @@ try {
   await linked.locator('#newbie-20261004-2').waitFor();
   assert.equal(await linked.locator('.honors-card').count(), 25);
   await linked.getByRole('button', { name: '查看更多' }).click();
-  await linked.getByText('已展示 31 份荣誉 · 按授予时间展示', { exact: true }).waitFor();
+  await linked.getByText('已展示 30 份荣誉 · 按授予时间展示', { exact: true }).waitFor();
   assert.equal(await linked.locator('#newbie-20261004-2').count(), 1);
   passed('a shared link locates an older honor beyond the first page without duplicating it during pagination');
   console.log(JSON.stringify({ checks: assertions.length, result: 'passed', screenshots: output }));

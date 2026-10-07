@@ -1,6 +1,8 @@
 import { buildGeneralChatMessages, buildGroundedChatMessages, boundedUserMessages } from './grounded-prompt.mjs';
 import { handleOaChatBridge } from './oa-chat-bridge.mjs';
 import { handleOaAdminBridge } from './oa-admin-bridge.mjs';
+import { handleFutureStarsBridge } from './future-stars-bridge.mjs';
+import { handleFutureStarsOperation } from './future-stars-service.mjs';
 import { questionAllowsGeneralKnowledge, questionPrefersGeneralKnowledge, questionRequestsKnowledgeImages } from './question-scope.mjs';
 import { chatKnowledgeImages, proxyKnowledgeAsset } from "./knowledge-assets.mjs";
 import { protectAnswerTechnicalText } from "./answer-math.mjs";
@@ -509,6 +511,10 @@ async function currentVisitor(context) {
   if (!/^[a-f0-9]{64}$/u.test(token)) return null;
   const row = await database(context).prepare("SELECT email,role,expires_at AS expiresAt FROM visitor_sessions WHERE hash=? AND expires_at>?")
     .bind(await sha256Hex(token), Date.now()).first();
+  if (row) {
+    try { context.env.FUTURE_STARS_LEARNING?.touch(row.email, Date.now()); }
+    catch { console.error('LEARNING_PRESENCE_WRITE_FAILED'); }
+  }
   return row ? { email: row.email, role: row.role, roleLabel: roleLabel(row.role) } : null;
 }
 
@@ -1729,6 +1735,13 @@ async function api(context) {
     : null;
   try {
     if (method === "OPTIONS" && publicApiPath) return publicOptions(context);
+    if (path === "internal/oa-future-stars") return handleFutureStarsBridge(context, {
+      claimRequest: async nonce => {
+        await consumeCounter(context, 'oa-stars:' + nonce, 1, Math.floor(Date.now() / 1000) + 120);
+        await database(context).prepare("DELETE FROM limits WHERE expires < ?").bind(Math.floor(Date.now() / 1000)).run();
+      },
+      handle: payload => handleFutureStarsOperation(context, payload, { json, readJson, currentVisitor, requireOwner, sameOrigin, limit }),
+    });
     if (path === "internal/oa-admin") return handleOaAdminBridge(context, {
       claimRequest: async (nonce) => {
         await consumeCounter(context, `oa-admin-bridge:${nonce}`, 1, Math.floor(Date.now() / 1000) + 120);

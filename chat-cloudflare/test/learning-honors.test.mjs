@@ -208,12 +208,17 @@ test('public and admin pagination and state filters do not leak hidden or revoke
   assert.equal((await call(env, '/api/admin/honors?status=unbound', { cookie })).data.hasMore, true);
 });
 test('new honor pages and modules are routed explicitly with secure noncached responses', async () => {
-  for (const path of ['/learning/honors', '/learning/honors/', '/learning/honors/admin', '/learning/honors.css',
-    '/learning/honors.mjs', '/learning/honors-admin.mjs', '/learning/honors-trophy.svg']) {
+  for (const path of ['/learning/honors', '/learning/honors/', '/learning/honors.css',
+    '/learning/honors.mjs', '/learning/honors-trophy.svg']) {
     const env = { ASSETS: { fetch: request => new Response(new URL(request.url).pathname) } };
     const response = await routeStaticRequest(new Request(ORIGIN + path), env);
     assert.equal(response.status, 200); assert.equal(response.headers.get('cache-control'), 'no-store');
     assert.match(response.headers.get('content-security-policy'), /script-src 'self'/);
     assert.equal((await routeStaticRequest(new Request(ORIGIN + path, { method: 'POST' }), env)).status, 405);
   }
+  const moved = await routeStaticRequest(new Request(ORIGIN + '/learning/honors/admin'), {});
+  assert.equal(moved.status, 302);
+  assert.equal(moved.headers.get('location'), 'https://oa.omindos.cn/#future-stars');
+  assert.equal(moved.headers.get('cache-control'), 'no-store');
+  assert.equal((await routeStaticRequest(new Request(ORIGIN + '/learning/honors/admin', { method: 'POST' }), {})).status, 405);
 });

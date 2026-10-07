@@ -48,10 +48,8 @@ const SAFE_METHODS = new Set(["GET", "HEAD"]);
 const HONOR_ASSETS = new Map([
   ["/learning/honors", "/honors.html"],
   ["/learning/honors/", "/honors.html"],
-  ["/learning/honors/admin", "/honors-admin.html"],
   ["/learning/honors.css", "/honors.css"],
   ["/learning/honors.mjs", "/honors.mjs"],
-  ["/learning/honors-admin.mjs", "/honors-admin.mjs"],
   ["/learning/honors-trophy.svg", "/honors-trophy.svg"],
 ]);
 
@@ -138,6 +136,10 @@ async function fetchAsset(request, env, pathname, cacheControl) {
 export async function routeStaticRequest(request, env) {
   const url = new URL(request.url);
   const kind = classifyPath(url.pathname);
+  if (url.pathname === "/learning/honors/admin" || url.pathname === "/learning/honors/admin/") {
+    if (!SAFE_METHODS.has(request.method)) return methodNotAllowed();
+    return hardenResponse(Response.redirect("https://oa.omindos.cn/#future-stars", 302));
+  }
 
   if (kind === RouteKind.DYNAMIC) return null;
   if (HONOR_ASSETS.has(url.pathname)) {
