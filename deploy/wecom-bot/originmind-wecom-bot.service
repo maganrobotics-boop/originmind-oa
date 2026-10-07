@@ -1,0 +1,32 @@
+[Unit]
+Description=OriginMind WeCom OA assistant trial
+After=network-online.target
+Wants=network-online.target
+StartLimitIntervalSec=300
+StartLimitBurst=3
+
+[Service]
+Type=simple
+User=originmind-wecom-bot
+Group=originmind-wecom-bot
+WorkingDirectory=/opt/originmind-wecom-bot/current
+EnvironmentFile=/etc/originmind-wecom-bot/env
+ExecStart=/usr/local/bin/node /opt/originmind-wecom-bot/current/scripts/wecom-bot.mjs
+Restart=on-failure
+RestartSec=15
+TimeoutStopSec=15
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+UMask=0077
+MemoryMax=256M
+TasksMax=64
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

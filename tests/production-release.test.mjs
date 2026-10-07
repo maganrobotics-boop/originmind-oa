@@ -165,7 +165,7 @@ test("reviewed definitions match SQLite's forward migration result", async () =>
       }
     }
     const actualSchemaRows = database.prepare(
-      "SELECT type, name, sql FROM sqlite_master WHERE name GLOB 'knowledge_*' OR name GLOB 'conversation_events*' OR name GLOB 'conversation_members*' OR name GLOB 'conversation_messages*' OR name GLOB 'conversations*' OR name GLOB 'department_memberships*' OR name GLOB 'departments*' OR name GLOB 'project_links*' OR name GLOB 'project_members*' OR name GLOB 'projects*' ORDER BY type, name",
+      "SELECT type, name, sql FROM sqlite_master WHERE name GLOB 'knowledge_*' OR name GLOB 'wecom_bot_*' OR name GLOB 'conversation_events*' OR name GLOB 'conversation_members*' OR name GLOB 'conversation_messages*' OR name GLOB 'conversations*' OR name GLOB 'department_memberships*' OR name GLOB 'departments*' OR name GLOB 'project_links*' OR name GLOB 'project_members*' OR name GLOB 'projects*' ORDER BY type, name",
     ).all().map((row) => ({ ...row }));
     const notificationRows = notificationObjects.map((entry) => {
       const separator = entry.indexOf(":");
@@ -253,16 +253,45 @@ test("asset migration gate rejects SQL drift and partial application at each che
 
 test("lab OA V2 production schema is hash-pinned and checked object by object", () => {
   const definitions = schemaDefinitionsByMigration[34];
-  const snapshot = migrationSnapshot(migrationNames, schemaObjectsFor(definitions), 0, definitions);
+  const snapshot = migrationSnapshot(migrationNames.slice(0, 35), schemaObjectsFor(definitions), 0, definitions);
   const changed = structuredClone(snapshot);
   const table = changed.schemaPayload[0].results.find((row) => row.name === "conversation_messages");
   table.sql = table.sql.replace("`body` text NOT NULL", "`body` text");
-  assert.throws(() => validateProductionMigrationState({ phase: "after", ...changed }), /schema SQL does not match/u);
+  assert.throws(() => validateProductionMigrationState({ phase: "before", ...changed }), /schema SQL does not match/u);
 
   const partial = structuredClone(snapshot);
   partial.schemaPayload[0].results = partial.schemaPayload[0].results.filter(
     (row) => row.name !== "projects_migration_freeze_delete",
   );
+  assert.throws(() => validateProductionMigrationState({ phase: "before", ...partial }), /does not match/u);
+});
+
+test("WeCom bot release verifies every new table and unique mapping index", () => {
+  const definitions = schemaDefinitionsByMigration[35];
+  const previousDefinitions = schemaDefinitionsByMigration[34];
+  const addedObjects = Object.keys(definitions).filter((name) => !(name in previousDefinitions)).sort();
+  assert.deepEqual(addedObjects, [
+    "index:wecom_bot_links_active_member_unique",
+    "index:wecom_bot_messages_bot_rate_idx",
+    "index:wecom_bot_messages_expiry_idx",
+    "index:wecom_bot_messages_rate_idx",
+    "index:wecom_bot_pairings_active_member_unique",
+    "index:wecom_bot_pairings_code_hash_unique",
+    "index:wecom_bot_pairings_expiry_idx",
+    "table:wecom_bot_links",
+    "table:wecom_bot_messages",
+    "table:wecom_bot_pairings",
+  ]);
+  const before = migrationSnapshot(migrationNames.slice(0, 35), schemaObjectsFor(previousDefinitions), 0, previousDefinitions);
+  assert.equal(validateProductionMigrationState({ phase: "before", ...before }), "pending-0035");
+  const snapshot = migrationSnapshot(migrationNames, schemaObjectsFor(definitions), 0, definitions);
+  assert.equal(validateProductionMigrationState({ phase: "after", ...snapshot }), "applied");
+  const drift = structuredClone(snapshot);
+  const unique = drift.schemaPayload[0].results.find((row) => row.name === "wecom_bot_links_active_member_unique");
+  unique.sql = unique.sql.replace("CREATE UNIQUE INDEX", "CREATE INDEX");
+  assert.throws(() => validateProductionMigrationState({ phase: "after", ...drift }), /schema SQL does not match/u);
+  const partial = structuredClone(snapshot);
+  partial.schemaPayload[0].results = partial.schemaPayload[0].results.filter((row) => row.name !== "wecom_bot_pairings_code_hash_unique");
   assert.throws(() => validateProductionMigrationState({ phase: "after", ...partial }), /does not match/u);
 });
 
@@ -479,28 +508,21 @@ test("compiled production config preserves provider-managed state", async () => 
   }
 });
 
-test("retired OA workflow is CI-only while the archived shell still rejects unauthorized releases", { skip: process.platform === "win32" ? "requires a POSIX shell" : false }, async () => {
-  // PR #114 removed OA dispatch/deployment and the Chat Cloudflare workflows.
-  assert.match(workflow, /push:\s+branches: \[main\]/u);
-  assert.match(workflow, /pull_request:\s+branches: \[main\]/u);
-  assert.doesNotMatch(workflow, /workflow_dispatch|pull_request_target/u);
+test("retired production workflow is read-only CI without release credentials or dispatch", () => {
+  assert.match(workflow, /name: Check retired OA code/u);
+  assert.match(workflow, /on:\n  push:\n    branches: \[main\]\n  pull_request:\n    branches: \[main\]/u);
   assert.match(workflow, /permissions:\n  contents: read/u);
-  assert.deepEqual([...workflow.slice(workflow.indexOf("\njobs:\n")).matchAll(/^  ([\w-]+):/gmu)].map((match) => match[1]), ["test"]);
+  assert.match(workflow, /persist-credentials: false/u);
+  assert.deepEqual([...workflow.matchAll(/^  ([A-Za-z0-9_-]+):$/gmu)].map(match => match[1]), ["push", "pull_request", "test"]);
+  assert.doesNotMatch(workflow, /workflow_dispatch|pull_request_target|secrets\.|vars\.OA_PRODUCTION_|CLOUDFLARE_API_TOKEN|PUBLIC_LAB_AI_SERVICE_TOKEN/u);
+  assert.doesNotMatch(workflow, /production-oa|release:standalone|release-production\.sh|release-standalone\.sh|wrangler\s+(?:deploy|publish)|:\s*write\b/u);
   for (const command of ["npm run install:ci", "npm run typecheck", "npm run lint", "npm test"]) {
-    assert.ok(workflow.includes(`run: ${command}\n`), `CI must retain ${command}`);
+    assert.ok(workflow.includes(`run: ${command}`), `retired CI must retain ${command}`);
   }
-  assert.doesNotMatch(workflow, /CLOUDFLARE_API_TOKEN|PUBLIC_LAB_AI_SERVICE_TOKEN|OA_PRODUCTION_|secrets\.|release:standalone|release-production\.sh|\bwrangler\b/u);
-  const workflowFiles = await readdir(join(projectRoot, ".github", "workflows"));
-  for (const retiredWorkflow of [
-    "deploy-chat-cloudflare.yml",
-    "deploy-chat-preview-cloudflare.yml",
-    "deploy-chat-static-cloudflare.yml",
-    "initialize-chat-admin.yml",
-    "repair-chat-admin-pbkdf2.yml",
-  ]) {
-    assert.ok(!workflowFiles.includes(retiredWorkflow), `${retiredWorkflow} must remain retired`);
-  }
-  assert.doesNotMatch(`${workflow}\n${releaseScript}`, /oa\.omindos\.ai|41e8b3404be24e1dd288556d77ffc951|34af7e92-7da5-47cd-b7c0-1270e157c0e6/u);
+});
+
+test("retained historical shell protects release confirmation and token handling", { skip: process.platform === "win32" ? "requires a POSIX shell" : false }, () => {
+  assert.doesNotMatch(releaseScript, /oa\.omindos\.ai|41e8b3404be24e1dd288556d77ffc951|34af7e92-7da5-47cd-b7c0-1270e157c0e6/u);
 
   const invalid = spawnSync("/bin/bash", [join(projectRoot, "scripts", "release-production.sh"), "production"], {
     encoding: "utf8",
@@ -645,4 +667,12 @@ test("production smoke uses the injected origin and keeps its POST probe unauthe
   assert.match(smokeScript, /access-control-allow-credentials/u);
   assert.doesNotMatch(smokeScript, /x-originmind-public-lab-ai-service-token|PUBLIC_LAB_AI_SERVICE_TOKEN/u);
   assert.doesNotMatch(smokeScript, /method:\s*["'](?:PUT|PATCH|DELETE)["']/u);
+});
+
+test("removed Chat operation workflows remain absent after merge", async () => {
+  const files = await readdir(join(projectRoot, ".github", "workflows"));
+  for (const name of ["deploy-chat-cloudflare.yml", "deploy-chat-preview-cloudflare.yml",
+    "deploy-chat-static-cloudflare.yml", "initialize-chat-admin.yml", "repair-chat-admin-pbkdf2.yml"]) {
+    assert.ok(!files.includes(name), `${name} must remain retired`);
+  }
 });
