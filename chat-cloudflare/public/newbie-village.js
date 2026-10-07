@@ -563,6 +563,11 @@ function renderDashboard() {
   document.querySelector(".profile-role").textContent = data.user.roleLabel;
   document.querySelector(".profile-progress").textContent = `已完成 ${data.progress.completed}/${data.progress.total}`;
   document.querySelector(".avatar").textContent = displayName.slice(0, 1).toUpperCase() || "新";
+  const honorTarget = document.querySelector(".personal-honors");
+  if (honorTarget) {
+    honorTarget.dataset.account = state.localGuest ? "" : data.user.email;
+    honorTarget.dispatchEvent?.(new Event("honors-account-change"));
+  }
   const showPasses = location.hash === "#passes";
   const requestedTask = data.tasks.find((task) => location.hash === `#${task.id}`);
   switchView(state.activeView, showPasses || Boolean(requestedTask));
