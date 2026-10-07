@@ -37,7 +37,13 @@ export function pendingCirculationPeople(payload: Record<string, unknown>, step:
   if (!review && step !== "流转确认") return [];
   const selected = circulationPeople(review ? payload.circulationApprovers : payload.circulationRecipients);
   const decisions = circulationPeople(review ? payload.circulationApprovals : payload.circulationConfirmations);
-  return selected.filter((person) => !decisions.some((decision) => decision.memberId === person.memberId && decision.accountUserId === person.accountUserId && decision.email === person.email));
+  const done = (person: CirculationPerson) => decisions.some((decision) => decision.memberId === person.memberId && decision.accountUserId === person.accountUserId && decision.email === person.email);
+  if(review && payload.circulationAnyTechnical === true && selected.length >= 2) {
+    const technical=selected.slice(0,-1),owner=selected[selected.length-1];
+    return technical.some(done) ? done(owner) ? [] : [owner] : technical;
+  }
+  const pending=selected.filter(person=>!done(person));
+  return review && payload.circulationOrdered === true ? pending.slice(0,1) : pending;
 }
 
 export function circulationPendingForEmail(payload: Record<string, unknown>, step: string, currentEmail: string) {

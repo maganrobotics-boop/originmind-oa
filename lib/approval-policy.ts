@@ -6,6 +6,7 @@ import {
   type ConfidentialityAgreementKind,
 } from "./nda-agreement";
 import { circulationPeople, isCirculationParticipant } from "./circulation-policy";
+import { technicalParticipant } from "./review-routing.mjs";
 
 const SIGNATURE_CANVAS_WIDTH = 900;
 const SIGNATURE_CANVAS_HEIGHT = 260;
@@ -62,6 +63,9 @@ const WORKFLOW_ACTIONS: Record<ApprovalType, Record<string, readonly ApprovalAct
     补充材料: ["resubmit"],
   },
   采购审核: {
+    财务审核: ["approve", "return"],
+    负责人终审: ["approve", "return"],
+    报销待完成: ["approve", "return"],
     技术顾问: ["approve", "return"],
     项目负责人: ["approve", "return"],
     统一采购: ["confirm_purchase", "return"],
@@ -97,7 +101,7 @@ export function hasDistinctVerifiedEmails(...values: unknown[]) {
 export function workflowRevisionsNeededAfterMaterial(type: ApprovalType, payload: Record<string, unknown>) {
   if (type === "流转审批") return circulationPeople(payload.circulationRecipients).length + circulationPeople(payload.circulationApprovers).length;
   if (type === "技术审核") return (Array.isArray(payload.developers) ? payload.developers.length : 0) + 2;
-  if (type === "采购审核") return 3;
+  if (type === "采购审核") return 6;
   if (type === "保密协议") return payload.autoArchived === true ? 0 : 1;
   return 2;
 }
@@ -153,6 +157,9 @@ export function nextWorkflowStep(type: ApprovalType, step: string, action: Exclu
     if (step === "项目负责人") return "已归档";
   }
   if (type === "采购审核") {
+    if (step === "财务审核" && action === "approve") return "负责人终审";
+    if (step === "负责人终审" && action === "approve") return "报销待完成";
+    if (step === "报销待完成" && action === "approve") return "已归档";
     if (step === "技术顾问" && action === "approve") return "项目负责人";
     if (step === "项目负责人" && action === "approve") return "统一采购";
     if (step === "统一采购" && action === "confirm_purchase") return "已归档";
@@ -239,7 +246,8 @@ export function isApprovalRelated(row: ApprovalAccessRecord, email: string, hist
     || normalizeEmail(row.currentReviewerEmail) === normalizedEmail
     || historicalActorEmails.has(normalizedEmail)
     || (row.type === "流转审批" && row.status !== "草稿" && isCirculationParticipant(parseJsonObject(row.payloadJson), normalizedEmail))
-    || (row.type === "技术审核" && isTechnicalDeveloper(parseJsonObject(row.payloadJson), normalizedEmail));
+    || (row.type === "采购审核" && row.status !== '草稿' && technicalParticipant(parseJsonObject(row.payloadJson), normalizedEmail))
+    || (row.type === "技术审核" && (isTechnicalDeveloper(parseJsonObject(row.payloadJson), normalizedEmail) || row.status !== '草稿' && technicalParticipant(parseJsonObject(row.payloadJson), normalizedEmail)));
 }
 
 export function isValidLaborMonth(month: string) {

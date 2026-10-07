@@ -1,5 +1,7 @@
+import { getReviewPolicy, fixedTechnicalPayload, technicalRoute, technicalParticipant } from '../../../lib/review-routing.mjs';
+import { LedgerError } from '../../../lib/expense-ledger.mjs';
 import { and, count, desc, eq, exists, isNull, sql } from "drizzle-orm";
-import { getDb } from "../../../db";
+import { getDb, getD1Database } from "../../../db";
 import { approvalRevisions, approvals, laborSourceClaims, members } from "../../../db/schema";
 import {
   APPROVAL_TYPES,
@@ -23,7 +25,7 @@ import {
   type ApprovalType,
   type TechnicalDeveloper,
 } from "../../../lib/approval-policy";
-import { circulationPeople, isCirculationParticipant, normalizeCirculationSelection } from "../../../lib/circulation-policy";
+import { circulationPeople, isCirculationParticipant, normalizeCirculationSelection, pendingCirculationPeople } from "../../../lib/circulation-policy";
 import { addApprovalSigner, approvalSignerLabels } from "../../../lib/approval-signers";
 import { assertMemberNdaAdmissionInBatch, conditionalApprovalEvent, conditionalLaborClaimInsert } from "../../../lib/workflow-write-store";
 import { readBoundedJsonObject } from "../../../lib/bounded-json-request";
@@ -59,6 +61,7 @@ function canSeePayload(row: typeof approvals.$inferSelect, authorized: NonNullab
     || authorized.role === "project_owner"
     || (authorized.isFinanceOwner && ["劳务报酬", "采购审核"].includes(row.type))
     || (row.type === "流转审批" && row.status !== "草稿" && isCirculationParticipant(parseJsonObject(row.payloadJson), email))
+    || (["技术审核","采购审核"].includes(row.type) && row.status !== "草稿" && technicalParticipant(parseJsonObject(row.payloadJson),email))
     || normalizeEmail(row.requesterEmail) === email
     || normalizeEmail(row.currentReviewerEmail) === email;
 }
@@ -103,9 +106,15 @@ function approvalListSelection(currentEmail: string) {
         'circulationRecipients', json_extract(${approvals.payloadJson}, '$.circulationRecipients'),
         'circulationApprovers', json_extract(${approvals.payloadJson}, '$.circulationApprovers'),
         'circulationConfirmations', json_extract(${approvals.payloadJson}, '$.circulationConfirmations'),
+        'circulationOrdered', json_extract(${approvals.payloadJson}, '$.circulationOrdered') = 1,
+        'circulationAnyTechnical', json(CASE WHEN json_extract(${approvals.payloadJson}, '$.circulationAnyTechnical') = 1 THEN 'true' ELSE 'false' END),
+        'technicalWeekly', json(CASE WHEN json_extract(${approvals.payloadJson}, '$.technicalWeekly') = 1 THEN 'true' ELSE 'false' END),
         'circulationApprovals', json_extract(${approvals.payloadJson}, '$.circulationApprovals')
       )
-      WHEN ${approvals.type} = '技术审核' THEN json_object(
+      WHEN ${approvals.type} IN ('技术审核','采购审核') THEN json_object(
+        'fixedReviewRoute', json_extract(${approvals.payloadJson}, '$.fixedReviewRoute'),
+        'fixedReviewApprovals', json_extract(${approvals.payloadJson}, '$.fixedReviewApprovals'),
+        'routingRequesterEmail', json_extract(${approvals.payloadJson}, '$.routingRequesterEmail'),
         'totalWorkHours', json_extract(${approvals.payloadJson}, '$.totalWorkHours'),
         'developers', json_extract(${approvals.payloadJson}, '$.developers'),
         'archivedAt', json_extract(${approvals.payloadJson}, '$.archivedAt')
@@ -238,6 +247,7 @@ export async function GET() {
               OR EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${approvals.payloadJson}) THEN ${approvals.payloadJson} ELSE '{}' END, '$.circulationApprovers') AS reviewer WHERE lower(json_extract(reviewer.value, '$.email')) = ${currentEmail})
             )
           )
+          OR (${approvals.type} IN ('技术审核','采购审核') AND ${approvals.status} <> '草稿' AND EXISTS (SELECT 1 FROM json_each(CASE WHEN json_valid(${approvals.payloadJson}) THEN ${approvals.payloadJson} ELSE '{}' END, '$.fixedReviewRoute') AS reviewer WHERE lower(json_extract(reviewer.value, '$.email')) = ${currentEmail}))
           OR (
             ${approvals.type} = '技术审核'
             AND EXISTS (
@@ -277,7 +287,7 @@ export async function POST(request: Request) {
   if (requestedId && !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(requestedId)) return Response.json({ error: "申请编号格式不正确。" }, { status: 400 });
   const title = textValue(body.title);
   const summary = textValue(body.summary);
-  const reviewerEmail = normalizeEmail(body.reviewerEmail);
+  let reviewerEmail = normalizeEmail(body.reviewerEmail);
   const rawPayload = body.payload && typeof body.payload === "object" && !Array.isArray(body.payload) ? body.payload as Record<string, unknown> : {};
   if (!saveAsDraft && (!title || !summary)) return Response.json({ error: "申请标题和事项摘要不能为空。" }, { status: 400 });
   if (title.length > 160) return Response.json({ error: "申请标题不能超过 160 字。" }, { status: 400 });
@@ -287,6 +297,8 @@ export async function POST(request: Request) {
     const db = await getDb();
     const actorGuard = authorizedMemberGuard(authorized);
     const currentEmail = normalizeEmail(authorized.user.email);
+    const reviewPolicy = ["技术审核","采购审核","流转审批"].includes(type) ? await getReviewPolicy(await getD1Database()) : null;
+    if (["技术审核","采购审核"].includes(type) && reviewPolicy) reviewerEmail = reviewPolicy.technical[0].email;
     if (!(await consumeWriteRateLimit(db, { actorSubject: authorized.accountUserId || "", scope: "approval_write", limit: MAX_WRITES_PER_MINUTE }))) {
       return Response.json({ error: "申请保存过于频繁，请稍后再试。" }, { status: 429, headers: { "retry-after": "60" } });
     }
@@ -477,6 +489,15 @@ export async function POST(request: Request) {
       payload = { circulationContent: content, circulationRecipients: recipients.people, circulationApprovers: approvers.people, circulationConfirmations: [], circulationApprovals: [] };
     }
 
+    if (["技术审核","采购审核"].includes(type) && reviewPolicy) { payload = fixedTechnicalPayload(payload, reviewPolicy, currentEmail); reviewerEmail = textValue(payload.initialReviewerEmail); }
+    if (type === "流转审批" && reviewPolicy && requestedId) {
+      const weekly = await (await getD1Database()).prepare('SELECT id FROM personnel_weekly_entries WHERE client_key=? AND member_id=?').bind(requestedId,authorized.memberId).first();
+      if (weekly) {
+        const route = technicalRoute(reviewPolicy).filter(person=>person.memberId === reviewPolicy.owner.memberId || person.email !== currentEmail);
+        if (route.some(person => person.email === currentEmail)) return Response.json({ error: "本人不能审核自己的技术周报，请联系负责人处理职责冲突。" }, { status: 409 });
+        payload = { ...payload, circulationApprovers: route, circulationOrdered: true, circulationAnyTechnical: true, technicalWeekly: true };
+      }
+    }
     const ndaDirectArchive = type === "保密协议" && agreementKind !== null
       && shouldAutoArchiveConfidentialityAgreement(agreementKind, authorized.isAdmin)
       && !saveAsDraft;
@@ -514,7 +535,7 @@ export async function POST(request: Request) {
       : ndaDirectArchive
         ? null
       : type === "流转审批"
-        ? (() => { const person = [...circulationPeople(payload.circulationRecipients), ...circulationPeople(payload.circulationApprovers)][0]; return person ? { email: person.email, displayName: person.name } : null; })()
+        ? (() => { const pending = pendingCirculationPeople(payload,initialStep); const person = pending[0]; return person ? { email: person.email, displayName: pending.map(p=>p.name).join(" / ") } : null; })()
       : type === "技术审核"
         ? { email: firstTechnicalDeveloper?.email || "", displayName: firstTechnicalDeveloper?.name || "" }
         : reviewer;
@@ -522,8 +543,8 @@ export async function POST(request: Request) {
     const workflowMutationRevision = crypto.randomUUID();
     payload = {
       ...payload,
-      initialReviewerEmail: ndaDirectArchive ? "" : reviewer?.email || normalizeEmail(previousPayload.initialReviewerEmail),
-      initialReviewerName: ndaDirectArchive ? "" : reviewer?.displayName || textValue(previousPayload.initialReviewerName),
+      initialReviewerEmail: ["技术审核","采购审核"].includes(type) && reviewPolicy ? textValue(payload.initialReviewerEmail) : ndaDirectArchive ? "" : reviewer?.email || normalizeEmail(previousPayload.initialReviewerEmail),
+      initialReviewerName: ["技术审核","采购审核"].includes(type) && reviewPolicy ? textValue(payload.initialReviewerName) : ndaDirectArchive ? "" : reviewer?.displayName || textValue(previousPayload.initialReviewerName),
       workflowMutationRevision,
       ...(ndaDirectArchive ? { archivedAt: now, archivedBy: authorized.user.displayName, archivedByEmail: currentEmail, autoArchived: true } : {}),
     };
@@ -745,6 +766,7 @@ export async function POST(request: Request) {
     if (revisionRows.length !== insertRevisions.length || revisionRows.some((rows) => !rows[0]) || !eventRows[0]) return Response.json({ error: "申请、不可变材料版本与审核记录未能完整保存，请稍后重试。" }, { status: 500 });
     return Response.json({ approval: serializeApproval(created, authorized, true) }, { status: 201, headers: PRIVATE_JSON_HEADERS });
   } catch (error) {
+    if (error instanceof LedgerError) return Response.json({error:error.message},{status:error.status});
     const message = error instanceof Error ? error.message : "";
     if (/approvals_requester_creation_unique|client_creation_key/i.test(message) && requestedId) {
       try {

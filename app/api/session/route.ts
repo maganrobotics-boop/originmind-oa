@@ -1,6 +1,7 @@
+import {getReviewPolicy,policyActor} from "../../../lib/review-routing.mjs";
 import { eq, inArray } from "drizzle-orm";
 import { cookies } from "next/headers";
-import { getDb } from "../../../db";
+import { getDb, getD1Database } from "../../../db";
 import { memberSessions, members, oauthSessions } from "../../../db/schema";
 import { isChatGPTLoginEnabled } from "../../../lib/auth-capabilities";
 import { isFeishuLoginEnabled } from "../../../lib/feishu-oauth";
@@ -22,7 +23,10 @@ export async function GET() {
   const feishuLoginEnabled = isFeishuLoginEnabled();
   const loginCapabilities = { chatgptLoginEnabled, githubLoginEnabled, feishuLoginEnabled };
   const authorized = await getAuthorizedUser();
+  let canViewAllPersonnel=false;
+  if(authorized?.ndaCompleted){try{const policy=await getReviewPolicy(await getD1Database());canViewAllPersonnel=Boolean(policy?.technical.some(person=>policyActor(person,authorized)));}catch{/* Fail closed for optional personnel access. */}}
   if (authorized) return sessionJson({
+    canViewAllPersonnel,
     registered: true,
     status: "active",
     user: authorized.user,

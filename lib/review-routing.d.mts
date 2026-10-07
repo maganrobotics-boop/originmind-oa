@@ -1,0 +1,15 @@
+export type ReviewPerson={memberId:string;accountUserId:string;email:string;name:string};
+export type ReviewPolicy={technical:ReviewPerson[];finance:ReviewPerson;owner:ReviewPerson};
+export function getReviewPolicy(db:any):Promise<ReviewPolicy|null>;
+export function policyActor(person:ReviewPerson|undefined,user:any):boolean;
+export function technicalRoute(policy:ReviewPolicy):ReviewPerson[];
+export function fixedTechnicalPayload(payload:Record<string,unknown>,policy:ReviewPolicy|null,requesterEmail:string):Record<string,unknown>;
+export function technicalReviewState(payload:Record<string,unknown>,policy:ReviewPolicy):{route:ReviewPerson[];decisions:any[];pending:ReviewPerson|undefined;pendingPeople:ReviewPerson[]};
+export function technicalParticipant(payload:Record<string,unknown>,email:string):boolean;
+export function technicalPendingForEmail(payload:Record<string,unknown>,step:string,email:string):boolean;
+export function advanceTechnicalReview(payload:Record<string,unknown>,policy:ReviewPolicy,user:any,now:string,note?:string):{payload:Record<string,unknown>;next:ReviewPerson|null;step:string};
+export function reviewBasis(record:any):string;
+export function hasFullSettlement(record:any):boolean;
+export function reviewState(record:any,row:any,policy:ReviewPolicy):any;
+export function expenseReviewOverview(db:any,records:any[],user:any,policy:ReviewPolicy|null):Promise<any>;
+export function assertPurchaseSettled(db:any,approvalId:string,actualAmount:unknown):Promise<any[]>;

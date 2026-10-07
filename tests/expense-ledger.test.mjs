@@ -129,3 +129,73 @@ test('authorized bill aliases deduplicate into one person without rewriting sour
  const {answerPersonnelQuestion}=await import('../lib/personnel-chat.mjs');assert.match((await answerPersonnelQuestion(db,{...user('admin'),ndaCompleted:true},'历史账单名报销了吗')).answer,/测试甲的个人情况/);
  assert.throws(()=>parseAlipay(source,[{id:'a',bill_name:'历史账单名'},{id:'b',bill_name:'另一个人',aliases_json:JSON.stringify(['历史账单名'])}]),/对应多个人员/);
 });
+
+const editableClaim=claim=>Object.fromEntries(['stage','project_name','approval_id','expected_date','submitted_date','received_date','reimbursed_cents','reference','note','handler'].map(k=>[k,claim[k]]));
+function reviewFixture(){
+ const f=fixture();f.raw.exec(readFileSync(new URL('../migrations/review-routing-20261007.sql',import.meta.url),'utf8'));
+ f.raw.prepare("INSERT INTO members VALUES(?,?,?,'member','active','v1',?,'2026-01-01')").run('reviewer2','第二审核人','reviewer2@test.invalid','account:reviewer2');
+ const person=id=>({memberId:id,accountUserId:'account:'+id,email:id+'@test.invalid'});
+ f.raw.prepare('INSERT INTO oa_review_policy VALUES(1,?,?,?,?)').run(JSON.stringify([person('reviewer'),person('reviewer2')]),JSON.stringify(person('other')),JSON.stringify(person('admin')),'now');
+ const user=id=>({...f.user(id),isFinanceOwner:id==='other'});
+ const act=async(id,input)=>mutateLedger(f.db,user(id),{revision:(await loadLedger(f.db,user(id))).revision,...input});
+ return {...f,user,act};
+}
+test('either technical adviser may approve once, then only the designated owner can finalize',async()=>{
+ const {getReviewPolicy,fixedTechnicalPayload,advanceTechnicalReview,technicalPendingForEmail}=await import('../lib/review-routing.mjs');
+ const {pendingCirculationPeople}=await import('../lib/circulation-policy.ts');
+ const f=reviewFixture(),policy=await getReviewPolicy(f.db),payload=fixedTechnicalPayload({developers:[{memberId:'member',email:'member@test.invalid'}]},policy,'member@test.invalid');
+ assert.equal(technicalPendingForEmail(payload,'技术顾问','reviewer2@test.invalid'),true);
+ assert.throws(()=>advanceTechnicalReview(payload,policy,f.user('admin'),'now'),/不能跳过/);
+ for(const reviewer of ['reviewer','reviewer2']){
+   const first=advanceTechnicalReview(payload,policy,f.user(reviewer),'now');assert.equal(first.step,'项目负责人');assert.equal(first.next.memberId,'admin');
+   assert.equal(technicalPendingForEmail(first.payload,'技术顾问','reviewer@test.invalid'),false);
+   assert.throws(()=>advanceTechnicalReview(first.payload,policy,f.user(reviewer==='reviewer'?'reviewer2':'reviewer'),'now'),/不能跳过/);
+   const last=advanceTechnicalReview(first.payload,policy,f.user('admin'),'later');assert.equal(last.step,'已归档');assert.equal(last.payload.fixedReviewApprovals.length,2);
+ }
+ const circulation={circulationContent:'本人周报',circulationAnyTechnical:true,circulationApprovers:[...policy.technical,policy.owner],circulationApprovals:[]};
+ assert.equal(pendingCirculationPeople(circulation,'指定审批').length,2);
+ circulation.circulationApprovals=[policy.technical[1]];
+ assert.deepEqual(pendingCirculationPeople(circulation,'指定审批').map(p=>p.memberId),['admin']);
+});
+test('reimbursement requires finance then owner and full verified settlement before immutable archive',async()=>{
+ const {db,user,act,raw}=reviewFixture();await act('admin',{action:'import',csv,filename:'review.csv'});
+ await act('member',{action:'report_progress',ids:['payment0000001'],status:'reported_settled'});
+ await assert.rejects(act('admin',{action:'review_owner',ids:['payment0000001']}),/先经财务/);
+ await assert.rejects(act('admin',{action:'review_finance',ids:['payment0000001']}),/指定审核人/);
+ await act('other',{action:'review_finance',ids:['payment0000001']});
+ const {getOwnPersonnelTodos}=await import('../lib/personnel-todos.mjs');
+ assert.ok((await getOwnPersonnelTodos(db,user('admin'))).some(t=>t.id.startsWith('personnel-review-owner-')));
+ await act('admin',{action:'review_owner',ids:['payment0000001']});
+ await assert.rejects(act('admin',{action:'review_archive',personId:'person'}),/全额报销/);
+ let claim=(await loadLedger(db,user('other'))).records[0].claim;
+ const settled={...editableClaim(claim),stage:'settled',submitted_date:'2026-01-01',received_date:'2026-01-02',reference:'合成到账回单',reimbursed_cents:8000};
+ await assert.rejects(act('member',{action:'progress',id:'payment0000001',claim:settled}),/指定财务/);
+ await act('other',{action:'progress',id:'payment0000001',claim:{...settled,stage:'partial',reimbursed_cents:4000}});
+ await assert.rejects(act('admin',{action:'review_archive',personId:'person'}),/全额报销/);
+ await act('other',{action:'progress',id:'payment0000001',claim:settled});
+ await act('admin',{action:'review_archive',personId:'person'});
+ assert.equal((await loadLedger(db,user('admin'))).records[0].review.state,'archived');
+ await assert.rejects(act('other',{action:'progress',id:'payment0000001',claim:settled}),/已归档/);
+ await assert.rejects(act('member',{action:'dispute',ids:['payment0000001'],note:'更改归档'}),/已归档/);
+ assert.equal(raw.prepare("SELECT count(*) n FROM expense_events WHERE action='review_archive'").get().n,1);
+});
+test('changed materials require renewed financial review and a partially settled group cannot archive',async()=>{
+ const {db,user,act}=reviewFixture();const extra='2026-09-03 10:00:00,亲友代付,测试甲,亲情卡,支出,50.00,payment0000002,merchant002,支付成功,信用卡,\n';
+ await act('admin',{action:'import',csv:csv+extra,filename:'two.csv'});await act('member',{action:'confirm',ids:['payment0000001','payment0000002']});
+ await act('other',{action:'review_finance',ids:['payment0000001','payment0000002']});await act('admin',{action:'review_owner',ids:['payment0000001','payment0000002']});
+ const claim=(await loadLedger(db,user('member'))).records.find(r=>r.id==='payment0000001').claim;
+ await act('member',{action:'progress',id:'payment0000001',claim:{...editableClaim(claim),note:'用途更改，需重新审核'}});
+ const ledger=await loadLedger(db,user('admin'));assert.equal(ledger.records.find(r=>r.id==='payment0000001').review.state,'finance');
+ await assert.rejects(act('admin',{action:'review_archive',personId:'person'}),/全额报销/);
+ assert.ok(ledger.records.every(r=>!r.review.archivedAt));
+});
+test('both named technical reviewers can read every homepage without gaining financial mutation powers',async()=>{
+ const {db,user,act}=reviewFixture();await act('admin',{action:'import',csv,filename:'read-access.csv'});await act('member',{action:'confirm',ids:['payment0000001']});
+ for(const id of ['reviewer','reviewer2']){
+   const ledger=await loadLedger(db,user(id));assert.equal(ledger.canViewAll,true);assert.equal(ledger.manager,false);assert.equal(ledger.profiles.length,5);assert.equal(ledger.records.length,1);
+   await assert.rejects(act(id,{action:'progress',id:'payment0000001',claim:editableClaim(ledger.records[0].claim)}),/仅可查看/);
+   await assert.rejects(act(id,{action:'review_finance',ids:['payment0000001']}),/指定审核人/);
+   await assert.rejects(act(id,{action:'confirm',ids:['payment0000001']}),/只能本人/);
+ }
+ const own=await loadLedger(db,user('member'));assert.equal(own.canViewAll,false);assert.equal(own.profiles.length,1);
+});

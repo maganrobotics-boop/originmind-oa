@@ -1,5 +1,7 @@
+import { getReviewPolicy, fixedTechnicalPayload, technicalReviewState, advanceTechnicalReview, technicalRoute, policyActor, assertPurchaseSettled, technicalPendingForEmail } from '../../../../lib/review-routing.mjs';
+import { LedgerError } from '../../../../lib/expense-ledger.mjs';
 import { and, asc, eq, exists, isNull, sql } from "drizzle-orm";
-import { getDb } from "../../../../db";
+import { getDb, getD1Database } from "../../../../db";
 import { approvalEvents, approvalRevisions, approvals, externalArchives, laborSourceClaims, members } from "../../../../db/schema";
 import {
   asNumber,
@@ -342,6 +344,15 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return Response.json({ error: "该申请的不可变材料版本已达安全上限，请联系管理员核验并制定迁移处理方案。" }, { status: 409 });
     }
     let payload = parseJsonObject(approval.payloadJson);
+    const reviewPolicy = ["技术审核","采购审核","流转审批"].includes(approval.type) ? await getReviewPolicy(await getD1Database()) : null;
+    if (reviewPolicy && ["技术审核","采购审核"].includes(approval.type) && ["approve","confirm_developer"].includes(action) && (approval.type === "技术审核" || ["技术顾问","项目负责人"].includes(approval.currentStep))) {
+      const state=technicalReviewState(payload,reviewPolicy);
+      if (action === "approve" && !state.pendingPeople.some(person=>policyActor(person,authorized))) return Response.json({error:"须先由任一指定技术审核人审核，再交负责人。"},{status:403});
+    }
+    if (reviewPolicy && approval.type === "采购审核" && ["财务审核","负责人终审","报销待完成"].includes(approval.currentStep) && !["withdraw","force_return"].includes(action)) {
+      const expected=approval.currentStep === "负责人终审" ? reviewPolicy.owner : reviewPolicy.finance;
+      if(!policyActor(expected,authorized)) return Response.json({error:"仅本节点指定审核人本人可以处理。"},{status:403});
+    }
     const isApplicantAction = action === "resubmit" || action === "withdraw" || action === "void" || action === "archive_note";
     if (isApplicantAction) {
       if (requesterEmail !== currentEmail) return Response.json({ error: "申请不存在或当前账号不可操作。" }, { status: 404 });
@@ -349,7 +360,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (!authorized.isAdmin) return Response.json({ error: "只有管理员可以执行异常流程强制退回。" }, { status: 403 });
     } else {
       const isAssignedCirculationActor = approval.type === "流转审批" && pendingCirculationPeople(payload, approval.currentStep).some((person) => person.email === currentEmail && person.memberId === authorized.memberId && person.accountUserId === authorized.accountUserId);
-      if (approval.type === "流转审批" ? !isAssignedCirculationActor : normalizeEmail(approval.currentReviewerEmail) !== currentEmail) return Response.json({ error: "申请不存在或当前账号不可操作。" }, { status: 404 });
+      const isAssignedTechnicalActor = ["技术审核","采购审核"].includes(approval.type) && approval.currentStep === "技术顾问" && reviewPolicy && technicalReviewState(payload,reviewPolicy).pendingPeople.some(person=>policyActor(person,authorized));
+      if (approval.type === "流转审批" ? !isAssignedCirculationActor : ["技术审核","采购审核"].includes(approval.type) && approval.currentStep === "技术顾问" && reviewPolicy ? !isAssignedTechnicalActor : normalizeEmail(approval.currentReviewerEmail) !== currentEmail) return Response.json({ error: "申请不存在或当前账号不可操作。" }, { status: 404 });
       if (!stepRoleAllowed(approval.currentStep, authorized)) return Response.json({ error: "当前账号没有该审核节点的处理权限。" }, { status: 403 });
     }
     if (!isApprovalType(approval.type)) return Response.json({ error: "申请类型异常，无法继续流转。" }, { status: 409 });
@@ -476,6 +488,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         const error = validateStoredCirculation(payload, await activeMembers(db), requesterEmail);
         if (error) return Response.json({ error }, { status: 409 });
         payload = { ...payload, circulationConfirmations: [], circulationApprovals: [] };
+        if(payload.technicalWeekly === true && reviewPolicy) payload = {...payload,circulationApprovers:technicalRoute(reviewPolicy).filter(p=>p.memberId===reviewPolicy.owner.memberId||p.email!==requesterEmail),circulationOrdered:true,circulationAnyTechnical:true};
         const person = [...circulationPeople(payload.circulationRecipients), ...circulationPeople(payload.circulationApprovers)][0];
         nextReviewer = { email: person.email, displayName: person.name };
       } else if (approval.type === "技术审核") {
@@ -483,7 +496,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         const normalized = await normalizeStoredDevelopers(db, payload);
         if (!normalized.developers) return Response.json({ error: normalized.error || "技术开发人信息已失效，请重新编辑申请。" }, { status: 409 });
         const firstDeveloper = normalized.developers[0];
-        payload = { ...payload, developers: normalized.developers, developerConfirmations: [] };
+        payload = fixedTechnicalPayload({ ...payload, developers: normalized.developers, developerConfirmations: [] },reviewPolicy,requesterEmail);
         nextReviewer = { email: firstDeveloper.email, displayName: firstDeveloper.name };
       } else {
         const initialReviewerEmail = normalizeEmail(payload.initialReviewerEmail);
@@ -522,6 +535,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (approval.type === "采购审核") {
         for (const key of ["purchaserEmail", "purchaserMemberId", "purchaserName", "purchaserAssignedAt", "purchaserAssignedBy", "purchaseNote", "actualAmount", "purchaseConfirmedAt", "purchaseCompletion"]) delete payload[key];
       }
+      if(approval.type === "采购审核") { payload=fixedTechnicalPayload(payload,reviewPolicy,requesterEmail); nextReviewer={email:textValue(payload.initialReviewerEmail),displayName:textValue(payload.initialReviewerName)}; delete payload.expenseApprovalRoute; delete payload.expenseApprovals; delete payload.reimbursementEvidence; }
       delete payload.archivedAt;
       delete payload.archivedBy;
       if (approval.currentRevisionNo + 1 + workflowRevisionsNeededAfterMaterial(approval.type, payload) > MAX_APPROVAL_REVISIONS) {
@@ -604,6 +618,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     let nextReviewer: { email: string; displayName: string } | null = null;
     let signersJson = approval.signersJson;
     let nextAmount = approval.amount;
+    let financialLedgerRevision: number | null = null;
     const now = new Date().toISOString();
     const initialReviewerEmail = normalizeEmail(payload.initialReviewerEmail);
 
@@ -664,11 +679,11 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
         if (advisor.email === requesterEmail) return Response.json({ error: "申请人不能担任本人申请的技术顾问，请联系管理员退回后重新选择。" }, { status: 409 });
         if (normalized.developers.some((developer) => developer.email === advisor.email)) return Response.json({ error: "技术开发人不能同时担任本事项的技术顾问，请联系管理员退回后重新选择。" }, { status: 409 });
         nextStep = "技术顾问";
-        nextReviewer = { email: advisor.email, displayName: advisor.displayName };
+        nextReviewer = { email: advisor.email, displayName: approval.type === "技术审核" && reviewPolicy ? textValue(payload.initialReviewerName) : advisor.displayName };
       }
     }
 
-    if (action === "approve" && approval.currentStep === "技术顾问") {
+    if (action === "approve" && approval.currentStep === "技术顾问" && !(["技术审核","采购审核"].includes(approval.type) && reviewPolicy)) {
       const nextReviewerEmail = normalizeEmail(body.nextReviewerEmail);
       if (!nextReviewerEmail) return Response.json({ error: "请选择下一位项目负责人，或选择退回。" }, { status: 400 });
       const candidate = (await getReviewerDirectory({ ...user, accountUserId: authorized.accountUserId })).find((item) => item.email === nextReviewerEmail && item.ndaCompleted && item.permissions.includes("project_owner"));
@@ -677,6 +692,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       if (approval.type === "技术审核" && Array.isArray(payload.developers) && payload.developers.some((item) => normalizeEmail((item as TechnicalDeveloper).email) === candidate.email)) return Response.json({ error: "技术开发人不能同时担任本事项的项目负责人审核人。" }, { status: 400 });
       nextReviewer = { email: candidate.email, displayName: candidate.displayName };
       signersJson = addApprovalSigner(signersJson, { name: user.displayName, email: currentEmail, accountUserId: authorized.accountUserId, memberId: authorized.memberId, signedAt: now });
+    }
+
+    if (["技术审核","采购审核"].includes(approval.type) && reviewPolicy && action === "approve" && ["技术顾问","项目负责人"].includes(approval.currentStep)) {
+      const result=advanceTechnicalReview(payload,reviewPolicy,authorized,now,note);
+      payload=result.payload;if(!(approval.type === "采购审核" && approval.currentStep === "项目负责人"))nextStep=result.step;
+      nextReviewer=result.next?{email:result.next.email,displayName:result.next.name}:null;
+      signersJson=addApprovalSigner(signersJson,{name:user.displayName,email:currentEmail,accountUserId:authorized.accountUserId,memberId:authorized.memberId,signedAt:now});
     }
 
     if (action === "approve" && approval.type === "采购审核" && approval.currentStep === "项目负责人") {
@@ -717,6 +739,34 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       };
       nextAmount = formatAmount(round(actualAmount));
       signersJson = addApprovalSigner(signersJson, { name: user.displayName, email: currentEmail, accountUserId: authorized.accountUserId, memberId: authorized.memberId, signedAt: now });
+    }
+
+    if (reviewPolicy && approval.type === "采购审核") {
+      if(action === "confirm_purchase") {
+        payload={...payload,expenseApprovalRoute:[reviewPolicy.finance,reviewPolicy.owner],expenseApprovals:[]};
+        nextStep="财务审核";nextReviewer={email:reviewPolicy.finance.email,displayName:reviewPolicy.finance.name};
+      }
+      if(action === "approve" && ["财务审核","负责人终审","报销待完成"].includes(approval.currentStep)) {
+        const route=[reviewPolicy.finance,reviewPolicy.owner];
+        const decisions=Array.isArray(payload.expenseApprovals)?payload.expenseApprovals as Array<Record<string,unknown>>:[];
+        if(decisions.some((d,i)=>!route[i]||d.memberId!==route[i].memberId||d.accountUserId!==route[i].accountUserId||!d.confirmedAt)) return Response.json({error:"报销审核身份或顺序有变化，请退回重审。"},{status:409});
+        const expectedCount=approval.currentStep === "财务审核"?0:approval.currentStep === "负责人终审"?1:2;
+        if(decisions.length!==expectedCount) return Response.json({error:"必须先完成财务审核，再由负责人审核。"},{status:409});
+        if(expectedCount<2) {
+          payload={...payload,expenseApprovals:[...decisions,{...route[expectedCount],confirmedAt:now,note}]};
+          nextStep=expectedCount===0?"负责人终审":"报销待完成";
+          const next=expectedCount===0?reviewPolicy.owner:reviewPolicy.finance;
+          nextReviewer={email:next.email,displayName:next.name};
+        } else {
+          const ledgerDb=await getD1Database();
+          const meta=await ledgerDb.prepare('SELECT revision FROM expense_ledger_meta WHERE id=1').first<{revision:number}>();
+          financialLedgerRevision=meta?.revision ?? null;
+          if(financialLedgerRevision===null)throw new LedgerError('账单状态暂不可用，不能归档。',409);
+          const evidence=await assertPurchaseSettled(ledgerDb,approval.id,payload.actualAmount);
+          payload={...payload,reimbursementEvidence:evidence};nextStep="已归档";nextReviewer=null;
+        }
+        signersJson=addApprovalSigner(signersJson,{name:user.displayName,email:currentEmail,accountUserId:authorized.accountUserId,memberId:authorized.memberId,signedAt:now});
+      }
     }
 
     if (action === "approve" && approval.type === "劳务报酬" && approval.currentStep === "项目负责人") {
@@ -841,7 +891,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const ndaSubjectGuard = approval.type === "保密协议" && isFinal
       ? sql`EXISTS (SELECT 1 FROM members AS nda_subject WHERE lower(nda_subject.chatgpt_account) = ${requesterEmail} AND nda_subject.status = 'active' AND nda_subject.account_user_id = ${ndaSignerAccountUserId} AND ${ndaSubjectRoleGuard})`
       : sql`1 = 1`;
-    const update = db.update(approvals).set({ ...nextState, currentRevisionNo: revisionPlan.currentRevisionNo, currentRevisionHash: revisionPlan.currentRevisionHash }).where(and(eq(approvals.id, id), eq(approvals.updatedAt, approval.updatedAt), eq(approvals.payloadJson, approval.payloadJson), eq(approvals.currentRevisionNo, approval.currentRevisionNo), previousRevisionPointerMatches, actorGuard, ndaSubjectGuard)).returning();
+    const update = db.update(approvals).set({ ...nextState, currentRevisionNo: revisionPlan.currentRevisionNo, currentRevisionHash: revisionPlan.currentRevisionHash }).where(and(eq(approvals.id, id), eq(approvals.updatedAt, approval.updatedAt), eq(approvals.payloadJson, approval.payloadJson), eq(approvals.currentRevisionNo, approval.currentRevisionNo), previousRevisionPointerMatches, actorGuard, ndaSubjectGuard, financialLedgerRevision === null ? sql`1=1` : sql`EXISTS(SELECT 1 FROM expense_ledger_meta WHERE id=1 AND revision=${financialLedgerRevision})`)).returning();
     const revisionWrites = revisionPlan.revisions.map((revision) => conditionalApprovalRevisionInsert(db, id, now, workflowMutationRevision, revisionPlan.currentRevisionNo, revisionPlan.currentRevisionHash!, revision));
     const event = conditionalApprovalEvent(db, id, now, workflowMutationRevision, { actorName: user.displayName, actorEmail: currentEmail, action, note: eventNote });
 
@@ -899,6 +949,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     }
     return Response.json({ approval: serializeActionApproval(updated, authorized) }, { headers: PRIVATE_JSON_HEADERS });
   } catch (error) {
+    if (error instanceof LedgerError) return Response.json({error:error.message},{status:error.status});
     const message = error instanceof Error ? error.message : "";
     if (/period_key/i.test(message)) return Response.json({ error: "该月份已有正式劳务报酬申请，请刷新后查看。" }, { status: 409 });
     if (/labor_source_claims|member_technical_unique/i.test(message)) return Response.json({ error: "所选技术成果已被当前成员的另一份正式劳务报酬申请占用。" }, { status: 409 });
