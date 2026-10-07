@@ -511,6 +511,10 @@ async function currentVisitor(context) {
   if (!/^[a-f0-9]{64}$/u.test(token)) return null;
   const row = await database(context).prepare("SELECT email,role,expires_at AS expiresAt FROM visitor_sessions WHERE hash=? AND expires_at>?")
     .bind(await sha256Hex(token), Date.now()).first();
+  if (row) {
+    try { context.env.FUTURE_STARS_LEARNING?.touch(row.email, Date.now()); }
+    catch { console.error('LEARNING_PRESENCE_WRITE_FAILED'); }
+  }
   return row ? { email: row.email, role: row.role, roleLabel: roleLabel(row.role) } : null;
 }
 

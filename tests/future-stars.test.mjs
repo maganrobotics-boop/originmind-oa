@@ -24,11 +24,12 @@ function env(t) {
   const DB = new D1DatabaseAdapter(); t.after(() => DB.close());
   const learning = new DatabaseSync(':memory:'); t.after(() => learning.close());
   learning.exec("CREATE TABLE learning_submissions(id TEXT PRIMARY KEY,email TEXT,payload TEXT,review_state TEXT,review TEXT,error TEXT,created_at INTEGER); CREATE TABLE learning_course_drafts(email TEXT,course_id TEXT,revision INTEGER,updated_at INTEGER);");
+  for (const table of ['learning_messages','learning_git_runs','learning_graduation_attempts','learning_patrol_attempts']) learning.exec(`CREATE TABLE ${table}(email TEXT,created_at INTEGER)`);
   DB.sqlite.exec("CREATE TABLE visitor_accounts(email TEXT PRIMARY KEY,role TEXT,registered_at INTEGER,last_login_at INTEGER,registration_source TEXT);");
   const subjects = ['one', 'two', 'three'];
   for (const name of subjects) {
     const email = name + '@stumail.sztu.edu.cn';
-    DB.sqlite.prepare('INSERT INTO visitor_accounts VALUES(?,?,?,?,?)').run(email, 'student', 100, 100, 'fixture');
+    DB.sqlite.prepare('INSERT INTO visitor_accounts VALUES(?,?,?,?,?)').run(email, 'student', 100, Date.now() - 1000, 'fixture');
     DB.sqlite.prepare('INSERT INTO newbie_profiles(email,display_name,grade,major,direction,created_at,updated_at) VALUES(?,?,?,?,?,?,?)')
       .run(email, name === 'one' ? '<script>学生</script>' : name, '2026', '机器人', 'navigation', 100, 100);
   }
@@ -44,7 +45,7 @@ function env(t) {
     graduationSummary: () => ({ status: 'not_attempted', passedAt: null }),
   });
   return { DB, APP_ORIGIN: origin, PUBLIC_LAB_AI_SERVICE_TOKEN: secret, ADMIN_EMAIL: actor.email,
-    APP_ENCRYPTION_KEY: 'e'.repeat(48), RATE_LIMIT_HMAC_KEY: 'r'.repeat(48), FUTURE_STARS_LEARNING };
+    APP_ENCRYPTION_KEY: 'e'.repeat(48), RATE_LIMIT_HMAC_KEY: 'r'.repeat(48), FUTURE_STARS_LEARNING, learningDb: learning };
 }
 async function call(env, payload, options = {}) {
   const result = await handleRequest(await signedRequest(payload, options), env, {});
@@ -76,7 +77,7 @@ test('replaying the same signed nonce cannot repeat even a read operation', asyn
   assert.equal((await call(environment, payload, { nonce })).status, 200);
   assert.equal((await call(environment, payload, { nonce })).status, 429);
 });
-test('students paginate before enrichment, exclude staff and filter actual course participation', async t => {
+test('students rank before pagination, exclude staff and filter actual course participation', async t => {
   const environment = env(t);
   const all = await call(environment, peoplePayload);
   assert.equal(all.status, 200); assert.equal(all.data.received, true);
@@ -106,6 +107,17 @@ test('records return only submitted evidence and AI feedback, without code paylo
   assert.equal(result.status, 200); assert.equal(result.data.records.length, 2);
   assert.equal(result.data.records.find(row => row.id === 's1').review.feedback, 'fixture点评');
   assert.ok(result.data.records.every(row => !Object.hasOwn(row, 'payload')));
+});
+test('legacy plain-text and malformed JSON reviews preserve readable personal records', async t => {
+  const environment = env(t);
+  const values = ['历史纯文本点评', '{incomplete JSON', '<script>literal text</script>'];
+  for (const [index, review] of values.entries()) environment.learningDb.prepare('INSERT INTO learning_submissions VALUES(?,?,?,?,?,?,?)')
+    .run('legacy-' + index, 'one@stumail.sztu.edu.cn', JSON.stringify({ courseId: 'navigation' }), 'done', review, null, 2000 + index);
+  const result = await call(environment, { actor, operation: 'records', params: { email: 'one@stumail.sztu.edu.cn' } });
+  assert.equal(result.status, 200); assert.equal(result.data.pagination.total, 5);
+  for (const [index, review] of values.entries()) assert.equal(result.data.records.find(row => row.id === 'legacy-' + index).review, review);
+  assert.equal(result.data.records.find(row => row.id === 's1').review.feedback, 'fixture点评');
+  assert.equal(result.data.records.find(row => row.id === 's2').review, null);
 });
 test('competition grants share the honor store and authenticated OA actor, and synchronize hiding', async t => {
   const environment = env(t);
@@ -137,4 +149,30 @@ test('migrating current private honors preserves exact identity and is idempoten
   const verify = new DatabaseSync(dbPath);
   const saved = verify.prepare('SELECT * FROM learning_honors').get(); verify.close();
   assert.equal(saved.recipient_email, award.email); assert.equal(saved.granted_at, award.issuedAt); assert.equal(saved.visibility, 'hidden');
+});
+
+test('Arena bridge distinguishes disconnected, connected empty, and unavailable sources', async t => {
+  const environment=env(t), payload={actor,operation:'arena',params:{window:'3d'}};
+  let result=await call(environment,payload);
+  assert.equal(result.status,200);assert.equal(result.data.source.status,'not_connected');assert.equal(result.data.source.message,'数据源未接入');
+  assert.equal(result.data.summary.tests,null);assert.deepEqual(result.data.summary.onlineCounts,{'24h':null,'3d':null,'7d':null});
+  environment.FUTURE_STARS_ARENA={overview:async()=>{throw new Error('private database path must not leak');}};
+  result=await call(environment,payload);assert.equal(result.data.source.status,'unavailable');assert.ok(!JSON.stringify(result.data).includes('private database'));
+  environment.FUTURE_STARS_ARENA={overview:async()=>({source:{status:'connected'},summary:{tests:0},records:[]})};
+  result=await call(environment,payload);assert.equal(result.data.source.status,'connected');assert.equal(result.data.summary.tests,0);
+  assert.equal((await call(environment,{...payload,params:{window:'all'}})).status,400);
+});
+test('actual SQL deduplicates case variants and ignores profile-only edits and future activity',async t=>{
+ const environment=env(t), now=Date.now();
+ environment.DB.sqlite.prepare('INSERT INTO visitor_accounts VALUES(?,?,?,?,?)').run('ONE@stumail.sztu.edu.cn','student',100,now-1,'fixture');
+ environment.DB.sqlite.prepare('UPDATE visitor_accounts SET last_login_at=0 WHERE email=?').run('three@stumail.sztu.edu.cn');
+ environment.DB.sqlite.prepare('UPDATE newbie_profiles SET updated_at=? WHERE email=?').run(now,'three@stumail.sztu.edu.cn');
+ let result=await readFutureStudents(environment.DB,environment.FUTURE_STARS_LEARNING,{},now);
+ assert.equal(result.summary.active,2);assert.equal(result.records.filter(row=>row.email.toLowerCase().startsWith('one@')).length,1);
+ // Question tracking is present only on some production versions.
+ environment.DB.sqlite.exec('CREATE TABLE newbie_questions(email TEXT,created_at INTEGER)');
+ environment.DB.sqlite.prepare('INSERT INTO newbie_questions VALUES(?,?)').run('three@stumail.sztu.edu.cn',now-10);
+ environment.DB.sqlite.prepare('INSERT INTO newbie_questions VALUES(?,?)').run('three@stumail.sztu.edu.cn',now+100);
+ result=await readFutureStudents(environment.DB,environment.FUTURE_STARS_LEARNING,{},now);
+ assert.equal(result.summary.active,3);assert.equal(result.records.find(row=>row.email.startsWith('three@')).lastActivityAt,now-10);
 });
