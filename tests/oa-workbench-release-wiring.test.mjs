@@ -46,4 +46,3 @@ test('release shell parses and refuses an unauthorised activation before running
   const webmailBlocked = spawnSync('/bin/bash', [shellPath, 'production'], { encoding: 'utf8', env: { PATH: '/nonexistent', OA_PRODUCTION_ENABLE_FEISHU_WEBMAIL: 'true' } });
   assert.equal(webmailBlocked.status, 64); assert.doesNotMatch(webmailBlocked.stderr, /command not found/u);
 });
-

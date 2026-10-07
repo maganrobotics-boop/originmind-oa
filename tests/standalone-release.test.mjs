@@ -18,6 +18,12 @@ test("the staging release requires an explicit isolated target before running an
 });
 
 test("retired Cloudflare release commands are not exposed by package scripts", () => {
+  for (const command of [
+    "build:standalone:staging", "build:standalone:production",
+    "check:standalone:staging", "check:standalone:production",
+    "release:standalone:staging", "release:standalone:production",
+    "migration:import:staging", "migration:schema-fingerprint:staging", "migration:import:production",
+  ]) assert.ok(!Object.hasOwn(packageJson.scripts, command), `${command} must remain retired`);
   assert.deepEqual(Object.keys(packageJson.scripts).filter(name => name.startsWith("release:standalone:")), []);
   for (const [name, command] of Object.entries(packageJson.scripts)) {
     assert.doesNotMatch(command, /release-(?:production|standalone)\.sh|wrangler\s+(?:deploy|publish)/u, `${name} must not reactivate a retired Cloudflare release`);

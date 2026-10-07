@@ -10,8 +10,8 @@ test("requires reviewers to choose internal or public before approving knowledge
   const source = await readFile(path.join(root, "components/knowledge/knowledge-view.tsx"), "utf8");
 
   assert.match(source, /KnowledgeVisibility,[\s\S]*?from "@\/lib\/knowledge-types"/u);
-  assert.match(source, /value="internal"[\s\S]*?>对内</u);
-  assert.match(source, /value="public"[\s\S]*?>对外公开</u);
+  assert.match(source, /value="internal"[\s\S]*?>OriginMind · 内部</u);
+  assert.match(source, /value="public"[\s\S]*?>ARTS Robotics · 公开</u);
   assert.match(source, /if \(item\.status !== "active" && item\.status !== "revoked"\) return undefined/u);
   assert.match(source, /const canApprove = canAct && Boolean\(visibility\)/u);
   assert.match(source, /body: JSON\.stringify\(\{ action, mutationRevision:[\s\S]*?\.\.\.approvalScope \}\)/u);
@@ -87,7 +87,10 @@ test("explains the internal OA and public ARTS Robotics assistant split", async 
 test("lets authorized reviewers reclassify active knowledge with the same public confirmation guard", async () => {
   const source = await readFile(path.join(root, "components/knowledge/knowledge-view.tsx"), "utf8");
 
-  assert.match(source, /查看并调整范围/u);
+  assert.match(source, /同步到联合知识库/u);
+  assert.match(source, /function KnowledgeDestinationBadge/u);
+  assert.match(source, /已同步到 OriginMind 内部知识库/u);
+  assert.match(source, /已同步到 ARTS Robotics 公共知识库/u);
   assert.match(source, /detail\.item\.status === "active" && detail\.item\.canSetVisibility/u);
   assert.match(source, /item\.status === "active" && item\.canRevoke/u);
   assert.match(source, /detail\?\.item\.canReject !== false/u);

@@ -668,3 +668,11 @@ test("production smoke uses the injected origin and keeps its POST probe unauthe
   assert.doesNotMatch(smokeScript, /x-originmind-public-lab-ai-service-token|PUBLIC_LAB_AI_SERVICE_TOKEN/u);
   assert.doesNotMatch(smokeScript, /method:\s*["'](?:PUT|PATCH|DELETE)["']/u);
 });
+
+test("removed Chat operation workflows remain absent after merge", async () => {
+  const files = await readdir(join(projectRoot, ".github", "workflows"));
+  for (const name of ["deploy-chat-cloudflare.yml", "deploy-chat-preview-cloudflare.yml",
+    "deploy-chat-static-cloudflare.yml", "initialize-chat-admin.yml", "repair-chat-admin-pbkdf2.yml"]) {
+    assert.ok(!files.includes(name), `${name} must remain retired`);
+  }
+});
