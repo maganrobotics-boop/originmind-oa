@@ -253,6 +253,13 @@
       "when": 1790810117788,
       "tag": "0035_wecom_bot",
       "breakpoints": true
+    },
+    {
+      "idx": 36,
+      "version": "6",
+      "when": 1791607510000,
+      "tag": "0036_unified_qr_login",
+      "breakpoints": true
     }
   ]
 }

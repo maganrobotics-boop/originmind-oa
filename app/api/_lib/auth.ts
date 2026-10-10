@@ -3,6 +3,7 @@ import { cookies, headers } from "next/headers";
 import { getDb } from "../../../db";
 import { accountProfiles, approvals, authIdentities, memberSessions, members, oauthSessions } from "../../../db/schema";
 import { accountSubjectForEmail, normalizeAccountEmail } from "../../../lib/account-subject";
+import { WECOM_PROVIDER, isWecomLoginEnabled } from "../../../lib/wecom-oauth";
 import { FEISHU_PROVIDER, isFeishuLoginEnabled } from "../../../lib/feishu-oauth";
 import { GITHUB_PROVIDER, isGitHubLoginEnabled } from "../../../lib/github-oauth";
 import { canReviewMemberRegistrations } from "../../../lib/member-attributes";
@@ -162,6 +163,7 @@ async function clearOAuthSession(tokenHash?: string) {
 function enabledOAuthProvider(value: string): OAuthProvider | null {
   if (value === GITHUB_PROVIDER && isGitHubLoginEnabled()) return GITHUB_PROVIDER;
   if (value === FEISHU_PROVIDER && isFeishuLoginEnabled()) return FEISHU_PROVIDER;
+  if (value === WECOM_PROVIDER && isWecomLoginEnabled()) return WECOM_PROVIDER;
   return null;
 }
 
@@ -191,6 +193,10 @@ async function getOAuthSessionUser(options: AuthenticationReadOptions = {}): Pro
 
   const now = new Date(nowMs).toISOString();
   if (!session.memberId) {
+    if (provider === WECOM_PROVIDER) {
+      if (!noTouch) await clearOAuthSession(tokenHash);
+      return null;
+    }
     if (!noTouch && nowMs - lastSeenAt >= SESSION_TOUCH_INTERVAL_MS) await db.update(oauthSessions).set({ lastSeenAt: now }).where(eq(oauthSessions.tokenHash, tokenHash));
     try {
       return {
@@ -226,7 +232,7 @@ async function getOAuthSessionUser(options: AuthenticationReadOptions = {}): Pro
     if (!noTouch) await clearOAuthSession(tokenHash);
     return null;
   }
-  if (member.status === "departed") {
+  if (member.status === "departed" || (provider === WECOM_PROVIDER && (member.status !== "active" || !member.accountUserId))) {
     if (!noTouch) await clearOAuthSession(tokenHash);
     return null;
   }

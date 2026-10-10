@@ -1,0 +1,16 @@
+.oa-qr-login { box-sizing: border-box; width: 100%; padding: 16px; border: 1px solid #e0e7f3; border-radius: 14px; display: grid; justify-items: center; gap: 9px; color: #607080; background: #fff; text-align: center; }
+.oa-qr-login .oa-qr-frame { position: relative; width: min(244px, 100%); aspect-ratio: 1; display: grid; place-items: center; overflow: hidden; border-radius: 10px; background: #f5f7fb; }
+.oa-qr-login .oa-qr-image { display: block; width: 100%; height: 100%; object-fit: contain; background: #fff; }
+.oa-qr-login .oa-qr-state { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 20px; color: #526780; background: #f5f7fb; font-size: 13px; line-height: 1.7; }
+.oa-qr-login .oa-qr-state-error { color: #9a534c; }
+.oa-qr-login .oa-qr-title { color: #25364a; font-size: 15px; font-weight: 700; }
+.oa-qr-login .oa-qr-status { margin: 0; max-width: 30em; font-size: 13px; line-height: 1.7; }
+.oa-qr-login .oa-qr-verification { display: flex; align-items: center; gap: 12px; padding: 6px 14px; border-radius: 8px; background: #f5f7fb; font-size: 12px; }
+.oa-qr-login .oa-qr-verification output { color: #25364a; font-size: 21px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .13em; }
+.oa-qr-login .oa-qr-expiry, .oa-qr-login .oa-qr-help { color: #69798c; font-size: 12px; line-height: 1.7; }
+.oa-qr-login .oa-qr-button { min-height: 44px; padding: 8px 14px; border: 1px solid #b7cbea; border-radius: 8px; color: #315b95; background: #fff; cursor: pointer; font-size: 13px; }
+.oa-qr-login .oa-qr-text-button, .oa-qr-login .oa-qr-device-login { min-height: 38px; display: inline-flex; align-items: center; justify-content: center; padding: 5px 10px; border: 0; color: #315b95; background: transparent; cursor: pointer; font-size: 13px; text-decoration: underline; text-underline-offset: 4px; }
+.oa-qr-login .oa-qr-device-login { min-height: 44px; width: 100%; margin-top: 2px; border: 1px solid #d7e0ed; border-radius: 8px; text-decoration: none; }
+.oa-qr-login :is(button, a):focus-visible { outline: 2px solid #729be1; outline-offset: 3px; }
+.oa-qr-unavailable { justify-items: start; color: #855e27; background: #fffbf4; border-color: #f0dcc1; text-align: left; font-size: 13px; line-height: 1.8; }
+@media (max-width: 480px) { .oa-qr-login { padding: 14px 12px; } .oa-qr-login .oa-qr-frame { width: min(230px, 100%); } }

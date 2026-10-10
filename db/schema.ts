@@ -234,6 +234,52 @@ export const oauthSessions = sqliteTable("oauth_sessions", {
   index("oauth_sessions_expires_idx").on(table.expiresAt),
 ]);
 
+// Short-lived QR transactions are separate from both OAuth providers and OA sessions.
+// A public challenge ID alone cannot approve a phone or authenticate a desktop.
+export const qrLoginChallenges = sqliteTable("qr_login_challenges", {
+  id: text("id").primaryKey(),
+  browserNonceHash: text("browser_nonce_hash").notNull(),
+  action: text("action").notNull(),
+  linkMemberId: text("link_member_id"),
+  linkAccountUserId: text("link_account_user_id"),
+  linkMemberRevision: text("link_member_revision"),
+  status: text("status").notNull().default("pending"),
+  provider: text("provider"),
+  providerSubject: text("provider_subject"),
+  loginSnapshot: text("login_snapshot"),
+  displayNameSnapshot: text("display_name_snapshot"),
+  memberId: text("member_id"),
+  scannerNonceHash: text("scanner_nonce_hash"),
+  verificationCode: text("verification_code").notNull(),
+  desktopLabel: text("desktop_label").notNull(),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  consumedAt: text("consumed_at"),
+  receiptHash: text("receipt_hash"),
+  denialReason: text("denial_reason"),
+}, (table) => [
+  index("qr_login_challenges_browser_idx").on(table.browserNonceHash),
+  index("qr_login_challenges_expires_idx").on(table.expiresAt),
+  check("qr_login_action_check", sql`${table.action} IN ('login', 'link')`),
+  check("qr_login_status_check", sql`${table.status} IN ('pending', 'verified', 'approved', 'consumed', 'denied')`),
+]);
+
+export const qrOAuthAttempts = sqliteTable("qr_oauth_attempts", {
+  stateHash: text("state_hash").primaryKey(),
+  challengeId: text("challenge_id").notNull().references(() => qrLoginChallenges.id, { onDelete: "cascade" }),
+  provider: text("provider").notNull(),
+  scannerNonceHash: text("scanner_nonce_hash").notNull(),
+  pkceVerifier: text("pkce_verifier").notNull(),
+  createdAt: text("created_at").notNull(),
+  expiresAt: text("expires_at").notNull(),
+  consumedAt: text("consumed_at"),
+  failureReason: text("failure_reason"),
+}, (table) => [
+  index("qr_oauth_attempts_challenge_idx").on(table.challengeId),
+  index("qr_oauth_attempts_expires_idx").on(table.expiresAt),
+  check("qr_oauth_provider_check", sql`${table.provider} IN ('feishu', 'wecom')`),
+]);
+
 export const accountProfiles = sqliteTable("account_profiles", {
   chatgptAccount: text("chatgpt_account").primaryKey(),
   avatarDataUrl: text("avatar_data_url").notNull().default(""),

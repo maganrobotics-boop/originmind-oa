@@ -165,7 +165,7 @@ test("reviewed definitions match SQLite's forward migration result", async () =>
       }
     }
     const actualSchemaRows = database.prepare(
-      "SELECT type, name, sql FROM sqlite_master WHERE name GLOB 'knowledge_*' OR name GLOB 'wecom_bot_*' OR name GLOB 'conversation_events*' OR name GLOB 'conversation_members*' OR name GLOB 'conversation_messages*' OR name GLOB 'conversations*' OR name GLOB 'department_memberships*' OR name GLOB 'departments*' OR name GLOB 'project_links*' OR name GLOB 'project_members*' OR name GLOB 'projects*' ORDER BY type, name",
+      "SELECT type, name, sql FROM sqlite_master WHERE name GLOB 'knowledge_*' OR name GLOB 'wecom_bot_*' OR name GLOB 'qr_login_challenges*' OR name GLOB 'qr_oauth_attempts*' OR name GLOB 'conversation_events*' OR name GLOB 'conversation_members*' OR name GLOB 'conversation_messages*' OR name GLOB 'conversations*' OR name GLOB 'department_memberships*' OR name GLOB 'departments*' OR name GLOB 'project_links*' OR name GLOB 'project_members*' OR name GLOB 'projects*' ORDER BY type, name",
     ).all().map((row) => ({ ...row }));
     const notificationRows = notificationObjects.map((entry) => {
       const separator = entry.indexOf(":");
@@ -225,6 +225,8 @@ test("asset migration gate rejects SQL drift and partial application at each che
   assert.equal(Object.keys(schemaDefinitionsByMigration[32]).length, 58);
   assert.equal(Object.keys(schemaDefinitionsByMigration[33]).length, 59);
   assert.equal(Object.keys(schemaDefinitionsByMigration[34]).length, 113);
+  assert.equal(Object.keys(schemaDefinitionsByMigration[35]).length, 123);
+  assert.equal(Object.keys(schemaDefinitionsByMigration[36]).length, 129);
   for (const migration of [31, 32, 33]) {
     const definitions = schemaDefinitionsByMigration[migration];
     const snapshot = migrationSnapshot(migrationNames.slice(0, migration + 1), schemaObjectsFor(definitions), 0, definitions);
@@ -246,7 +248,7 @@ test("asset migration gate rejects SQL drift and partial application at each che
     }), /reviewed SHA-256/u);
   }
   assert.throws(() => validateProductionMigrationManifest({
-    migrationNames: [...migrationNames, "0035_unreviewed.sql"], migrationSqlByName,
+    migrationNames: [...migrationNames, "0037_unreviewed.sql"], migrationSqlByName,
   }), /exact migrations/u);
   assert.throws(() => productionSchemaDefinitions(migrationSqlByName, reviewedNames.slice(1)), /exact ordered prefix/u);
 });
@@ -283,8 +285,8 @@ test("WeCom bot release verifies every new table and unique mapping index", () =
     "table:wecom_bot_pairings",
   ]);
   const before = migrationSnapshot(migrationNames.slice(0, 35), schemaObjectsFor(previousDefinitions), 0, previousDefinitions);
-  assert.equal(validateProductionMigrationState({ phase: "before", ...before }), "pending-0035");
-  const snapshot = migrationSnapshot(migrationNames, schemaObjectsFor(definitions), 0, definitions);
+  assert.equal(validateProductionMigrationState({ phase: "before", ...before }), "pending-0035-0036");
+  const snapshot = migrationSnapshot(migrationNames, expectedSchemaObjects, 0, expectedSchemaDefinitions);
   assert.equal(validateProductionMigrationState({ phase: "after", ...snapshot }), "applied");
   const drift = structuredClone(snapshot);
   const unique = drift.schemaPayload[0].results.find((row) => row.name === "wecom_bot_links_active_member_unique");
@@ -293,6 +295,45 @@ test("WeCom bot release verifies every new table and unique mapping index", () =
   const partial = structuredClone(snapshot);
   partial.schemaPayload[0].results = partial.schemaPayload[0].results.filter((row) => row.name !== "wecom_bot_pairings_code_hash_unique");
   assert.throws(() => validateProductionMigrationState({ phase: "after", ...partial }), /does not match/u);
+});
+
+test("unified QR login migration requires complete hash-pinned tables and indexes", () => {
+  const previousDefinitions = schemaDefinitionsByMigration[35];
+  const definitions = schemaDefinitionsByMigration[36];
+  const qrObjects = Object.keys(definitions).filter((name) => !(name in previousDefinitions)).sort();
+  assert.deepEqual(qrObjects, [
+    "index:qr_login_challenges_browser_idx",
+    "index:qr_login_challenges_expires_idx",
+    "index:qr_oauth_attempts_challenge_idx",
+    "index:qr_oauth_attempts_expires_idx",
+    "table:qr_login_challenges",
+    "table:qr_oauth_attempts",
+  ]);
+  for (const [name, sql] of Object.entries(previousDefinitions)) assert.equal(definitions[name], sql);
+  const pending = migrationSnapshot(migrationNames.slice(0, 36), schemaObjectsFor(previousDefinitions), 0, previousDefinitions);
+  assert.equal(validateProductionMigrationState({ phase: "before", ...pending }), "pending-0036");
+  assert.throws(() => validateProductionMigrationState({ phase: "after", ...pending }), /must end exactly/u);
+  const complete = migrationSnapshot(migrationNames, schemaObjectsFor(definitions), 0, definitions);
+  assert.equal(validateProductionMigrationState({ phase: "after", ...complete }), "applied");
+  const premature = structuredClone(pending);
+  premature.schemaPayload[0].results.push(complete.schemaPayload[0].results.find((row) => row.name === "qr_login_challenges"));
+  assert.throws(() => validateProductionMigrationState({ phase: "before", ...premature }), /does not match/u);
+  for (const object of qrObjects) {
+    const partial = structuredClone(complete);
+    partial.schemaPayload[0].results = partial.schemaPayload[0].results.filter((row) => `${row.type}:${row.name}` !== object);
+    assert.throws(() => validateProductionMigrationState({ phase: "after", ...partial }), /does not match/u);
+    assert.throws(() => validateProductionMigrationState({ phase: "before", ...partial }), /does not match/u);
+  }
+  const changed = structuredClone(complete);
+  const challenge = changed.schemaPayload[0].results.find((row) => row.name === "qr_login_challenges");
+  challenge.sql = challenge.sql.replace("`browser_nonce_hash` text NOT NULL", "`browser_nonce_hash` text");
+  assert.throws(() => validateProductionMigrationState({ phase: "after", ...changed }), /schema SQL does not match/u);
+  assert.throws(() => validateProductionMigrationState({
+    phase: "before", ...pending, freezePayload: queryResult([{ active_freezes: 1 }]),
+  }), /active migration freeze/u);
+  assert.throws(() => validateProductionMigrationState({
+    phase: "after", ...complete, freezePayload: queryResult([{ active_freezes: 1 }]),
+  }), /active migration freeze/u);
 });
 
 test("migration CLI validates all reviewed immutable migration files", async () => {

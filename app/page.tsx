@@ -1,4 +1,5 @@
 "use client";
+import { OaQrLogin } from "@/components/oa-qr-login";
 
 /* This screen intentionally synchronizes remote OA state into local form/UI state. */
 /* eslint-disable react-hooks/set-state-in-effect */
@@ -143,8 +144,8 @@ type DirectMessage = { id: string; senderEmail: string; senderName: string; reci
 type ConversationSummary = { peer: { email: string; name?: string; fullName?: string; role?: string; permissions?: MemberPermission[]; isAdmin?: boolean }; latestMessageId?: string | null; latestCreatedAt?: string | null; latestIncomingId?: string | null };
 type MetricPanel = "approved" | "archive" | null;
 type ApprovalEvent = { id: number; actorName: string; actorEmail: string; action: string; note: string; createdAt: string };
-type AuthProvider = "chatgpt" | "github" | "feishu" | "legacy";
-type SessionInfo = { registered: boolean; status?: "unregistered" | "pending" | "active" | "rejected" | "departed"; accountBindingRequired?: boolean; accountBindingConflict?: boolean; platformIdentityMissing?: boolean; externalIdentityLinkRequired?: boolean; externalIdentityProvider?: "github" | "feishu"; githubIdentityLinkRequired?: boolean; feishuIdentityLinkRequired?: boolean; chatgptLoginEnabled?: boolean; githubLoginEnabled?: boolean; feishuLoginEnabled?: boolean; migrationExportEnabled?: boolean; migrationUnfreezeEnabled?: boolean; user?: { email: string; displayName: string; authProvider?: AuthProvider } | null; role?: string | null; canReviewMembers?: boolean; canGrantMemberPermissions?: boolean; canReviewKnowledge?: boolean; isAdmin?: boolean; isFinanceOwner?: boolean; ndaCompleted?: boolean; needsNda?: boolean; ndaApprovalId?: string; error?: string };
+type AuthProvider = "chatgpt" | "github" | "feishu" | "wecom" | "legacy";
+type SessionInfo = { registered: boolean; status?: "unregistered" | "pending" | "active" | "rejected" | "departed"; accountBindingRequired?: boolean; accountBindingConflict?: boolean; platformIdentityMissing?: boolean; externalIdentityLinkRequired?: boolean; externalIdentityProvider?: "github" | "feishu" | "wecom"; githubIdentityLinkRequired?: boolean; feishuIdentityLinkRequired?: boolean; chatgptLoginEnabled?: boolean; githubLoginEnabled?: boolean; feishuLoginEnabled?: boolean; wecomLoginEnabled?: boolean; migrationExportEnabled?: boolean; migrationUnfreezeEnabled?: boolean; user?: { email: string; displayName: string; authProvider?: AuthProvider } | null; role?: string | null; canReviewMembers?: boolean; canGrantMemberPermissions?: boolean; canReviewKnowledge?: boolean; isAdmin?: boolean; isFinanceOwner?: boolean; ndaCompleted?: boolean; needsNda?: boolean; ndaApprovalId?: string; error?: string };
 type FeishuBindingCandidate = { memberId: string; fullName: string; accountHint: string; department: string };
 
 async function loadApprovalDetail(id: string, signal: AbortSignal) {
@@ -163,13 +164,14 @@ async function loadApprovalDetail(id: string, signal: AbortSignal) {
 function authProviderLabel(provider?: AuthProvider) {
   if (provider === "github") return "GitHub";
   if (provider === "feishu") return "飞书";
+  if (provider === "wecom") return "企业微信";
   if (provider === "legacy") return "旧版会话";
   return "ChatGPT";
 }
 
 function accountIdentityLabel(user?: SessionInfo["user"]) {
   if (!user) return "登录后自动读取";
-  return user.authProvider === "feishu" ? `飞书 · ${user.displayName || "已验证成员"}` : user.email;
+  return user.authProvider === "feishu" || user.authProvider === "wecom" ? `${authProviderLabel(user.authProvider)} · ${user.displayName || "已验证成员"}` : user.email;
 }
 
 const emptyProfile = (): PersonProfile => ({ department: "", position: "", phone: "", bio: "", visibility: { department: false, position: false, phone: false, bio: false } });
@@ -821,6 +823,9 @@ function ProfileSettingsView({ currentUser, currentRole, isAdmin = false, migrat
   const [chatgptLoginEnabled, setChatgptLoginEnabled] = useState(false);
   const [chatgptLinked, setChatgptLinked] = useState(false);
   const [feishuLinked, setFeishuLinked] = useState(false);
+  const [wecomLoginEnabled, setWecomLoginEnabled] = useState(false);
+  const [wecomLinked, setWecomLinked] = useState(false);
+  const [bindingWecom, setBindingWecom] = useState(false);
   const [githubLinked, setGithubLinked] = useState(false);
   const [linkingFeishu, setLinkingFeishu] = useState(false);
   const [linkingGithub, setLinkingGithub] = useState(false);
@@ -840,7 +845,7 @@ function ProfileSettingsView({ currentUser, currentRole, isAdmin = false, migrat
     let cancelled = false;
     fetch("/api/profile", { headers: { accept: "application/json" }, credentials: "same-origin", cache: "no-store" })
       .then(async (response) => {
-        const data = await response.json() as { officialName?: string; profile?: PersonProfile & { avatarDataUrl?: string }; chatgptLoginEnabled?: boolean; githubLoginEnabled?: boolean; feishuLoginEnabled?: boolean; chatgptLinked?: boolean; githubLinked?: boolean; feishuLinked?: boolean; error?: string };
+        const data = await response.json() as { officialName?: string; profile?: PersonProfile & { avatarDataUrl?: string }; chatgptLoginEnabled?: boolean; githubLoginEnabled?: boolean; feishuLoginEnabled?: boolean; wecomLoginEnabled?: boolean; chatgptLinked?: boolean; githubLinked?: boolean; feishuLinked?: boolean; wecomLinked?: boolean; error?: string };
         if (!response.ok || !data.profile) throw new Error(data.error || "个人资料加载失败");
         if (!cancelled) {
           setDisplayName(data.officialName || currentUser.displayName || "");
@@ -851,6 +856,8 @@ function ProfileSettingsView({ currentUser, currentRole, isAdmin = false, migrat
           setGithubLoginEnabled(data.githubLoginEnabled === true);
           setChatgptLinked(data.chatgptLinked === true);
           setFeishuLinked(data.feishuLinked === true);
+          setWecomLoginEnabled(data.wecomLoginEnabled === true);
+          setWecomLinked(data.wecomLinked === true);
           setGithubLinked(data.githubLinked === true);
           setError("");
         }
@@ -948,6 +955,15 @@ function ProfileSettingsView({ currentUser, currentRole, isAdmin = false, migrat
                   ? <Badge variant="outline" className="feishu-linked-badge"><Check className="size-3.5" />已绑定</Badge>
                   : <form method="post" action="/api/auth/feishu/start?return_to=%2F" target="_top" aria-busy={linkingFeishu} onSubmit={beginFeishuLink}><button type="submit" className="feishu-link-button" disabled={linkingFeishu}><Building2 className="size-4" />{linkingFeishu ? "正在打开飞书…" : "绑定飞书"}</button></form>}
                 <small>原有成员请先用原 ChatGPT 账号进入，再在这里绑定。系统按当前成员 ID 关联，不按姓名或邮箱自动合并。</small>
+              </div>
+            )}
+            {(wecomLoginEnabled || wecomLinked) && (
+              <div className={`feishu-link-panel ${wecomLinked ? "linked" : ""}`}>
+                <div className="github-link-heading"><Building2 className="size-4" /><div><strong>企业微信扫码登录</strong><span>{wecomLinked ? "已绑定，扫码后进入当前成员账号" : "绑定本人企微身份，继续使用当前账号的原数据和权限"}</span></div></div>
+                {wecomLinked ? <Badge variant="outline" className="feishu-linked-badge"><Check className="size-3.5" />已绑定</Badge>
+                  : <button type="button" className="feishu-link-button" onClick={() => setBindingWecom((value) => !value)}>{bindingWecom ? "关闭绑定二维码" : "绑定企业微信"}</button>}
+                {bindingWecom && !wecomLinked && <OaQrLogin feishuEnabled={false} wecomEnabled={wecomLoginEnabled} action="link" onLinked={() => { setWecomLinked(true); setBindingWecom(false); toast.success("企业微信已绑定到当前 OA 账号"); }} />}
+                <small>只绑定到当前已登录的成员账号；不同姓名或同名账号不会自动合并。</small>
               </div>
             )}
             {(githubLoginEnabled || githubLinked) && (
@@ -1535,118 +1551,8 @@ function NdaAdmissionGate({ session, onRefresh }: { session: SessionInfo; onRefr
   return <div className="registration-shell nda-admission-shell"><div className="registration-card nda-admission-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><div className="eyebrow"><span className="eyebrow-line" />内部资料准入</div><h1>{isNdaRevision ? `修改并重新签署${agreementTitle}` : upgradingLegacyNda ? "角色要求已更新，请重新签署" : `先完成${agreementTitle}`}</h1><p className="registration-intro">在接触代码、图纸、BOM、测试数据、样机和客户资料前，须由本人实名手写签署。{ndaDirectArchive ? agreementKind === "member" ? "签署后立即生效并由系统自动归档，项目负责人可查阅。" : "签署后由系统自动归档。" : `签署后提交${reviewerLabel}确认。`} 归档前不会加载 OA 主工作区数据。</p>{upgradingLegacyNda && <div className="nda-returned-note"><RotateCcw className="size-4" /><span>{session.isAdmin ? "原成员保密协议仍保留；由于你已成为系统管理员，需另行签署《项目负责人保密承诺书》。" : isOwnerPledge ? "原成员保密协议仍保留；由于你已成为项目负责人，需另行签署《项目负责人保密承诺书》。" : "之前签署的协议仍保留在归档记录中；请阅读当前正文并重新手写签署。"}</span></div>}{isNdaRevision && <div className="nda-returned-note"><RotateCcw className="size-4" /><span>{existingApproval?.status === "已撤回" ? "文件已由你撤回，原记录已保留；请修改内容并重新手写签名。" : "上次文件已退回，请核对范围、重新手写签名并提交。"}</span></div>}{loadError && <div className="nda-gate-error" role="alert"><AlertTriangle className="size-4" /><span>{loadError}。为避免重复申请，暂时不能提交。</span></div>}<form className="nda-admission-form" onSubmit={submit} aria-busy={submitting}><Field label="签署人" required><Input value={signer} readOnly /></Field><Field label="当前认证身份" required><Input value={accountIdentityLabel(session.user)} readOnly /></Field><Field label="接触的未公开信息范围" required><Textarea value={confidentialScope} onChange={(event) => setConfidentialScope(event.target.value)} rows={3} disabled={submitting} /></Field><NdaAgreement kind={agreementKind} signer={signer} confidentialScope={confidentialScope} /><div className="signature-heading"><div><strong>本人手写电子签</strong><span>请由本人使用手指、触控笔或鼠标签名</span></div><FileSignature className="size-5" /></div><SignaturePad key={signatureResetKey} onChange={(signature) => setSignatureDataUrl(signature)} /><div className="nda-preview-actions"><Button type="button" variant="outline" disabled={!signatureDataUrl || submitting} onClick={() => setPreviewed(true)}><FileCheck2 className="size-4" />{previewed ? "已预览文件" : "预览已签文件"}</Button>{previewed && <button type="button" className="clear-signature" onClick={() => { setSignatureDataUrl(""); setSignatureResetKey((key) => key + 1); }}>重新签名</button>}</div>{previewed && <div className="nda-signed-preview"><div className="nda-signed-preview-label"><FileCheck2 className="size-4" />签署后预览</div><NdaAgreement kind={agreementKind} signer={signer} confidentialScope={confidentialScope} signatureDataUrl={signatureDataUrl} /></div>}<label className="nda-consent"><input type="checkbox" checked={agreed} onChange={(event) => setAgreed(event.target.checked)} disabled={!previewed || submitting} /><span>我已阅读{agreementTitle}正文，确认签名为本人手写，并同意按对应流程归档。</span></label>{!ndaDirectArchive && <Field label={`选择${reviewerLabel}`} required><NativeSelect value={reviewerEmail} onChange={(event) => setReviewerEmail(event.target.value)} disabled={submitting || eligibleReviewers.length === 0 || Boolean(loadError)}><NativeSelectOption value="">{eligibleReviewers.length ? `请选择${reviewerLabel}` : `暂无可选${reviewerLabel}`}</NativeSelectOption>{eligibleReviewers.map((reviewer) => <NativeSelectOption key={reviewer.email} value={reviewer.email}>{reviewer.displayName} · {reviewer.email}</NativeSelectOption>)}</NativeSelect></Field>}<Button type="submit" className="primary-button registration-button" disabled={submitting || Boolean(loadError) || !signatureDataUrl || !previewed || !agreed || (!ndaDirectArchive && !reviewerEmail)}>{submitting ? "正在提交…" : ndaDirectArchive ? `签署并归档${agreementTitle}` : isNdaRevision ? `重新提交${agreementTitle}` : `提交${agreementTitle}`}</Button>{existingApproval?.status === "已退回" && <div className="nda-withdraw-box"><strong>想终止这份退回记录？</strong><Textarea value={withdrawReason} onChange={(event) => setWithdrawReason(event.target.value)} rows={2} placeholder="先填写至少 2 个字的撤回原因" disabled={withdrawing} /><Button type="button" variant="outline" className="return-button" disabled={withdrawing || withdrawReason.trim().length < 2} onClick={() => void withdrawPendingNda()}><RotateCcw className="size-4" />{withdrawing ? "撤回中…" : "先撤回这份申请"}</Button><small>退回记录需先撤回，之后才可选择作废。</small></div>}{existingApproval?.status === "已撤回" && <div className="nda-withdraw-box nda-void-box"><strong>不再继续这份申请？</strong><Textarea value={withdrawReason} onChange={(event) => setWithdrawReason(event.target.value)} rows={2} placeholder="填写至少 2 个字的作废原因" disabled={voidingNda} /><label className="void-confirm"><input type="checkbox" checked={ndaVoidConfirmed} onChange={(event) => setNdaVoidConfirmed(event.target.checked)} /><span>我确认终止这份撤回记录；记录保留但不再流转。</span></label><Button type="button" className="danger-button" disabled={voidingNda || !ndaVoidConfirmed || withdrawReason.trim().length < 2} onClick={() => void voidWithdrawnNda()}><Trash2 className="size-4" />{voidingNda ? "作废中…" : "确认作废"}</Button></div>}</form></div></div>;
 }
 
-type FeishuQrLoginInstance = {
-  matchOrigin(origin: string): boolean;
-  matchData(data: unknown): boolean;
-};
-
-type FeishuQrLoginFactory = (options: {
-  id: string;
-  goto: string;
-  width: string;
-  height: string;
-  style: string;
-}) => FeishuQrLoginInstance;
-
-declare global {
-  interface Window {
-    QRLogin?: FeishuQrLoginFactory;
-  }
-}
-
-const FEISHU_QR_SDK_URL = "https://lf-package-cn.feishucdn.com/obj/feishu-static/lark/passport/qrcode/LarkSSOSDKWebQRCode-1.0.3.js";
-let feishuQrSdkPromise: Promise<void> | null = null;
-
-function loadFeishuQrSdk() {
-  if (window.QRLogin) return Promise.resolve();
-  if (feishuQrSdkPromise) return feishuQrSdkPromise;
-  feishuQrSdkPromise = new Promise<void>((resolve, reject) => {
-    const script = document.createElement("script");
-    script.src = FEISHU_QR_SDK_URL;
-    script.async = true;
-    script.crossOrigin = "anonymous";
-    script.addEventListener("load", () => window.QRLogin ? resolve() : reject(new Error("飞书二维码组件未就绪")), { once: true });
-    script.addEventListener("error", () => reject(new Error("飞书二维码组件加载失败")), { once: true });
-    document.head.appendChild(script);
-  }).catch((error) => {
-    feishuQrSdkPromise = null;
-    throw error;
-  });
-  return feishuQrSdkPromise;
-}
-
-function FeishuQrLogin({ enabled }: { enabled: boolean }) {
-  const reactId = useId();
-  const containerId = useMemo(() => `feishu-qr-${reactId.replace(/[^A-Za-z0-9_-]/gu, "")}`, [reactId]);
-  const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
-  const [retryKey, setRetryKey] = useState(0);
-
-  useEffect(() => {
-    if (!enabled) return;
-    let active = true;
-    let removeMessageListener = () => {};
-    const initialize = async () => {
-      setStatus("loading");
-      const response = await fetch("/api/auth/feishu/start?mode=qr", {
-        method: "POST",
-        headers: { accept: "application/json" },
-        credentials: "same-origin",
-        cache: "no-store",
-      });
-      const payload = await response.json() as { authorizeUrl?: string; error?: string };
-      if (!response.ok || !payload.authorizeUrl) throw new Error(payload.error || "二维码暂时无法生成");
-      const authorizeUrl = new URL(payload.authorizeUrl);
-      if (authorizeUrl.origin !== "https://passport.feishu.cn" || authorizeUrl.pathname !== "/suite/passport/oauth/authorize") {
-        throw new Error("二维码授权地址无效");
-      }
-      await loadFeishuQrSdk();
-      if (!active || !window.QRLogin) return;
-      const container = document.getElementById(containerId);
-      if (!container) throw new Error("二维码容器未就绪");
-      container.replaceChildren();
-      const qrLogin = window.QRLogin({
-        id: containerId,
-        goto: authorizeUrl.href,
-      width: "260",
-      height: "260",
-      style: "width:260px;height:260px;border:0",
-      });
-      const handleMessage = (event: MessageEvent<unknown>) => {
-        if (!qrLogin.matchOrigin(event.origin) || !qrLogin.matchData(event.data)) return;
-        const data = event.data && typeof event.data === "object" && !Array.isArray(event.data)
-          ? event.data as { tmp_code?: unknown }
-          : {};
-        const temporaryCode = typeof data.tmp_code === "string" ? data.tmp_code.trim() : "";
-        if (!temporaryCode || temporaryCode.length > 2_048 || /[\u0000-\u001f\u007f]/u.test(temporaryCode)) return;
-        authorizeUrl.searchParams.set("tmp_code", temporaryCode);
-        window.location.assign(authorizeUrl.href);
-      };
-      window.addEventListener("message", handleMessage, false);
-      removeMessageListener = () => window.removeEventListener("message", handleMessage, false);
-      setStatus("ready");
-    };
-    void initialize().catch(() => {
-      if (active) setStatus("error");
-    });
-    return () => {
-      active = false;
-      removeMessageListener();
-    };
-  }, [containerId, enabled, retryKey]);
-
-  if (!enabled) return <div className="login-provider-unavailable">飞书登录正在配置，请稍后再试。</div>;
-  return (
-    <div className="feishu-qr-login">
-      <div className="feishu-qr-frame">
-        <div id={containerId} className="feishu-qr-container" aria-label="飞书扫码登录二维码" />
-        {status === "loading" && <div className="feishu-qr-state"><Clock3 className="size-4" />正在生成二维码…</div>}
-        {status === "error" && <div className="feishu-qr-state error"><AlertTriangle className="size-4" />二维码加载失败<button type="button" onClick={() => setRetryKey((value) => value + 1)}>重新加载</button></div>}
-      </div>
-      <strong>飞书登录</strong>
-      <span>打开手机飞书，扫描并确认身份</span>
-      <a className="feishu-current-device-login" href="/api/auth/feishu/start" target="_top">本机已登录飞书，直接继续 <ArrowUpRight className="size-3.5" /></a>
-    </div>
-  );
+function FeishuQrLogin({ enabled, wecomEnabled = false }: { enabled: boolean; wecomEnabled?: boolean }) {
+  return <OaQrLogin feishuEnabled={enabled} wecomEnabled={wecomEnabled} />;
 }
 
 async function provisionCurrentFeishuMember(confirmation?: "none-of-these-accounts-is-mine") {
@@ -1664,7 +1570,7 @@ async function provisionCurrentFeishuMember(confirmation?: "none-of-these-accoun
   return nextSession;
 }
 
-function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = true, githubLoginEnabled = false, feishuLoginEnabled = false, onRegistered }: { initialUser?: SessionInfo["user"]; initialStatus?: SessionInfo["status"]; chatgptLoginEnabled?: boolean; githubLoginEnabled?: boolean; feishuLoginEnabled?: boolean; onRegistered: (session: SessionInfo) => void }) {
+function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = true, githubLoginEnabled = false, feishuLoginEnabled = false, wecomLoginEnabled = false, onRegistered }: { initialUser?: SessionInfo["user"]; initialStatus?: SessionInfo["status"]; chatgptLoginEnabled?: boolean; githubLoginEnabled?: boolean; feishuLoginEnabled?: boolean; wecomLoginEnabled?: boolean; onRegistered: (session: SessionInfo) => void }) {
   const [refreshing, setRefreshing] = useState(false);
   const [switchingAccount, setSwitchingAccount] = useState(false);
   const [bindingCandidates, setBindingCandidates] = useState<FeishuBindingCandidate[]>([]);
@@ -1780,7 +1686,7 @@ function RegistrationGate({ initialUser, initialStatus, chatgptLoginEnabled = tr
           </>
         ) : (
           <div className="login-entry-panel">
-            <FeishuQrLogin enabled={feishuLoginEnabled} />
+            <FeishuQrLogin enabled={feishuLoginEnabled} wecomEnabled={wecomLoginEnabled} />
             <div className="registration-notice login-notice"><ShieldCheck className="size-4" /><div className="login-notice-copy"><strong>登录不依赖邮箱验证码</strong><span>如果邮箱收不到验证码，直接使用飞书扫码；邮箱仅作为身份记录和后续联系信息。</span></div></div>
             <a className="registration-login github-login" href="https://chat.omindos.ai" target="_blank" rel="noreferrer"><Bot className="size-4" />游客试看公开问答</a>
             <small className="account-switch-help">游客仅能访问公开资料：不能上传文件、查看内部知识库、进入个人主页、接收任务或提交项目成果。</small>
@@ -1838,8 +1744,8 @@ function PendingGate({ session, onRefresh }: { session: SessionInfo; onRefresh: 
           <div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a>
           <div className="eyebrow"><span className="eyebrow-line" />切换登录账户</div>
           <h1>当前 OA 账户已退出</h1>
-          <p className="registration-intro">请使用源灵智能飞书二维码登录。已绑定成员会自动进入原账户；企业新成员扫码验证后直接进入。</p>
-          <FeishuQrLogin enabled={session.feishuLoginEnabled === true} />
+          <p className="registration-intro">使用飞书或已绑定的企业微信身份扫码登录。两种方式继续使用同一个 OA 成员账号。</p>
+          <FeishuQrLogin enabled={session.feishuLoginEnabled === true} wecomEnabled={session.wecomLoginEnabled === true} />
           <details className="other-login-options account-switch-alternatives">
             <summary>采用其他方式登录</summary>
             <div className="login-provider-actions">
@@ -2585,7 +2491,7 @@ export default function Home() {
   if (!session) return <div className="registration-shell"><div className="registration-card"><div className="registration-brand-lockup"><strong>{officialBrand}</strong><span>联合研发 OA</span></div><a className="oa-gate-guide-link" href="/guide"><BookOpen className="size-4" />项目章程与使用指南</a><h1>请登录账号</h1><p className="registration-intro">正在确认登录状态。实验室 AI 仅在登录并完成 OA 准入与保密签署后显示。</p></div></div>;
   if (!session.registered && (session.accountBindingRequired || session.accountBindingConflict || session.platformIdentityMissing || session.externalIdentityLinkRequired || session.githubIdentityLinkRequired || session.feishuIdentityLinkRequired)) return <><Toaster position="top-right" /><IdentityAccessGate session={session} onRefresh={refreshSession} /></>;
   if (session.status === "pending") return <><Toaster position="top-right" /><PendingGate session={session} onRefresh={refreshSession} /></>;
-  if (!session.registered) return <><Toaster position="top-right" /><RegistrationGate initialUser={session.user} initialStatus={session.status} chatgptLoginEnabled={session.chatgptLoginEnabled} githubLoginEnabled={session.githubLoginEnabled} feishuLoginEnabled={session.feishuLoginEnabled} onRegistered={setSession} /></>;
+  if (!session.registered) return <><Toaster position="top-right" /><RegistrationGate initialUser={session.user} initialStatus={session.status} chatgptLoginEnabled={session.chatgptLoginEnabled} githubLoginEnabled={session.githubLoginEnabled} feishuLoginEnabled={session.feishuLoginEnabled} wecomLoginEnabled={session.wecomLoginEnabled} onRegistered={setSession} /></>;
   if (needsNda) return <><Toaster position="top-right" /><NdaAdmissionGate key={ndaAdmissionIdentityKey(session.user?.email)} session={session} onRefresh={refreshSession} /></>;
   return (
     <OaConversationProvider key={session.user?.email || "oa-member"} currentUser={session.user || undefined} visible={activeView === "knowledge" && knowledgeTab === "ask"} onOpenChat={() => { setKnowledgeTab("ask"); navigate("knowledge"); }}>

@@ -1,0 +1,24 @@
+.oa-qr-mobile { box-sizing: border-box; min-height: 100dvh; display: grid; place-items: center; padding: 28px 16px; background: #f4f7fb; color: #25364a; font-family: inherit; }
+.oa-qr-mobile .oa-qr-mobile-card { box-sizing: border-box; width: min(100%, 440px); padding: 28px 24px; border: 1px solid #e0e7f3; border-radius: 18px; background: #fff; box-shadow: 0 12px 40px rgb(35 54 82 / 6%); }
+.oa-qr-mobile .oa-qr-mobile-brand { color: #60738e; font-size: 12px; font-weight: 600; letter-spacing: .02em; }
+.oa-qr-mobile h1 { margin: 10px 0 6px; font-size: 24px; font-weight: 700; line-height: 1.4; }
+.oa-qr-mobile .oa-qr-mobile-domain { margin: 0 0 24px; color: #607080; font-size: 13px; overflow-wrap: anywhere; }
+.oa-qr-mobile .oa-qr-mobile-message { margin: 0 0 18px; color: #4b607a; font-size: 14px; line-height: 1.8; }
+.oa-qr-mobile .oa-qr-mobile-error { margin: 0 0 18px; padding: 12px 14px; border: 1px solid #efcfca; border-radius: 10px; color: #934c43; background: #fff6f4; font-size: 13px; line-height: 1.7; }
+.oa-qr-mobile .oa-qr-mobile-provider-buttons, .oa-qr-mobile .oa-qr-mobile-actions { display: grid; gap: 12px; }
+.oa-qr-mobile .oa-qr-mobile-primary, .oa-qr-mobile .oa-qr-mobile-secondary { box-sizing: border-box; min-height: 48px; width: 100%; padding: 11px 14px; border: 1px solid #315b95; border-radius: 10px; background: #315b95; color: #fff; font-family: inherit; font-size: 14px; font-weight: 600; line-height: 1.6; cursor: pointer; }
+.oa-qr-mobile .oa-qr-mobile-secondary { border-color: #d7e0ed; color: #526780; background: #fff; }
+.oa-qr-mobile button:disabled { opacity: .55; cursor: default; }
+.oa-qr-mobile :is(button, input):focus-visible { outline: 2px solid #729be1; outline-offset: 3px; }
+.oa-qr-mobile .oa-qr-mobile-help { margin: 18px 0 0; color: #69798c; font-size: 12px; line-height: 1.8; }
+.oa-qr-mobile .oa-qr-mobile-code { display: grid; justify-items: center; gap: 5px; margin: 18px 0; padding: 16px; border-radius: 12px; background: #f4f7fb; }
+.oa-qr-mobile .oa-qr-mobile-code span { color: #60738e; font-size: 12px; }
+.oa-qr-mobile .oa-qr-mobile-code output { color: #25364a; font-size: 34px; font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: .15em; }
+.oa-qr-mobile .oa-qr-mobile-details { display: grid; gap: 10px; margin: 0 0 18px; font-size: 13px; line-height: 1.7; }
+.oa-qr-mobile .oa-qr-mobile-details div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; }
+.oa-qr-mobile .oa-qr-mobile-details dt { color: #69798c; }
+.oa-qr-mobile .oa-qr-mobile-details dd { margin: 0; overflow-wrap: anywhere; }
+.oa-qr-mobile .oa-qr-mobile-check { display: flex; align-items: flex-start; gap: 10px; margin: 0 0 22px; font-size: 13px; line-height: 1.8; cursor: pointer; }
+.oa-qr-mobile .oa-qr-mobile-check input { flex: 0 0 auto; width: 18px; height: 18px; margin-top: 3px; accent-color: #315b95; }
+.oa-qr-mobile .oa-qr-mobile-success { margin-top: 24px; padding: 18px 16px; border-radius: 10px; color: #2b6c54; background: #eff8f3; }
+@media (max-width: 360px) { .oa-qr-mobile { padding: 18px 12px; } .oa-qr-mobile .oa-qr-mobile-card { padding: 24px 18px; } }
