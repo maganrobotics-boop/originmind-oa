@@ -1,0 +1,20 @@
+export const BOT_MAX_BODY_BYTES: number;
+export const BOT_MAX_TEXT_LENGTH: number;
+export const BOT_CLOCK_WINDOW_MS: number;
+export const BOT_PAIRING_LIFETIME_MS: number;
+export const BOT_LEDGER_LIFETIME_MS: number;
+export type BotConfiguration = { secret: string; botId: string };
+export type BotMessage = { botId: string; userId: string; messageId: string; text: string };
+export type BotLinkAction = { action: 'create' } | { action: 'unlink' }
+  | { action: 'confirm'; pairingId: string } | { action: 'cancel'; pairingId: string };
+export function botConfiguration(environment: Record<string, unknown>): BotConfiguration | null;
+export function parseBotMessage(value: unknown, configuredBotId: string): BotMessage | null;
+export function parseBotCommand(text: string): { kind: 'help' | 'unlink' | 'work_items' | 'invalid_binding' } | { kind: 'bind'; code: string } | { kind: 'question'; question: string };
+export function strictBotBrowserOrigin(request: Request, environment: Record<string, unknown>): boolean;
+export function parseBotLinkAction(value: unknown): BotLinkAction | null;
+export function maskBotUserId(value: unknown): string;
+export function hashBotPairingCode(code: string): Promise<string>;
+export function createBotPairingCode(): string;
+export function signBotBody(secret: string, timestamp: string, body: string): Promise<string>;
+export function readSignedBotMessage(request: Request, configuration: BotConfiguration, now?: number): Promise<{ ok: true; message: BotMessage } | { ok: false; status: number }>;
+export const BOT_SQL: Record<'cleanupMessages' | 'cleanupPairings' | 'claimMessage' | 'cancelPrevious' | 'revokeStaleLink' | 'staleLinkEvent' | 'createPairing' | 'claimPairing' | 'confirmLink' | 'finishPairing' | 'linkEvent' | 'cancelPairing' | 'unlink' | 'unlinkEvent' | 'ownPairing' | 'ownLink' | 'senderLink' | 'currentLink' | 'ownWorkItems' | 'activeKnowledge' | 'currentEvidence', string>;

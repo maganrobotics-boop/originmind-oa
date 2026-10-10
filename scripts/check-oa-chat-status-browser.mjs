@@ -1,3 +1,4 @@
+import { openCollaborationWorkspace } from './oa-chat-browser-navigation.mjs';
 // Real OA UI with synthetic replies. Never access production or send member messages.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -53,10 +54,7 @@ try {
     const ask = async question => { await page.getByRole('button', { name: '发送问题', exact: true }).waitFor(); const input = page.getByPlaceholder('询问实验室大数据'); await input.fill(question); await input.press('Enter'); };
     try {
       await page.goto(origin);
-      // Home is the landing page; enter chat through the real workspace navigation.
-      if (name !== 'desktop') await page.getByRole('button', { name: '打开导航', exact: true }).click();
-      await page.locator(name === 'desktop' ? '.oa-desktop-navigation' : '.mobile-sidebar').getByRole('navigation', { name: '核心工作区', exact: true }).getByRole('button', { name: '聊天', exact: true }).click();
-      await page.locator('.collaboration-workspace').waitFor();
+      await openCollaborationWorkspace(page);
       await page.locator('.collaboration-ai-entry').click();
       await page.waitForFunction(() => document.querySelectorAll('.oa-chat-status > .ready').length === 4);
       assert.deepEqual(await states(), ['ready', 'ready', 'ready', 'ready', 'unknown']);

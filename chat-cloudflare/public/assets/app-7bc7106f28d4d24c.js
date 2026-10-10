@@ -435,7 +435,7 @@ function renderMarkdown(markdown) {
     if (/^\s*\|.*\|\s*$/u.test(line) && /^\s*\|?\s*:?-{3,}:?\s*(\|\s*:?-{3,}:?\s*)+\|?\s*$/u.test(lines[index + 1] || "")) {
       flushParagraph(); flushList();
       const table = tableRows(index);
-      const rows = table.rows.filter((_, rowIndex) => rowIndex !== 1).map((row) => row.replace(/^\||\|$/gu, "").split("|").map((cell) => inline(cell.trim())));
+      const rows = table.rows.filter((_, rowIndex) => rowIndex !== 1).map((row) => answerTableCells(row).map((cell) => inline(cell)));
       const [head = [], ...body] = rows;
       output.push(`<table><thead><tr>${head.map((cell) => `<th>${cell}</th>`).join("")}</tr></thead><tbody>${body.map((row) => `<tr>${row.map((cell) => `<td>${cell}</td>`).join("")}</tr>`).join("")}</tbody></table>`);
       index = table.next - 1;
@@ -447,7 +447,45 @@ function renderMarkdown(markdown) {
   return output.join("") || "<p>暂无内容。</p>";
 }
 
+function answerTableCells(row) {
+  const text = String(row).trim().replace(/^\||\|$/gu, "");
+  const cells = [];
+  let cell = "";
+  for (let index = 0; index < text.length;) {
+    if (text[index] === "\\" && text[index + 1] === "|") {
+      cell += "|";
+      index += 2;
+      continue;
+    }
+    if (text[index] === "`") {
+      const end = text.indexOf("`", index + 1);
+      if (end !== -1) {
+        cell += text.slice(index, end + 1);
+        index = end + 1;
+        continue;
+      }
+    }
+    const math = (text[index] === "$" || text[index] === "\\") ? answerMathTokenAt(text, index) : null;
+    if (math) {
+      cell += math.raw;
+      index = math.end;
+      continue;
+    }
+    if (text[index] === "|") {
+      cells.push(cell.trim());
+      cell = "";
+    } else {
+      cell += text[index];
+    }
+    index += 1;
+  }
+  cells.push(cell.trim());
+  return cells;
+}
+
 function renderAnswerBody(answer) {
+  // Keep the math loader in the shared renderer's dependency closure.
+  if (typeof loadAnswerMathEngine === "function") loadAnswerMathEngine();
   const container = document.createElement("div");
   container.className = "answer-content";
   const html = renderMarkdown(answer);

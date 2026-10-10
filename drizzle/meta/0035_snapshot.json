@@ -1,7 +1,7 @@
 {
   "version": "6",
   "dialect": "sqlite",
-  "id": "9d156446-aded-4e28-b18d-67189a3818c6",
+  "id": "a3223292-1c87-4844-80e4-cba7039adde2",
   "prevId": "e315d4c8-49e6-49c2-b605-2581afcca6c8",
   "tables": {
     "account_profiles": {
@@ -3018,110 +3018,129 @@
         }
       }
     },
-    "qr_login_challenges": {
-      "name": "qr_login_challenges",
+    "wecom_bot_links": {
+      "name": "wecom_bot_links",
       "columns": {
-        "id": {
-          "name": "id",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "browser_nonce_hash": {
-          "name": "browser_nonce_hash",
+        "bot_id": {
+          "name": "bot_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "action": {
-          "name": "action",
+        "user_id": {
+          "name": "user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
-          "autoincrement": false
-        },
-        "link_member_id": {
-          "name": "link_member_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "link_account_user_id": {
-          "name": "link_account_user_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "link_member_revision": {
-          "name": "link_member_revision",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "status": {
-          "name": "status",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false,
-          "default": "'pending'"
-        },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "provider_subject": {
-          "name": "provider_subject",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "login_snapshot": {
-          "name": "login_snapshot",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "display_name_snapshot": {
-          "name": "display_name_snapshot",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
           "autoincrement": false
         },
         "member_id": {
           "name": "member_id",
           "type": "text",
           "primaryKey": false,
-          "notNull": false,
+          "notNull": true,
           "autoincrement": false
         },
-        "scanner_nonce_hash": {
-          "name": "scanner_nonce_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "verification_code": {
-          "name": "verification_code",
+        "account_user_id": {
+          "name": "account_user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
         },
-        "desktop_label": {
-          "name": "desktop_label",
+        "linked_member_revision": {
+          "name": "linked_member_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revision": {
+          "name": "revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "revoked_at": {
+          "name": "revoked_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        }
+      },
+      "indexes": {
+        "wecom_bot_links_active_member_unique": {
+          "name": "wecom_bot_links_active_member_unique",
+          "columns": [
+            "bot_id",
+            "member_id"
+          ],
+          "isUnique": true,
+          "where": "\"wecom_bot_links\".\"revoked_at\" IS NULL"
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "wecom_bot_links_bot_id_user_id_pk": {
+          "columns": [
+            "bot_id",
+            "user_id"
+          ],
+          "name": "wecom_bot_links_bot_id_user_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "wecom_bot_links_bot_id_check": {
+          "name": "wecom_bot_links_bot_id_check",
+          "value": "length(\"wecom_bot_links\".\"bot_id\") BETWEEN 1 AND 128"
+        },
+        "wecom_bot_links_user_id_check": {
+          "name": "wecom_bot_links_user_id_check",
+          "value": "length(\"wecom_bot_links\".\"user_id\") BETWEEN 1 AND 128"
+        },
+        "wecom_bot_links_identity_check": {
+          "name": "wecom_bot_links_identity_check",
+          "value": "length(\"wecom_bot_links\".\"member_id\") > 0 AND length(\"wecom_bot_links\".\"account_user_id\") > 0 AND length(\"wecom_bot_links\".\"revision\") > 0"
+        }
+      }
+    },
+    "wecom_bot_messages": {
+      "name": "wecom_bot_messages",
+      "columns": {
+        "bot_id": {
+          "name": "bot_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "message_id": {
+          "name": "message_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "user_id": {
+          "name": "user_id",
           "type": "text",
           "primaryKey": false,
           "notNull": true,
@@ -3140,39 +3159,192 @@
           "primaryKey": false,
           "notNull": true,
           "autoincrement": false
+        }
+      },
+      "indexes": {
+        "wecom_bot_messages_expiry_idx": {
+          "name": "wecom_bot_messages_expiry_idx",
+          "columns": [
+            "expires_at"
+          ],
+          "isUnique": false
         },
-        "consumed_at": {
-          "name": "consumed_at",
+        "wecom_bot_messages_rate_idx": {
+          "name": "wecom_bot_messages_rate_idx",
+          "columns": [
+            "bot_id",
+            "user_id",
+            "created_at"
+          ],
+          "isUnique": false
+        },
+        "wecom_bot_messages_bot_rate_idx": {
+          "name": "wecom_bot_messages_bot_rate_idx",
+          "columns": [
+            "bot_id",
+            "created_at"
+          ],
+          "isUnique": false
+        }
+      },
+      "foreignKeys": {},
+      "compositePrimaryKeys": {
+        "wecom_bot_messages_bot_id_message_id_pk": {
+          "columns": [
+            "bot_id",
+            "message_id"
+          ],
+          "name": "wecom_bot_messages_bot_id_message_id_pk"
+        }
+      },
+      "uniqueConstraints": {},
+      "checkConstraints": {
+        "wecom_bot_messages_identity_check": {
+          "name": "wecom_bot_messages_identity_check",
+          "value": "length(\"wecom_bot_messages\".\"bot_id\") BETWEEN 1 AND 128 AND length(\"wecom_bot_messages\".\"message_id\") BETWEEN 1 AND 128 AND length(\"wecom_bot_messages\".\"user_id\") BETWEEN 1 AND 128"
+        },
+        "wecom_bot_messages_expiry_check": {
+          "name": "wecom_bot_messages_expiry_check",
+          "value": "\"wecom_bot_messages\".\"expires_at\" > \"wecom_bot_messages\".\"created_at\""
+        }
+      }
+    },
+    "wecom_bot_pairings": {
+      "name": "wecom_bot_pairings",
+      "columns": {
+        "id": {
+          "name": "id",
+          "type": "text",
+          "primaryKey": true,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "bot_id": {
+          "name": "bot_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "code_hash": {
+          "name": "code_hash",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "member_id": {
+          "name": "member_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "account_user_id": {
+          "name": "account_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "member_revision": {
+          "name": "member_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "member_nda_approval_id": {
+          "name": "member_nda_approval_id",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "receipt_hash": {
-          "name": "receipt_hash",
+        "member_nda_accepted_at": {
+          "name": "member_nda_accepted_at",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
           "autoincrement": false
         },
-        "denial_reason": {
-          "name": "denial_reason",
+        "member_nda_agreement_version": {
+          "name": "member_nda_agreement_version",
           "type": "text",
           "primaryKey": false,
           "notNull": false,
+          "autoincrement": false
+        },
+        "member_is_admin": {
+          "name": "member_is_admin",
+          "type": "integer",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "state": {
+          "name": "state",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false,
+          "default": "'pending'"
+        },
+        "candidate_user_id": {
+          "name": "candidate_user_id",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "link_revision": {
+          "name": "link_revision",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": false,
+          "autoincrement": false
+        },
+        "created_at": {
+          "name": "created_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "expires_at": {
+          "name": "expires_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
+          "autoincrement": false
+        },
+        "updated_at": {
+          "name": "updated_at",
+          "type": "text",
+          "primaryKey": false,
+          "notNull": true,
           "autoincrement": false
         }
       },
       "indexes": {
-        "qr_login_challenges_browser_idx": {
-          "name": "qr_login_challenges_browser_idx",
+        "wecom_bot_pairings_code_hash_unique": {
+          "name": "wecom_bot_pairings_code_hash_unique",
           "columns": [
-            "browser_nonce_hash"
+            "code_hash"
           ],
-          "isUnique": false
+          "isUnique": true
         },
-        "qr_login_challenges_expires_idx": {
-          "name": "qr_login_challenges_expires_idx",
+        "wecom_bot_pairings_active_member_unique": {
+          "name": "wecom_bot_pairings_active_member_unique",
+          "columns": [
+            "bot_id",
+            "member_id"
+          ],
+          "isUnique": true,
+          "where": "\"wecom_bot_pairings\".\"state\" IN ('pending', 'candidate')"
+        },
+        "wecom_bot_pairings_expiry_idx": {
+          "name": "wecom_bot_pairings_expiry_idx",
           "columns": [
             "expires_at"
           ],
@@ -3183,120 +3355,29 @@
       "compositePrimaryKeys": {},
       "uniqueConstraints": {},
       "checkConstraints": {
-        "qr_login_action_check": {
-          "name": "qr_login_action_check",
-          "value": "\"qr_login_challenges\".\"action\" IN ('login', 'link')"
+        "wecom_bot_pairings_admin_check": {
+          "name": "wecom_bot_pairings_admin_check",
+          "value": "\"wecom_bot_pairings\".\"member_is_admin\" IN (0, 1)"
         },
-        "qr_login_status_check": {
-          "name": "qr_login_status_check",
-          "value": "\"qr_login_challenges\".\"status\" IN ('pending', 'verified', 'approved', 'consumed', 'denied')"
-        }
-      }
-    },
-    "qr_oauth_attempts": {
-      "name": "qr_oauth_attempts",
-      "columns": {
-        "state_hash": {
-          "name": "state_hash",
-          "type": "text",
-          "primaryKey": true,
-          "notNull": true,
-          "autoincrement": false
+        "wecom_bot_pairings_state_check": {
+          "name": "wecom_bot_pairings_state_check",
+          "value": "\"wecom_bot_pairings\".\"state\" IN ('pending', 'candidate', 'confirmed', 'cancelled')"
         },
-        "challenge_id": {
-          "name": "challenge_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+        "wecom_bot_pairings_code_hash_check": {
+          "name": "wecom_bot_pairings_code_hash_check",
+          "value": "length(\"wecom_bot_pairings\".\"code_hash\") = 64 AND \"wecom_bot_pairings\".\"code_hash\" NOT GLOB '*[^0-9a-f]*'"
         },
-        "provider": {
-          "name": "provider",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+        "wecom_bot_pairings_expiry_check": {
+          "name": "wecom_bot_pairings_expiry_check",
+          "value": "\"wecom_bot_pairings\".\"expires_at\" > \"wecom_bot_pairings\".\"created_at\""
         },
-        "scanner_nonce_hash": {
-          "name": "scanner_nonce_hash",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
+        "wecom_bot_pairings_pending_check": {
+          "name": "wecom_bot_pairings_pending_check",
+          "value": "(\"wecom_bot_pairings\".\"state\" = 'pending' AND \"wecom_bot_pairings\".\"candidate_user_id\" IS NULL) OR \"wecom_bot_pairings\".\"state\" <> 'pending'"
         },
-        "pkce_verifier": {
-          "name": "pkce_verifier",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "created_at": {
-          "name": "created_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "expires_at": {
-          "name": "expires_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": true,
-          "autoincrement": false
-        },
-        "consumed_at": {
-          "name": "consumed_at",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        },
-        "failure_reason": {
-          "name": "failure_reason",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false,
-          "autoincrement": false
-        }
-      },
-      "indexes": {
-        "qr_oauth_attempts_challenge_idx": {
-          "name": "qr_oauth_attempts_challenge_idx",
-          "columns": [
-            "challenge_id"
-          ],
-          "isUnique": false
-        },
-        "qr_oauth_attempts_expires_idx": {
-          "name": "qr_oauth_attempts_expires_idx",
-          "columns": [
-            "expires_at"
-          ],
-          "isUnique": false
-        }
-      },
-      "foreignKeys": {
-        "qr_oauth_attempts_challenge_id_qr_login_challenges_id_fk": {
-          "name": "qr_oauth_attempts_challenge_id_qr_login_challenges_id_fk",
-          "tableFrom": "qr_oauth_attempts",
-          "tableTo": "qr_login_challenges",
-          "columnsFrom": [
-            "challenge_id"
-          ],
-          "columnsTo": [
-            "id"
-          ],
-          "onDelete": "cascade",
-          "onUpdate": "no action"
-        }
-      },
-      "compositePrimaryKeys": {},
-      "uniqueConstraints": {},
-      "checkConstraints": {
-        "qr_oauth_provider_check": {
-          "name": "qr_oauth_provider_check",
-          "value": "\"qr_oauth_attempts\".\"provider\" IN ('feishu', 'wecom')"
+        "wecom_bot_pairings_candidate_check": {
+          "name": "wecom_bot_pairings_candidate_check",
+          "value": "\"wecom_bot_pairings\".\"state\" NOT IN ('candidate', 'confirmed') OR length(\"wecom_bot_pairings\".\"candidate_user_id\") BETWEEN 1 AND 128"
         }
       }
     },

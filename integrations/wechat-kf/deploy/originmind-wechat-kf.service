@@ -1,0 +1,26 @@
+[Unit]
+Description=OriginMind independent WeChat customer-service bridge
+After=network.target
+
+[Service]
+Type=simple
+DynamicUser=yes
+WorkingDirectory=/opt/originmind-wechat-kf/current
+EnvironmentFile=/etc/originmind-wechat-kf/env
+ExecStart=/usr/local/bin/node /opt/originmind-wechat-kf/current/scripts/wechat-kf.mjs serve
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
+StateDirectory=originmind-wechat-kf
+StateDirectoryMode=0700
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/originmind-wechat-kf
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+LimitNOFILE=1024
+
+[Install]
+WantedBy=multi-user.target

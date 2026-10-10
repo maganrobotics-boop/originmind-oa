@@ -7,6 +7,8 @@
     <meta name="robots" content="noindex,nofollow">
     <meta name="theme-color" content="#f5f7fb">
     <title>新手村 · 个人学习主页</title>
+    <link rel="stylesheet" href="/learning/honors.css">
+    <script type="module" src="/learning/honors.mjs"></script>
     <style>
       :root {
         color: #20242b;
@@ -239,6 +241,7 @@
           <button class="nav-button active" type="button" data-view="tasks" disabled><span class="nav-icon">⌁</span><span>任务地图</span></button>
           <button class="nav-button" type="button" data-view="profile" disabled><span class="nav-icon">◎</span><span>个人主页</span></button>
           <a class="nav-button" href="#passes"><span class="nav-icon">◇</span><span>通行证</span></a>
+          <a class="nav-button" href="/learning/honors" aria-label="公开荣誉墙"><span class="nav-icon">🏆</span><span>荣誉墙</span></a>
         </nav>
         <div class="side-foot">
           <p class="side-note">新手村与 OA 独立运行，学习进度只保存在 Chat 系统。</p>
@@ -326,6 +329,7 @@
                   <div class="form-actions"><span class="form-status" role="status"></span><button class="primary" type="submit">保存个人主页</button></div>
                 </form>
               </div>
+              <section class="personal-honors" data-account="" aria-label="个人奖杯"></section>
             </div>
           </section>
 
@@ -396,4 +400,3 @@
     <div class="toast" role="status" aria-live="polite"></div>
   </body>
 </html>
-

@@ -39,14 +39,31 @@ https://oa.omindos.cn/api/auth/qr/callback/wecom
 
 企微配置缺失时，页面只提示当前可用的平台。该功能不接入审批消息或待办推送，不改变业务数据接口。
 
-## 发布与回退
+## 2026-10-10 接续与发布
 
-1. 先完成两平台应用配置并取得域名校验文件。在测试环境用各自手机客户端验证授权、Cookie 保留、手机端确认、绑定和退出后重新登录；尤其核对 `__Host-oa_qr_phone` 在平台授权跳转后仍保留。配置或真实手机客户端验收未完成时不切换正式版本。
-2. 使用现有发布流程备份 SQLite 数据库，应用新增迁移 `0035_unified_qr_login.sql`，再切换经过验证的代码包。迁移只新增两张临时认证表，不修改成员、业务记录或角色。不要跳过原有迁移账本校验。
-3. 当前生产代码是 `8a0bffc8b1e1`，仓库 main 是 `e70c9118fe77`，二者主页面存在既有差异。PR 只在 main 主页面添加登录修改；生产发布应在生产源码副本导入其余认证文件，再用 `git apply --check deployment-patches/oa-8a0bffc-unified-qr-login.patch` 核对页面补丁，检查通过后应用并构建。不要直接覆盖整个 main 页面。补丁已验证能精确重现经过构建检查的生产页面版本。
-4. 设置 `OA_UNIFIED_QR_LOGIN_ENABLED=false` 可关闭新的扫码请求；保留的飞书本机登录入口仍可使用。恢复上一个代码包时，可以保留新增的临时认证表。
+- 用户已完成企微自建应用。生产 OA 已核对为 `oa-library-5ee312888763`，对应 `maganrobotics-boop/aliyun-oa`；运行进程内尚无 `WECOM_LOGIN_*` 配置。
+- `omindos.cn` 与 `oa.omindos.cn` 的 `WW_verify_TrIXNK3EoirCVbIT.txt` 均返回 200、text/plain、16 字节，内容 SHA-256 相同。网页验证文件可用不等于后台可信域名已经保存。
+- 原 PR #115 已与 main `b386451` 对齐；企微机器人占用 0035，统一扫码迁移改为 **0036_unified_qr_login.sql**，保留机器人三表、索引和迁移账本。
+- 阿里云候选基于 main `11272f6` 局部集成登录代码，保留七天会话、资料库生成/上传、周报、审批和现有工作台。旧 `oa-8a0bffc` 页面补丁已移除，不能套用到当前生产。
+- 当前云浏览器的站点安全策略禁止访问企微管理后台，不能代替用户核验应用可见范围、可信域名和可信 API IP。未请求或回显真实 Secret。
 
-尚未对生产服务应用迁移、切换代码或修改环境配置。外部真实 OAuth 应用与手机扫码需要在配置完成后验收；自动化测试使用模拟平台响应和隔离 SQLite，不会请求真实凭证。
+管理员在阿里云服务器终端运行：
+
+```sh
+sudo python3 scripts/configure-wecom-login.py
+```
+
+按提示输入 CorpID、AgentID 和**同一自建应用** Secret。Secret 隐藏输入；脚本只新建 root 可读的 `/etc/originmind-oa/wecom-login.env`（0600），保留 `OA_UNIFIED_QR_LOGIN_ENABLED=false`，不改已有飞书配置、不重启、不启用服务，已有文件时拒绝覆盖。
+
+发布前继续完成：
+
+1. 核对企微网页授权可信域名是 `oa.omindos.cn`，应用可见范围包含待登录成员，可信 API IP 对应 OA 服务器的实际出口 IP。飞书新回调保留 `https://oa.omindos.cn/api/auth/qr/callback/feishu`，旧回调也保留。
+2. 在受保护服务器内验证应用凭据，不将 Secret、access_token、真实成员信息或上游原始错误写入日志/仓库。
+3. 用飞书和企微手机客户端分别验证授权跳转后 `__Host-oa_qr_phone` 保留、验证码确认、首次绑定、退出后重新登录。自动化隔离测试不代替此步骤。
+4. 再按阿里云流程备份 SQLite，应用 0036，验证两张临时认证表和四个索引以及既有迁移记录，挂载配置、切换已构建候选并验收。切换前重新比较生产版本，不能覆盖并行发布的新功能。
+5. 回退时恢复上一代码包并关闭 `OA_UNIFIED_QR_LOGIN_ENABLED`；新增临时表可保留。原飞书本机登录入口保持可用。
+
+**本轮未合并、未切换生产、未迁移生产数据库。当前缺失的是服务器凭据和真实手机 OAuth 验收。**
 
 ## 验证
 

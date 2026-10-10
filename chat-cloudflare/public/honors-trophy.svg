@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 144 144" role="img" aria-label="荣誉奖杯">
+  <defs>
+    <linearGradient id="gold" x1="0" y1="0" x2="1" y2="1"><stop stop-color="#fbe4a4"/><stop offset=".45" stop-color="#d9b268"/><stop offset="1" stop-color="#9f732e"/></linearGradient>
+    <linearGradient id="cup" x1="0" y1="0" x2="1" y2="0"><stop stop-color="#c19443"/><stop offset=".38" stop-color="#ffe7a7"/><stop offset=".7" stop-color="#edc77d"/><stop offset="1" stop-color="#ba8735"/></linearGradient>
+  </defs>
+  <circle cx="72" cy="72" r="69" fill="#fbf5e8" stroke="#e9d8b5"/>
+  <circle cx="72" cy="72" r="60" fill="none" stroke="#e2cd9f" stroke-dasharray="2 5"/>
+  <path d="M46 41H31v12c0 17 11 29 26 29M98 41h15v12c0 17-11 29-26 29" fill="none" stroke="url(#gold)" stroke-width="7" stroke-linecap="round"/>
+  <path d="M44 33h56l-5 36c-2 15-11 25-23 25S51 84 49 69Z" fill="url(#cup)"/>
+  <path d="M72 46l4.5 9 10 1.5-7.3 7 1.8 10-9-4.7-9 4.7 1.8-10-7.3-7 10-1.5Z" fill="#fff5d5" stroke="#b68a3c" stroke-width="1.2"/>
+  <path d="M67 91h10v16h-10zM57 107h30v6H57z" fill="url(#gold)"/>
+  <rect x="49" y="113" width="46" height="11" rx="3" fill="#28383c"/>
+  <rect x="61" y="116" width="22" height="4" rx="1" fill="#d9b268"/>
+</svg>

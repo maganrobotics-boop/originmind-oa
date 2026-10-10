@@ -1,3 +1,4 @@
+import { openCollaborationWorkspace } from './oa-chat-browser-navigation.mjs';
 // Two independent authenticated users, real OA components, synthetic APIs only.
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
@@ -37,11 +38,7 @@ try {
     }else if(url.pathname==='/api/approvals')data={approvals:[]};else if(url.pathname==='/api/members')data={members:[],pendingCount:0};else if(url.pathname==='/api/knowledge')data={items:[],pendingCount:0};else if(url.pathname==='/api/people')data={people:[]};else if(url.pathname==='/api/profile')data={profile:{}};
     return route.fulfill({json:data});
    });
-   await page.goto(origin);
-   // Home is the landing page; enter chat through the real navigation for each user.
-   if(name!=='desktop')await page.getByRole('button',{name:'打开导航',exact:true}).click();
-   await page.locator(name==='desktop'?'.oa-desktop-navigation':'.mobile-sidebar').getByRole('navigation',{name:'核心工作区',exact:true}).getByRole('button',{name:'聊天',exact:true}).click();
-   await page.locator('.collaboration-workspace').waitFor();await page.locator('.collaboration-ai-entry').click();await page.locator('.oa-shared-chat').waitFor();if(name==='desktop')await page.getByRole('button',{name:'收起侧栏',exact:true}).click();return page;
+   await page.goto(origin);await openCollaborationWorkspace(page);await page.locator('.collaboration-ai-entry').click();await page.locator('.oa-shared-chat').waitFor();if(name==='desktop')await page.getByRole('button',{name:'收起侧栏',exact:true}).click();return page;
   };
   const alice=await open(people[0]),bob=await open(people[1]);
   try {
@@ -80,7 +77,7 @@ try {
    assert.equal(apiCalls.filter(c=>c.path==='/api/lab-ai/ask').length,1,'member messages must never go through AI');
    await alice.screenshot({path:resolve(output,`${name}-two-way-chat.png`),fullPage:true});
     await alice.getByRole('button',{name:'聊天选项'}).click();await alice.getByRole('button',{name:'AI 助手',exact:true}).click();await alice.locator('.oa-conversation-ai').waitFor({state:'visible'});await alice.locator('.oa-member-title').waitFor({state:'detached'});assert.ok((await alice.locator('.message.assistant').innerText()).includes('正文完整结束'));
-    await alice.getByRole('button',{name:'聊天选项'}).click();await alice.getByRole('button',{name:'清空聊天',exact:true}).click();await alice.getByText('实验室大模型能做什么',{exact:true}).waitFor();assert.equal(store.length,2,'clearing AI must not delete member messages');
+    await alice.getByRole('button',{name:'聊天选项'}).click();await alice.getByRole('button',{name:'清空聊天',exact:true}).click();await alice.getByRole('heading',{name:'先问问题，也可以让它带你完成新手村',exact:true}).waitFor();assert.equal(store.length,2,'clearing AI must not delete member messages');
    await alice.getByRole('button',{name:name==='desktop'?'展开侧栏':'打开导航',exact:true}).click();const nav=alice.locator(name==='desktop'?'.oa-desktop-navigation':'.mobile-sidebar');
    assert.equal(await nav.locator('.oa-sidebar-new-chat').count(),1);assert.equal(await nav.locator('.oa-sidebar-account').count(),1);
    // Wait only for the horizontal entrance animation. Never scroll the footer into view.
