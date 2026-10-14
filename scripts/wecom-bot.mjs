@@ -4,6 +4,8 @@ import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { attachBotClient, createBotMessageHandler, createBridgeClient, createSafeLogger, readBotEnvironment } from '../lib/wecom-bot-transport.mjs';
 
+import { createGroupChatClient } from '../lib/wecom-group-chat.mjs';
+
 const requireBotSdk = createRequire(new URL('../deploy/wecom-bot/package.json', import.meta.url));
 
 export async function startBot({ env = process.env, loadSdk = () => requireBotSdk('@wecom/aibot-node-sdk'), logger = createSafeLogger(), onStop = () => { process.exitCode = 0; }, onFatalStop = () => { process.exitCode = 1; } } = {}) {
@@ -20,7 +22,8 @@ export async function startBot({ env = process.env, loadSdk = () => requireBotSd
     logger: logger.sdk,
   });
   const bridge = createBridgeClient({ endpoint: config.bridgeUrl, secret: config.bridgeSecret });
-  const handler = createBotMessageHandler({ botId: config.botId, bridge, logger,
+  const groupBridge = env.WECOM_BOT_GROUP_ENABLED === 'false' ? undefined : createGroupChatClient();
+  const handler = createBotMessageHandler({ botId: config.botId, bridge, groupBridge, logger,
     sendReply: (frame, streamId, text, finish) => client.replyStream(frame, streamId, text, finish),
   });
   const runtime = attachBotClient(client, handler, { botId: config.botId, logger, onIntentionalStop: onStop, onFatalStop });
