@@ -4,19 +4,24 @@
  import { OemInbox } from "@/components/oem-inbox";
  import { myReturnedApprovals } from "@/lib/my-pending-items";
  import "@/components/oa-pending-entry.css";
-+import { OaWorkbenchSettings } from "@/components/oa-workbench-settings";
++import { OaAdminSettingsButton } from "@/components/oa-workbench-settings";
  import { ProjectWorkspace } from "@/components/project-workspace";
  import { OaAiMemberDirectory, OaAiMemberProvider, OaAiChatEntrances, OaResearchWorkspace } from "@/components/ai-member-directory";
  import { FutureStars } from "@/components/future-stars/future-stars";
-@@ -2599,7 +2600,7 @@
+@@ -2588,11 +2589,12 @@
+       </div>
+       <div id="oa-desktop-navigation" className="oa-desktop-navigation"><Sidebar activeView={activeView} setActiveView={navigate} onNew={openNewRequest} onProfile={() => navigate("profile")} userName={session.user?.displayName} userAvatarDataUrl={myAvatarDataUrl} authProvider={session.user?.authProvider} currentRole={session.role} isAdmin={Boolean(session.isAdmin)} canReviewKnowledge={Boolean(session.canReviewKnowledge)} selectedKnowledgeTab={knowledgeTab} onKnowledgeTab={(tab) => { setKnowledgeTab(tab); navigate("knowledge"); }} onMyPending={openMyPending} pendingCount={pendingCount} onOpenChat={() => setMobileNavOpen(false)} /></div>
+       <main className="main-shell">
+-        <header className={isModelHeader ? "oa-model-chat-header" : "topbar"}>
++        <header className={isModelHeader ? "oa-model-chat-header" : session.isAdmin ? "topbar oa-topbar-admin" : "topbar"}>
+           <button type="button" className="workspace-sidebar-toggle" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "展开侧栏" : "收起侧栏"} aria-expanded={!sidebarCollapsed} aria-controls="oa-desktop-navigation"><Menu className="size-5" /></button>
+           <button ref={mobileMenuButtonRef} className="mobile-menu-button" onClick={() => setMobileNavOpen(true)} aria-label="打开导航" aria-expanded={mobileNavOpen} aria-controls="mobile-navigation"><Menu className="size-5" /></button>
+           {isModelHeader ? <div className="oa-model-chat-title">机器人自主移动与操作实验室</div> : <OaConversationTitle><div className="oa-topbar-secondary-title"><span className="oa-lab-title">机器人自主移动与操作实验室</span><strong>{secondaryTitle}</strong></div></OaConversationTitle>}
+           <button type="button" className={`oa-global-pending ${typeof pendingCount === "number" && pendingCount > 0 ? "has-pending" : ""}`} onClick={openMyPending} aria-label={`待我处理，${typeof pendingCount === "number" ? pendingCount + " 条" : "正在同步"}`}><ListTodo aria-hidden="true" /><span>待我处理</span><b className="oa-pending-count">{pendingCount}</b></button>
++          <OaAdminSettingsButton isAdmin={Boolean(session.isAdmin)} />
+           <div className={isModelHeader ? "oa-model-chat-actions" : "topbar-actions"}>{isModelHeader && <OaNewChatButton />}
+             <OaAccountMenu user={session.user} avatarDataUrl={myAvatarDataUrl} roleLabel={sessionRoleLabel(session.role, Boolean(session.isAdmin))} onIdentityChanged={(fullName, avatarDataUrl) => { setMyAvatarDataUrl(avatarDataUrl); setSession((current) => current?.user && current.user.email === session.user?.email ? { ...current, user: { ...current.user, displayName: fullName } } : current); }} />
  
-           </div>
-         </header>
--        {["project", "dashboard", "requests"].includes(activeView) && <button type="button" className="oa-pending-banner" onClick={openMyPending}><ListTodo aria-hidden="true" /><span className="oa-pending-banner-copy"><strong>待我处理 <span className={`oa-pending-count ${typeof pendingCount === "number" && pendingCount > 0 ? "has-pending" : ""}`}>{pendingCount}</span></strong><small>{pendingCount === 0 ? "当前没有待办，有新事项会在这里提醒。" : "确认、审核、补充材料与任务，轮到你处理的都在这里。"}</small></span><span className="oa-pending-banner-action">查看并处理 <ArrowUpRight aria-hidden="true" /></span></button>}
-+        {["project", "dashboard", "requests"].includes(activeView) && <OaWorkbenchSettings isAdmin={Boolean(session.isAdmin && activeView === "project")}><button type="button" className="oa-pending-banner" onClick={openMyPending}><ListTodo aria-hidden="true" /><span className="oa-pending-banner-copy"><strong>待我处理 <span className={`oa-pending-count ${typeof pendingCount === "number" && pendingCount > 0 ? "has-pending" : ""}`}>{pendingCount}</span></strong><small>{pendingCount === 0 ? "当前没有待办，有新事项会在这里提醒。" : "确认、审核、补充材料与任务，轮到你处理的都在这里。"}</small></span><span className="oa-pending-banner-action">查看并处理 <ArrowUpRight aria-hidden="true" /></span></button></OaWorkbenchSettings>}
-         <div className="project-pane" hidden={activeView !== "project" && activeView !== "todos"}><ProjectWorkspace mode={activeView === "todos" ? "todos" : "project"} approvals={approvals} pendingApprovals={myPendingApprovals} returnedApprovals={returnedApprovals} canReviewMembers={Boolean(session.isAdmin)} onOpenMembers={() => navigate("members")} onOpenKnowledgeMine={() => { setKnowledgeTab("mine"); navigate("knowledge"); }} onPendingCountChange={setSupplementalPendingCount} approvalsReady={dataReady} currentUserEmail={session.user?.email} people={session.user ? [{ email: session.user.email, name: session.user.displayName }] : []} canReviewKnowledge={Boolean(session.canReviewKnowledge)} canManageProject={Boolean(session.isAdmin || session.role === "project_owner")} onOpenApproval={openApproval} onOpenKnowledgeReview={() => { setKnowledgeTab("review"); navigate("knowledge"); }} onOpenLibrary={() => navigate("library")} /></div>
-         {activeView === "profile" && <nav className="oa-my-tools" aria-label="我的工具"><button type="button" onClick={() => navigate("todos")}>我的待办</button><button type="button" onClick={() => { setKnowledgeTab("mine"); navigate("knowledge"); }}>我的资料</button><button type="button" onClick={() => navigate("mail")}>邮箱</button><button type="button" onClick={() => navigate("home")}>入组导览</button><button type="button" onClick={() => navigate("rules")}>流程规则</button>{session.isAdmin && <><button type="button" onClick={() => navigate("members")}>成员审核</button><button type="button" onClick={() => navigate("notifications")}>飞书提醒</button><a href="/admin">系统管理</a></>}</nav>}
-         <div className="oa-knowledge-pane" hidden={activeView !== "knowledge" && !(mobileDirect && activeView === "chat")}><KnowledgeView canReviewKnowledge={Boolean(session.canReviewKnowledge)} isAdmin={Boolean(session.isAdmin)} activeSection={mobileDirect && activeView === "chat" ? "ask" : knowledgeTab} onSectionChange={(tab) => { setKnowledgeTab(tab); if (activeView === "library") navigate("knowledge"); }} /></div>
 --- a/app/admin/page.tsx
 +++ b/app/admin/page.tsx
 @@ -74,6 +74,18 @@
