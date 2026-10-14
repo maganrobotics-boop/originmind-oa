@@ -1,0 +1,17 @@
+{
+  "sourceRelease": "/opt/omindos-deploy/releases/oa-subtitle-admin-20261014-v1",
+  "candidateRelease": "/opt/omindos-deploy/releases/oa-workbench-settings-20261014-v1",
+  "scope": [
+    "模型设置",
+    "实时字幕",
+    "会议设置",
+    "系统管理"
+  ],
+  "administratorOnly": true,
+  "databaseMigration": false,
+  "baselineSha256": {
+    "app/page.tsx": "3f0bfe57d5bd375a0a23302ee3b384e4aded62d51374812abd5121e6c53e2fb2",
+    "app/admin/page.tsx": "27b57e10934ca701894516b1f4a6048100e556cb044fcb7869c40b3f486327dd",
+    "app/admin/admin.css": "07ab63c1ed13d1bf82995db4a92515989d84bf9cc766c8cbbfadaae516cf618e"
+  }
+}

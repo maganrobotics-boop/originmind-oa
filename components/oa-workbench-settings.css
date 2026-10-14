@@ -1,0 +1,15 @@
+.oa-workbench-settings { display: grid; grid-template-columns: minmax(280px, 1.25fr) minmax(270px, 1fr); gap: 12px; margin: 18px 0 6px; align-items: stretch; }
+.oa-workbench-settings > .oa-pending-banner { margin: 0; height: 100%; }
+.oa-workbench-settings-links { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.oa-workbench-settings-links > a { display: flex; align-items: center; justify-content: center; gap: 8px; min-height: 44px; padding: 12px; border: 1px solid #dce3e8; border-radius: 10px; background: #fff; color: #354f62; font-size: 13px; font-weight: 600; line-height: 1.4; text-decoration: none; }
+.oa-workbench-settings-links > a:hover { background: #f4f7fa; border-color: #b9cbd9; }
+.oa-workbench-settings-links > a:focus-visible { outline: 3px solid #729be1; outline-offset: 3px; }
+.oa-workbench-settings-links svg { flex: 0 0 auto; width: 17px; height: 17px; }
+.oa-workbench-settings-links span { min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 980px) {
+  .oa-workbench-settings { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 640px) {
+  .oa-workbench-settings { margin-top: 12px; gap: 10px; }
+  .oa-workbench-settings-links > a { padding: 11px 8px; }
+}
