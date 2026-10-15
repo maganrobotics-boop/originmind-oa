@@ -4,5 +4,6 @@ export type ServerMaintenanceAnswer = {
   operationConfirmed: boolean;
   conversationId?: string;
   steps?: Array<{server: string; action: string; ok: boolean; summary?: string}>;
+  uiActions?: Array<'expand_layout'|'compact_layout'|'browser_fullscreen'>;
 };
 export function answerServerMaintenanceQuestion(request: Request, question: string, options?: {dedicated?: boolean; general?: boolean; conversationId?: string}): Promise<ServerMaintenanceAnswer | null>;

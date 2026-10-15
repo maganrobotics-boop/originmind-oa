@@ -1,8 +1,10 @@
 import { randomBytes } from 'node:crypto';
 import { validServerToolCall } from './tool-policy.mjs';
+import { executeAssistantOperation, operationSummary } from './operation-runner.mjs';
+import { serviceAuthority } from './operation-policy.mjs';
 
 const SERVERS = ['aliyun', 'tencent'];
-const NAMES = { aliyun: '阿里云', tencent: '腾讯云' };
+const NAMES = { aliyun: '阿里云', tencent: '腾讯云',web:'联网检索',interface:'页面' };
 const TTL = 30 * 60_000;
 const MAX_CONTEXT = 72 * 1024;
 const readable = value => typeof value === 'string' && value.isWellFormed() && value.length <= 12000 && !/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(value);
@@ -46,12 +48,13 @@ function remember(turn) {
  * neither a browser transcript nor a model-supplied shell command is accepted. */
 export function createServerAgentConversation({ now = Date.now } = {}) {
   const conversations = new Map();
-  return async ({ actor, question, conversationId, call, model, signal, general = false, allowCleanup = true }) => {
+  return async ({ actor, question, conversationId, call, model, webSearch, capabilities = [], signal, general = false, allowCleanup = true }) => {
     const timestamp = now();
     for (const [id, item] of conversations) if (!item.busy && timestamp - item.touched > TTL) conversations.delete(id);
     let state = conversationId ? conversations.get(conversationId) : null;
+    const uiActions=[];
     const envelope = (answer, steps = []) => ({ answer, mode: 'server_maintenance', conversationId: state.id,
-      steps, operationConfirmed: steps.length > 0 && steps.every(step => step.ok) });
+      steps, ...(uiActions.length ? {uiActions:[...new Set(uiActions)]} : {}), operationConfirmed: steps.length > 0 && steps.every(step => step.ok) });
     if (conversationId && (!state || state.actor !== actor || state.general !== general)) {
       return { answer: '这段服务器会话已过期或不属于当前账号，请清空会话后重新描述问题。', mode: 'server_maintenance', operationConfirmed: false, steps: [] };
     }
@@ -59,13 +62,15 @@ export function createServerAgentConversation({ now = Date.now } = {}) {
       if (conversations.size >= 128) {
         return { answer: '服务器助手会话已满，请稍后重试。', mode: 'server_maintenance', operationConfirmed: false, steps: [] };
       }
-      state = { id: randomBytes(24).toString('hex'), actor, general, touched: timestamp, turns: [], previews: {}, pendingCleanup: {}, busy: false };
+      state = { id: randomBytes(24).toString('hex'), actor, general, touched: timestamp, turns: [], previews: {}, pendingCleanup: {}, pendingOperations: {}, busy: false };
       conversations.set(state.id, state);
     }
     if (state.busy) return envelope('这段会话正在处理上一条请求，请等待回执。');
     state.busy = true; state.touched = timestamp;
     const steps = [], turn = [{ role: 'user', content: question }];
     const allowed = allowCleanup ? cleanupAuthority(question, state.previews, timestamp) : [];
+    const serviceGrants=serviceAuthority(question);
+    const offeredCapabilities=capabilities.filter(capability=>capability!=='services' || serviceGrants.length>0);
     const freshTargets = allowCleanup ? cleanupAuthority(question, {}, timestamp) : [];
     const deadline = now() + 135_000;
     const controller = AbortSignal.any([AbortSignal.timeout(135_000), ...(signal ? [signal] : [])]);
@@ -78,7 +83,7 @@ export function createServerAgentConversation({ now = Date.now } = {}) {
         while (history.length && (history.flat().length + turn.length > 40 || bytes([...history.flat(), ...turn]) > MAX_CONTEXT)) history.shift();
         const messages = [...history.flat(), ...turn];
         if (bytes(messages) > MAX_CONTEXT) throw new Error('AGENT_CONTEXT_LIMIT');
-        const result = await model({ operation: 'server_agent_turn', messages: structuredClone(messages), allowCleanup: allowed, ...(general ? { purpose: 'general' } : {}) }, { signal: controller, deadline });
+        const result = await model({ operation: 'server_agent_turn', messages: structuredClone(messages), allowCleanup: allowed, ...(offeredCapabilities.length ? {capabilities:offeredCapabilities} : {}), ...(general ? { purpose: 'general' } : {}) }, { signal: controller, deadline });
         check();
         const message = result?.message;
         if (!message || message.role !== 'assistant' || (message.content != null && !readable(message.content))) throw new Error('AGENT_MODEL_PROTOCOL');
@@ -93,10 +98,10 @@ export function createServerAgentConversation({ now = Date.now } = {}) {
         // Validate every call before performing any action in the batch.
         const ids = new Set();
         const parsed = calls.map(item => {
-          if (item?.type !== 'function' || typeof item.id !== 'string' || !/^[A-Za-z0-9_-]{1,120}$/u.test(item.id) || ids.has(item.id) || typeof item.function?.arguments !== 'string' || item.function.arguments.length > 2000) throw new Error('AGENT_MODEL_PROTOCOL');
+          if (item?.type !== 'function' || typeof item.id !== 'string' || !/^[A-Za-z0-9_-]{1,120}$/u.test(item.id) || ids.has(item.id) || typeof item.function?.arguments !== 'string' || item.function.arguments.length > 22000) throw new Error('AGENT_MODEL_PROTOCOL');
           ids.add(item.id);
           const args = JSON.parse(item.function.arguments);
-          if (!validServerToolCall(item.function.name, args, { allowCleanup: allowed })) throw new Error('AGENT_TOOL_DENIED');
+          if (!validServerToolCall(item.function.name, args, { allowCleanup: allowed, capabilities:offeredCapabilities })) throw new Error('AGENT_TOOL_DENIED');
           // Scope tool IDs to this conversation turn, even if a provider reuses
           // an ID from a completed historical turn.
           return { item: { ...item, id: `oa_${randomBytes(12).toString('hex')}` }, args, name: item.function.name };
@@ -106,9 +111,16 @@ export function createServerAgentConversation({ now = Date.now } = {}) {
         })) });
         for (const { item, args, name } of parsed) {
           check();
-          const server = args.server;
+          const server = args.server || (name === 'web_search' ? 'web' : 'interface');
           let output;
           try {
+            const operation=await executeAssistantOperation(name,args,{state,call,webSearch,signal:controller,cache:executed,capabilities,serviceGrants});
+            if (operation) {
+              output=operation;
+              if (output.uiAction) uiActions.push(output.uiAction);
+              const ok=!['failed','uncertain','running'].includes(output.state) && (output.state!=='cancelled' || name==='command_cancel') && (output.operation!=='service' || output.statusVerified===true);
+              steps.push({server,action:output.action==='operations' ? `operations:${output.operation}` : output.action,ok,summary:operationSummary(output)});
+            } else {
             if (name === 'cleanup_execute' && executed.has(server)) output = executed.get(server);
             else {
               let action, parameters = {};
@@ -149,12 +161,15 @@ export function createServerAgentConversation({ now = Date.now } = {}) {
             }
             const action = output.action;
             steps.push({ server, action: action === 'diagnostic' ? `${action}:${args.topic}` : action, ok: true, summary: stepSummary(action, output) });
-          } catch {
-            output = { ok: false, server, error: '服务器没有返回可核对的成功回执。不要推测操作已经完成。' };
+            }
+          } catch (error) {
+            output = { ok: false, server, error: '工具没有返回可核对的成功回执。不要推测操作已经完成。', ...(error?.operationError ? {code:error.operationError} : {}) };
             steps.push({ server, action: name, ok: false, summary: '未取得成功回执' });
           }
           // Plan IDs stay inside OA. The model selects a server, never a token.
           const visible = { ...output }; delete visible.planId;
+          delete visible.requestId;
+          for (const field of ['content','output']) if (typeof visible[field] === 'string' && visible[field].length > 12000) {visible[field]=visible[field].slice(0,12000).toWellFormed();visible.outputLimited=true;}
           if (Array.isArray(visible.entries)) {
             while (JSON.stringify(visible).length > 15000 && visible.entries.length) { visible.entries.shift(); visible.limited = true; }
           }

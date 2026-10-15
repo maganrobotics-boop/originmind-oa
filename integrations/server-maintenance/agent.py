@@ -49,7 +49,7 @@ DIAGNOSTIC_SECONDS = 3
 DISK_DIAGNOSTIC_SECONDS = 5
 SERVICE_PROPERTIES = ("Id", "LoadState", "ActiveState", "SubState", "MainPID", "NRestarts",
                       "ExecMainStatus", "MemoryCurrent", "CPUUsageNSec", "ActiveEnterTimestamp")
-MAX_BODY = 8192
+MAX_BODY = 65536
 MAX_FILES = 500
 MAX_BYTES = 500 * 1024 * 1024
 MAX_SCAN_ENTRIES = 10000
@@ -407,7 +407,7 @@ class MaintenanceAgent:
     def __init__(self, server, secret, *, roots=ROOTS, clock=time.time,
                  audit_path="/var/log/originmind-maintenance.jsonl",
                  status_provider=system_status, disk_provider=disk_status,
-                 diagnostic_provider=system_diagnostic):
+                 diagnostic_provider=system_diagnostic, operations=None):
         if server not in SERVICES or not isinstance(secret, str) or len(secret) < 32:
             raise ValueError("Invalid maintenance configuration")
         self.server = server
@@ -418,6 +418,7 @@ class MaintenanceAgent:
         self.status_provider = status_provider
         self.disk_provider = disk_provider
         self.diagnostic_provider = diagnostic_provider
+        self.operations = operations
         self.nonces = collections.OrderedDict()
         self.plans = collections.OrderedDict()
         self.lock = threading.Lock()
@@ -460,6 +461,10 @@ class MaintenanceAgent:
             data = json.loads(body.decode("utf-8"), object_pairs_hook=pairs)
         except (ValueError, UnicodeDecodeError, RecursionError):
             raise MaintenanceError("invalid_json") from None
+        if isinstance(data, dict) and data.get("action") == "operations":
+            if not isinstance(data.get("actor"), str) or not ACTOR_RE.fullmatch(data["actor"]):
+                raise MaintenanceError("invalid_request")
+            return data  # The enabled executor validates its complete exact schema.
         if not isinstance(data, dict) or set(data) - {"action", "actor", "planId", "topic", "service", "path"}:
             raise MaintenanceError("invalid_request")
         if data.get("action") not in ("status", "plan", "clean", "diagnostic") or not isinstance(data.get("actor"), str) or not ACTOR_RE.fullmatch(data["actor"]):
@@ -666,6 +671,10 @@ class MaintenanceAgent:
                     if request["topic"] in ("service", "logs") and request["service"] not in SERVICES[self.server]:
                         raise MaintenanceError("invalid_service")
                     result = self.diagnostic_provider(self.server, request)
+                elif action == "operations":
+                    if self.operations is None:
+                        raise MaintenanceError("operations_not_enabled", 503)
+                    result = self.operations.execute(request)
                 else:
                     result = self.clean(actor, request["planId"])
             except MaintenanceError as error:
@@ -674,7 +683,9 @@ class MaintenanceAgent:
                 except (OSError, MaintenanceError):
                     pass
                 raise
-            except Exception:
+            except Exception as error:
+                if action == "operations" and isinstance(getattr(error, "code", None), str) and re.fullmatch(r"[a-z_]{2,80}", error.code) and isinstance(getattr(error, "status", None), int) and 400 <= error.status <= 599:
+                    raise MaintenanceError(error.code, error.status) from None
                 try:
                     self.audit(actor, action, "internal_error")
                 except (OSError, MaintenanceError):
@@ -706,7 +717,7 @@ class Handler(http.server.BaseHTTPRequestHandler):
         pass
 
     def reply(self, status, data):
-        body = json.dumps(data, ensure_ascii=True, separators=(",", ":")).encode("ascii")
+        body = json.dumps(data, ensure_ascii=False, separators=(",", ":")).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
@@ -773,11 +784,15 @@ def load_config(path):
 def main():
     parser = argparse.ArgumentParser(description="Private fixed-action maintenance agent")
     parser.add_argument("--config", required=True)
+    parser.add_argument("--operations", action="store_true", help="Enable the separately installed administrator executor")
     args = parser.parse_args()
     if os.geteuid() != 0:
         parser.error("The maintenance service requires its dedicated root unit")
     try:
         agent = MaintenanceAgent(**load_config(args.config))
+        if args.operations:
+            from server_operations import OperationsExecutor
+            agent.operations = OperationsExecutor(agent.server, agent.audit)
     except (ValueError, OSError):
         parser.error("Cannot load a safe maintenance configuration")
     server = http.server.HTTPServer(("127.0.0.1", 18893), Handler)
