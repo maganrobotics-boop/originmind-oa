@@ -6,6 +6,8 @@ on:
       - 'integrations/server-maintenance/**'
       - 'tests/server-maintenance*'
       - 'tests/server-agent*'
+      - 'tests/server-assistant-operations.test.mjs'
+      - 'tests/server-operations.test.py'
       - 'tests/ai-assistant-api.test.mjs'
       - 'tests/ai-workbench-bridge.test.mjs'
       - 'tests/ai-workbench-tools.test.mjs'
@@ -18,6 +20,7 @@ on:
       - 'lib/write-rate-limit.ts'
       - 'chat-cloudflare/src/oa-chat-bridge*'
       - 'chat-cloudflare/src/server-agent-bridge.mjs'
+      - 'chat-cloudflare/src/server-agent-web-search.mjs'
       - 'chat-cloudflare/src/task-tool-model.mjs'
       - 'chat-cloudflare/src/crypto.mjs'
       - 'chat-cloudflare/src/knowledge.mjs'
@@ -38,6 +41,8 @@ on:
       - 'integrations/server-maintenance/**'
       - 'tests/server-maintenance*'
       - 'tests/server-agent*'
+      - 'tests/server-assistant-operations.test.mjs'
+      - 'tests/server-operations.test.py'
       - 'tests/ai-assistant-api.test.mjs'
       - 'tests/ai-workbench-bridge.test.mjs'
       - 'tests/ai-workbench-tools.test.mjs'
@@ -50,6 +55,7 @@ on:
       - 'lib/write-rate-limit.ts'
       - 'chat-cloudflare/src/oa-chat-bridge*'
       - 'chat-cloudflare/src/server-agent-bridge.mjs'
+      - 'chat-cloudflare/src/server-agent-web-search.mjs'
       - 'chat-cloudflare/src/task-tool-model.mjs'
       - 'chat-cloudflare/src/crypto.mjs'
       - 'chat-cloudflare/src/knowledge.mjs'
@@ -80,6 +86,7 @@ jobs:
           node-version: '24'
       - run: >-
           node --test tests/server-agent*.test.mjs
+          tests/server-assistant-operations.test.mjs
           tests/server-maintenance-conversation.test.mjs
           tests/server-maintenance-ask.test.mjs
           tests/server-maintenance-api.test.mjs
@@ -91,3 +98,4 @@ jobs:
           tests/ai-workbench-tools.test.mjs
           tests/ai-workbench-failure-diagnostics.test.mjs
       - run: sudo python3 tests/server-maintenance-agent.test.py
+      - run: sudo python3 tests/server-operations.test.py

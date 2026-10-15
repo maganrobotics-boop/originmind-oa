@@ -4,6 +4,7 @@ import { lstat, open } from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { createServerAgentConversation, cleanupAuthority } from './agent-conversation.mjs';
+import { validCapabilities } from './operation-policy.mjs';
 
 const LIMIT = 32 * 1024;
 const TIMEOUT = 10_000;
@@ -30,8 +31,8 @@ function intent(question) {
   return { servers, action: clean ? 'clean' : 'plan' };
 }
 
-async function responseJson(response) {
-  if (!response || response.ok !== true || response.status < 200 || response.status >= 300) throw new Error('REQUEST_FAILED');
+async function responseJson(response, { allowError = false } = {}) {
+  if (!response || (!allowError && (response.ok !== true || response.status < 200 || response.status >= 300))) throw new Error('REQUEST_FAILED');
   if (!String(response.headers?.get('content-type') || '').toLowerCase().includes('application/json')) throw new Error('INVALID_RESPONSE');
   const length = Number(response.headers.get('content-length'));
   if (Number.isFinite(length) && length > LIMIT) throw new Error('RESPONSE_LIMIT');
@@ -83,7 +84,7 @@ function nativeBackend(url, options) {
       method: 'POST', headers: options.headers, signal: options.signal, agent: false, maxHeaderSize: 16384,
     }, incoming => {
       const code = incoming.statusCode || 502;
-      if (code < 200 || code >= 300 || Number(incoming.headers['content-length']) > LIMIT) {
+      if (Number(incoming.headers['content-length']) > LIMIT) {
         incoming.destroy(); reject(new Error('BACKEND_FAILED')); return;
       }
       const chunks = []; let size = 0;
@@ -151,18 +152,18 @@ function cleanAnswer(data) {
   return `已完成限定临时文件清理：实际删除 ${display(count)} 项，${gib(bytes)}${number(data.skippedCount) !== null ? `，跳过 ${display(data.skippedCount)} 项` : ''}。\n可用空间：${gib(before)} → ${gib(after)}`;
 }
 
-export function createServerMaintenanceConversation({ port, configPath = '/etc/originmind-maintenance/oa-client.json', config, sessionFetch, backendFetch = nativeBackend } = {}) {
+export function createServerMaintenanceConversation({ port, configPath = '/etc/originmind-maintenance/oa-client.json', config, permissionsPath = '/etc/originmind-maintenance/assistant-permissions.json', permissions, sessionFetch, backendFetch = nativeBackend } = {}) {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid OA port');
   const actors = new Map();
   const agent = createServerAgentConversation();
-  return async (request, question, { signal, dedicated = false, general = false, conversationId, model } = {}) => {
+  return async (request, question, { signal, dedicated = false, general = false, conversationId, model, webSearch } = {}) => {
     const command = intent(question);
     if (!command && !dedicated) return null;
     if (typeof question !== 'string' || question.length < 2 || question.length > 2000 || !question.isWellFormed()) return null;
     const reply = (answer, operationConfirmed = false) => ({ answer, mode: 'server_maintenance', operationConfirmed });
     const cookie = request.headers.get('cookie');
     if (!cookie || cookie.length > 16384) return reply('服务器查询和临时文件清理仅向已登录的 OA 管理员开放，请先登录管理员账号。');
-    const combined = () => AbortSignal.any([AbortSignal.timeout(TIMEOUT), ...(signal ? [signal] : [])]);
+    const combined = (timeout = TIMEOUT) => AbortSignal.any([AbortSignal.timeout(timeout), ...(signal ? [signal] : [])]);
     let session;
     try {
       session = sessionFetch ? await responseJson(await sessionFetch(`http://127.0.0.1:${port}/api/session`, {
@@ -195,21 +196,28 @@ export function createServerMaintenanceConversation({ port, configPath = '/etc/o
     catch { return reply('服务器维护连接尚未配置或配置不可读取，未执行查询或清理。'); }
     if (dedicated) {
       if (typeof model !== 'function') return reply('服务器自然语言模型暂不可用，请稍后重试。');
+      let capabilities = ['ui'];
+      try {
+        const grant = permissions ?? await readConfig(permissionsPath);
+        if (grant?.enabled === true && grant.scope === 'active_oa_admin' && validCapabilities(grant.capabilities)) capabilities = grant.capabilities;
+      } catch { /* Missing grants retain legacy server tools and local UI only. */ }
+      if (typeof webSearch !== 'function') capabilities = capabilities.filter(item => item !== 'web');
       const call = async (id, action, parameters = {}, options = {}) => {
         const target = TARGETS[id], connection = settings?.servers?.[id];
         if (!target || !connection || connection.url !== target.url || typeof connection.secret !== 'string' || connection.secret.length < 32 || connection.secret.length > 4096) throw new Error('CONFIG_INVALID');
         const body = JSON.stringify({ action, actor, ...parameters });
         const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(24).toString('hex');
         const signature = createHmac('sha256', connection.secret).update(`${timestamp}\n${nonce}\n${body}`).digest('hex');
-        const backendSignal = AbortSignal.any([combined(), ...(options.signal ? [options.signal] : [])]);
+        const backendSignal = AbortSignal.any([combined(action === 'operations' ? 35000 : TIMEOUT), ...(options.signal ? [options.signal] : [])]);
         backendSignal.throwIfAborted();
         const data = await responseJson(await backendFetch(target.url, { method: 'POST', redirect: 'error', signal: backendSignal,
           headers: { 'content-type': 'application/json', accept: 'application/json', 'x-maintenance-time': timestamp,
-            'x-maintenance-nonce': nonce, authorization: `Maintenance-HMAC ${signature}` }, body }));
+              'x-maintenance-nonce': nonce, authorization: `Maintenance-HMAC ${signature}` }, body }), { allowError: true });
+        if (data.ok === false && typeof data.error === 'string' && /^[a-z_]{2,80}$/u.test(data.error)) throw Object.assign(new Error('BACKEND_OPERATION_FAILED'), { operationError: data.error });
         if (data.ok !== true || data.error || data.server !== id || data.action !== action) throw new Error('BACKEND_FAILED');
         return data;
       };
-      return await agent({ actor, question, conversationId, call, model, signal, general });
+      return await agent({ actor, question, conversationId, call, model, webSearch, capabilities, signal, general });
     }
     const results = await Promise.all(command.servers.map(async id => {
       const target = TARGETS[id], connection = settings?.servers?.[id];

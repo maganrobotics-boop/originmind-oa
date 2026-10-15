@@ -21,9 +21,9 @@ export async function completeServerAgentTurn(context, engine, config, payload) 
   });
   const reply = await transport({
     messages: [{ role: 'system', content: payload.purpose === 'general' ? GENERAL_AGENT_SYSTEM_PROMPT : SERVER_AGENT_SYSTEM_PROMPT }, ...payload.messages],
-    tools: serverAgentTools({ allowCleanup: payload.allowCleanup }),
+    tools: serverAgentTools({ allowCleanup: payload.allowCleanup, capabilities: payload.capabilities }),
     deadline: Date.now() + 45000,
   });
   return { received: true, mode: 'server_agent_turn', provider: 'bailian',
-    message: normalizeServerAgentReply(reply, payload.allowCleanup), finishReason: reply.finishReason };
+    message: normalizeServerAgentReply(reply, payload.allowCleanup, payload.capabilities), finishReason: reply.finishReason };
 }

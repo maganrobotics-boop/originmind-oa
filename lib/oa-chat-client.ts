@@ -8,7 +8,7 @@ export { questionAllowsGeneralKnowledge, questionPrefersGeneralKnowledge, questi
 
 export type OaChatImage = { url: string; alt: string; mimeType: string };
 export type OaChatHistory = Array<{ role: 'user'; content: string }>;
-type BridgeResponse = { received?: boolean; answer?: string; mode?: string; provider?: string; fallbackReason?: string; modelReady?: boolean; budgetReady?: boolean; bridgeReady?: boolean; message?: unknown; finishReason?: string };
+type BridgeResponse = { received?: boolean; answer?: string; mode?: string; provider?: string; fallbackReason?: string; modelReady?: boolean; budgetReady?: boolean; bridgeReady?: boolean; message?: unknown; finishReason?: string; searched?: boolean; sources?: Array<{index: number; title: string; url: string}> };
 function prefix(value: string, maximum: number) {
   const result = String(value || '').slice(0, maximum);
   return /[\uD800-\uDBFF]$/u.test(result) ? result.slice(0, -1) : result;
@@ -99,6 +99,12 @@ export async function serverAgentModelTurn(payload: object, options: { signal?: 
   const result = await bridge(payload, 50000, options.signal);
   options.signal?.throwIfAborted();
   if (result.mode !== 'server_agent_turn' || !result.message) throw new Error('SERVER_AGENT_MODEL_PROTOCOL');
+  return result;
+}
+
+export async function serverAgentWebSearch(query: string, options: { signal?: AbortSignal } = {}) {
+  const result = await bridge({ operation: 'server_agent_web_search', query }, 50000, options.signal);
+  if (result.mode !== 'server_agent_web_search' || result.searched !== true || !result.sources?.length) throw new Error('SERVER_AGENT_SEARCH_UNAVAILABLE');
   return result;
 }
 const ROBOT_IMAGE_KIND_PATTERN = /(?:四足|轮足|轮式|双臂|机械臂|开放式|人形|履带|无人机)/gu;

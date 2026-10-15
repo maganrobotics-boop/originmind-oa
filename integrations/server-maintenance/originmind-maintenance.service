@@ -1,17 +1,17 @@
 [Unit]
-Description=OriginMind restricted server maintenance agent
+Description=OriginMind signed server assistant broker
 After=network.target
 
 [Service]
 Type=simple
 User=root
 Group=root
-ExecStart=/usr/bin/python3 /opt/originmind-maintenance/agent.py --config /etc/originmind-maintenance/agent.json
+ExecStart=/usr/bin/python3 /opt/originmind-maintenance/agent.py --config /etc/originmind-maintenance/agent.json --operations
 Restart=on-failure
 RestartSec=3
 UMask=0077
 NoNewPrivileges=true
-CapabilityBoundingSet=
+CapabilityBoundingSet=CAP_CHOWN CAP_DAC_OVERRIDE
 ProtectSystem=strict
 ProtectHome=true
 ProtectKernelTunables=true
@@ -23,7 +23,7 @@ LockPersonality=true
 RestrictAddressFamilies=AF_INET AF_UNIX
 IPAddressDeny=any
 IPAddressAllow=localhost
-ReadWritePaths=/var/cache/apt/archives /tmp/omindos-ai-maintenance /var/cache/omindos-maintenance /var/log/originmind-maintenance.jsonl
+ReadWritePaths=/var/cache/apt/archives /tmp/omindos-ai-maintenance /var/cache/omindos-maintenance /var/log/originmind-maintenance.jsonl /var/lib/originmind-assistant
 MemoryMax=128M
 TasksMax=32
 

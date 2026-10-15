@@ -8,6 +8,7 @@ import { fallbackAnswer, aliyunEndpoint } from './knowledge.mjs';
 import { generateValidatedAnswer } from './answer-retry.mjs';
 import { answerMode } from './answer-mode.mjs';
 import { completeServerAgentTurn, validServerAgentPayload } from './server-agent-bridge.mjs';
+import { completeServerAgentWebSearch, validServerAgentWebSearchPayload } from './server-agent-web-search.mjs';
 
 export const OA_CHAT_PATH = '/api/internal/oa-answer';
 export const OA_CHAT_ORIGIN = 'https://chat.omindos.ai';
@@ -57,6 +58,7 @@ async function authenticatedBody(request, secret, now) {
   return { body, nonce };
 }
 export function validOaChatPayload(value) {
+  if (value?.operation === 'server_agent_web_search') return validServerAgentWebSearchPayload(value);
   if (value?.operation === 'server_agent_turn') return validServerAgentPayload(value);
   if (exactKeys(value, ['operation', 'task']) && value.operation === 'task') return validTaskInput(value.task);
   if (exactKeys(value, ['operation']) && value.operation === 'status') return true;
@@ -87,6 +89,7 @@ export async function handleOaChatBridge(context, engine, now = Date.now()) {
     const config = await engine.getModelConfig(context);
     taskPhase = 'provider_selection';
     const active = engine.modelProvider(context, config);
+    if (payload.operation === 'server_agent_web_search') return json(await completeServerAgentWebSearch(context, engine, config, payload));
     if (payload.operation === 'server_agent_turn') return json(await completeServerAgentTurn(context, engine, config, payload));
     if (payload.operation === 'status') {
       const [model, budgetReady] = await Promise.all([engine.currentModelStatus(context, config, active), engine.modelBudgetReady(context)]);
@@ -170,8 +173,8 @@ export async function handleOaChatBridge(context, engine, now = Date.now()) {
     if (!generated.visible) return fallback(generated.failureReason);
     return json({ received: true, answer: generated.visible, mode: answerType === 'general' ? 'general' : 'ai', provider, answerMode: selectedMode });
   } catch (error) {
-    if (payload.operation === 'server_agent_turn') {
-      const allowed = ['SERVER_AGENT_INPUT', 'SERVER_AGENT_MODEL_UNAVAILABLE', 'SERVER_AGENT_MODEL_PROTOCOL', 'SERVER_AGENT_MODEL_TOOL', 'SERVER_AGENT_MODEL_INCOMPLETE', 'TASK_MODEL_CONFIG', 'TASK_MODEL_HTTP', 'TASK_MODEL_PROTOCOL', 'TASK_MODEL_TRANSPORT', 'TASK_TOOL_TIMEOUT', 'TASK_TOOL_CONTEXT_LIMIT', 'TASK_MODEL_RESPONSE_LIMIT'];
+    if (payload.operation === 'server_agent_turn' || payload.operation === 'server_agent_web_search') {
+      const allowed = ['SERVER_AGENT_INPUT', 'SERVER_AGENT_MODEL_UNAVAILABLE', 'SERVER_AGENT_MODEL_PROTOCOL', 'SERVER_AGENT_MODEL_TOOL', 'SERVER_AGENT_MODEL_INCOMPLETE', 'TASK_MODEL_CONFIG', 'TASK_MODEL_HTTP', 'TASK_MODEL_PROTOCOL', 'TASK_MODEL_TRANSPORT', 'TASK_TOOL_TIMEOUT', 'TASK_TOOL_CONTEXT_LIMIT', 'TASK_MODEL_RESPONSE_LIMIT', 'SERVER_AGENT_SEARCH_CONFIG', 'SERVER_AGENT_SEARCH_UNAVAILABLE', 'SERVER_AGENT_SEARCH_INPUT', 'SERVER_AGENT_SEARCH_HTTP', 'SERVER_AGENT_SEARCH_PROTOCOL', 'SERVER_AGENT_SEARCH_NO_SOURCES', 'SERVER_AGENT_SEARCH_RESPONSE_LIMIT', 'SERVER_AGENT_SEARCH_TIMEOUT', 'SERVER_AGENT_SEARCH_TRANSPORT'];
       const diagnostic = { code: allowed.includes(error?.message) ? error.message : 'SERVER_AGENT_UNAVAILABLE',
         ...(Number.isInteger(error?.upstreamStatus) && error.upstreamStatus >= 100 && error.upstreamStatus <= 599 ? { upstreamStatus: error.upstreamStatus } : {}) };
       return json({ error: '助手模型暂不可用，请稍后重试', diagnostic }, 503);
