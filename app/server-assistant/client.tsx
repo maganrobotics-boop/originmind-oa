@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
+import { renderAnswerBody, userFacingAnswer } from '@/lib/oa-chat-renderer.mjs';
 
 type Session = { registered?: boolean; status?: string; isAdmin?: boolean };
 type ToolStep = { server: string; action: string; ok: boolean; summary?: string };
@@ -26,6 +27,45 @@ function readSteps(value: unknown): ToolStep[] {
   return value.slice(0, 24).filter((step): step is ToolStep => step !== null && typeof step === 'object'
     && typeof step.server === 'string' && typeof step.action === 'string' && typeof step.ok === 'boolean'
     && (step.summary === undefined || typeof step.summary === 'string'));
+}
+
+function AssistantAnswer({ answer }: { answer: string }) {
+  const host = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const element = host.current;
+    if (!element) return;
+    const fragment = document.createDocumentFragment();
+    let text: string[] = [];
+    let code: string[] = [];
+    let closingFence: RegExp | null = null;
+    const appendText = () => {
+      if (text.join('\n').trim()) fragment.append(renderAnswerBody(text.join('\n')));
+      text = [];
+    };
+    const appendCode = () => {
+      const pre = document.createElement('pre');
+      const block = document.createElement('code');
+      block.textContent = code.join('\n');
+      pre.append(block); fragment.append(pre); code = [];
+    };
+    for (const line of userFacingAnswer(answer).split(/\r?\n/u)) {
+      if (closingFence) {
+        if (closingFence.test(line)) { appendCode(); closingFence = null; }
+        else code.push(line);
+      } else {
+        const fence = line.match(/^ {0,3}(`{3,}|~{3,})[^`~]*$/u);
+        if (fence) {
+          appendText();
+          closingFence = new RegExp(`^ {0,3}${fence[1][0]}{${fence[1].length},}[ \\t]*$`, 'u');
+        } else text.push(line);
+      }
+    }
+    if (closingFence) appendCode();
+    appendText();
+    element.replaceChildren(fragment);
+    return () => element.replaceChildren();
+  }, [answer]);
+  return <div ref={host} className="server-assistant-answer" />;
 }
 
 export default function ServerAssistant({ variant = 'server' }: { variant?: 'server' | 'general' }) {
@@ -88,7 +128,7 @@ export default function ServerAssistant({ variant = 'server' }: { variant?: 'ser
         <div className="server-assistant-chatbar"><span><i /> 管理员身份已验证</span><button type="button" disabled={busy || messages.length === 0} onClick={() => { conversationId.current = undefined; setMessages([]); setError(''); }}>清空本页</button></div>
         <div className="server-assistant-messages" role="log" aria-live="polite" aria-relevant="additions text">
           {messages.length === 0 && <div className="server-assistant-welcome"><span aria-hidden="true">⌁</span><h2>{general ? '有什么想问，或想一起完成的事？' : '用自然语言检查服务器'}</h2><p>{general ? <>自由提问、梳理思路、整理方案，<br />也可以交办已接入并授权的服务器任务。</> : <>分析健康状态、进程、日志与磁盘占用，<br />支持继续追问，也可以预览临时文件清理。</>}</p></div>}
-          {messages.map(message => <article key={message.id} className={`server-assistant-message ${message.role}`}><div className="server-assistant-message-meta">{message.role === 'user' ? '您' : assistantName}{message.role === 'assistant' && <span className={message.steps?.length ? message.confirmed ? 'confirmed' : 'unconfirmed' : ''}>{message.steps?.length ? message.confirmed ? '工具回执已核对' : '请查看工具回执' : '对话回复'}</span>}</div><p>{message.text}</p>{Boolean(message.steps?.length) && <details className="server-assistant-steps"><summary>查看 {message.steps!.length} 条工具回执</summary><ol>{message.steps!.map((step, index) => <li key={index}><span className={step.ok ? 'step-ok' : 'step-error'}>{step.ok ? '完成' : '未完成'}</span><span>{serverName(step.server)} · {actionName(step.action)}</span>{step.summary && <p>{step.summary}</p>}</li>)}</ol></details>}</article>)}
+          {messages.map(message => <article key={message.id} className={`server-assistant-message ${message.role}`}><div className="server-assistant-message-meta">{message.role === 'user' ? '您' : assistantName}{message.role === 'assistant' && <span className={message.steps?.length ? message.confirmed ? 'confirmed' : 'unconfirmed' : ''}>{message.steps?.length ? message.confirmed ? '工具回执已核对' : '请查看工具回执' : '对话回复'}</span>}</div>{message.role === 'assistant' ? <AssistantAnswer answer={message.text} /> : <p>{message.text}</p>}{Boolean(message.steps?.length) && <details className="server-assistant-steps"><summary>查看 {message.steps!.length} 条工具回执</summary><ol>{message.steps!.map((step, index) => <li key={index}><span className={step.ok ? 'step-ok' : 'step-error'}>{step.ok ? '完成' : '未完成'}</span><span>{serverName(step.server)} · {actionName(step.action)}</span>{step.summary && <p>{step.summary}</p>}</li>)}</ol></details>}</article>)}
           {busy && <div className="server-assistant-wait" role="status"><span>{general ? '正在分析问题并准备回复…' : '正在分析问题并查询服务器…'}</span><button type="button" onClick={() => request.current?.abort()}>停止等待</button></div>}
           <div ref={bottom} />
         </div>

@@ -443,6 +443,10 @@ class MaintenanceTests(unittest.TestCase):
         self.assertGreaterEqual(result["skippedEntries"], 2)
         item = next(item for item in result["directories"] if item["name"] == "data")
         self.assertTrue(item["queryable"])
+        self.assertTrue(item["complete"])
+        self.assertTrue(result["complete"])
+        self.assertFalse(result["limited"])
+        self.assertEqual(result["bytes"], result["scannedBytes"])
         self.assertEqual(item["bytes"], directory.stat().st_blocks * 512 + public_file.stat().st_blocks * 512)
         self.assert_error("invalid_diagnostic_path", lambda: agent_module.disk_diagnostic(str(self.base)))
 
@@ -452,11 +456,72 @@ class MaintenanceTests(unittest.TestCase):
         with mock.patch.object(agent_module, "DIAGNOSTIC_PATHS", frozenset((str(self.cache),))), mock.patch.object(agent_module, "DIAGNOSTIC_MAX_ENTRIES", 1):
             result = agent_module.disk_diagnostic(str(self.cache))
         self.assertTrue(result["limited"])
-        self.assertEqual(result["measurement"], "allocated_bytes_partial")
+        self.assertFalse(result["complete"])
+        self.assertIsNone(result["bytes"])
+        self.assertIsNone(result["directFilesBytes"])
+        self.assertGreaterEqual(result["scannedBytes"], self.cache.stat().st_blocks * 512)
+        self.assertEqual(result["measurement"], "allocated_bytes_partial_lower_bound")
         self.cache.rename(self.base / "real-cache")
         self.cache.symlink_to(self.base / "real-cache", target_is_directory=True)
         with mock.patch.object(agent_module, "DIAGNOSTIC_PATHS", frozenset((str(self.cache),))):
             self.assert_error("diagnostic_path_unavailable", lambda: agent_module.disk_diagnostic(str(self.cache)))
+
+    def test_partial_disk_measurement_cannot_present_lower_bounds_as_totals(self):
+        small = self.cache / "small"
+        large = self.cache / "large"
+        untouched = self.cache / "untouched"
+        for directory in (small, large, untouched):
+            directory.mkdir(mode=0o700)
+        self.create_file(small / "one")
+        for name in ("one", "two", "three", "four"):
+            self.create_file(large / name)
+        self.create_file(untouched / "one")
+        # Directory names are discovered before deep traversal. The first
+        # completed sibling keeps a total; incomplete siblings expose only a
+        # lower bound, including a sibling not traversed at all.
+        original_scandir = agent_module.os.scandir
+
+        class SortedScan:
+            def __init__(inner_self, fd):
+                inner_self.iterator = original_scandir(fd)
+
+            def __enter__(inner_self):
+                return iter(sorted(inner_self.iterator, key=lambda item: ({"small": 0, "large": 1, "untouched": 2}.get(item.name, 3), item.name)))
+
+            def __exit__(inner_self, *args):
+                inner_self.iterator.close()
+
+        with mock.patch.object(agent_module, "DIAGNOSTIC_PATHS", frozenset((str(self.cache),))), mock.patch.object(agent_module, "DIAGNOSTIC_MAX_ENTRIES", 6), mock.patch.object(agent_module.os, "scandir", side_effect=SortedScan):
+            result = agent_module.disk_diagnostic(str(self.cache))
+        rows = {item["name"]: item for item in result["directories"]}
+        self.assertEqual(set(rows), {"small", "large", "untouched"})
+        self.assertTrue(rows["small"]["complete"])
+        self.assertIsNotNone(rows["small"]["bytes"])
+        self.assertFalse(rows["large"]["complete"])
+        self.assertIsNone(rows["large"]["bytes"])
+        self.assertGreater(rows["large"]["scannedBytes"], 0)
+        self.assertFalse(rows["untouched"]["complete"])
+        self.assertIsNone(rows["untouched"]["bytes"])
+        self.assertEqual(rows["untouched"]["scannedBytes"], 0)
+        self.assertIsNone(result["bytes"])
+        self.assertTrue(result["limited"])
+
+    def test_disk_deadline_and_display_truncation_have_distinct_completeness(self):
+        self.create_file(self.cache / "one")
+        with mock.patch.object(agent_module, "DIAGNOSTIC_PATHS", frozenset((str(self.cache),))), mock.patch.object(agent_module.time, "monotonic", side_effect=[0, 6]):
+            timed_out = agent_module.disk_diagnostic(str(self.cache))
+        self.assertTrue(timed_out["limited"])
+        self.assertFalse(timed_out["complete"])
+        self.assertIsNone(timed_out["bytes"])
+        for number in range(21):
+            (self.cache / ("dir-" + str(number))).mkdir(mode=0o700)
+        with mock.patch.object(agent_module, "DIAGNOSTIC_PATHS", frozenset((str(self.cache),))):
+            complete = agent_module.disk_diagnostic(str(self.cache))
+        self.assertTrue(complete["complete"])
+        self.assertFalse(complete["limited"])
+        self.assertIsNotNone(complete["bytes"])
+        self.assertTrue(complete["directoryListTruncated"])
+        self.assertEqual(len(complete["directories"]), 20)
 
     def test_http_signature_headers_endpoint_body_limit_and_status(self):
         server = http.server.HTTPServer(("127.0.0.1", 0), agent_module.Handler)

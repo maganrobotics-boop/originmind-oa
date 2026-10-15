@@ -126,6 +126,13 @@ test('natural-language final answer is returned only after a complete model resp
   assert.equal((await f.send()).message.content, '阿里云的磁盘使用率较高，建议继续查看目录占用。');
 });
 
+test('provider tool index metadata is discarded while tool arguments remain strictly validated', () => {
+  const indexed = { ...call(), index: 0 };
+  assert.deepEqual(normalizeServerAgentReply(reply({ role: 'assistant', content: null, tool_calls: [indexed] })).tool_calls, [call()]);
+  const invalid = { ...call('server_status', { server: 'aliyun', command: 'id' }), index: 0 };
+  assert.throws(() => normalizeServerAgentReply(reply({ role: 'assistant', content: null, tool_calls: [invalid] })), /SERVER_AGENT_MODEL_TOOL/u);
+});
+
 test('provider and budget failures cannot fall back or send a model request', async () => {
   const unconfigured = await fixture({ provider: 'workers-ai' });
   await assert.rejects(unconfigured.send(), /SERVER_AGENT_MODEL_UNAVAILABLE/u); assert.equal(unconfigured.state().calls, 0);

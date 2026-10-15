@@ -44,8 +44,9 @@ PRIVATE_DIAGNOSTIC_NAME_RE = re.compile(
     r"(?:^\.(?:env|ssh|gnupg|aws|config)(?:\.|$)|(?:secret|credential|password|token|private[-_]?key)|\.(?:pem|p12|pfx|key)(?:\.|$))", re.IGNORECASE)
 DIAGNOSTIC_TOPICS = frozenset(("processes", "service", "logs", "disk"))
 DIAGNOSTIC_MAX_OUTPUT = 24576
-DIAGNOSTIC_MAX_ENTRIES = 20000
+DIAGNOSTIC_MAX_ENTRIES = 200000
 DIAGNOSTIC_SECONDS = 3
+DISK_DIAGNOSTIC_SECONDS = 5
 SERVICE_PROPERTIES = ("Id", "LoadState", "ActiveState", "SubState", "MainPID", "NRestarts",
                       "ExecMainStatus", "MemoryCurrent", "CPUUsageNSec", "ActiveEnterTimestamp")
 MAX_BODY = 8192
@@ -226,22 +227,22 @@ def disk_diagnostic(path):
         root_fd = open_diagnostic_directory(path)
     except OSError:
         raise MaintenanceError("diagnostic_path_unavailable", 404) from None
-    deadline, scanned, skipped = time.monotonic() + DIAGNOSTIC_SECONDS, 0, 0
-    limited = False
+    deadline, scanned, skipped = time.monotonic() + DISK_DIAGNOSTIC_SECONDS, 0, 0
     seen = set()
     try:
         device = os.fstat(root_fd).st_dev
 
         def measure(fd, current_path, depth, children=None):
-            nonlocal scanned, skipped, limited
+            nonlocal scanned, skipped
             total, direct = os.fstat(fd).st_blocks * 512, 0
+            complete, pending_directories = True, []
             try:
                 with os.scandir(fd) as iterator:
                     for item in iterator:
-                        scanned += 1
-                        if scanned > DIAGNOSTIC_MAX_ENTRIES or time.monotonic() > deadline:
-                            limited = True
+                        if scanned >= DIAGNOSTIC_MAX_ENTRIES or time.monotonic() > deadline:
+                            complete = False
                             break
+                        scanned += 1
                         child_path = current_path.rstrip("/") + "/" + item.name
                         if PRIVATE_DIAGNOSTIC_NAME_RE.search(item.name) or any(child_path == private or child_path.startswith(private + "/") for private in PRIVATE_DIAGNOSTIC_PATHS):
                             skipped += 1
@@ -252,22 +253,9 @@ def disk_diagnostic(path):
                                 skipped += 1
                                 continue
                             if stat.S_ISDIR(info.st_mode):
-                                if depth >= MAX_DEPTH:
-                                    limited = True
-                                    continue
-                                child_fd = os.open(item.name, DIR_FLAGS, dir_fd=fd)
-                                try:
-                                    actual = os.fstat(child_fd)
-                                    if (info.st_dev, info.st_ino) != (actual.st_dev, actual.st_ino):
-                                        skipped += 1
-                                        continue
-                                    size, _ = measure(child_fd, child_path, depth + 1)
-                                finally:
-                                    os.close(child_fd)
-                                total += size
-                                if children is not None:
-                                    children.append({"name": redact_diagnostic_text(item.name, 120), "path": child_path if child_path in DIAGNOSTIC_PATHS else None,
-                                                     "bytes": size, "queryable": child_path in DIAGNOSTIC_PATHS})
+                                # Enumerate immediate directories first. A deep
+                                # first sibling must not hide all other names.
+                                pending_directories.append((item.name, child_path, info.st_dev, info.st_ino))
                             elif stat.S_ISREG(info.st_mode):
                                 key = (info.st_dev, info.st_ino)
                                 if key not in seen:
@@ -277,18 +265,44 @@ def disk_diagnostic(path):
                                     direct += size
                         except OSError:
                             skipped += 1
+                            complete = False
             except OSError:
                 skipped += 1
-            return total, direct
+                complete = False
+            for name, child_path, child_device, child_inode in pending_directories:
+                size, child_complete = 0, False
+                if depth < MAX_DEPTH and scanned < DIAGNOSTIC_MAX_ENTRIES and time.monotonic() <= deadline:
+                    try:
+                        child_fd = os.open(name, DIR_FLAGS, dir_fd=fd)
+                        try:
+                            actual = os.fstat(child_fd)
+                            if (child_device, child_inode) == (actual.st_dev, actual.st_ino):
+                                size, _, child_complete = measure(child_fd, child_path, depth + 1)
+                            else:
+                                skipped += 1
+                        finally:
+                            os.close(child_fd)
+                    except OSError:
+                        skipped += 1
+                complete = complete and child_complete
+                total += size
+                if children is not None:
+                    children.append({"name": redact_diagnostic_text(name, 120), "path": child_path if child_path in DIAGNOSTIC_PATHS else None,
+                                     "bytes": size if child_complete else None, "scannedBytes": size,
+                                     "complete": child_complete, "queryable": child_path in DIAGNOSTIC_PATHS})
+            return total, direct, complete
 
         children = []
-        total, direct = measure(root_fd, path, 0, children)
-        return {"topic": "disk", "path": path, "bytes": total, "directFilesBytes": direct,
-                "directories": sorted(children, key=lambda item: (-item["bytes"], item["name"]))[:20],
-                "limited": limited or len(children) > 20, "scannedEntries": min(scanned, DIAGNOSTIC_MAX_ENTRIES),
+        total, direct, complete = measure(root_fd, path, 0, children)
+        return {"topic": "disk", "path": path, "bytes": total if complete else None,
+                "scannedBytes": total, "complete": complete,
+                "directFilesBytes": direct if complete else None, "scannedDirectFilesBytes": direct,
+                "directories": sorted(children, key=lambda item: (item["complete"], -item["scannedBytes"], item["name"]))[:20],
+                "limited": not complete, "directoryListTruncated": len(children) > 20,
+                "scannedEntries": scanned,
                 "skippedEntries": skipped, "metadataOnly": True, "privateEntriesExcluded": True,
                 "scope": "same_filesystem_excluding_private_entries",
-                "measurement": "allocated_bytes_partial" if limited else "allocated_bytes"}
+                "measurement": "allocated_bytes" if complete else "allocated_bytes_partial_lower_bound"}
     finally:
         os.close(root_fd)
 
