@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState, type FormEvent } from 'react';
+import Link from 'next/link';
 
 type Session = { registered?: boolean; status?: string; isAdmin?: boolean };
 type Message = { id: number; role: 'user' | 'assistant'; text: string; confirmed?: boolean };
@@ -53,12 +54,12 @@ export default function ServerAssistant() {
   function submit(event: FormEvent) { event.preventDefault(); void send(); }
 
   return <main className="server-assistant">
-    <header className="server-assistant-header"><a href="/" className="server-assistant-brand">OriginMind <span>OA</span></a><a href="/" className="server-assistant-back">返回工作台 ↗</a></header>
+    <header className="server-assistant-header"><Link href="/" className="server-assistant-brand">OriginMind <span>OA</span></Link><Link href="/" className="server-assistant-back">返回工作台 ↗</Link></header>
     <section className="server-assistant-heading"><span className="server-assistant-eyebrow">管理专用</span><h1>服务器助手</h1><p>阿里云与腾讯云</p></section>
     {access !== 'admin' ? <section className="server-assistant-access" aria-live="polite">
       <h2>{access === 'loading' ? '正在核对登录状态…' : access === 'denied' ? '此通道仅供 OA 管理员使用' : access === 'error' ? '暂时无法核对登录状态' : '登录后使用服务器助手'}</h2>
       <p>{access === 'loading' ? '请稍候。' : '请使用您的 OA 管理员账号进入。'}</p>
-      {access !== 'loading' && <a href="/" className="server-assistant-login">返回 OA 登录</a>}
+      {access !== 'loading' && <Link href="/" className="server-assistant-login">返回 OA 登录</Link>}
     </section> : <>
       <section className="server-assistant-chat" aria-label="服务器查询与清理通道">
         <div className="server-assistant-chatbar"><span><i /> 管理员身份已验证</span><button type="button" disabled={busy || messages.length === 0} onClick={() => { setMessages([]); setError(''); }}>清空本页</button></div>
