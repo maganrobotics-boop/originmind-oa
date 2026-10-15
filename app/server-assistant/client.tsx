@@ -46,7 +46,7 @@ function AssistantAnswer({ answer }: { answer: string }) {
       const pre = document.createElement('pre');
       const block = document.createElement('code');
       block.textContent = code.join('\n');
-      pre.append(block); fragment.append(pre); code = [];
+      pre.appendChild(block); fragment.appendChild(pre); code = [];
     };
     for (const line of userFacingAnswer(answer).split(/\r?\n/u)) {
       if (closingFence) {
