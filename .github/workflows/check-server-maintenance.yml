@@ -5,11 +5,17 @@ on:
     paths:
       - 'integrations/server-maintenance/**'
       - 'tests/server-maintenance*'
+      - 'lib/server-maintenance-ask*'
+      - 'app/api/lab-ai/ask/route.ts'
+      - 'lib/oa-chat-indicators.mjs'
       - '.github/workflows/check-server-maintenance.yml'
   pull_request:
     paths:
       - 'integrations/server-maintenance/**'
       - 'tests/server-maintenance*'
+      - 'lib/server-maintenance-ask*'
+      - 'app/api/lab-ai/ask/route.ts'
+      - 'lib/oa-chat-indicators.mjs'
       - '.github/workflows/check-server-maintenance.yml'
 
 permissions:
@@ -24,5 +30,5 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
-      - run: node --test tests/server-maintenance-conversation.test.mjs
+      - run: node --test tests/server-maintenance-conversation.test.mjs tests/server-maintenance-ask.test.mjs tests/server-maintenance-api.test.mjs tests/oa-chat-indicators.test.mjs
       - run: sudo python3 tests/server-maintenance-agent.test.py

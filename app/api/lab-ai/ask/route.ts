@@ -4,6 +4,7 @@ import { answerOaChatQuestion, questionRequestsKnowledgeImages, type OaChatHisto
 import { isWellFormedUnicode, rankKnowledgeChunks } from "../../../../lib/knowledge-policy";
 import { getActiveKnowledgeChunks, type KnowledgeActor } from "../../../../lib/knowledge-store";
 import { consumeWriteRateLimit } from "../../../../lib/write-rate-limit";
+import { answerServerMaintenanceQuestion } from "../../../../lib/server-maintenance-ask.mjs";
 import { getAuthorizedUser } from "../../_lib/auth";
 
 const MAX_ASK_REQUEST_BYTES = 25_000;
@@ -76,6 +77,8 @@ export async function POST(request: Request) {
   try {
     const db = await getDb();
     if (!(await consumeWriteRateLimit(db, { actorSubject: authorized.accountUserId, scope: "lab_ai_ask", limit: MAX_QUESTIONS_PER_MINUTE }))) return finish(privateJson({ error: "提问过于频繁，请稍后再试。" }, { status: 429, headers: { "retry-after": "60" } }));
+    const maintenance = await answerServerMaintenanceQuestion(request, question);
+    if (maintenance) return finish(privateJson({ ...maintenance, citations: [], images: [] }));
     const actor: KnowledgeActor = {
       memberId: authorized.memberId, accountUserId: authorized.accountUserId, memberMutationRevision: authorized.memberMutationRevision,
       name: authorized.user.displayName, email: authorized.user.email, isAdmin: authorized.isAdmin,

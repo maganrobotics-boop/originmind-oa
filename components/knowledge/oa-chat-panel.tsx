@@ -25,7 +25,7 @@ import { toast } from 'sonner';
 
 type Image = { url: string; alt: string; mimeType: string };
 type Turn = { id: string; order: number; question: string; answer: string; citations: KnowledgeCitation[]; images: Image[]; failed?: boolean };
-type Reply = { answer?: string; citations?: KnowledgeCitation[]; images?: Image[]; error?: string; mode?: string; fallbackReason?: string };
+type Reply = { answer?: string; citations?: KnowledgeCitation[]; images?: Image[]; error?: string; mode?: string; fallbackReason?: string; operationConfirmed?: boolean };
 
 type EditableImage = { path: string; alt: string; file?: File; sourceUrl?: string };
 const meetingModePrompt = '@会议模式919700881';

@@ -35,17 +35,31 @@ test('unrelated questions leave the existing research conversation untouched', a
   assert.equal(await handler(request(), '服务器'.repeat(1000)), null);
   assert.equal(calls.length + sessions.length, 0);
 });
-test('requires a cookie and a current authenticated administrator with NDA admission', async () => {
+test('requires a cookie and a current active authenticated administrator', async () => {
   const f = fixture();
-  assert.match((await f.handler(request(''), '查两个服务器空间')).answer, /仅向已登录/);
+  const missingCookie = await f.handler(request(''), '查两个服务器空间');
+  assert.match(missingCookie.answer, /仅向已登录/);
+  assert.equal(missingCookie.operationConfirmed, false);
   assert.equal(f.calls.length, 0);
-  for (const invalid of [{ ...session, isAdmin: false }, { ...session, ndaCompleted: false }, { ...session, registered: false }, { ...session, status: 'departed' }, { ...session, user: {} }]) {
+  for (const invalid of [{ ...session, isAdmin: false }, { ...session, isAdmin: false, ndaCompleted: false }, { ...session, registered: false }, { ...session, status: 'departed' }, { ...session, status: 'rejected' }, { ...session, user: {} }]) {
     const g = fixture({ sessionFetch: async () => response(invalid) });
-    assert.match((await g.handler(request(), '查两个服务器空间')).answer, /没有此权限/);
+    const denied = await g.handler(request(), '查两个服务器空间');
+    assert.match(denied.answer, /没有此权限/);
+    assert.equal(denied.operationConfirmed, false);
     assert.equal(g.calls.length, 0);
   }
   const broken = fixture({ sessionFetch: async () => { throw new Error('private failure'); } });
-  assert.match((await broken.handler(request(), '查两个服务器空间')).answer, /会话验证失败/);
+  const failedSession = await broken.handler(request(), '查两个服务器空间');
+  assert.match(failedSession.answer, /会话验证失败/);
+  assert.equal(failedSession.operationConfirmed, false);
+});
+test('matches OA administrator NDA bypass while still verifying the active administrator session', async () => {
+  const f = fixture({ sessionFetch: async () => response({ ...session, ndaCompleted: false }) });
+  const result = await f.handler(request(), '查两个服务器空间');
+  assert.equal(result.mode, 'server_maintenance');
+  assert.equal(result.operationConfirmed, true);
+  assert.match(result.answer, /阿里云[\s\S]*50.00 GiB[\s\S]*腾讯云/);
+  assert.equal(f.calls.length, 2);
 });
 test('fixed loopback session verification ignores supplied identity headers', async () => {
   const f = fixture();
@@ -59,6 +73,7 @@ test('fixed loopback session verification ignores supplied identity headers', as
 test('queries both servers, signs each exact request, and formats verified status in Chinese', async () => {
   const f = fixture(), result = await f.handler(request(), '查询两个服务器磁盘、内存、CPU和服务状态');
   assert.equal(result.mode, 'server_maintenance');
+  assert.equal(result.operationConfirmed, true);
   assert.match(result.answer, /阿里云[\s\S]*50.00 GiB[\s\S]*腾讯云/);
   assert.match(result.answer, /2026\/10\/15 14:00:00（北京时间）/);
   assert.match(result.answer, /originmind-oa：active/);
@@ -73,22 +88,29 @@ test('queries both servers, signs each exact request, and formats verified statu
 });
 test('denies SSRF configuration before sending backend requests', async () => {
   const f = fixture({ config: { servers: { aliyun: { url: 'http://169.254.169.254/latest/meta-data', secret } } } });
-  assert.match((await f.handler(request(), '查阿里云磁盘空间')).answer, /连接配置无效/);
+  const result = await f.handler(request(), '查阿里云磁盘空间');
+  assert.match(result.answer, /连接配置无效/);
+  assert.equal(result.operationConfirmed, false);
   assert.equal(f.calls.length, 0);
 });
 test('cleanup questions and quoted or combined commands only preview, negation never cleans', async () => {
   for (const question of ['可以清理两个服务器吗？', '怎么清理腾讯云临时文件', '“清理两个服务器的临时文件”', '清理阿里云临时文件；重启服务', '清理腾讯云 /tmp 文件', '清理两个服务器的临时文件吗？']) {
     const f = fixture(), result = await f.handler(request(), question);
     assert.match(result.answer, /清理预览/);
+    assert.equal(result.operationConfirmed, true);
     assert.ok(f.calls.every(call => call.body.action === 'plan'));
   }
   for (const question of ['不要清理两个服务器的临时文件', '别清理腾讯云缓存', '取消清理阿里云临时文件']) {
-    const f = fixture(); assert.match((await f.handler(request(), question)).answer, /未执行清理/); assert.equal(f.calls.length, 0);
+    const f = fixture(), result = await f.handler(request(), question);
+    assert.match(result.answer, /未执行清理/);
+    assert.equal(result.operationConfirmed, false);
+    assert.equal(f.calls.length, 0);
   }
 });
 test('explicit current cleanup command plans then cleans both servers with bound plan IDs', async () => {
   const f = fixture(), result = await f.handler(request(), '清理两个服务器的临时文件');
   assert.match(result.answer, /实际删除 2 项/);
+  assert.equal(result.operationConfirmed, true);
   assert.equal(f.calls.length, 4);
   for (const url of Object.values(config.servers).map(v => v.url)) {
     const calls = f.calls.filter(c => c.url === url);
@@ -102,9 +124,26 @@ test('reports each unavailable server separately and never invents cleanup succe
   const f = fixture({ backendFetch: async (url) => { if (url.startsWith('https:')) throw new Error('secret network error'); return backendResponse(status, url, 'status'); } });
   const result = await f.handler(request(), '查两个服务器空间');
   assert.match(result.answer, /阿里云[\s\S]*50.00 GiB[\s\S]*腾讯云：维护查询或操作未确认完成/);
+  assert.equal(result.operationConfirmed, false);
   assert.doesNotMatch(result.answer, /secret network/);
   const g = fixture({ backendFetch: async () => response({ planId: 'bad' }) });
-  assert.doesNotMatch((await g.handler(request(), '清理两个服务器的临时文件')).answer, /已完成/);
+  const failedCleanup = await g.handler(request(), '清理两个服务器的临时文件');
+  assert.doesNotMatch(failedCleanup.answer, /已完成/);
+  assert.equal(failedCleanup.operationConfirmed, false);
+});
+
+test('partial plan or cleanup receipts cannot confirm an operation across both servers', async () => {
+  for (const question of ['预览两个服务器临时文件清理', '清理两个服务器的临时文件']) {
+    const f = fixture({ backendFetch: async (url, options) => {
+      const action = JSON.parse(options.body).action;
+      if (url.startsWith('https:')) throw new Error('unavailable');
+      return backendResponse(action === 'plan' ? { ok: true, planId, candidateCount: 2, candidateBytes: 2048 }
+        : { ok: true, deletedCount: 2, deletedBytes: 2048, diskBefore: { availableBytes: 10 * 2 ** 30 }, diskAfter: { availableBytes: 10 * 2 ** 30 + 2048 } }, url, action);
+    } });
+    const result = await f.handler(request(), question);
+    assert.equal(result.operationConfirmed, false);
+    assert.match(result.answer, /阿里云[\s\S]*腾讯云：维护查询或操作未确认完成/);
+  }
 });
 test('rejects redirected or oversized backend responses', async () => {
   for (const backendFetch of [async () => new Response(null, { status: 302, headers: { location: 'https://evil.invalid' } }), async () => response({ value: 'x'.repeat(33 * 1024) })]) {
@@ -160,7 +199,9 @@ test('malformed success receipts cannot produce a completed cleanup claim', asyn
     const action = JSON.parse(options.body).action;
     return backendResponse(action === 'plan' ? { ok: true, planId } : { ok: true }, url, action);
   } });
-  assert.doesNotMatch((await f.handler(request(), '清理两个服务器的临时文件')).answer, /已完成限定临时文件清理/);
+  const result = await f.handler(request(), '清理两个服务器的临时文件');
+  assert.doesNotMatch(result.answer, /已完成限定临时文件清理/);
+  assert.equal(result.operationConfirmed, false);
 });
 
 test('binds every backend receipt to the requested server and action', async () => {
@@ -202,6 +243,7 @@ test('prevents concurrent maintenance commands for the same administrator', asyn
   const first = f.handler(request(), '查阿里云空间'); await ready;
   const second = await f.handler(request(), '请清理阿里云临时文件');
   assert.match(second.answer, /已有一项服务器维护/);
+  assert.equal(second.operationConfirmed, false);
   assert.equal(backendCalls, 1);
   release(); assert.match((await first).answer, /50.00 GiB/);
 });
