@@ -8,12 +8,12 @@ export { questionAllowsGeneralKnowledge, questionPrefersGeneralKnowledge, questi
 
 export type OaChatImage = { url: string; alt: string; mimeType: string };
 export type OaChatHistory = Array<{ role: 'user'; content: string }>;
-type BridgeResponse = { received?: boolean; answer?: string; mode?: string; provider?: string; fallbackReason?: string; modelReady?: boolean; budgetReady?: boolean; bridgeReady?: boolean };
+type BridgeResponse = { received?: boolean; answer?: string; mode?: string; provider?: string; fallbackReason?: string; modelReady?: boolean; budgetReady?: boolean; bridgeReady?: boolean; message?: unknown; finishReason?: string };
 function prefix(value: string, maximum: number) {
   const result = String(value || '').slice(0, maximum);
   return /[\uD800-\uDBFF]$/u.test(result) ? result.slice(0, -1) : result;
 }
-async function bridge(payload: object, timeoutMs: number): Promise<BridgeResponse> {
+async function bridge(payload: object, timeoutMs: number, signal?: AbortSignal): Promise<BridgeResponse> {
   const { env } = await import('cloudflare:workers');
   const bindings = env as typeof env & {
     PUBLIC_LAB_AI_SERVICE_TOKEN?: string;
@@ -32,7 +32,7 @@ async function bridge(payload: object, timeoutMs: number): Promise<BridgeRespons
     method: 'POST', headers: await signOaChatRequest(body, secret), body,
     // Manual mode works across workerd versions and never follows a Location.
     // The !response.ok guard below rejects every 3xx before reading its body.
-    cache: 'no-store', redirect: 'manual', credentials: 'omit', signal: AbortSignal.timeout(timeoutMs),
+    cache: 'no-store', redirect: 'manual', credentials: 'omit', signal: AbortSignal.any([AbortSignal.timeout(timeoutMs), ...(signal ? [signal] : [])]),
   });
   if (!response.ok) {
     await response.body?.cancel().catch(() => {});
@@ -90,6 +90,16 @@ export async function oaChatModelStatus() {
     const result = await bridge({ operation: 'status' }, 12000);
     return { bridgeReady: result.bridgeReady === true, modelReady: result.modelReady === true, budgetReady: result.budgetReady === true };
   } catch { return { bridgeReady: false, modelReady: false, budgetReady: false }; }
+}
+
+/** Private tool-selection turn. Credentials and model budget remain in Chat;
+ * server authority and the conversation transcript remain in the OA host. */
+export async function serverAgentModelTurn(payload: object, options: { signal?: AbortSignal } = {}) {
+  options.signal?.throwIfAborted();
+  const result = await bridge(payload, 50000, options.signal);
+  options.signal?.throwIfAborted();
+  if (result.mode !== 'server_agent_turn' || !result.message) throw new Error('SERVER_AGENT_MODEL_PROTOCOL');
+  return result;
 }
 const ROBOT_IMAGE_KIND_PATTERN = /(?:四足|轮足|轮式|双臂|机械臂|开放式|人形|履带|无人机)/gu;
 function imageChunkScore(question: string, chunk: RankedKnowledgeChunk, refs: Map<string, string>): number {

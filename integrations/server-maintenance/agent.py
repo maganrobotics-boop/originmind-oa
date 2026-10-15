@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Private, fixed-action server maintenance agent. Python 3 standard library only.
+"""Private, typed-action server maintenance agent. Python 3 standard library only.
 
 Production listens exclusively on 127.0.0.1:18893. The caller cannot supply a
-command, service, filename, directory, or cleanup rule. Secrets stay in a root
+command, arbitrary service, filename, directory, or cleanup rule. Secrets stay in a root
 owned configuration file and are never returned or written to the audit log.
 """
 
@@ -15,6 +15,7 @@ import json
 import os
 import platform
 import re
+import selectors
 import secrets
 import socket
 import stat
@@ -32,6 +33,22 @@ SERVICES = {
     "aliyun": ("nginx.service", "originmind-oa.service", "originmind-chat.service"),
     "tencent": ("nginx.service", "docker.service", "originmind-arena.service", "originmind-cloud-mcp.service"),
 }
+DIAGNOSTIC_PATHS = frozenset((
+    "/", "/var", "/var/log", "/var/cache", "/var/lib", "/var/lib/docker",
+    "/var/lib/containerd", "/opt", "/opt/omindos-deploy", "/usr", "/usr/local",
+    "/usr/share", "/tmp", "/tmp/omindos-ai-maintenance", "/var/cache/omindos-maintenance",
+))
+PRIVATE_DIAGNOSTIC_PATHS = ("/etc", "/root", "/home", "/run", "/proc", "/sys", "/dev",
+                            "/var/lib/originmind-mcp")
+PRIVATE_DIAGNOSTIC_NAME_RE = re.compile(
+    r"(?:^\.(?:env|ssh|gnupg|aws|config)(?:\.|$)|(?:secret|credential|password|token|private[-_]?key)|\.(?:pem|p12|pfx|key)(?:\.|$))", re.IGNORECASE)
+DIAGNOSTIC_TOPICS = frozenset(("processes", "service", "logs", "disk"))
+DIAGNOSTIC_MAX_OUTPUT = 24576
+DIAGNOSTIC_MAX_ENTRIES = 200000
+DIAGNOSTIC_SECONDS = 3
+DISK_DIAGNOSTIC_SECONDS = 5
+SERVICE_PROPERTIES = ("Id", "LoadState", "ActiveState", "SubState", "MainPID", "NRestarts",
+                      "ExecMainStatus", "MemoryCurrent", "CPUUsageNSec", "ActiveEnterTimestamp")
 MAX_BODY = 8192
 MAX_FILES = 500
 MAX_BYTES = 500 * 1024 * 1024
@@ -49,6 +66,256 @@ AUTH_RE = re.compile(r"^Maintenance-HMAC ([a-fA-F0-9]{64})$")
 PROTECTED_NAME_RE = re.compile(r"(?:^\.env(?:\.|$)|(?:key|secret|credential|password|token|database|backup|upload|deploy)|\.(?:pem|p12|pfx|crt|db|sqlite|sqlite3|log|jsonl)(?:\.|$))", re.IGNORECASE)
 DIR_FLAGS = os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
 FILE_FLAGS = os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC | os.O_NONBLOCK
+
+
+def redact_diagnostic_text(value, limit=512):
+    """Journal data is untrusted. Remove control characters and common secrets/PII."""
+    value = str(value)
+    if re.search(r"-----BEGIN (?:[A-Z ]*PRIVATE KEY|OPENSSH PRIVATE KEY)-----", value):
+        return "[private key material redacted]"
+    value = re.sub(r"\x1b\[[0-?]*[ -/]*[@-~]", "", value)
+    value = "".join(character if character >= " " and character != "\x7f" else " " for character in value)
+    value = re.sub(r"(?i)\b(authorization|cookie|set-cookie)[\s\"']*[:=].*", r"\1=[redacted]", value)
+    value = re.sub(r"(?i)\b((?:[A-Za-z][A-Za-z0-9_-]*[_-])?(?:password|passwd|secret|token|api[-_]?key|access[-_]?key|client[-_]?secret|session[-_]?id))\b[\"']*\s*[:=]\s*(?:\"[^\"]*\"|'[^']*'|[^\s,;}]+)", r"\1=[redacted]", value)
+    value = re.sub(r"(?i)\b(Bearer|Basic)\s+[A-Za-z0-9._~+/-]+=*", r"\1 [redacted]", value)
+    value = re.sub(r"\b(?:sk-(?:proj-)?[A-Za-z0-9_-]{12,}|AKIA[A-Z0-9]{16}|[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,}\.[A-Za-z0-9_-]{16,})\b", "[credential redacted]", value)
+    value = re.sub(r"(?i)([a-z][a-z0-9+.-]*://)[^\s/@]+:[^\s/@]+@", r"\1[redacted]@", value)
+    value = re.sub(r"([?&](?:code|key|token|secret|password|signature|access_token)=)[^&\s]+", r"\1[redacted]", value, flags=re.IGNORECASE)
+    value = re.sub(r"\b[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", "[email redacted]", value)
+    return value[:limit] + ("…" if len(value) > limit else "")
+
+
+def bounded_command(arguments, *, max_bytes=DIAGNOSTIC_MAX_OUTPUT, timeout=DIAGNOSTIC_SECONDS):
+    """No shell, inherited credentials, or unbounded communicate() buffers."""
+    output = bytearray()
+    limited = False
+    deadline = time.monotonic() + timeout
+    try:
+        process = subprocess.Popen(arguments, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
+                                   stderr=subprocess.DEVNULL, close_fds=True,
+                                   env={"PATH": "/usr/bin:/bin", "LC_ALL": "C", "SYSTEMD_COLORS": "0"})
+    except OSError:
+        raise MaintenanceError("diagnostic_unavailable", 503) from None
+    try:
+        with selectors.DefaultSelector() as selector:
+            selector.register(process.stdout, selectors.EVENT_READ)
+            while True:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    limited = True
+                    break
+                if not selector.select(remaining):
+                    limited = True
+                    break
+                block = os.read(process.stdout.fileno(), min(4096, max_bytes + 1 - len(output)))
+                if not block:
+                    break
+                output.extend(block)
+                if len(output) > max_bytes:
+                    limited = True
+                    break
+        if limited:
+            process.kill()
+        process.wait(timeout=1)
+        if process.returncode != 0 and not limited:
+            raise MaintenanceError("diagnostic_unavailable", 503)
+        return output[:max_bytes].decode("utf-8", "replace"), limited
+    finally:
+        process.stdout.close()
+        if process.poll() is None:
+            process.kill()
+            process.wait(timeout=1)
+
+
+def process_sample():
+    result = {}
+    with os.scandir("/proc") as entries:
+        for count, entry in enumerate(entries):
+            if count >= 16384:
+                break
+            if not entry.name.isascii() or not entry.name.isdigit():
+                continue
+            try:
+                with open("/proc/" + entry.name + "/stat", encoding="utf-8", errors="replace") as handle:
+                    raw = handle.read(4096)
+                start, end = raw.index("("), raw.rindex(")")
+                fields = raw[end + 2:].split()
+                if len(fields) < 22:
+                    continue
+                ticks, started, rss = int(fields[11]) + int(fields[12]), int(fields[19]), int(fields[21])
+                result[int(entry.name)] = {"pid": int(entry.name), "name": redact_diagnostic_text(raw[start + 1:end], 64),
+                    "uid": entry.stat(follow_symlinks=False).st_uid, "state": fields[0],
+                    "residentBytes": max(0, rss) * os.sysconf("SC_PAGE_SIZE"), "cpuTicks": ticks, "started": started}
+            except (OSError, ValueError, IndexError):
+                continue
+    return result
+
+
+def process_diagnostic():
+    first, started = process_sample(), time.monotonic()
+    time.sleep(0.2)
+    second = process_sample()
+    elapsed = max(time.monotonic() - started, 0.001)
+    ticks_per_second = os.sysconf("SC_CLK_TCK")
+    for pid, item in second.items():
+        prior = first.get(pid)
+        item["cpuPercent"] = round(max(0, item["cpuTicks"] - prior["cpuTicks"]) * 100 / ticks_per_second / elapsed, 1) if prior and item["started"] == prior["started"] else 0.0
+        del item["started"]
+    return {"topic": "processes", "processCount": len(second), "sampleSeconds": round(elapsed, 3),
+            "cpuPercentBasis": "one_core", "topCpu": sorted(second.values(), key=lambda item: (-item["cpuPercent"], -item["residentBytes"], item["pid"]))[:10],
+            "topMemory": sorted(second.values(), key=lambda item: (-item["residentBytes"], item["pid"]))[:10]}
+
+
+def service_diagnostic(service):
+    output, limited = bounded_command(["/usr/bin/systemctl", "show", service, "--no-pager",
+                                       "--property=" + ",".join(SERVICE_PROPERTIES)], max_bytes=4096)
+    properties = {}
+    for line in output.splitlines():
+        name, separator, value = line.partition("=")
+        if separator and name in SERVICE_PROPERTIES:
+            properties[name] = redact_diagnostic_text(value, 160)
+    return {"topic": "service", "service": service, "properties": properties, "limited": limited}
+
+
+def log_diagnostic(service):
+    output, limited = bounded_command(["/usr/bin/journalctl", "--unit=" + service, "--since=-1 hour", "--lines=50",
+                                       "--no-pager", "--output=json", "--output-fields=MESSAGE,__REALTIME_TIMESTAMP,PRIORITY"])
+    entries, encoded_bytes = [], 0
+    for line in output.splitlines():
+        try:
+            item = json.loads(line)
+            if not isinstance(item, dict) or not isinstance(item.get("MESSAGE"), str):
+                continue
+            stamp = str(item.get("__REALTIME_TIMESTAMP", ""))
+            priority = str(item.get("PRIORITY", ""))
+            entry = {"timestampMicros": stamp if stamp.isdigit() and len(stamp) <= 20 else "",
+                     "priority": priority if priority in tuple(str(number) for number in range(8)) else "",
+                     "message": redact_diagnostic_text(item["MESSAGE"], 320)}
+            size = len(json.dumps(entry, ensure_ascii=True).encode("ascii"))
+            if encoded_bytes + size > 16000:
+                limited = True
+                break
+            entries.append(entry)
+            encoded_bytes += size
+        except (ValueError, TypeError):
+            limited = True
+    return {"topic": "logs", "service": service, "sinceSeconds": 3600,
+            "entries": entries[-50:], "limited": limited, "redacted": True,
+            "sourceIsUntrusted": True}
+
+
+def open_diagnostic_directory(path):
+    fd = os.open("/", DIR_FLAGS)
+    try:
+        for component in path.split("/")[1:]:
+            if not component:
+                continue
+            next_fd = os.open(component, DIR_FLAGS, dir_fd=fd)
+            os.close(fd)
+            fd = next_fd
+        return fd
+    except BaseException:
+        os.close(fd)
+        raise
+
+
+def disk_diagnostic(path):
+    """Measure allocated blocks using metadata only; never open file contents."""
+    if path not in DIAGNOSTIC_PATHS:
+        raise MaintenanceError("invalid_diagnostic_path")
+    try:
+        root_fd = open_diagnostic_directory(path)
+    except OSError:
+        raise MaintenanceError("diagnostic_path_unavailable", 404) from None
+    deadline, scanned, skipped = time.monotonic() + DISK_DIAGNOSTIC_SECONDS, 0, 0
+    seen = set()
+    try:
+        device = os.fstat(root_fd).st_dev
+
+        def measure(fd, current_path, depth, children=None):
+            nonlocal scanned, skipped
+            total, direct = os.fstat(fd).st_blocks * 512, 0
+            complete, pending_directories = True, []
+            try:
+                with os.scandir(fd) as iterator:
+                    for item in iterator:
+                        if scanned >= DIAGNOSTIC_MAX_ENTRIES or time.monotonic() > deadline:
+                            complete = False
+                            break
+                        scanned += 1
+                        child_path = current_path.rstrip("/") + "/" + item.name
+                        if PRIVATE_DIAGNOSTIC_NAME_RE.search(item.name) or any(child_path == private or child_path.startswith(private + "/") for private in PRIVATE_DIAGNOSTIC_PATHS):
+                            skipped += 1
+                            continue
+                        try:
+                            info = item.stat(follow_symlinks=False)
+                            if info.st_dev != device or stat.S_ISLNK(info.st_mode):
+                                skipped += 1
+                                continue
+                            if stat.S_ISDIR(info.st_mode):
+                                # Enumerate immediate directories first. A deep
+                                # first sibling must not hide all other names.
+                                pending_directories.append((item.name, child_path, info.st_dev, info.st_ino))
+                            elif stat.S_ISREG(info.st_mode):
+                                key = (info.st_dev, info.st_ino)
+                                if key not in seen:
+                                    seen.add(key)
+                                    size = info.st_blocks * 512
+                                    total += size
+                                    direct += size
+                        except OSError:
+                            skipped += 1
+                            complete = False
+            except OSError:
+                skipped += 1
+                complete = False
+            for name, child_path, child_device, child_inode in pending_directories:
+                size, child_complete = 0, False
+                if depth < MAX_DEPTH and scanned < DIAGNOSTIC_MAX_ENTRIES and time.monotonic() <= deadline:
+                    try:
+                        child_fd = os.open(name, DIR_FLAGS, dir_fd=fd)
+                        try:
+                            actual = os.fstat(child_fd)
+                            if (child_device, child_inode) == (actual.st_dev, actual.st_ino):
+                                size, _, child_complete = measure(child_fd, child_path, depth + 1)
+                            else:
+                                skipped += 1
+                        finally:
+                            os.close(child_fd)
+                    except OSError:
+                        skipped += 1
+                complete = complete and child_complete
+                total += size
+                if children is not None:
+                    children.append({"name": redact_diagnostic_text(name, 120), "path": child_path if child_path in DIAGNOSTIC_PATHS else None,
+                                     "bytes": size if child_complete else None, "scannedBytes": size,
+                                     "complete": child_complete, "queryable": child_path in DIAGNOSTIC_PATHS})
+            return total, direct, complete
+
+        children = []
+        total, direct, complete = measure(root_fd, path, 0, children)
+        return {"topic": "disk", "path": path, "bytes": total if complete else None,
+                "scannedBytes": total, "complete": complete,
+                "directFilesBytes": direct if complete else None, "scannedDirectFilesBytes": direct,
+                "directories": sorted(children, key=lambda item: (item["complete"], -item["scannedBytes"], item["name"]))[:20],
+                "limited": not complete, "directoryListTruncated": len(children) > 20,
+                "scannedEntries": scanned,
+                "skippedEntries": skipped, "metadataOnly": True, "privateEntriesExcluded": True,
+                "scope": "same_filesystem_excluding_private_entries",
+                "measurement": "allocated_bytes" if complete else "allocated_bytes_partial_lower_bound"}
+    finally:
+        os.close(root_fd)
+
+
+def system_diagnostic(server, request):
+    topic = request["topic"]
+    if topic == "processes":
+        return process_diagnostic()
+    if topic == "service":
+        return service_diagnostic(request["service"])
+    if topic == "logs":
+        return log_diagnostic(request["service"])
+    return disk_diagnostic(request["path"])
 
 
 class MaintenanceError(Exception):
@@ -139,7 +406,8 @@ def system_status(server):
 class MaintenanceAgent:
     def __init__(self, server, secret, *, roots=ROOTS, clock=time.time,
                  audit_path="/var/log/originmind-maintenance.jsonl",
-                 status_provider=system_status, disk_provider=disk_status):
+                 status_provider=system_status, disk_provider=disk_status,
+                 diagnostic_provider=system_diagnostic):
         if server not in SERVICES or not isinstance(secret, str) or len(secret) < 32:
             raise ValueError("Invalid maintenance configuration")
         self.server = server
@@ -149,6 +417,7 @@ class MaintenanceAgent:
         self.audit_path = audit_path
         self.status_provider = status_provider
         self.disk_provider = disk_provider
+        self.diagnostic_provider = diagnostic_provider
         self.nonces = collections.OrderedDict()
         self.plans = collections.OrderedDict()
         self.lock = threading.Lock()
@@ -191,9 +460,27 @@ class MaintenanceAgent:
             data = json.loads(body.decode("utf-8"), object_pairs_hook=pairs)
         except (ValueError, UnicodeDecodeError, RecursionError):
             raise MaintenanceError("invalid_json") from None
-        if not isinstance(data, dict) or set(data) - {"action", "actor", "planId"}:
+        if not isinstance(data, dict) or set(data) - {"action", "actor", "planId", "topic", "service", "path"}:
             raise MaintenanceError("invalid_request")
-        if data.get("action") not in ("status", "plan", "clean") or not isinstance(data.get("actor"), str) or not ACTOR_RE.fullmatch(data["actor"]):
+        if data.get("action") not in ("status", "plan", "clean", "diagnostic") or not isinstance(data.get("actor"), str) or not ACTOR_RE.fullmatch(data["actor"]):
+            raise MaintenanceError("invalid_request")
+        if data["action"] == "diagnostic":
+            topic = data.get("topic")
+            if not isinstance(topic, str) or topic not in DIAGNOSTIC_TOPICS:
+                raise MaintenanceError("invalid_diagnostic")
+            expected = {"action", "actor", "topic"}
+            if topic in ("service", "logs"):
+                expected.add("service")
+                if not isinstance(data.get("service"), str) or data["service"] not in {item for units in SERVICES.values() for item in units}:
+                    raise MaintenanceError("invalid_service")
+            elif topic == "disk":
+                expected.add("path")
+                if not isinstance(data.get("path"), str) or data["path"] not in DIAGNOSTIC_PATHS:
+                    raise MaintenanceError("invalid_diagnostic_path")
+            if set(data) != expected:
+                raise MaintenanceError("invalid_request")
+            return data
+        if set(data) - {"action", "actor", "planId"}:
             raise MaintenanceError("invalid_request")
         if data["action"] == "clean":
             if not isinstance(data.get("planId"), str) or not PLAN_RE.fullmatch(data["planId"]):
@@ -375,6 +662,10 @@ class MaintenanceAgent:
                     result = self.status_provider(self.server)
                 elif action == "plan":
                     result = self.plan(actor)
+                elif action == "diagnostic":
+                    if request["topic"] in ("service", "logs") and request["service"] not in SERVICES[self.server]:
+                        raise MaintenanceError("invalid_service")
+                    result = self.diagnostic_provider(self.server, request)
                 else:
                     result = self.clean(actor, request["planId"])
             except MaintenanceError as error:
@@ -390,6 +681,8 @@ class MaintenanceAgent:
                     pass
                 raise MaintenanceError("internal_error", 500) from None
             audit_values = {key: result[key] for key in ("candidateCount", "candidateBytes", "deletedCount", "deletedBytes", "skippedCount", "idempotent") if key in result}
+            if action == "diagnostic":
+                audit_values["topic"] = request["topic"]
             try:
                 self.audit(actor, action, "ok", **audit_values)
             except (OSError, MaintenanceError):

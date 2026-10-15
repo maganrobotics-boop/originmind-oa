@@ -1,21 +1,69 @@
-name: Check restricted server maintenance
+name: Check server assistant and restricted maintenance
 
 on:
   push:
     paths:
       - 'integrations/server-maintenance/**'
       - 'tests/server-maintenance*'
+      - 'tests/server-agent*'
+      - 'tests/ai-assistant-api.test.mjs'
+      - 'tests/ai-workbench-bridge.test.mjs'
+      - 'tests/ai-workbench-tools.test.mjs'
+      - 'tests/ai-workbench-failure-diagnostics.test.mjs'
+      - 'tests/oa-chat-parity.test.mjs'
+      - 'tests/wecom-bot-model-stream.test.mjs'
       - 'lib/server-maintenance-ask*'
+      - 'lib/oa-chat-client.ts'
+      - 'lib/bounded-json-request.ts'
+      - 'lib/write-rate-limit.ts'
+      - 'chat-cloudflare/src/oa-chat-bridge*'
+      - 'chat-cloudflare/src/server-agent-bridge.mjs'
+      - 'chat-cloudflare/src/task-tool-model.mjs'
+      - 'chat-cloudflare/src/crypto.mjs'
+      - 'chat-cloudflare/src/knowledge.mjs'
+      - 'chat-cloudflare/src/app.mjs'
+      - 'app/api/server-maintenance/**'
+      - 'app/server-assistant/**'
+      - 'app/api/ai-assistant/**'
+      - 'app/ai-assistant/**'
+      - 'components/server-assistant-entry.tsx'
+      - 'app/page.tsx'
       - 'app/api/lab-ai/ask/route.ts'
-      - 'lib/oa-chat-indicators.mjs'
+      - 'components/knowledge/oa-chat-panel.tsx'
+      - 'lib/oa-chat-indicators*'
+      - 'tests/oa-chat-indicators.test.mjs'
       - '.github/workflows/check-server-maintenance.yml'
   pull_request:
     paths:
       - 'integrations/server-maintenance/**'
       - 'tests/server-maintenance*'
+      - 'tests/server-agent*'
+      - 'tests/ai-assistant-api.test.mjs'
+      - 'tests/ai-workbench-bridge.test.mjs'
+      - 'tests/ai-workbench-tools.test.mjs'
+      - 'tests/ai-workbench-failure-diagnostics.test.mjs'
+      - 'tests/oa-chat-parity.test.mjs'
+      - 'tests/wecom-bot-model-stream.test.mjs'
       - 'lib/server-maintenance-ask*'
+      - 'lib/oa-chat-client.ts'
+      - 'lib/bounded-json-request.ts'
+      - 'lib/write-rate-limit.ts'
+      - 'chat-cloudflare/src/oa-chat-bridge*'
+      - 'chat-cloudflare/src/server-agent-bridge.mjs'
+      - 'chat-cloudflare/src/task-tool-model.mjs'
+      - 'chat-cloudflare/src/crypto.mjs'
+      - 'chat-cloudflare/src/knowledge.mjs'
+      - 'chat-cloudflare/src/app.mjs'
+      - 'app/api/server-maintenance/**'
+      - 'app/server-assistant/**'
+      - 'app/api/ai-assistant/**'
+      - 'app/ai-assistant/**'
+      - 'components/server-assistant-entry.tsx'
+      - 'app/page.tsx'
       - 'app/api/lab-ai/ask/route.ts'
-      - 'lib/oa-chat-indicators.mjs'
+      - 'components/knowledge/oa-chat-panel.tsx'
+      - 'lib/oa-chat-indicators*'
+      - 'tests/oa-chat-indicators.test.mjs'
       - '.github/workflows/check-server-maintenance.yml'
 
 permissions:
@@ -30,5 +78,16 @@ jobs:
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version: '24'
-      - run: node --test tests/server-maintenance-conversation.test.mjs tests/server-maintenance-ask.test.mjs tests/server-maintenance-api.test.mjs tests/oa-chat-indicators.test.mjs
+      - run: >-
+          node --test tests/server-agent*.test.mjs
+          tests/server-maintenance-conversation.test.mjs
+          tests/server-maintenance-ask.test.mjs
+          tests/server-maintenance-api.test.mjs
+          tests/ai-assistant-api.test.mjs
+          tests/oa-chat-indicators.test.mjs
+          tests/oa-chat-parity.test.mjs
+          tests/wecom-bot-model-stream.test.mjs
+          tests/ai-workbench-bridge.test.mjs
+          tests/ai-workbench-tools.test.mjs
+          tests/ai-workbench-failure-diagnostics.test.mjs
       - run: sudo python3 tests/server-maintenance-agent.test.py
