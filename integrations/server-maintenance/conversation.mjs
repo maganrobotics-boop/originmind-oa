@@ -3,6 +3,7 @@ import { constants } from 'node:fs';
 import { lstat, open } from 'node:fs/promises';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
+import { createServerAgentConversation, cleanupAuthority } from './agent-conversation.mjs';
 
 const LIMIT = 32 * 1024;
 const TIMEOUT = 10_000;
@@ -153,9 +154,11 @@ function cleanAnswer(data) {
 export function createServerMaintenanceConversation({ port, configPath = '/etc/originmind-maintenance/oa-client.json', config, sessionFetch, backendFetch = nativeBackend } = {}) {
   if (!Number.isInteger(port) || port < 1024 || port > 65535) throw new Error('Invalid OA port');
   const actors = new Map();
-  return async (request, question, { signal } = {}) => {
+  const agent = createServerAgentConversation();
+  return async (request, question, { signal, dedicated = false, general = false, conversationId, model } = {}) => {
     const command = intent(question);
-    if (!command) return null;
+    if (!command && !dedicated) return null;
+    if (typeof question !== 'string' || question.length < 2 || question.length > 2000 || !question.isWellFormed()) return null;
     const reply = (answer, operationConfirmed = false) => ({ answer, mode: 'server_maintenance', operationConfirmed });
     const cookie = request.headers.get('cookie');
     if (!cookie || cookie.length > 16384) return reply('服务器查询和临时文件清理仅向已登录的 OA 管理员开放，请先登录管理员账号。');
@@ -171,7 +174,7 @@ export function createServerMaintenanceConversation({ port, configPath = '/etc/o
       typeof session.user?.email !== 'string' || !session.user.email.trim() || session.user.email.length > 320) {
       return reply('服务器查询和临时文件清理仅向已完成准入的 OA 管理员开放。当前账号没有此权限。');
     }
-    if (command.action === 'explain') return reply('未执行清理。可发送“查询两个服务器状态”或“预览两个服务器临时文件清理”。');
+    if (!dedicated && command.action === 'explain') return reply('未执行清理。可发送“查询两个服务器状态”或“预览两个服务器临时文件清理”。');
     const actor = createHash('sha256').update(session.user.email.trim().toLowerCase()).digest('hex');
     const now = Date.now();
     for (const [key, state] of actors) if (!state.inflight && now - state.windowStart >= 60_000) actors.delete(key);
@@ -181,14 +184,33 @@ export function createServerMaintenanceConversation({ port, configPath = '/etc/o
       state = { windowStart: now, count: 0, cleanCount: 0, inflight: false }; actors.set(actor, state);
     }
     if (state.inflight) return reply('您已有一项服务器维护正在处理，请等待回执后再操作。未重复执行。');
-    if (state.count >= 10 || (command.action === 'clean' && state.cleanCount >= 2)) return reply('服务器维护请求过于频繁，请一分钟后重试。未执行本次查询或清理。');
+    const cleanRequested = dedicated ? cleanupAuthority(question, {}, now).length > 0 || /^请?确认(?:执行)?清理[。！!]?$/u.test(question.trim()) : command.action === 'clean';
+    if (state.count >= 10 || (cleanRequested && state.cleanCount >= 2)) return reply('服务器维护请求过于频繁，请一分钟后重试。未执行本次查询或清理。');
     state.count += 1;
-    if (command.action === 'clean') state.cleanCount += 1;
+    if (cleanRequested) state.cleanCount += 1;
     state.inflight = true;
     try {
     let settings;
     try { settings = config ?? await readConfig(configPath); }
     catch { return reply('服务器维护连接尚未配置或配置不可读取，未执行查询或清理。'); }
+    if (dedicated) {
+      if (typeof model !== 'function') return reply('服务器自然语言模型暂不可用，请稍后重试。');
+      const call = async (id, action, parameters = {}, options = {}) => {
+        const target = TARGETS[id], connection = settings?.servers?.[id];
+        if (!target || !connection || connection.url !== target.url || typeof connection.secret !== 'string' || connection.secret.length < 32 || connection.secret.length > 4096) throw new Error('CONFIG_INVALID');
+        const body = JSON.stringify({ action, actor, ...parameters });
+        const timestamp = String(Math.floor(Date.now() / 1000)), nonce = randomBytes(24).toString('hex');
+        const signature = createHmac('sha256', connection.secret).update(`${timestamp}\n${nonce}\n${body}`).digest('hex');
+        const backendSignal = AbortSignal.any([combined(), ...(options.signal ? [options.signal] : [])]);
+        backendSignal.throwIfAborted();
+        const data = await responseJson(await backendFetch(target.url, { method: 'POST', redirect: 'error', signal: backendSignal,
+          headers: { 'content-type': 'application/json', accept: 'application/json', 'x-maintenance-time': timestamp,
+            'x-maintenance-nonce': nonce, authorization: `Maintenance-HMAC ${signature}` }, body }));
+        if (data.ok !== true || data.error || data.server !== id || data.action !== action) throw new Error('BACKEND_FAILED');
+        return data;
+      };
+      return await agent({ actor, question, conversationId, call, model, signal, general });
+    }
     const results = await Promise.all(command.servers.map(async id => {
       const target = TARGETS[id], connection = settings?.servers?.[id];
       try {

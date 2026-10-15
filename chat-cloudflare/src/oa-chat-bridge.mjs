@@ -7,6 +7,7 @@ import { decryptSecret } from './crypto.mjs';
 import { fallbackAnswer, aliyunEndpoint } from './knowledge.mjs';
 import { generateValidatedAnswer } from './answer-retry.mjs';
 import { answerMode } from './answer-mode.mjs';
+import { completeServerAgentTurn, validServerAgentPayload } from './server-agent-bridge.mjs';
 
 export const OA_CHAT_PATH = '/api/internal/oa-answer';
 export const OA_CHAT_ORIGIN = 'https://chat.omindos.ai';
@@ -56,6 +57,7 @@ async function authenticatedBody(request, secret, now) {
   return { body, nonce };
 }
 export function validOaChatPayload(value) {
+  if (value?.operation === 'server_agent_turn') return validServerAgentPayload(value);
   if (exactKeys(value, ['operation', 'task']) && value.operation === 'task') return validTaskInput(value.task);
   if (exactKeys(value, ['operation']) && value.operation === 'status') return true;
   const answerType = value?.answerType || 'grounded';
@@ -85,6 +87,7 @@ export async function handleOaChatBridge(context, engine, now = Date.now()) {
     const config = await engine.getModelConfig(context);
     taskPhase = 'provider_selection';
     const active = engine.modelProvider(context, config);
+    if (payload.operation === 'server_agent_turn') return json(await completeServerAgentTurn(context, engine, config, payload));
     if (payload.operation === 'status') {
       const [model, budgetReady] = await Promise.all([engine.currentModelStatus(context, config, active), engine.modelBudgetReady(context)]);
       return json({ received: true, bridgeReady: true, modelReady: model.ready === true && model.probePending !== true, budgetReady: budgetReady === true });
