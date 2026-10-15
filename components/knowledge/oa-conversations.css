@@ -103,3 +103,63 @@
 .oa-workspace .oa-chat-status-panel dt { font-weight:600; }
 .oa-workspace .oa-chat-status-panel dd { margin:0; color:#666; overflow-wrap:anywhere; }
 .oa-workspace .oa-chat-status-panel small { font-size:11px; color:#777; }
+
+/* Compact OA chat header (2026-09-28): no sidebar-button chrome in the topbar.
+   Keep the text in the accessibility tree; only its visual size is suppressed.
+   These overrides never affect sidebar buttons, other OA views or public Chat. */
+.oa-app.oa-workspace.oa-chat-open > .main-shell {
+  row-gap:0;
+  padding-block-start:0;
+}
+.oa-app.oa-workspace.oa-chat-open .topbar {
+  box-sizing:border-box;
+  flex:0 0 48px;
+  height:48px;
+  min-height:48px;
+  margin-block:0;
+  padding-block:0;
+}
+.oa-app.oa-workspace.oa-chat-open .topbar .oa-sidebar-new-chat,
+.oa-app.oa-workspace.oa-chat-open .topbar .oa-sidebar-new-chat:hover,
+.oa-app.oa-workspace.oa-chat-open .topbar .oa-sidebar-new-chat:active {
+  display:inline-flex;
+  align-items:center;
+  justify-content:center;
+  flex:0 0 44px;
+  width:44px;
+  min-width:44px;
+  height:44px;
+  min-height:44px;
+  margin:0;
+  padding:0;
+  gap:0;
+  border:0;
+  border-radius:0;
+  background:transparent;
+  color:#272727;
+  box-shadow:none;
+  font-size:0;
+  line-height:0;
+}
+.oa-app.oa-workspace.oa-chat-open .topbar .oa-sidebar-new-chat > svg {
+  flex:none;
+  width:24px;
+  height:24px;
+  color:inherit;
+}
+.oa-app.oa-workspace.oa-chat-open .topbar .oa-sidebar-new-chat:focus-visible {
+  outline:2px solid currentColor;
+  outline-offset:-4px;
+}
+.oa-app.oa-workspace.oa-chat-open .oa-knowledge-pane,
+.oa-app.oa-workspace.oa-chat-open .knowledge-view[data-section="ask"],
+.oa-app.oa-workspace.oa-chat-open .knowledge-tabs,
+.oa-app.oa-workspace.oa-chat-open .oa-chat-tab {
+  margin-block-start:0;
+  padding-block-start:0;
+  row-gap:0;
+}
+.oa-app.oa-workspace.oa-chat-open .oa-shared-chat .oa-chat-messages {
+  padding-block-start:8px;
+  scroll-padding-block-start:8px;
+}
