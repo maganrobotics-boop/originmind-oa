@@ -1,0 +1,28 @@
+name: Check restricted server maintenance
+
+on:
+  push:
+    paths:
+      - 'integrations/server-maintenance/**'
+      - 'tests/server-maintenance*'
+      - '.github/workflows/check-server-maintenance.yml'
+  pull_request:
+    paths:
+      - 'integrations/server-maintenance/**'
+      - 'tests/server-maintenance*'
+      - '.github/workflows/check-server-maintenance.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version: '24'
+      - run: node --test tests/server-maintenance-conversation.test.mjs
+      - run: sudo python3 tests/server-maintenance-agent.test.py

@@ -1,0 +1,31 @@
+[Unit]
+Description=OriginMind restricted server maintenance agent
+After=network.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+ExecStart=/usr/bin/python3 /opt/originmind-maintenance/agent.py --config /etc/originmind-maintenance/agent.json
+Restart=on-failure
+RestartSec=3
+UMask=0077
+NoNewPrivileges=true
+CapabilityBoundingSet=
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+PrivateDevices=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictAddressFamilies=AF_INET AF_UNIX
+IPAddressDeny=any
+IPAddressAllow=localhost
+ReadWritePaths=/var/cache/apt/archives /tmp/omindos-ai-maintenance /var/cache/omindos-maintenance /var/log/originmind-maintenance.jsonl
+MemoryMax=128M
+TasksMax=32
+
+[Install]
+WantedBy=multi-user.target
