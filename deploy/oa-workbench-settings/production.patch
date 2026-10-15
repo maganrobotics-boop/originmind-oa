@@ -1,0 +1,80 @@
+--- a/app/page.tsx
++++ b/app/page.tsx
+@@ -72,6 +72,7 @@
+ import { OemInbox } from "@/components/oem-inbox";
+ import { myReturnedApprovals } from "@/lib/my-pending-items";
+ import "@/components/oa-pending-entry.css";
++import { OaAdminSettingsButton } from "@/components/oa-workbench-settings";
+ import { ProjectWorkspace } from "@/components/project-workspace";
+ import { OaAiMemberDirectory, OaAiMemberProvider, OaAiChatEntrances, OaResearchWorkspace } from "@/components/ai-member-directory";
+ import { FutureStars } from "@/components/future-stars/future-stars";
+@@ -2588,11 +2589,12 @@
+       </div>
+       <div id="oa-desktop-navigation" className="oa-desktop-navigation"><Sidebar activeView={activeView} setActiveView={navigate} onNew={openNewRequest} onProfile={() => navigate("profile")} userName={session.user?.displayName} userAvatarDataUrl={myAvatarDataUrl} authProvider={session.user?.authProvider} currentRole={session.role} isAdmin={Boolean(session.isAdmin)} canReviewKnowledge={Boolean(session.canReviewKnowledge)} selectedKnowledgeTab={knowledgeTab} onKnowledgeTab={(tab) => { setKnowledgeTab(tab); navigate("knowledge"); }} onMyPending={openMyPending} pendingCount={pendingCount} onOpenChat={() => setMobileNavOpen(false)} /></div>
+       <main className="main-shell">
+-        <header className={isModelHeader ? "oa-model-chat-header" : "topbar"}>
++        <header className={isModelHeader ? "oa-model-chat-header" : session.isAdmin ? "topbar oa-topbar-admin" : "topbar"}>
+           <button type="button" className="workspace-sidebar-toggle" onClick={toggleSidebar} aria-label={sidebarCollapsed ? "展开侧栏" : "收起侧栏"} aria-expanded={!sidebarCollapsed} aria-controls="oa-desktop-navigation"><Menu className="size-5" /></button>
+           <button ref={mobileMenuButtonRef} className="mobile-menu-button" onClick={() => setMobileNavOpen(true)} aria-label="打开导航" aria-expanded={mobileNavOpen} aria-controls="mobile-navigation"><Menu className="size-5" /></button>
+           {isModelHeader ? <div className="oa-model-chat-title">机器人自主移动与操作实验室</div> : <OaConversationTitle><div className="oa-topbar-secondary-title"><span className="oa-lab-title">机器人自主移动与操作实验室</span><strong>{secondaryTitle}</strong></div></OaConversationTitle>}
+           <button type="button" className={`oa-global-pending ${typeof pendingCount === "number" && pendingCount > 0 ? "has-pending" : ""}`} onClick={openMyPending} aria-label={`待我处理，${typeof pendingCount === "number" ? pendingCount + " 条" : "正在同步"}`}><ListTodo aria-hidden="true" /><span>待我处理</span><b className="oa-pending-count">{pendingCount}</b></button>
++          <OaAdminSettingsButton isAdmin={Boolean(session.isAdmin)} />
+           <div className={isModelHeader ? "oa-model-chat-actions" : "topbar-actions"}>{isModelHeader && <OaNewChatButton />}
+             <OaAccountMenu user={session.user} avatarDataUrl={myAvatarDataUrl} roleLabel={sessionRoleLabel(session.role, Boolean(session.isAdmin))} onIdentityChanged={(fullName, avatarDataUrl) => { setMyAvatarDataUrl(avatarDataUrl); setSession((current) => current?.user && current.user.email === session.user?.email ? { ...current, user: { ...current.user, displayName: fullName } } : current); }} />
+ 
+--- a/app/admin/page.tsx
++++ b/app/admin/page.tsx
+@@ -74,6 +74,18 @@
+     // eslint-disable-next-line react-hooks/exhaustive-deps
+   }, []);
+ 
++  useEffect(() => {
++    if (!state?.signedIn || resetOpen) return;
++    const scroll = () => {
++      const id = window.location.hash.slice(1);
++      if (!['model-settings', 'subtitle-settings', 'security-settings'].includes(id)) return;
++      document.getElementById(id)?.scrollIntoView({ block: 'start' });
++    };
++    const frame = window.requestAnimationFrame(scroll);
++    window.addEventListener('hashchange', scroll);
++    return () => { window.cancelAnimationFrame(frame); window.removeEventListener('hashchange', scroll); };
++  }, [state?.signedIn, resetOpen]);
++
+   const run = async (body: object, success: string) => {
+     if (busy) return;
+     setBusy(true); setNotice(''); setLoadError('');
+@@ -139,7 +151,7 @@
+ 
+     {state?.signedIn && !resetOpen && <div className="admin-grid">
+       <div className="admin-connections">
+-      <section className="admin-card admin-model-card">
++      <section id="model-settings" className="admin-card admin-model-card" tabIndex={-1}>
+         <div className="admin-card-heading"><span className="admin-icon"><Bot /></span><div><h2>阿里云百炼模型</h2><p>用于 OA 大模型问答、任务生成和 Chat 回答。</p></div><span className={`admin-status ${state.activeProvider === 'bailian' ? 'ready' : ''}`}>{state.activeProvider === 'bailian' ? '已连接' : '待配置'}</span></div>
+         <form className="admin-form" onSubmit={save}>
+           <label><span>API Base URL</span><input type="url" value={baseUrl} maxLength={300} onChange={event => setBaseUrl(event.target.value)} required /></label>
+@@ -150,7 +162,7 @@
+         </form>
+       </section>
+ 
+-      <section className="admin-card admin-subtitle-card">
++      <section id="subtitle-settings" className="admin-card admin-subtitle-card" tabIndex={-1}>
+         <div className="admin-card-heading"><span className="admin-icon"><Mic /></span><div><h2>实时字幕</h2><p>用于日语与中文连续字幕，单独保存语音服务的地址和普通 API Key。</p></div><span className={`admin-status ${state.subtitleProvider?.verifiedAt ? 'ready' : ''}`}>{state.subtitleProvider?.verifiedAt ? '连接已验证' : '待配置'}</span></div>
+         <form className="admin-form" onSubmit={saveSubtitles}>
+           <label><span>语音 API Base URL</span><input type="url" value={subtitleBaseUrl} maxLength={300} onChange={event => setSubtitleBaseUrl(event.target.value)} required /><small>使用千问平台按量付费地址，配合普通 API Key。</small></label>
+@@ -166,7 +178,7 @@
+ 
+       <aside className="admin-side">
+         <section className="admin-card"><div className="admin-card-heading"><span className="admin-icon"><Settings2 /></span><div><h2>管理入口</h2><p>更多实验室 OA 管理工具。</p></div></div><nav className="admin-links"><Link href="/admin/meeting-bot"><Video />飞书会议机器人</Link><Link href="/admin/meeting-minutes"><Settings2 />会议纪要管理</Link></nav></section>
+-        <section className="admin-card admin-security"><h2>安全状态</h2><ul><li><CheckCircle2 />仅 OA 系统管理员可访问</li><li><CheckCircle2 />管理密码独立校验</li><li><CheckCircle2 />API Key 使用 AES-GCM 加密</li><li><CheckCircle2 />候选配置验证成功后才替换</li></ul><div className="admin-actions vertical"><button type="button" onClick={() => setResetOpen(true)}><KeyRound size={16} />重设管理员密码</button><button type="button" onClick={() => void logout()}><LogOut size={16} />退出管理会话</button></div></section>
++        <section id="security-settings" className="admin-card admin-security" tabIndex={-1}><h2>安全状态</h2><ul><li><CheckCircle2 />仅 OA 系统管理员可访问</li><li><CheckCircle2 />管理密码独立校验</li><li><CheckCircle2 />API Key 使用 AES-GCM 加密</li><li><CheckCircle2 />候选配置验证成功后才替换</li></ul><div className="admin-actions vertical"><button type="button" onClick={() => setResetOpen(true)}><KeyRound size={16} />重设管理员密码</button><button type="button" onClick={() => void logout()}><LogOut size={16} />退出管理会话</button></div></section>
+       </aside>
+     </div>}
+   </main>;
+--- a/app/admin/admin.css
++++ b/app/admin/admin.css
+@@ -1,3 +1,5 @@
+ .admin-console{min-height:100dvh;background:#f4f6f4;color:#15221d;padding-bottom:64px}.admin-topbar{height:64px;display:flex;align-items:center;justify-content:space-between;padding:0 max(24px,calc((100vw - 1180px)/2));border-bottom:1px solid #dfe5e1;background:#ffffffd9;backdrop-filter:blur(18px);position:sticky;top:0;z-index:10}.admin-topbar>a,.admin-topbar>div{display:flex;align-items:center;gap:8px;color:#405048;text-decoration:none}.admin-topbar strong{color:#17251f}.admin-hero{max-width:1180px;margin:0 auto;padding:62px 24px 34px}.admin-kicker{font-size:11px;letter-spacing:.16em;font-weight:750;color:#39715a}.admin-hero h1{font-size:clamp(34px,5vw,56px);letter-spacing:-.045em;line-height:1;margin:12px 0 18px}.admin-hero p{max-width:700px;margin:0;color:#637169;line-height:1.8}.admin-alert,.admin-card,.admin-grid{max-width:1180px;margin-left:auto;margin-right:auto}.admin-alert{display:flex;align-items:center;gap:9px;margin-bottom:16px;padding:13px 16px;border-radius:12px}.admin-alert.error{background:#fff0ee;color:#9a382f;border:1px solid #f0cec9}.admin-alert.success{background:#edf8f1;color:#256744;border:1px solid #cce5d5}.admin-card{padding:26px;border:1px solid #dce3df;border-radius:18px;background:#fff;box-shadow:0 12px 34px #203b2e0a}.admin-console>.admin-card{margin-top:18px}.admin-loading{display:flex;align-items:center;gap:12px;color:#607068}.spin{animation:admin-spin 1s linear infinite}@keyframes admin-spin{to{transform:rotate(360deg)}}.admin-card-heading{display:flex;align-items:flex-start;gap:14px;margin-bottom:24px}.admin-card-heading h2,.admin-security h2{font-size:19px;margin:1px 0 7px}.admin-card-heading p{margin:0;color:#718078;line-height:1.55}.admin-icon{width:42px;height:42px;flex:0 0 42px;display:grid;place-items:center;border-radius:12px;background:#eaf3ee;color:#2d7155}.admin-icon svg{width:20px}.admin-status{margin-left:auto;padding:6px 10px;border-radius:999px;background:#f1f2f1;color:#6d756f;font-size:12px}.admin-status.ready{background:#e5f5eb;color:#1f6b43}.admin-form{display:grid;gap:17px}.admin-form label{display:grid;gap:8px}.admin-form label>span{font-size:13px;font-weight:650}.admin-form input{width:100%;height:45px;padding:0 13px;border:1px solid #cfd8d3;border-radius:10px;background:#fff;color:#15221d;font:inherit;outline:none}.admin-form input:focus{border-color:#3c8061;box-shadow:0 0 0 3px #3c806117}.admin-form small{color:#7b8780}.admin-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:4px}.admin-actions button,.admin-actions a{min-height:40px;display:inline-flex;align-items:center;justify-content:center;gap:7px;padding:0 15px;border:1px solid #d3dad6;border-radius:9px;background:#fff;color:#34483e;text-decoration:none;font:inherit;cursor:pointer}.admin-actions button.primary{border-color:#235e47;background:#235e47;color:#fff}.admin-actions button:disabled{opacity:.55;cursor:not-allowed}.admin-grid{display:grid;grid-template-columns:minmax(0,1.65fr) minmax(280px,.75fr);gap:18px}.admin-side{display:grid;align-content:start;gap:18px}.admin-links{display:grid;gap:10px}.admin-links a{display:flex;align-items:center;gap:10px;padding:12px;border:1px solid #e1e6e3;border-radius:10px;color:#294438;text-decoration:none}.admin-links svg{width:18px}.admin-security ul{display:grid;gap:11px;padding:0;margin:18px 0 24px;list-style:none;color:#53645b}.admin-security li{display:flex;align-items:center;gap:9px}.admin-security li svg{width:17px;color:#2d8058}.admin-actions.vertical{display:grid}.admin-actions.vertical button{justify-content:flex-start}.admin-metadata{display:flex;flex-wrap:wrap;gap:10px 22px;padding:12px 14px;border-radius:10px;background:#f5f7f5;color:#627069;font-size:13px}.admin-auth-card{max-width:680px}.admin-console>.admin-alert{width:calc(100% - 48px)}@media(max-width:760px){.admin-topbar{padding:0 18px}.admin-hero{padding:42px 18px 26px}.admin-console>.admin-card,.admin-grid{width:calc(100% - 36px)}.admin-grid{grid-template-columns:1fr}.admin-card{padding:20px}.admin-card-heading{flex-wrap:wrap}.admin-status{margin-left:56px}.admin-actions>*{width:100%}}
+ 
+ .admin-connections{display:grid;gap:18px;align-content:start;min-width:0}.admin-connections>.admin-card{width:100%;min-width:0}.admin-subtitle-card .admin-form>small{line-height:1.6}
++
++#model-settings, #subtitle-settings, #security-settings { scroll-margin-block-start: 24px; }

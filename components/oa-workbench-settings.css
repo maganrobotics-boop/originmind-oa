@@ -1,0 +1,28 @@
+.oa-admin-settings-button { display: inline-flex; align-items: center; justify-content: center; gap: 6px; flex-shrink: 0; min-height: 42px; padding: 8px 12px; border: 1px solid #dce3e8; border-radius: 10px; background: #fff; color: #354f62; font-size: 13px; font-weight: 600; line-height: 1.4; white-space: nowrap; text-decoration: none; }
+.oa-admin-settings-button:hover { background: #f4f7fa; border-color: #b9cbd9; }
+.oa-admin-settings-button:focus-visible { outline: 3px solid #729be1; outline-offset: 3px; }
+.oa-admin-settings-button svg { flex: 0 0 auto; width: 17px; height: 17px; }
+@media (max-width: 640px) {
+  .oa-admin-settings-button { min-height: 40px; padding: 7px 8px; gap: 5px; font-size: 12px; }
+  .oa-admin-settings-button svg { width: 15px; height: 15px; }
+}
+@media (max-width: 380px) {
+  .oa-admin-settings-button { padding-inline: 7px; }
+  .oa-admin-settings-button svg { display: none; }
+}
+
+.oa-app.oa-workspace .main-shell > .topbar.oa-topbar-admin { display: grid; grid-template-columns: 44px minmax(0, 1fr) auto auto auto; column-gap: 8px; }
+.oa-app.oa-workspace .topbar.oa-topbar-admin > .oa-global-pending { grid-column: 3; grid-row: 1; margin-left: 0; }
+.oa-app.oa-workspace .topbar.oa-topbar-admin > .oa-admin-settings-button { grid-column: 4; grid-row: 1; }
+.oa-app.oa-workspace .topbar.oa-topbar-admin > .topbar-actions { grid-column: 5; grid-row: 1; }
+@media (max-width: 380px) {
+  .oa-app.oa-workspace .main-shell > .topbar.oa-topbar-admin { grid-template-columns: 36px minmax(0, 1fr) auto auto auto; column-gap: 6px; padding-inline: 6px; }
+  .oa-app.oa-workspace .topbar.oa-topbar-admin > .mobile-menu-button { width: 36px; min-width: 36px; padding: 6px; }
+}
+
+@media (max-width: 760px) {
+  .oa-app.oa-workspace .topbar.oa-topbar-admin .oa-account-name { display: none; }
+}
+@media (max-width: 380px) {
+  .oa-app.oa-workspace .topbar.oa-topbar-admin .oa-account-trigger { gap: 0; padding-inline: 4px; }
+}
